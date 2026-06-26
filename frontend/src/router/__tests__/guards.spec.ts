@@ -55,6 +55,7 @@ interface MockAuthState {
   backendModeEnabled: boolean
   hasPendingAuthSession: boolean
   setupNeedsSetup?: boolean
+  hideUserSubscriptionsMenu?: boolean
 }
 
 /**
@@ -112,6 +113,10 @@ function simulateGuard(
   // 需要管理员但不是管理员
   if (requiresAdmin && !authState.isAdmin) {
     return '/dashboard'
+  }
+
+  if (toPath.startsWith('/subscriptions') && authState.hideUserSubscriptionsMenu === true) {
+    return authState.isAdmin ? '/admin/dashboard' : '/dashboard'
   }
 
   // 简易模式限制
@@ -251,6 +256,34 @@ describe('路由守卫逻辑', () => {
 
     it('访问用户页面允许通过', () => {
       const redirect = simulateGuard('/dashboard', {}, authState)
+      expect(redirect).toBeNull()
+    })
+  })
+
+  describe('我的订阅菜单开关', () => {
+    it('隐藏开关开启后普通用户直接访问 /subscriptions 重定向到 /dashboard', () => {
+      const authState: MockAuthState = {
+        isAuthenticated: true,
+        isAdmin: false,
+        isSimpleMode: false,
+        backendModeEnabled: false,
+        hasPendingAuthSession: false,
+        hideUserSubscriptionsMenu: true,
+      }
+      const redirect = simulateGuard('/subscriptions', {}, authState)
+      expect(redirect).toBe('/dashboard')
+    })
+
+    it('隐藏开关不影响管理员订阅管理页', () => {
+      const authState: MockAuthState = {
+        isAuthenticated: true,
+        isAdmin: true,
+        isSimpleMode: false,
+        backendModeEnabled: false,
+        hasPendingAuthSession: false,
+        hideUserSubscriptionsMenu: true,
+      }
+      const redirect = simulateGuard('/admin/subscriptions', { requiresAdmin: true }, authState)
       expect(redirect).toBeNull()
     })
   })

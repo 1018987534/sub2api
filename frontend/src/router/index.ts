@@ -857,6 +857,11 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
+  if (to.path.startsWith('/subscriptions') && appStore.cachedPublicSettings?.hide_user_subscriptions_menu === true) {
+    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
+    return
+  }
+
   // 简易模式下限制访问某些页面
   if (authStore.isSimpleMode) {
     const restrictedPaths = [

@@ -290,6 +290,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.HideCcsImportButton != after.HideCcsImportButton {
 		changed = append(changed, "hide_ccs_import_button")
 	}
+	if before.HideUserSubscriptionsMenu != after.HideUserSubscriptionsMenu {
+		changed = append(changed, "hide_user_subscriptions_menu")
+	}
 	if before.DefaultConcurrency != after.DefaultConcurrency {
 		changed = append(changed, "default_concurrency")
 	}

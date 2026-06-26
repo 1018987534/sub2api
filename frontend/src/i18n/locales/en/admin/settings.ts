@@ -474,7 +474,9 @@ export default {
         homeContentHint: 'Customize the home page content. Supports Markdown/HTML. If you enter a URL (starting with http:// or https://), it will be used as an iframe src to embed an external page. When set, the default status information will no longer be displayed.',
         homeContentIframeWarning: '⚠️ iframe mode note: Some websites have X-Frame-Options or CSP security policies that prevent embedding in iframes. If the page appears blank or shows an error, please verify the target website allows embedding, or consider using HTML mode to build your own content.',
         hideCcsImportButton: 'Hide CCS Import Button',
-        hideCcsImportButtonHint: 'When enabled, the "Import to CCS" button will be hidden on the API Keys page'
+        hideCcsImportButtonHint: 'When enabled, the "Import to CCS" button will be hidden on the API Keys page',
+        hideUserSubscriptionsMenu: 'Hide user subscriptions menu',
+        hideUserSubscriptionsMenuHint: 'When enabled, the "My Subscriptions" entry is hidden from regular users.'
       },
       purchase: {
         title: 'Recharge / Subscription Page',
