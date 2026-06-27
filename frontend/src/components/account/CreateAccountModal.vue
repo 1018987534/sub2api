@@ -1,7 +1,7 @@
 <template>
   <BaseDialog
     :show="show"
-    :title="t('admin.accounts.createAccount')"
+    :title="props.initialAccount ? t('admin.accounts.copyAccountTitle') : t('admin.accounts.createAccount')"
     width="wide"
     @close="handleClose"
   >
@@ -3457,6 +3457,7 @@ import {
   getModelsByPlatform,
   commonErrorCodes,
   buildModelMappingObject,
+  splitModelMappingObject,
   fetchAntigravityDefaultMappings,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
@@ -3473,6 +3474,7 @@ import { useGeminiOAuth } from '@/composables/useGeminiOAuth'
 import { useAntigravityOAuth } from '@/composables/useAntigravityOAuth'
 import { useGrokOAuth } from '@/composables/useGrokOAuth'
 import type {
+  Account,
   Proxy,
   AdminGroup,
   AccountPlatform,
@@ -3563,6 +3565,7 @@ interface Props {
   show: boolean
   proxies: Proxy[]
   groups: AdminGroup[]
+  initialAccount?: Account | null
 }
 
 const props = defineProps<Props>()
@@ -3632,6 +3635,7 @@ interface TempUnschedRuleForm {
 // State
 const step = ref(1)
 const submitting = ref(false)
+const applyingInitialAccount = ref(false)
 const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
@@ -3682,6 +3686,21 @@ function parsePoolModeRetryStatusCodes(input: string): number[] {
     out.push(n)
   }
   return out.sort((a, b) => a - b)
+}
+
+function formatPoolModeRetryStatusCodes(value: unknown): string {
+  if (!Array.isArray(value)) return ''
+  const out: number[] = []
+  const seen = new Set<number>()
+  for (const v of value) {
+    const n = typeof v === 'string' ? Number(v.trim()) : Number(v)
+    if (!Number.isFinite(n) || !Number.isInteger(n)) continue
+    if (n < 100 || n > 599) continue
+    if (seen.has(n)) continue
+    seen.add(n)
+    out.push(n)
+  }
+  return out.sort((a, b) => a - b).join(', ')
 }
 const customErrorCodesEnabled = ref(false)
 const selectedErrorCodes = ref<number[]>([])
@@ -3736,7 +3755,9 @@ const {
   globalEnabled: quotaNotifyGlobalEnabled,
   state: quotaNotifyState,
   loadGlobalState: loadQuotaNotifyGlobal,
+  loadFromExtra: loadQuotaNotifyFromExtra,
   writeToExtra: writeQuotaNotifyToExtra,
+  reset: resetQuotaNotify,
 } = useQuotaNotifyState()
 
 // Load global feature states once
@@ -3811,6 +3832,33 @@ const normalizeOpenAIEndpointCapabilities = (values: OpenAIEndpointCapability[])
   const allowed: OpenAIEndpointCapability[] = ['chat_completions', 'embeddings']
   const selected = allowed.filter((value) => values.includes(value))
   return selected.length > 0 ? selected : allowed
+}
+
+const readOpenAIEndpointCapabilities = (credentials?: Record<string, unknown>): OpenAIEndpointCapability[] => {
+  const raw = credentials?.openai_capabilities
+  if (Array.isArray(raw)) {
+    return normalizeOpenAIEndpointCapabilities(
+      raw.filter((value): value is OpenAIEndpointCapability =>
+        value === 'chat_completions' || value === 'embeddings'
+      )
+    )
+  }
+  if (raw !== null && typeof raw === 'object') {
+    const capabilityMap = raw as Record<string, unknown>
+    return normalizeOpenAIEndpointCapabilities(
+      openAIEndpointCapabilityOptions.value
+        .map((option) => option.value)
+        .filter((value) => capabilityMap[value] === true)
+    )
+  }
+  return ['chat_completions', 'embeddings']
+}
+
+const normalizeOpenAIResponsesMode = (mode: unknown): OpenAIResponsesMode => {
+  if (mode === 'force_responses' || mode === 'force_chat_completions') {
+    return mode
+  }
+  return 'auto'
 }
 
 const toggleOpenAIEndpointCapability = (capability: OpenAIEndpointCapability, event?: Event) => {
@@ -4050,6 +4098,325 @@ const canExchangeCode = computed(() => {
   return authCode.trim() && oauth.sessionId.value && !oauth.loading.value
 })
 
+const appendCopySuffix = (name: string) => {
+  const suffix = t('admin.accounts.copyAccountNameSuffix')
+  return name.trim() ? `${name.trim()} ${suffix}` : suffix
+}
+
+const loadModelRestrictionFromMapping = (rawMapping?: Record<string, unknown>) => {
+  const parsed = splitModelMappingObject(rawMapping)
+  allowedModels.value = parsed.allowedModels
+  modelMappings.value = parsed.modelMappings
+  modelRestrictionMode.value =
+    parsed.modelMappings.length > 0 && parsed.allowedModels.length === 0
+      ? 'mapping'
+      : 'whitelist'
+}
+
+function formatTempUnschedKeywords(value: unknown) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .join(', ')
+  }
+  if (typeof value === 'string') {
+    return value
+  }
+  return ''
+}
+
+function toPositiveNumber(value: unknown) {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) {
+    return null
+  }
+  return Math.trunc(num)
+}
+
+function loadTempUnschedRules(credentials?: Record<string, unknown>) {
+  tempUnschedEnabled.value = credentials?.temp_unschedulable_enabled === true
+  const rawRules = credentials?.temp_unschedulable_rules
+  if (!Array.isArray(rawRules)) {
+    tempUnschedRules.value = []
+    return
+  }
+
+  tempUnschedRules.value = rawRules.map((rule) => {
+    const entry = rule as Record<string, unknown>
+    return {
+      error_code: toPositiveNumber(entry.error_code),
+      keywords: formatTempUnschedKeywords(entry.keywords),
+      duration_minutes: toPositiveNumber(entry.duration_minutes),
+      description: typeof entry.description === 'string' ? entry.description : ''
+    }
+  })
+}
+
+function resetQuotaControlState() {
+  windowCostEnabled.value = false
+  windowCostLimit.value = null
+  windowCostStickyReserve.value = null
+  sessionLimitEnabled.value = false
+  maxSessions.value = null
+  sessionIdleTimeout.value = null
+  rpmLimitEnabled.value = false
+  baseRpm.value = null
+  rpmStrategy.value = 'tiered'
+  rpmStickyBuffer.value = null
+  userMsgQueueMode.value = ''
+  tlsFingerprintEnabled.value = false
+  tlsFingerprintProfileId.value = null
+  sessionIdMaskingEnabled.value = false
+  cacheTTLOverrideEnabled.value = false
+  cacheTTLOverrideTarget.value = '5m'
+  customBaseUrlEnabled.value = false
+  customBaseUrl.value = ''
+}
+
+function loadQuotaControlSettings(account: Account) {
+  resetQuotaControlState()
+  if (account.platform !== 'anthropic') {
+    return
+  }
+  if (account.type !== 'oauth' && account.type !== 'setup-token') {
+    return
+  }
+  if (account.window_cost_limit != null && account.window_cost_limit > 0) {
+    windowCostEnabled.value = true
+    windowCostLimit.value = account.window_cost_limit
+    windowCostStickyReserve.value = account.window_cost_sticky_reserve ?? 10
+  }
+  if (account.max_sessions != null && account.max_sessions > 0) {
+    sessionLimitEnabled.value = true
+    maxSessions.value = account.max_sessions
+    sessionIdleTimeout.value = account.session_idle_timeout_minutes ?? 5
+  }
+  if (account.base_rpm != null && account.base_rpm > 0) {
+    rpmLimitEnabled.value = true
+    baseRpm.value = account.base_rpm
+    rpmStrategy.value = (account.rpm_strategy as 'tiered' | 'sticky_exempt') || 'tiered'
+    rpmStickyBuffer.value = account.rpm_sticky_buffer ?? null
+  }
+  userMsgQueueMode.value = account.user_msg_queue_mode ?? ''
+  if (account.enable_tls_fingerprint === true) {
+    tlsFingerprintEnabled.value = true
+  }
+  tlsFingerprintProfileId.value = account.tls_fingerprint_profile_id ?? null
+  if (account.session_id_masking_enabled === true) {
+    sessionIdMaskingEnabled.value = true
+  }
+  if (account.cache_ttl_override_enabled === true) {
+    cacheTTLOverrideEnabled.value = true
+    cacheTTLOverrideTarget.value = account.cache_ttl_override_target || '5m'
+  }
+  if (account.custom_base_url_enabled === true) {
+    customBaseUrlEnabled.value = true
+    customBaseUrl.value = account.custom_base_url || ''
+  }
+}
+
+function applyInitialAccount(account: Account) {
+  applyingInitialAccount.value = true
+  try {
+    resetForm()
+    const credentials = account.credentials as Record<string, unknown> | undefined
+    const extra = account.extra as Record<string, unknown> | undefined
+
+    form.name = appendCopySuffix(account.name)
+    form.notes = account.notes || ''
+    form.platform = account.platform
+    form.proxy_id = account.proxy_id
+    form.concurrency = account.concurrency || 10
+    form.load_factor = account.load_factor ?? null
+    form.priority = account.priority || 1
+    form.rate_multiplier = account.rate_multiplier ?? 1
+    form.group_ids = [...(account.group_ids || [])]
+    form.expires_at = account.expires_at ?? null
+    form.credentials = {}
+
+    if (account.type === 'apikey') {
+      accountCategory.value = 'apikey'
+      apiKeyBaseUrl.value = String(credentials?.base_url || (
+        account.platform === 'openai'
+          ? 'https://api.openai.com'
+          : account.platform === 'gemini'
+            ? 'https://generativelanguage.googleapis.com'
+            : 'https://api.anthropic.com'
+      ))
+      apiKeyValue.value = typeof credentials?.api_key === 'string' ? credentials.api_key : ''
+      if (account.platform === 'gemini') {
+        const tier = credentials?.tier_id
+        if (tier === 'aistudio_paid' || tier === 'aistudio_free') {
+          geminiTierAIStudio.value = tier
+        }
+      }
+      loadModelRestrictionFromMapping(credentials?.model_mapping as Record<string, unknown> | undefined)
+    } else if (account.type === 'bedrock' && account.platform === 'anthropic') {
+      accountCategory.value = 'bedrock'
+      bedrockAuthMode.value = credentials?.auth_mode === 'apikey' ? 'apikey' : 'sigv4'
+      bedrockAccessKeyId.value = typeof credentials?.aws_access_key_id === 'string' ? credentials.aws_access_key_id : ''
+      bedrockSecretAccessKey.value = typeof credentials?.aws_secret_access_key === 'string' ? credentials.aws_secret_access_key : ''
+      bedrockSessionToken.value = typeof credentials?.aws_session_token === 'string' ? credentials.aws_session_token : ''
+      bedrockRegion.value = typeof credentials?.aws_region === 'string' ? credentials.aws_region : 'us-east-1'
+      bedrockForceGlobal.value = credentials?.aws_force_global === 'true'
+      bedrockApiKeyValue.value = typeof credentials?.api_key === 'string' ? credentials.api_key : ''
+      loadModelRestrictionFromMapping(credentials?.model_mapping as Record<string, unknown> | undefined)
+    } else if ((account.platform === 'gemini' || account.platform === 'anthropic') && account.type === 'service_account') {
+      accountCategory.value = 'service_account'
+      vertexProjectId.value = typeof credentials?.project_id === 'string' ? credentials.project_id : ''
+      vertexClientEmail.value = typeof credentials?.client_email === 'string' ? credentials.client_email : ''
+      vertexLocation.value =
+        typeof credentials?.location === 'string'
+          ? credentials.location
+          : typeof credentials?.vertex_location === 'string'
+            ? credentials.vertex_location
+            : 'global'
+      vertexServiceAccountJson.value =
+        typeof credentials?.service_account_json === 'string'
+          ? credentials.service_account_json
+          : typeof credentials?.service_account === 'string'
+            ? credentials.service_account
+            : ''
+      loadModelRestrictionFromMapping(credentials?.model_mapping as Record<string, unknown> | undefined)
+    } else {
+      accountCategory.value = 'oauth-based'
+      addMethod.value = account.type === 'setup-token' ? 'setup-token' : 'oauth'
+      if (account.platform === 'gemini') {
+        const tier = credentials?.tier_id
+        if (tier === 'google_ai_pro' || tier === 'google_ai_ultra' || tier === 'google_one_free') {
+          geminiOAuthType.value = 'google_one'
+          geminiTierGoogleOne.value = tier
+        } else if (tier === 'gcp_enterprise' || tier === 'gcp_standard') {
+          geminiOAuthType.value = 'code_assist'
+          geminiTierGcp.value = tier
+        } else if (tier === 'aistudio_paid' || tier === 'aistudio_free') {
+          geminiOAuthType.value = 'ai_studio'
+          geminiTierAIStudio.value = tier
+        }
+      }
+      if (account.platform === 'openai') {
+        loadModelRestrictionFromMapping(credentials?.model_mapping as Record<string, unknown> | undefined)
+      }
+    }
+
+    if (account.platform === 'antigravity') {
+      antigravityAccountType.value = account.type === 'apikey' || account.type === 'upstream' ? 'upstream' : 'oauth'
+      upstreamBaseUrl.value = typeof credentials?.base_url === 'string' ? credentials.base_url : ''
+      upstreamApiKey.value = typeof credentials?.api_key === 'string' ? credentials.api_key : ''
+      antigravityModelRestrictionMode.value = 'mapping'
+      antigravityWhitelistModels.value = []
+      const rawAgMapping = credentials?.model_mapping as Record<string, string> | undefined
+      if (rawAgMapping && typeof rawAgMapping === 'object') {
+        antigravityModelMappings.value = Object.entries(rawAgMapping).map(([from, to]) => ({ from, to }))
+      } else {
+        const rawWhitelist = credentials?.model_whitelist
+        antigravityModelMappings.value = Array.isArray(rawWhitelist)
+          ? rawWhitelist
+              .map((v) => String(v).trim())
+              .filter((v) => v.length > 0)
+              .map((model) => ({ from: model, to: model }))
+          : []
+      }
+    }
+
+    interceptWarmupRequests.value = credentials?.intercept_warmup_requests === true
+    autoPauseOnExpired.value = account.auto_pause_on_expired === true
+    loadTempUnschedRules(credentials)
+    loadQuotaControlSettings(account)
+
+    mixedScheduling.value = extra?.mixed_scheduling === true
+    allowOverages.value = extra?.allow_overages === true
+    openaiPassthroughEnabled.value = false
+    openAICompactMode.value = 'auto'
+    openAIResponsesMode.value = 'auto'
+    openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
+    openAICompactModelMappings.value = []
+    openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+    openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+    codexCLIOnlyEnabled.value = false
+    codexCLIOnlyAppServerEnabled.value = false
+    anthropicPassthroughEnabled.value = false
+    webSearchEmulationMode.value = 'default'
+
+    if (account.platform === 'openai' && (account.type === 'oauth' || account.type === 'apikey')) {
+      openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
+      openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
+      if (account.type === 'apikey') {
+        openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
+        openAIEndpointCapabilities.value = readOpenAIEndpointCapabilities(credentials)
+        if (!openAITextGenerationCapabilityEnabled.value) {
+          openAIResponsesMode.value = 'auto'
+        }
+      }
+      openaiOAuthResponsesWebSocketV2Mode.value =
+        typeof extra?.openai_oauth_responses_websockets_v2_mode === 'string'
+          ? extra.openai_oauth_responses_websockets_v2_mode as OpenAIWSMode
+          : extra?.openai_oauth_responses_websockets_v2_enabled === true || extra?.responses_websockets_v2_enabled === true || extra?.openai_ws_enabled === true
+            ? OPENAI_WS_MODE_CTX_POOL
+            : OPENAI_WS_MODE_OFF
+      openaiAPIKeyResponsesWebSocketV2Mode.value =
+        typeof extra?.openai_apikey_responses_websockets_v2_mode === 'string'
+          ? extra.openai_apikey_responses_websockets_v2_mode as OpenAIWSMode
+          : extra?.openai_apikey_responses_websockets_v2_enabled === true || extra?.responses_websockets_v2_enabled === true || extra?.openai_ws_enabled === true
+            ? OPENAI_WS_MODE_CTX_POOL
+            : OPENAI_WS_MODE_OFF
+      codexCLIOnlyEnabled.value = account.type === 'oauth' && extra?.codex_cli_only === true
+      codexCLIOnlyAppServerEnabled.value =
+        extra?.codex_cli_only_allow_app_server === true ||
+        (
+          Array.isArray(extra?.codex_cli_only_allowed_clients) &&
+          (extra.codex_cli_only_allowed_clients as unknown[]).includes('claude_code')
+        )
+      const compactMappings = credentials?.compact_model_mapping as Record<string, string> | undefined
+      if (compactMappings && typeof compactMappings === 'object') {
+        openAICompactModelMappings.value = Object.entries(compactMappings).map(([from, to]) => ({ from, to }))
+      }
+    }
+
+    if (account.platform === 'anthropic' && account.type === 'apikey') {
+      anthropicPassthroughEnabled.value = extra?.anthropic_passthrough === true
+      const wsVal = extra?.web_search_emulation
+      webSearchEmulationMode.value =
+        wsVal === 'enabled' || wsVal === 'disabled'
+          ? wsVal
+          : wsVal === true
+            ? 'enabled'
+            : 'default'
+    }
+
+    if (account.type === 'apikey' || account.type === 'bedrock') {
+      editQuotaLimit.value = typeof extra?.quota_limit === 'number' && extra.quota_limit > 0 ? extra.quota_limit : null
+      editQuotaDailyLimit.value = typeof extra?.quota_daily_limit === 'number' && extra.quota_daily_limit > 0 ? extra.quota_daily_limit : null
+      editQuotaWeeklyLimit.value = typeof extra?.quota_weekly_limit === 'number' && extra.quota_weekly_limit > 0 ? extra.quota_weekly_limit : null
+      editDailyResetMode.value = (extra?.quota_daily_reset_mode as 'rolling' | 'fixed') || null
+      editDailyResetHour.value = (extra?.quota_daily_reset_hour as number) ?? null
+      editWeeklyResetMode.value = (extra?.quota_weekly_reset_mode as 'rolling' | 'fixed') || null
+      editWeeklyResetDay.value = (extra?.quota_weekly_reset_day as number) ?? null
+      editWeeklyResetHour.value = (extra?.quota_weekly_reset_hour as number) ?? null
+      editResetTimezone.value = (extra?.quota_reset_timezone as string) || null
+      loadQuotaNotifyFromExtra(extra)
+    }
+
+    if (account.type === 'apikey' || account.type === 'bedrock') {
+      poolModeEnabled.value = credentials?.pool_mode === true
+      poolModeRetryCount.value = normalizePoolModeRetryCount(
+        Number(credentials?.pool_mode_retry_count ?? DEFAULT_POOL_MODE_RETRY_COUNT)
+      )
+      poolModeRetryStatusCodesInput.value = formatPoolModeRetryStatusCodes(credentials?.pool_mode_retry_status_codes)
+      customErrorCodesEnabled.value = credentials?.custom_error_codes_enabled === true
+      selectedErrorCodes.value = Array.isArray(credentials?.custom_error_codes)
+        ? [...credentials.custom_error_codes].map((v) => Number(v)).filter((v) => Number.isInteger(v))
+        : []
+    }
+  } finally {
+    queueMicrotask(() => {
+      applyingInitialAccount.value = false
+    })
+  }
+}
+
 // Watchers
 watch(
   () => props.show,
@@ -4059,6 +4426,10 @@ watch(
       adminAPI.tlsFingerprintProfiles.list()
         .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })
         .catch(() => { tlsFingerprintProfiles.value = [] })
+      if (props.initialAccount) {
+        applyInitialAccount(props.initialAccount)
+        return
+      }
       // Modal opened - fill related models
       allowedModels.value = [...getModelsByPlatform(form.platform)]
       // Antigravity: 默认使用映射模式并填充默认映射
@@ -4108,6 +4479,7 @@ watch(
 watch(
   () => form.platform,
   (newPlatform) => {
+    if (applyingInitialAccount.value) return
     // Reset base URL based on platform
     apiKeyBaseUrl.value =
       (newPlatform === 'openai')
@@ -4236,6 +4608,7 @@ const handleSelectGeminiOAuthType = (oauthType: 'code_assist' | 'google_one' | '
 watch(
   [modelRestrictionMode, () => form.platform],
   ([newMode]) => {
+    if (applyingInitialAccount.value) return
     if (newMode === 'whitelist') {
       allowedModels.value = [...getModelsByPlatform(form.platform)]
     }
@@ -4555,6 +4928,7 @@ const resetForm = () => {
   editWeeklyResetDay.value = null
   editWeeklyResetHour.value = null
   editResetTimezone.value = null
+  resetQuotaNotify()
   modelMappings.value = []
   openAICompactModelMappings.value = []
   modelRestrictionMode.value = 'whitelist'
@@ -4562,9 +4936,13 @@ const resetForm = () => {
 
   antigravityModelRestrictionMode.value = 'mapping'
   antigravityWhitelistModels.value = []
-  fetchAntigravityDefaultMappings().then(mappings => {
-    antigravityModelMappings.value = [...mappings]
-  })
+  if (applyingInitialAccount.value) {
+    antigravityModelMappings.value = []
+  } else {
+    fetchAntigravityDefaultMappings().then(mappings => {
+      antigravityModelMappings.value = [...mappings]
+    })
+  }
   poolModeEnabled.value = false
   poolModeRetryCount.value = DEFAULT_POOL_MODE_RETRY_COUNT
   poolModeRetryStatusCodesInput.value = ''
