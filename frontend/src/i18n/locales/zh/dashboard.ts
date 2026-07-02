@@ -569,6 +569,7 @@ export default {
     redeemCodeLabel: '兑换码',
     redeemCodePlaceholder: '请输入兑换码',
     redeemCodeHint: '兑换码区分大小写',
+    rechargeButton: '充值',
     redeeming: '兑换中...',
     redeemButton: '兑换',
     redeemSuccess: '兑换成功！',
