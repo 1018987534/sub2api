@@ -858,6 +858,9 @@ func (s *OpenAIGatewayService) correctToolCallsInResponseBody(body []byte) []byt
 	if normalized, changed := normalizeOpenAIResponsesFunctionCallArguments(updated); changed {
 		updated = normalized
 	}
+	if normalized, changed := normalizeOpenAIResponsesToolSearchArguments(updated); changed {
+		updated = normalized
+	}
 	return updated
 }
 
@@ -916,6 +919,60 @@ func dedupeResponsesFunctionCallOutputArguments(data []byte, outputPath string, 
 
 func isResponsesFunctionCallItemType(itemType string) bool {
 	return itemType == "function_call" || itemType == "custom_tool_call"
+}
+
+func normalizeOpenAIResponsesToolSearchArguments(data []byte) ([]byte, bool) {
+	if len(bytes.TrimSpace(data)) == 0 ||
+		!bytes.Contains(data, []byte(`"tool_search_call"`)) ||
+		!bytes.Contains(data, []byte(`"arguments"`)) {
+		return data, false
+	}
+	if !gjson.ValidBytes(data) {
+		return data, false
+	}
+
+	updated := data
+	changed := false
+	setObjectArgument := func(path string) {
+		arg := gjson.GetBytes(updated, path)
+		if !arg.Exists() || arg.Type != gjson.String {
+			return
+		}
+		raw := strings.TrimSpace(arg.Str)
+		if !gjson.Valid(raw) || !gjson.Parse(raw).IsObject() {
+			return
+		}
+		next, err := sjson.SetRawBytes(updated, path, []byte(raw))
+		if err != nil {
+			return
+		}
+		updated = next
+		changed = true
+	}
+
+	if itemType := strings.TrimSpace(gjson.GetBytes(updated, "type").String()); itemType == "tool_search_call" {
+		setObjectArgument("arguments")
+	}
+	if itemType := strings.TrimSpace(gjson.GetBytes(updated, "item.type").String()); itemType == "tool_search_call" {
+		setObjectArgument("item.arguments")
+	}
+	normalizeResponsesToolSearchOutputArguments(updated, "response.output", setObjectArgument)
+	normalizeResponsesToolSearchOutputArguments(updated, "output", setObjectArgument)
+
+	return updated, changed
+}
+
+func normalizeResponsesToolSearchOutputArguments(data []byte, outputPath string, setObjectArgument func(string)) {
+	output := gjson.GetBytes(data, outputPath)
+	if !output.Exists() || !output.IsArray() {
+		return
+	}
+	for i, item := range output.Array() {
+		if strings.TrimSpace(item.Get("type").String()) != "tool_search_call" {
+			continue
+		}
+		setObjectArgument(outputPath + "." + strconv.Itoa(i) + ".arguments")
+	}
 }
 
 func dedupeRepeatedJSONArgumentString(arguments string) (string, bool) {

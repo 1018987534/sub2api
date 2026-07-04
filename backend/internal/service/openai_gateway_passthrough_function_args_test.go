@@ -71,6 +71,46 @@ func TestHandleStreamingResponsePassthroughDeduplicatesFunctionCallArguments(t *
 	requireJSONArgument(t, gjson.Get(completed, "response.output.1.arguments").String())
 }
 
+func TestHandleStreamingResponsePassthroughNormalizesToolSearchArguments(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	searchArgs := `{"query":"computer-use get_app_state list_apps click type_text set_value Codex Computer Use","limit":10}`
+	upstreamBody := strings.Join([]string{
+		passthroughSSEData(`{"type":"response.created","response":{"id":"resp_tool_search","model":"gpt-5.5"}}`),
+		passthroughSSEData(toolSearchOutputItemJSON("response.output_item.added", "tsc_a", "call_search", `{}`)),
+		passthroughSSEData(toolSearchOutputItemJSON("response.output_item.done", "tsc_a", "call_search", searchArgs)),
+		passthroughSSEData(completedWithToolSearchJSON(searchArgs)),
+		"data: [DONE]\n\n",
+	}, "")
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}
+
+	svc := &OpenAIGatewayService{}
+	result, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "gpt-5.5", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	events := collectSSEDataPayloads(t, rec.Body.String())
+	added := findSSEEvent(t, events, "response.output_item.added", "call_search")
+	done := findSSEEvent(t, events, "response.output_item.done", "call_search")
+	completed := findSSEEvent(t, events, "response.completed", "")
+
+	require.NotEqual(t, gjson.String, gjson.Get(added, "item.arguments").Type)
+	require.True(t, gjson.Get(added, "item.arguments").IsObject())
+	require.Equal(t, "computer-use get_app_state list_apps click type_text set_value Codex Computer Use", gjson.Get(done, "item.arguments.query").String())
+	require.Equal(t, int64(10), gjson.Get(done, "item.arguments.limit").Int())
+	require.Equal(t, int64(10), gjson.Get(completed, "response.output.0.arguments.limit").Int())
+	require.NotEqual(t, gjson.String, gjson.Get(done, "item.arguments").Type)
+	require.NotEqual(t, gjson.String, gjson.Get(completed, "response.output.0.arguments").Type)
+}
+
 func TestForwardResponsesChatCompletionsFallbackKeepsFunctionArgumentsSingle(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -152,11 +192,28 @@ func outputItemDoneJSON(outputIndex int, itemID, callID, name, arguments string)
 	)
 }
 
+func toolSearchOutputItemJSON(eventType, itemID, callID, arguments string) string {
+	return fmt.Sprintf(
+		`{"type":%s,"output_index":0,"item":{"type":"tool_search_call","id":%s,"call_id":%s,"status":"completed","execution":"client","arguments":%s}}`,
+		strconv.Quote(eventType),
+		strconv.Quote(itemID),
+		strconv.Quote(callID),
+		strconv.Quote(arguments),
+	)
+}
+
 func completedWithFunctionCallsJSON(argsA, argsB string) string {
 	return fmt.Sprintf(
 		`{"type":"response.completed","response":{"id":"resp_passthrough_args","status":"completed","output":[{"type":"function_call","id":"fc_a","call_id":"call_a","name":"exec_command","arguments":%s,"status":"completed"},{"type":"function_call","id":"fc_b","call_id":"call_b","name":"apply_patch","arguments":%s,"status":"completed"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}`,
 		strconv.Quote(argsA),
 		strconv.Quote(argsB),
+	)
+}
+
+func completedWithToolSearchJSON(arguments string) string {
+	return fmt.Sprintf(
+		`{"type":"response.completed","response":{"id":"resp_tool_search","status":"completed","output":[{"type":"tool_search_call","id":"tsc_a","call_id":"call_search","status":"completed","execution":"client","arguments":%s}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}`,
+		strconv.Quote(arguments),
 	)
 }
 
