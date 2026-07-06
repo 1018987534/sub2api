@@ -22,14 +22,10 @@
       <!-- Redeem Form -->
       <div class="card">
         <div class="p-6">
-          <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="mb-5">
             <h2 class="text-base font-semibold text-gray-900 dark:text-white">
               {{ t('redeem.redeemCodeLabel') }}
             </h2>
-            <button type="button" class="btn btn-secondary" @click="openRecharge">
-              <Icon name="externalLink" size="sm" class="mr-2" />
-              {{ t('redeem.rechargeButton') }}
-            </button>
           </div>
           <form @submit.prevent="handleRedeem" class="space-y-5">
             <div>
@@ -370,7 +366,6 @@ const user = computed(() => authStore.user)
 
 const redeemCode = ref('')
 const submitting = ref(false)
-const rechargeUrl = 'https://pay.ldxp.cn/shop/QBK1FBO8'
 const redeemResult = ref<{
   message: string
   type: string
@@ -381,10 +376,6 @@ const redeemResult = ref<{
   validity_days?: number
 } | null>(null)
 const errorMessage = ref('')
-
-const openRecharge = () => {
-  window.open(rechargeUrl, '_blank', 'noopener,noreferrer')
-}
 
 // History data
 const history = ref<RedeemHistoryItem[]>([])

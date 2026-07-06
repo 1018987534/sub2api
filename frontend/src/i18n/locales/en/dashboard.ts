@@ -564,7 +564,6 @@ export default {
     redeemCodeLabel: 'Redeem Code',
     redeemCodePlaceholder: 'Enter your redeem code',
     redeemCodeHint: 'Redeem codes are case-sensitive',
-    rechargeButton: 'Top Up',
     redeeming: 'Redeeming...',
     redeemButton: 'Redeem Code',
     redeemSuccess: 'Code Redeemed Successfully!',
