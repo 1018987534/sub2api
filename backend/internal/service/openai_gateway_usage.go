@@ -34,6 +34,9 @@ type OpenAIRecordUsageInput struct {
 	QuotaPlatform      string // user×platform quota platform resolved by the handler before async billing.
 	// CyberBlocked 为 true 时把该用量行标记为 cyber（request_type=cyber），计费逻辑不变。
 	CyberBlocked bool
+	// SkipTempUnschedFailureReset is used by failed upstream requests that still
+	// write a usage row (for example, cyber policy response.failed events).
+	SkipTempUnschedFailureReset bool
 	ChannelUsageFields
 }
 
@@ -80,19 +83,20 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 		},
 	}
 	if err := s.RecordUsage(ctx, &OpenAIRecordUsageInput{
-		Result:             result,
-		APIKey:             in.APIKey,
-		User:               in.APIKey.User,
-		Account:            in.Account,
-		Subscription:       in.Subscription,
-		InboundEndpoint:    in.InboundEndpoint,
-		UpstreamEndpoint:   in.UpstreamEndpoint,
-		UserAgent:          in.UserAgent,
-		IPAddress:          in.IPAddress,
-		RequestPayloadHash: in.RequestPayloadHash,
-		APIKeyService:      in.APIKeyService,
-		ChannelUsageFields: in.ChannelUsageFields,
-		CyberBlocked:       true,
+		Result:                      result,
+		APIKey:                      in.APIKey,
+		User:                        in.APIKey.User,
+		Account:                     in.Account,
+		Subscription:                in.Subscription,
+		InboundEndpoint:             in.InboundEndpoint,
+		UpstreamEndpoint:            in.UpstreamEndpoint,
+		UserAgent:                   in.UserAgent,
+		IPAddress:                   in.IPAddress,
+		RequestPayloadHash:          in.RequestPayloadHash,
+		APIKeyService:               in.APIKeyService,
+		ChannelUsageFields:          in.ChannelUsageFields,
+		CyberBlocked:                true,
+		SkipTempUnschedFailureReset: true,
 	}); err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "cyber usage record failed: request_id=%s err=%v", in.RequestID, err)
 	}
@@ -106,6 +110,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	result := input.Result
 	if result == nil {
 		return errors.New("openai usage result is nil")
+	}
+	if s.rateLimitService != nil && input.Account != nil && !input.SkipTempUnschedFailureReset && !input.CyberBlocked {
+		s.rateLimitService.ResetTempUnschedulableFailureCounters(ctx, input.Account.ID)
 	}
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)

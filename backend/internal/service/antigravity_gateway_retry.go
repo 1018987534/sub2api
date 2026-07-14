@@ -553,6 +553,9 @@ urlFallbackLoop:
 					continue
 				}
 				logger.LegacyPrintf("service.antigravity_gateway", "%s status=request_failed retries_exhausted error=%v", p.prefix, err)
+				if s.rateLimitService != nil {
+					s.rateLimitService.HandleTempUnschedulableTransportFailure(p.ctx, p.account, err)
+				}
 				setOpsUpstreamError(p.c, 0, safeErr, "")
 				return nil, fmt.Errorf("upstream request failed after retries: %w", err)
 			}

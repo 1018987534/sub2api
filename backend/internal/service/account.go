@@ -113,6 +113,18 @@ type TempUnschedulableRule struct {
 	Description     string   `json:"description"`
 }
 
+const (
+	TempUnschedulableModeRules               = "rules"
+	TempUnschedulableModeConsecutiveFailures = "consecutive_failures"
+)
+
+type TempUnschedulableFailureRule struct {
+	WindowSeconds    int    `json:"window_seconds"`
+	FailureThreshold int    `json:"failure_threshold"`
+	DurationMinutes  int    `json:"duration_minutes"`
+	Description      string `json:"description"`
+}
+
 func (a *Account) IsActive() bool {
 	return a.Status == StatusActive
 }
@@ -364,6 +376,17 @@ func (a *Account) IsTempUnschedulableEnabled() bool {
 	return ok && enabled
 }
 
+func (a *Account) GetTempUnschedulableMode() string {
+	if a == nil || a.Credentials == nil {
+		return TempUnschedulableModeRules
+	}
+	mode := strings.ToLower(parseTempUnschedString(a.Credentials["temp_unschedulable_mode"]))
+	if mode == TempUnschedulableModeConsecutiveFailures {
+		return mode
+	}
+	return TempUnschedulableModeRules
+}
+
 func (a *Account) GetTempUnschedulableRules() []TempUnschedulableRule {
 	if a.Credentials == nil {
 		return nil
@@ -399,6 +422,43 @@ func (a *Account) GetTempUnschedulableRules() []TempUnschedulableRule {
 		rules = append(rules, rule)
 	}
 
+	return rules
+}
+
+func (a *Account) GetTempUnschedulableFailureRules() []TempUnschedulableFailureRule {
+	if a == nil || a.Credentials == nil {
+		return nil
+	}
+	raw, ok := a.Credentials["temp_unschedulable_failure_rules"]
+	if !ok || raw == nil {
+		return nil
+	}
+
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+
+	rules := make([]TempUnschedulableFailureRule, 0, len(arr))
+	for _, item := range arr {
+		entry, ok := item.(map[string]any)
+		if !ok || entry == nil {
+			continue
+		}
+
+		rule := TempUnschedulableFailureRule{
+			WindowSeconds:    parseTempUnschedInt(entry["window_seconds"]),
+			FailureThreshold: parseTempUnschedInt(entry["failure_threshold"]),
+			DurationMinutes:  parseTempUnschedInt(entry["duration_minutes"]),
+			Description:      parseTempUnschedString(entry["description"]),
+		}
+		if rule.WindowSeconds < 1 || rule.WindowSeconds > 86400 ||
+			rule.FailureThreshold < 1 || rule.FailureThreshold > 1000 ||
+			rule.DurationMinutes < 1 || rule.DurationMinutes > 10080 {
+			continue
+		}
+		rules = append(rules, rule)
+	}
 	return rules
 }
 

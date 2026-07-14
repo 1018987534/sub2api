@@ -69,18 +69,24 @@
           </div>
           <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
             <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.tempUnschedulable.errorCode') }}
+              {{ isConsecutiveFailure
+                ? t('admin.accounts.tempUnschedulable.triggerMode')
+                : t('admin.accounts.tempUnschedulable.errorCode') }}
             </p>
             <p class="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">
-              {{ state?.status_code || '-' }}
+              {{ isConsecutiveFailure
+                ? t('admin.accounts.tempUnschedulable.modeConsecutiveFailures')
+                : (state?.status_code || '-') }}
             </p>
           </div>
           <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
             <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ t('admin.accounts.tempUnschedulable.matchedKeyword') }}
+              {{ isConsecutiveFailure
+                ? t('admin.accounts.tempUnschedulable.failureThreshold')
+                : t('admin.accounts.tempUnschedulable.matchedKeyword') }}
             </p>
             <p class="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">
-              {{ state?.matched_keyword || '-' }}
+              {{ isConsecutiveFailure ? consecutiveFailureText : (state?.matched_keyword || '-') }}
             </p>
           </div>
           <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
@@ -169,6 +175,16 @@ const resetting = ref(false)
 const status = ref<TempUnschedulableStatus | null>(null)
 
 const state = computed(() => status.value?.state || null)
+const isConsecutiveFailure = computed(() => state.value?.trigger_mode === 'consecutive_failures')
+
+const consecutiveFailureText = computed(() => {
+  if (!state.value || !isConsecutiveFailure.value) return '-'
+  return t('admin.accounts.tempUnschedulable.consecutiveFailureSummary', {
+    count: state.value.failure_count || 0,
+    threshold: state.value.failure_threshold || 0,
+    window: state.value.window_seconds || 0
+  })
+})
 
 const isActive = computed(() => {
   if (!status.value?.active || !state.value) return false

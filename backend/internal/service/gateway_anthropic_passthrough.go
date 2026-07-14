@@ -125,6 +125,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
+			if s.rateLimitService != nil {
+				s.rateLimitService.HandleTempUnschedulableTransportFailure(ctx, account, err)
+			}
 			c.JSON(http.StatusBadGateway, gin.H{
 				"type": "error",
 				"error": gin.H{

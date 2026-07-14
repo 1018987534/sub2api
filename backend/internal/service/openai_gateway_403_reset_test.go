@@ -11,6 +11,21 @@ type openAI403CounterResetStub struct {
 	resetCalls []int64
 }
 
+type tempUnschedFailureResetStub struct {
+	counts map[string]int64
+	resets []int64
+}
+
+func (s *tempUnschedFailureResetStub) RecordFailure(context.Context, int64, string, int, string) (int64, error) {
+	return 0, nil
+}
+
+func (s *tempUnschedFailureResetStub) ResetFailures(_ context.Context, accountID int64) error {
+	s.resets = append(s.resets, accountID)
+	s.counts = make(map[string]int64)
+	return nil
+}
+
 func (s *openAI403CounterResetStub) IncrementOpenAI403Count(context.Context, int64, int) (int64, error) {
 	return 0, nil
 }
@@ -45,4 +60,33 @@ func TestOpenAIGatewayServiceRecordUsage_ResetsOpenAI403CounterForZeroUsage(t *t
 	require.NoError(t, err)
 	require.Equal(t, []int64{777}, counter.resetCalls)
 	require.Equal(t, 1, usageRepo.calls)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_ResetsTempUnschedFailureCounters(t *testing.T) {
+	counter := &tempUnschedFailureResetStub{counts: map[string]int64{}}
+	counter.counts["rule-a"] = 2
+	rateLimitSvc := NewRateLimitService(nil, nil, nil, nil, nil)
+	rateLimitSvc.SetTempUnschedFailureCounterCache(counter)
+
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: true}}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+		nil,
+	)
+	svc.rateLimitService = rateLimitSvc
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result:  &OpenAIForwardResult{RequestID: "success-reset", Model: "gpt-5.1"},
+		APIKey:  &APIKey{ID: 1001, Group: &Group{RateMultiplier: 1}},
+		User:    &User{ID: 2001},
+		Account: &Account{ID: 778, Platform: PlatformOpenAI},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, []int64{778}, counter.resets)
+	require.Empty(t, counter.counts)
 }

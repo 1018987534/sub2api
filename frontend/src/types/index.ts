@@ -852,6 +852,13 @@ export interface TempUnschedulableRule {
   description: string
 }
 
+export interface TempUnschedulableFailureRule {
+  window_seconds: number
+  failure_threshold: number
+  duration_minutes: number
+  description: string
+}
+
 export interface TempUnschedulableState {
   until_unix: number
   triggered_at_unix: number
@@ -859,6 +866,10 @@ export interface TempUnschedulableState {
   matched_keyword: string
   rule_index: number
   error_message: string
+  trigger_mode?: 'rules' | 'consecutive_failures'
+  failure_count?: number
+  failure_threshold?: number
+  window_seconds?: number
 }
 
 export interface TempUnschedulableStatus {

@@ -383,6 +383,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 				Kind:               "request_error",
 				Message:            safeErr,
 			})
+			if s.rateLimitService != nil {
+				s.rateLimitService.HandleTempUnschedulableTransportFailure(ctx, account, err)
+			}
 			c.JSON(http.StatusBadGateway, gin.H{
 				"type": "error",
 				"error": gin.H{

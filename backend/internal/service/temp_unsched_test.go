@@ -258,6 +258,43 @@ func TestTempUnschedulableRule_Parse(t *testing.T) {
 	require.Equal(t, 5, rule.DurationMinutes)
 }
 
+func TestAccount_GetTempUnschedulableMode(t *testing.T) {
+	require.Equal(t, TempUnschedulableModeRules, (&Account{}).GetTempUnschedulableMode())
+	require.Equal(t, TempUnschedulableModeRules, (&Account{Credentials: map[string]any{
+		"temp_unschedulable_mode": "unknown",
+	}}).GetTempUnschedulableMode())
+	require.Equal(t, TempUnschedulableModeConsecutiveFailures, (&Account{Credentials: map[string]any{
+		"temp_unschedulable_mode": "consecutive_failures",
+	}}).GetTempUnschedulableMode())
+}
+
+func TestAccount_GetTempUnschedulableFailureRules(t *testing.T) {
+	account := &Account{Credentials: map[string]any{
+		"temp_unschedulable_failure_rules": []any{
+			map[string]any{
+				"window_seconds":    float64(60),
+				"failure_threshold": float64(3),
+				"duration_minutes":  float64(10),
+				"description":       "short window",
+			},
+			map[string]any{
+				"window_seconds":    float64(0),
+				"failure_threshold": float64(3),
+				"duration_minutes":  float64(10),
+			},
+		},
+	}}
+
+	rules := account.GetTempUnschedulableFailureRules()
+	require.Len(t, rules, 1)
+	require.Equal(t, TempUnschedulableFailureRule{
+		WindowSeconds:    60,
+		FailureThreshold: 3,
+		DurationMinutes:  10,
+		Description:      "short window",
+	}, rules[0])
+}
+
 // TestTruncateTempUnschedMessage 测试消息截断
 func TestTruncateTempUnschedMessage(t *testing.T) {
 	tests := []struct {

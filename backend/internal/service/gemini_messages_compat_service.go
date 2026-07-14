@@ -794,6 +794,9 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				sleepGeminiBackoff(attempt)
 				continue
 			}
+			if s.rateLimitService != nil {
+				s.rateLimitService.HandleTempUnschedulableTransportFailure(ctx, account, err)
+			}
 			setOpsUpstreamError(c, 0, safeErr, "")
 			return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed after retries: "+safeErr)
 		}
@@ -1330,6 +1333,9 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					Duration:      time.Since(startTime),
 					FirstTokenMs:  nil,
 				}, nil
+			}
+			if s.rateLimitService != nil {
+				s.rateLimitService.HandleTempUnschedulableTransportFailure(ctx, account, err)
 			}
 			setOpsUpstreamError(c, 0, safeErr, "")
 			return nil, s.writeGoogleError(c, http.StatusBadGateway, "Upstream request failed after retries: "+safeErr)

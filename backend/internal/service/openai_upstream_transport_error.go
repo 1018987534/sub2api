@@ -123,8 +123,11 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	if errors.Is(err, context.Canceled) {
 		return err
 	}
+	if s.rateLimitService != nil {
+		s.rateLimitService.HandleTempUnschedulableTransportFailure(ctx, account, err)
+	}
 
-	if classifyOpenAITransportError(err).Persistent {
+	if account.GetTempUnschedulableMode() != TempUnschedulableModeConsecutiveFailures && classifyOpenAITransportError(err).Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
 
