@@ -182,6 +182,19 @@ func indexLatestByModel(rows []*ChannelMonitorLatest) map[string]*ChannelMonitor
 	return m
 }
 
+// effectiveMonitorStatus 为当前状态增加失败迟滞：瞬时失败先显示为 degraded，
+// 只有仓储确认最近连续失败达到阈值后才保留 failed/error 红色状态。
+func effectiveMonitorStatus(latest *ChannelMonitorLatest) string {
+	if latest == nil {
+		return ""
+	}
+	if (latest.Status == MonitorStatusFailed || latest.Status == MonitorStatusError) &&
+		!latest.FailureThresholdReached {
+		return MonitorStatusDegraded
+	}
+	return latest.Status
+}
+
 // indexAvailabilityByModel 把 availability 切片按 model 索引。
 func indexAvailabilityByModel(rows []*ChannelMonitorAvailability) map[string]*ChannelMonitorAvailability {
 	m := make(map[string]*ChannelMonitorAvailability, len(rows))
@@ -202,7 +215,7 @@ func buildStatusSummary(
 	summary := MonitorStatusSummary{ExtraModels: make([]ExtraModelStatus, 0, len(extras))}
 	if primary != "" {
 		if l, ok := latestByModel[primary]; ok {
-			summary.PrimaryStatus = l.Status
+			summary.PrimaryStatus = effectiveMonitorStatus(l)
 			summary.PrimaryLatencyMs = l.LatencyMs
 		}
 		if a, ok := availByModel[primary]; ok {
@@ -212,7 +225,7 @@ func buildStatusSummary(
 	for _, model := range extras {
 		entry := ExtraModelStatus{Model: model}
 		if l, ok := latestByModel[model]; ok {
-			entry.Status = l.Status
+			entry.Status = effectiveMonitorStatus(l)
 			entry.LatencyMs = l.LatencyMs
 		}
 		summary.ExtraModels = append(summary.ExtraModels, entry)
@@ -273,7 +286,7 @@ func mergeModelDetails(
 	for _, model := range all {
 		d := ModelDetail{Model: model}
 		if l, ok := latestByModel[model]; ok {
-			d.LatestStatus = l.Status
+			d.LatestStatus = effectiveMonitorStatus(l)
 			d.LatestLatencyMs = l.LatencyMs
 		}
 		if a, ok := availMap[monitorAvailability7Days][model]; ok {

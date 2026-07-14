@@ -192,11 +192,12 @@ type ChannelMonitorHistoryEntry struct {
 
 // ChannelMonitorLatest 最近一次检测的简明信息（用于 UserMonitorView 聚合）。
 type ChannelMonitorLatest struct {
-	Model         string
-	Status        string
-	LatencyMs     *int
-	PingLatencyMs *int
-	CheckedAt     time.Time
+	Model                   string
+	Status                  string
+	LatencyMs               *int
+	PingLatencyMs           *int
+	CheckedAt               time.Time
+	FailureThresholdReached bool // 最近连续失败已达到确认阈值
 }
 
 // ChannelMonitorAvailability 单个模型在某窗口内的可用率与平均延迟（用于 UserMonitorDetail 聚合）。

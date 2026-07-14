@@ -83,6 +83,9 @@ const (
 
 	// monitorTimelineMaxPoints 用户视图 timeline 每个监控最多返回的历史点数。
 	monitorTimelineMaxPoints = 60
+	// MonitorFailureConfirmationThreshold 连续失败达到该次数后，当前状态才显示为失败。
+	// 阈值前显示 degraded，避免单次网络抖动让渠道立即标红；任意成功会立即恢复。
+	MonitorFailureConfirmationThreshold = 3
 
 	// monitorEndpointResolveTimeout validateEndpoint 解析 hostname 的最长耗时。
 	monitorEndpointResolveTimeout = 5 * time.Second

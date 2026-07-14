@@ -257,17 +257,38 @@ func (r *channelMonitorRepository) ListHistory(ctx context.Context, monitorID in
 
 // ---------- 用户视图聚合（原生 SQL） ----------
 
-// ListLatestPerModel 用 DISTINCT ON 取每个 (monitor_id, model) 的最近一条记录。
-// 借助 (monitor_id, model, checked_at DESC) 索引可走 Index Scan。
+// ListLatestPerModel 用 DISTINCT ON 取每个 (monitor_id, model) 的最近一条记录，
+// 并通过每个模型最近 N 条记录确认是否达到连续失败阈值。
+// 两部分都借助 (monitor_id, model, checked_at DESC) 索引，避免扫描完整历史。
 func (r *channelMonitorRepository) ListLatestPerModel(ctx context.Context, monitorID int64) ([]*service.ChannelMonitorLatest, error) {
 	const q = `
-		SELECT DISTINCT ON (model)
-		    model, status, latency_ms, ping_latency_ms, checked_at
-		FROM channel_monitor_histories
-		WHERE monitor_id = $1
-		ORDER BY model, checked_at DESC
+		WITH latest AS (
+		    SELECT DISTINCT ON (model)
+		        model, status, latency_ms, ping_latency_ms, checked_at
+		    FROM channel_monitor_histories
+		    WHERE monitor_id = $1
+		    ORDER BY model, checked_at DESC
+		)
+		SELECT latest.model,
+		       latest.status,
+		       latest.latency_ms,
+		       latest.ping_latency_ms,
+		       latest.checked_at,
+		       COALESCE((
+		           SELECT COUNT(*) = $2::bigint
+		                  AND BOOL_AND(recent.status IN ('failed', 'error'))
+		           FROM (
+		               SELECT h.status
+		               FROM channel_monitor_histories h
+		               WHERE h.monitor_id = $1
+		                 AND h.model = latest.model
+		               ORDER BY h.checked_at DESC
+		               LIMIT $2
+		           ) recent
+		       ), FALSE) AS failure_threshold_reached
+		FROM latest
 	`
-	rows, err := r.db.QueryContext(ctx, q, monitorID)
+	rows, err := r.db.QueryContext(ctx, q, monitorID, service.MonitorFailureConfirmationThreshold)
 	if err != nil {
 		return nil, fmt.Errorf("query latest per model: %w", err)
 	}
@@ -277,7 +298,14 @@ func (r *channelMonitorRepository) ListLatestPerModel(ctx context.Context, monit
 	for rows.Next() {
 		l := &service.ChannelMonitorLatest{}
 		var latency, ping sql.NullInt64
-		if err := rows.Scan(&l.Model, &l.Status, &latency, &ping, &l.CheckedAt); err != nil {
+		if err := rows.Scan(
+			&l.Model,
+			&l.Status,
+			&latency,
+			&ping,
+			&l.CheckedAt,
+			&l.FailureThresholdReached,
+		); err != nil {
 			return nil, fmt.Errorf("scan latest row: %w", err)
 		}
 		assignNullInt(&l.LatencyMs, latency)
@@ -360,21 +388,42 @@ func finalizeAvailabilityRow(row *service.ChannelMonitorAvailability, avgLatency
 	}
 }
 
-// ListLatestForMonitorIDs 一次性查询多个监控的"每个 (monitor_id, model) 最近一条"记录。
-// 利用 PG 的 DISTINCT ON 特性，借助 (monitor_id, model, checked_at DESC) 索引可走 Index Scan。
+// ListLatestForMonitorIDs 一次性查询多个监控的"每个 (monitor_id, model) 最近一条"记录，
+// 并确认每个模型的最近 N 次是否连续失败。
 func (r *channelMonitorRepository) ListLatestForMonitorIDs(ctx context.Context, ids []int64) (map[int64][]*service.ChannelMonitorLatest, error) {
 	out := make(map[int64][]*service.ChannelMonitorLatest, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
 	const q = `
-		SELECT DISTINCT ON (monitor_id, model)
-		    monitor_id, model, status, latency_ms, ping_latency_ms, checked_at
-		FROM channel_monitor_histories
-		WHERE monitor_id = ANY($1)
-		ORDER BY monitor_id, model, checked_at DESC
+		WITH latest AS (
+		    SELECT DISTINCT ON (monitor_id, model)
+		        monitor_id, model, status, latency_ms, ping_latency_ms, checked_at
+		    FROM channel_monitor_histories
+		    WHERE monitor_id = ANY($1)
+		    ORDER BY monitor_id, model, checked_at DESC
+		)
+		SELECT latest.monitor_id,
+		       latest.model,
+		       latest.status,
+		       latest.latency_ms,
+		       latest.ping_latency_ms,
+		       latest.checked_at,
+		       COALESCE((
+		           SELECT COUNT(*) = $2::bigint
+		                  AND BOOL_AND(recent.status IN ('failed', 'error'))
+		           FROM (
+		               SELECT h.status
+		               FROM channel_monitor_histories h
+		               WHERE h.monitor_id = latest.monitor_id
+		                 AND h.model = latest.model
+		               ORDER BY h.checked_at DESC
+		               LIMIT $2
+		           ) recent
+		       ), FALSE) AS failure_threshold_reached
+		FROM latest
 	`
-	rows, err := r.db.QueryContext(ctx, q, pq.Array(ids))
+	rows, err := r.db.QueryContext(ctx, q, pq.Array(ids), service.MonitorFailureConfirmationThreshold)
 	if err != nil {
 		return nil, fmt.Errorf("query latest batch: %w", err)
 	}
@@ -384,7 +433,15 @@ func (r *channelMonitorRepository) ListLatestForMonitorIDs(ctx context.Context, 
 		var monitorID int64
 		l := &service.ChannelMonitorLatest{}
 		var latency, ping sql.NullInt64
-		if err := rows.Scan(&monitorID, &l.Model, &l.Status, &latency, &ping, &l.CheckedAt); err != nil {
+		if err := rows.Scan(
+			&monitorID,
+			&l.Model,
+			&l.Status,
+			&latency,
+			&ping,
+			&l.CheckedAt,
+			&l.FailureThresholdReached,
+		); err != nil {
 			return nil, fmt.Errorf("scan latest batch row: %w", err)
 		}
 		assignNullInt(&l.LatencyMs, latency)
