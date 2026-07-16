@@ -107,6 +107,35 @@ func runCheckForModel(ctx context.Context, provider, endpoint, apiKey, model str
 	return finalizeOperationalOrDegraded(res, latency, latencyMs)
 }
 
+// runCheckForModelWithRetry retries every actual check failure, regardless of
+// transport error, HTTP status, or challenge mismatch. A slow but valid response
+// is degraded rather than failed, so it ends the retry loop as usable.
+func runCheckForModelWithRetry(ctx context.Context, provider, endpoint, apiKey, model string, opts *CheckOptions) *CheckResult {
+	var result *CheckResult
+	for attempt := 1; attempt <= monitorCheckMaxAttempts; attempt++ {
+		result = runCheckForModel(ctx, provider, endpoint, apiKey, model, opts)
+		if result.Status != MonitorStatusError && result.Status != MonitorStatusFailed {
+			return result
+		}
+		if attempt == monitorCheckMaxAttempts || ctx.Err() != nil {
+			return result
+		}
+		timer := time.NewTimer(monitorCheckRetryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return result
+		case <-timer.C:
+		}
+	}
+	return result
+}
+
 // finalizeOperationalOrDegraded 负责走到最后一步的 operational/degraded 判定。
 // 拆出来是为了让 runCheckForModel 不超过 30 行。
 func finalizeOperationalOrDegraded(res *CheckResult, latency time.Duration, latencyMs int) *CheckResult {

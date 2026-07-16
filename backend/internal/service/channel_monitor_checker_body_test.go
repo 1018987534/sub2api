@@ -60,15 +60,19 @@ func setupFakeAnthropic(t *testing.T, handler *captureHandler) string {
 }
 
 type openAICaptureHandler struct {
-	lastBody                  map[string]any
-	lastHeaders               http.Header
-	lastPath                  string
-	status                    int
-	rawResponse               string
-	responsesLeadingReasoning bool
+	lastBody                       map[string]any
+	lastHeaders                    http.Header
+	lastPath                       string
+	requestCount                   int
+	failuresBeforeSuccess          int
+	challengeFailuresBeforeSuccess int
+	status                         int
+	rawResponse                    string
+	responsesLeadingReasoning      bool
 }
 
 func (h *openAICaptureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.requestCount++
 	h.lastHeaders = r.Header.Clone()
 	h.lastPath = r.URL.Path
 	defer func() { _ = r.Body.Close() }()
@@ -76,17 +80,24 @@ func (h *openAICaptureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	_ = json.NewDecoder(r.Body).Decode(&parsed)
 	h.lastBody = parsed
 
-	if h.status == 0 {
-		h.status = http.StatusOK
+	status := h.status
+	if h.failuresBeforeSuccess > 0 && h.requestCount <= h.failuresBeforeSuccess {
+		status = http.StatusBadGateway
+	}
+	if status == 0 {
+		status = http.StatusOK
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(h.status)
+	w.WriteHeader(status)
 	if h.rawResponse != "" {
 		_, _ = w.Write([]byte(h.rawResponse))
 		return
 	}
 
 	answer := answerFromOpenAIRequest(parsed)
+	if h.challengeFailuresBeforeSuccess > 0 && h.requestCount <= h.challengeFailuresBeforeSuccess {
+		answer = ""
+	}
 	if h.lastPath == providerOpenAIResponsesPath {
 		output := []map[string]any{}
 		if h.responsesLeadingReasoning {
@@ -192,6 +203,48 @@ func TestRunCheckForModel_OpenAI_DefaultChatRequest(t *testing.T) {
 	}
 	if h.lastHeaders.Get("Authorization") != "Bearer sk-openai" {
 		t.Errorf("expected bearer auth header, got %q", h.lastHeaders.Get("Authorization"))
+	}
+}
+
+func TestRunCheckForModelWithRetry_RetriesAnyFailureUntilSuccess(t *testing.T) {
+	h := &openAICaptureHandler{failuresBeforeSuccess: 2}
+	endpoint := setupFakeOpenAI(t, h)
+
+	res := runCheckForModelWithRetry(context.Background(), MonitorProviderOpenAI, endpoint, "sk-openai", "gpt-test", nil)
+
+	if res.Status != MonitorStatusOperational {
+		t.Fatalf("retry should recover on a later account response, got status=%s message=%q", res.Status, res.Message)
+	}
+	if h.requestCount != 3 {
+		t.Fatalf("request count = %d, want 3", h.requestCount)
+	}
+}
+
+func TestRunCheckForModelWithRetry_StopsAfterFiveFailedAttempts(t *testing.T) {
+	h := &openAICaptureHandler{status: http.StatusBadGateway}
+	endpoint := setupFakeOpenAI(t, h)
+
+	res := runCheckForModelWithRetry(context.Background(), MonitorProviderOpenAI, endpoint, "sk-openai", "gpt-test", nil)
+
+	if res.Status != MonitorStatusError {
+		t.Fatalf("all failed attempts should return error, got status=%s message=%q", res.Status, res.Message)
+	}
+	if h.requestCount != monitorCheckMaxAttempts {
+		t.Fatalf("request count = %d, want %d", h.requestCount, monitorCheckMaxAttempts)
+	}
+}
+
+func TestRunCheckForModelWithRetry_RetriesChallengeFailure(t *testing.T) {
+	h := &openAICaptureHandler{challengeFailuresBeforeSuccess: 1}
+	endpoint := setupFakeOpenAI(t, h)
+
+	res := runCheckForModelWithRetry(context.Background(), MonitorProviderOpenAI, endpoint, "sk-openai", "gpt-test", nil)
+
+	if res.Status != MonitorStatusOperational {
+		t.Fatalf("challenge retry should recover, got status=%s message=%q", res.Status, res.Message)
+	}
+	if h.requestCount != 2 {
+		t.Fatalf("request count = %d, want 2", h.requestCount)
 	}
 }
 

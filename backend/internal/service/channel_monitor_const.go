@@ -11,6 +11,10 @@ import (
 const (
 	// monitorRequestTimeout 单次模型请求总超时（含 Body 读取）。
 	monitorRequestTimeout = 45 * time.Second
+	// monitorCheckMaxAttempts 单个模型每轮监控最多检测次数。任何 error/failed 都会重试。
+	monitorCheckMaxAttempts = 5
+	// monitorCheckRetryDelay 两次检测之间的短暂退避，避免瞬时失败时连续打满上游。
+	monitorCheckRetryDelay = 200 * time.Millisecond
 	// monitorPingTimeout HEAD 请求 endpoint origin 的超时。
 	monitorPingTimeout = 8 * time.Second
 	// monitorDegradedThreshold 主请求成功但耗时超过该阈值视为 degraded。

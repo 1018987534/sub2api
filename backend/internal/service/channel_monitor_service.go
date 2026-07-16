@@ -317,7 +317,7 @@ func (s *ChannelMonitorService) runChecksConcurrent(ctx context.Context, m *Chan
 	for i, model := range models {
 		i, model := i, model
 		eg.Go(func() error {
-			r := runCheckForModel(ctx, m.Provider, m.Endpoint, m.APIKey, model, opts)
+			r := runCheckForModelWithRetry(ctx, m.Provider, m.Endpoint, m.APIKey, model, opts)
 			r.PingLatencyMs = pingMs
 			mu.Lock()
 			results[i] = r
