@@ -375,7 +375,23 @@ export default {
       rebatesDescription: '查看每一笔产生返利的充值订单',
       transfersDescription: '查看返利额度转入账户余额的提取流水',
       errors: {
-        loadFailed: '加载邀请返利记录失败'
+        loadFailed: '加载邀请返利记录失败',
+        AFFILIATE_ALREADY_BOUND: '该客户已有邀请人，不能覆盖现有返利关系',
+        AFFILIATE_SELF_BINDING: '客户和邀请人不能是同一个用户',
+        INVALID_USER: '所选用户无效或已不存在'
+      },
+      manualMatch: {
+        button: '手动匹配',
+        title: '手动匹配邀请关系',
+        inviteeLabel: '客户（被邀请人）',
+        inviteePlaceholder: '搜索客户邮箱、用户名或 ID',
+        inviterLabel: '邀请人',
+        inviterPlaceholder: '搜索邀请人邮箱、用户名或 ID',
+        clearSelection: '清除选择',
+        notice: '只允许匹配尚未绑定邀请人的客户。保存后仅对后续符合条件的充值产生返利，不补算历史订单，也不能覆盖已有关系。',
+        sameUser: '客户不能同时作为自己的邀请人',
+        submit: '确认匹配',
+        success: '邀请返利关系匹配成功'
       },
       records: {
         search: '搜索',
@@ -386,6 +402,9 @@ export default {
         invitee: '被邀请人',
         user: '用户',
         affCode: '邀请码',
+        bindSource: '匹配方式',
+        sourceRegistration: '注册绑定',
+        sourceAdmin: '管理员手动',
         order: '订单',
         totalRebate: '累计返利',
         orderAmount: '充值金额',

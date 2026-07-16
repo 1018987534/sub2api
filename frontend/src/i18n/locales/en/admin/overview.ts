@@ -375,7 +375,23 @@ export default {
       rebatesDescription: 'View recharge orders that generated affiliate rebates',
       transfersDescription: 'View affiliate quota transfers into account balance',
       errors: {
-        loadFailed: 'Failed to load affiliate records'
+        loadFailed: 'Failed to load affiliate records',
+        AFFILIATE_ALREADY_BOUND: 'This customer already has an inviter and the existing relationship cannot be overwritten',
+        AFFILIATE_SELF_BINDING: 'The customer and inviter must be different users',
+        INVALID_USER: 'The selected user is invalid or no longer exists'
+      },
+      manualMatch: {
+        button: 'Manual match',
+        title: 'Manually match affiliate relationship',
+        inviteeLabel: 'Customer (invitee)',
+        inviteePlaceholder: 'Search customer by email, username, or ID',
+        inviterLabel: 'Inviter',
+        inviterPlaceholder: 'Search inviter by email, username, or ID',
+        clearSelection: 'Clear selection',
+        notice: 'Only customers without an inviter can be matched. The relationship applies to future eligible top-ups only; historical orders are not recalculated and existing relationships cannot be overwritten.',
+        sameUser: 'A customer cannot be their own inviter',
+        submit: 'Confirm match',
+        success: 'Affiliate relationship matched'
       },
       records: {
         search: 'Search',
@@ -386,6 +402,9 @@ export default {
         invitee: 'Invitee',
         user: 'User',
         affCode: 'Invite Code',
+        bindSource: 'Match Source',
+        sourceRegistration: 'Registration',
+        sourceAdmin: 'Admin',
         order: 'Order',
         totalRebate: 'Total Rebate',
         orderAmount: 'Top-up Amount',

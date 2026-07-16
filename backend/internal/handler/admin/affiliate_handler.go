@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -168,9 +170,22 @@ type AffiliateUserSummary struct {
 // LookupUsers searches users by email/username for the "add custom user" modal.
 // GET /api/v1/admin/affiliates/users/lookup?q=
 func (h *AffiliateHandler) LookupUsers(c *gin.Context) {
-	keyword := c.Query("q")
+	keyword := strings.TrimSpace(c.Query("q"))
 	if keyword == "" {
 		response.Success(c, []AffiliateUserSummary{})
+		return
+	}
+	if userID, parseErr := strconv.ParseInt(strings.TrimPrefix(keyword, "#"), 10, 64); parseErr == nil && userID > 0 {
+		user, err := h.adminService.GetUser(c.Request.Context(), userID)
+		if err != nil {
+			if errors.Is(err, service.ErrUserNotFound) {
+				response.Success(c, []AffiliateUserSummary{})
+				return
+			}
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, []AffiliateUserSummary{{ID: user.ID, Email: user.Email, Username: user.Username}})
 		return
 	}
 	users, _, err := h.adminService.ListUsers(c.Request.Context(), 1, 20, service.UserListFilters{Search: keyword}, "email", "asc")
@@ -212,6 +227,56 @@ func (h *AffiliateHandler) ListInviteRecords(c *gin.Context) {
 		return
 	}
 	response.Paginated(c, items, total, filter.Page, filter.PageSize)
+}
+
+type CreateAffiliateInviteMatchRequest struct {
+	InviterID int64 `json:"inviter_id" binding:"required"`
+	InviteeID int64 `json:"invitee_id" binding:"required"`
+}
+
+// CreateInviteMatch manually binds an unbound customer to an inviter. The
+// operation affects future eligible recharges only; historical orders and
+// ledger entries are never recalculated.
+// POST /api/v1/admin/affiliates/invites
+func (h *AffiliateHandler) CreateInviteMatch(c *gin.Context) {
+	var req CreateAffiliateInviteMatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if req.InviterID <= 0 || req.InviteeID <= 0 {
+		response.BadRequest(c, "inviter_id and invitee_id must be positive")
+		return
+	}
+	if req.InviterID == req.InviteeID {
+		response.ErrorFrom(c, service.ErrAffiliateSelfBinding)
+		return
+	}
+
+	ctx := c.Request.Context()
+	if _, err := h.adminService.GetUser(ctx, req.InviterID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if _, err := h.adminService.GetUser(ctx, req.InviteeID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := h.affiliateService.AdminBindInviter(ctx, req.InviteeID, req.InviterID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	slog.Info("admin.affiliate_invite_match_created",
+		"actor_admin_id", getAdminIDFromContext(c),
+		"inviter_id", req.InviterID,
+		"invitee_id", req.InviteeID,
+		"retroactive", false)
+	response.Success(c, gin.H{
+		"inviter_id":  req.InviterID,
+		"invitee_id":  req.InviteeID,
+		"bind_source": string(service.AffiliateBindingSourceAdmin),
+	})
 }
 
 // ListRebateRecords returns all order-level affiliate rebate records.

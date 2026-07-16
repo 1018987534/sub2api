@@ -42,6 +42,7 @@ export interface AffiliateInviteRecord {
   invitee_email: string
   invitee_username: string
   aff_code: string
+  bind_source: 'registration' | 'admin' | string
   total_rebate: number
   created_at: string
 }
@@ -107,6 +108,17 @@ export interface SimpleUser {
   id: number
   email: string
   username: string
+}
+
+export interface CreateAffiliateInviteMatchRequest {
+  inviter_id: number
+  invitee_id: number
+}
+
+export interface CreateAffiliateInviteMatchResponse {
+  inviter_id: number
+  invitee_id: number
+  bind_source: 'admin'
 }
 
 export async function listUsers(
@@ -186,6 +198,16 @@ export async function listInviteRecords(
   return data
 }
 
+export async function createInviteMatch(
+  payload: CreateAffiliateInviteMatchRequest,
+): Promise<CreateAffiliateInviteMatchResponse> {
+  const { data } = await apiClient.post<CreateAffiliateInviteMatchResponse>(
+    '/admin/affiliates/invites',
+    payload,
+  )
+  return data
+}
+
 export async function listRebateRecords(
   params: ListAffiliateRecordsParams = {},
 ): Promise<PaginatedResponse<AffiliateRebateRecord>> {
@@ -222,6 +244,7 @@ export const affiliatesAPI = {
   clearUserSettings,
   batchSetRate,
   listInviteRecords,
+  createInviteMatch,
   listRebateRecords,
   listTransferRecords,
   getUserOverview,

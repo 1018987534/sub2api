@@ -9,6 +9,10 @@
           </div>
           <input v-model="filters.start_at" type="date" class="input w-full sm:w-44" :title="t('admin.affiliates.records.startAt')" @change="reloadFromFirstPage" />
           <input v-model="filters.end_at" type="date" class="input w-full sm:w-44" :title="t('admin.affiliates.records.endAt')" @change="reloadFromFirstPage" />
+          <button v-if="props.type === 'invites'" data-testid="manual-match-open" class="btn btn-primary" @click="openManualMatch">
+            <Icon name="link" size="md" />
+            <span>{{ t('admin.affiliates.manualMatch.button') }}</span>
+          </button>
           <button class="btn btn-secondary px-2 md:px-3" :disabled="loading" :title="t('common.refresh')" @click="loadRecords">
             <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
           </button>
@@ -55,6 +59,15 @@
           </template>
           <template #cell-aff_code="{ row }">
             <span class="font-mono text-sm text-gray-700 dark:text-gray-300">{{ row.aff_code || '-' }}</span>
+          </template>
+          <template #cell-bind_source="{ row }">
+            <span
+              :class="row.bind_source === 'admin'
+                ? 'inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
+                : 'inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-dark-300'"
+            >
+              {{ row.bind_source === 'admin' ? t('admin.affiliates.records.sourceAdmin') : t('admin.affiliates.records.sourceRegistration') }}
+            </span>
           </template>
           <template #cell-order="{ row }">
             <div class="space-y-0.5">
@@ -138,6 +151,112 @@
         </div>
       </div>
     </BaseDialog>
+
+    <BaseDialog
+      :show="manualMatch.show"
+      :title="t('admin.affiliates.manualMatch.title')"
+      width="normal"
+      @close="closeManualMatch"
+    >
+      <div class="space-y-5">
+        <div>
+          <label class="input-label">{{ t('admin.affiliates.manualMatch.inviteeLabel') }}</label>
+          <div v-if="manualMatch.invitee.selected" class="flex min-h-11 items-center justify-between rounded border border-primary-200 bg-primary-50 px-3 py-2 dark:border-primary-800 dark:bg-primary-950/30">
+            <div class="min-w-0 text-sm">
+              <div class="truncate font-medium text-gray-900 dark:text-white">{{ manualMatch.invitee.selected.email || '-' }}</div>
+              <div class="truncate text-xs text-gray-500 dark:text-dark-400">#{{ manualMatch.invitee.selected.id }} · {{ manualMatch.invitee.selected.username || '-' }}</div>
+            </div>
+            <button type="button" class="ml-3 p-1 text-gray-400 hover:text-red-600" :title="t('admin.affiliates.manualMatch.clearSelection')" @click="clearManualUser('invitee')">
+              <Icon name="x" size="sm" />
+            </button>
+          </div>
+          <div v-else class="relative">
+            <Icon name="search" size="md" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              v-model="manualMatch.invitee.query"
+              data-testid="manual-match-invitee-search"
+              type="text"
+              class="input pl-10"
+              :placeholder="t('admin.affiliates.manualMatch.inviteePlaceholder')"
+              @input="searchManualUsers('invitee')"
+            />
+            <div v-if="manualMatch.invitee.results.length > 0" class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-900">
+              <button
+                v-for="user in manualMatch.invitee.results"
+                :key="user.id"
+                :data-testid="`manual-match-invitee-user-${user.id}`"
+                type="button"
+                class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-dark-800"
+                @click="selectManualUser('invitee', user)"
+              >
+                <span class="min-w-0">
+                  <span class="block truncate text-sm font-medium text-gray-900 dark:text-white">{{ user.email || '-' }}</span>
+                  <span class="block truncate text-xs text-gray-500 dark:text-dark-400">{{ user.username || '-' }}</span>
+                </span>
+                <span class="shrink-0 font-mono text-xs text-gray-400">#{{ user.id }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="input-label">{{ t('admin.affiliates.manualMatch.inviterLabel') }}</label>
+          <div v-if="manualMatch.inviter.selected" class="flex min-h-11 items-center justify-between rounded border border-primary-200 bg-primary-50 px-3 py-2 dark:border-primary-800 dark:bg-primary-950/30">
+            <div class="min-w-0 text-sm">
+              <div class="truncate font-medium text-gray-900 dark:text-white">{{ manualMatch.inviter.selected.email || '-' }}</div>
+              <div class="truncate text-xs text-gray-500 dark:text-dark-400">#{{ manualMatch.inviter.selected.id }} · {{ manualMatch.inviter.selected.username || '-' }}</div>
+            </div>
+            <button type="button" class="ml-3 p-1 text-gray-400 hover:text-red-600" :title="t('admin.affiliates.manualMatch.clearSelection')" @click="clearManualUser('inviter')">
+              <Icon name="x" size="sm" />
+            </button>
+          </div>
+          <div v-else class="relative">
+            <Icon name="search" size="md" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              v-model="manualMatch.inviter.query"
+              data-testid="manual-match-inviter-search"
+              type="text"
+              class="input pl-10"
+              :placeholder="t('admin.affiliates.manualMatch.inviterPlaceholder')"
+              @input="searchManualUsers('inviter')"
+            />
+            <div v-if="manualMatch.inviter.results.length > 0" class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded border border-gray-200 bg-white shadow-lg dark:border-dark-700 dark:bg-dark-900">
+              <button
+                v-for="user in manualMatch.inviter.results"
+                :key="user.id"
+                :data-testid="`manual-match-inviter-user-${user.id}`"
+                type="button"
+                class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-dark-800"
+                @click="selectManualUser('inviter', user)"
+              >
+                <span class="min-w-0">
+                  <span class="block truncate text-sm font-medium text-gray-900 dark:text-white">{{ user.email || '-' }}</span>
+                  <span class="block truncate text-xs text-gray-500 dark:text-dark-400">{{ user.username || '-' }}</span>
+                </span>
+                <span class="shrink-0 font-mono text-xs text-gray-400">#{{ user.id }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex gap-3 border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          <Icon name="exclamationTriangle" size="md" class="mt-0.5 shrink-0" />
+          <p>{{ t('admin.affiliates.manualMatch.notice') }}</p>
+        </div>
+        <p v-if="manualMatchSameUser" class="text-sm text-red-600 dark:text-red-400">
+          {{ t('admin.affiliates.manualMatch.sameUser') }}
+        </p>
+      </div>
+
+      <template #footer>
+        <button type="button" class="btn btn-secondary" :disabled="manualMatch.saving" @click="closeManualMatch">
+          {{ t('common.cancel') }}
+        </button>
+        <button type="button" data-testid="manual-match-submit" class="btn btn-primary" :disabled="!manualMatchCanSubmit || manualMatch.saving" @click="submitManualMatch">
+          {{ manualMatch.saving ? t('common.saving') : t('admin.affiliates.manualMatch.submit') }}
+        </button>
+      </template>
+    </BaseDialog>
   </AppLayout>
 </template>
 
@@ -153,7 +272,7 @@ import Icon from '@/components/icons/Icon.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
-import { affiliatesAPI, type AffiliateInviteRecord, type AffiliateRebateRecord, type AffiliateTransferRecord, type AffiliateUserOverview, type ListAffiliateRecordsParams } from '@/api/admin/affiliates'
+import { affiliatesAPI, type AffiliateInviteRecord, type AffiliateRebateRecord, type AffiliateTransferRecord, type AffiliateUserOverview, type ListAffiliateRecordsParams, type SimpleUser } from '@/api/admin/affiliates'
 import type { PaginatedResponse } from '@/types'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatDateTime as formatDisplayDateTime } from '@/utils/format'
@@ -176,12 +295,33 @@ const overviewLoading = ref(false)
 const selectedOverview = ref<AffiliateUserOverview | null>(null)
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
+type ManualMatchRole = 'invitee' | 'inviter'
+interface ManualUserPickerState {
+  query: string
+  results: SimpleUser[]
+  selected: SimpleUser | null
+  loading: boolean
+  timer: ReturnType<typeof setTimeout> | null
+}
+
+function emptyManualUserPicker(): ManualUserPickerState {
+  return { query: '', results: [], selected: null, loading: false, timer: null }
+}
+
+const manualMatch = reactive({
+  show: false,
+  saving: false,
+  invitee: emptyManualUserPicker(),
+  inviter: emptyManualUserPicker(),
+})
+
 const columns = computed<Column[]>(() => {
   if (props.type === 'invites') {
     return [
       { key: 'inviter', label: t('admin.affiliates.records.inviter'), sortable: true },
       { key: 'invitee', label: t('admin.affiliates.records.invitee'), sortable: true },
       { key: 'aff_code', label: t('admin.affiliates.records.affCode'), sortable: true },
+      { key: 'bind_source', label: t('admin.affiliates.records.bindSource'), sortable: true },
       { key: 'total_rebate', label: t('admin.affiliates.records.totalRebate'), sortable: true },
       { key: 'created_at', label: t('admin.affiliates.records.invitedAt'), sortable: true },
     ]
@@ -301,6 +441,97 @@ function handleSort(key: string, order: 'asc' | 'desc') {
   sortState.sort_order = order
   pagination.page = 1
   void loadRecords()
+}
+
+function pickerFor(role: ManualMatchRole): ManualUserPickerState {
+  return manualMatch[role]
+}
+
+function resetPicker(picker: ManualUserPickerState) {
+  if (picker.timer) clearTimeout(picker.timer)
+  picker.query = ''
+  picker.results = []
+  picker.selected = null
+  picker.loading = false
+  picker.timer = null
+}
+
+function openManualMatch() {
+  resetPicker(manualMatch.invitee)
+  resetPicker(manualMatch.inviter)
+  manualMatch.saving = false
+  manualMatch.show = true
+}
+
+function closeManualMatch() {
+  if (manualMatch.saving) return
+  manualMatch.show = false
+  resetPicker(manualMatch.invitee)
+  resetPicker(manualMatch.inviter)
+}
+
+function searchManualUsers(role: ManualMatchRole) {
+  const picker = pickerFor(role)
+  if (picker.timer) clearTimeout(picker.timer)
+  const query = picker.query.trim()
+  if (!query) {
+    picker.results = []
+    picker.loading = false
+    return
+  }
+  picker.loading = true
+  picker.timer = setTimeout(async () => {
+    try {
+      const results = await affiliatesAPI.lookupUsers(query)
+      if (picker.query.trim() === query) picker.results = results
+    } catch (error) {
+      appStore.showError(extractI18nErrorMessage(error, t, 'admin.affiliates.errors', t('common.error')))
+    } finally {
+      if (picker.query.trim() === query) picker.loading = false
+    }
+  }, 250)
+}
+
+function selectManualUser(role: ManualMatchRole, user: SimpleUser) {
+  const picker = pickerFor(role)
+  picker.selected = user
+  picker.query = ''
+  picker.results = []
+}
+
+function clearManualUser(role: ManualMatchRole) {
+  resetPicker(pickerFor(role))
+}
+
+const manualMatchSameUser = computed(() => {
+  const inviteeID = manualMatch.invitee.selected?.id
+  const inviterID = manualMatch.inviter.selected?.id
+  return Boolean(inviteeID && inviterID && inviteeID === inviterID)
+})
+
+const manualMatchCanSubmit = computed(() => Boolean(
+  manualMatch.invitee.selected
+  && manualMatch.inviter.selected
+  && !manualMatchSameUser.value,
+))
+
+async function submitManualMatch() {
+  if (!manualMatchCanSubmit.value || manualMatch.saving) return
+  manualMatch.saving = true
+  try {
+    await affiliatesAPI.createInviteMatch({
+      invitee_id: manualMatch.invitee.selected!.id,
+      inviter_id: manualMatch.inviter.selected!.id,
+    })
+    appStore.showSuccess(t('admin.affiliates.manualMatch.success'))
+    manualMatch.saving = false
+    closeManualMatch()
+    reloadFromFirstPage()
+  } catch (error) {
+    appStore.showError(extractI18nErrorMessage(error, t, 'admin.affiliates.errors', t('common.error')))
+  } finally {
+    manualMatch.saving = false
+  }
 }
 
 function formatAmount(value: number | null | undefined): string {

@@ -16,6 +16,7 @@ var (
 	ErrAffiliateCodeInvalid     = infraerrors.BadRequest("AFFILIATE_CODE_INVALID", "invalid affiliate code")
 	ErrAffiliateCodeTaken       = infraerrors.Conflict("AFFILIATE_CODE_TAKEN", "affiliate code already in use")
 	ErrAffiliateAlreadyBound    = infraerrors.Conflict("AFFILIATE_ALREADY_BOUND", "affiliate inviter already bound")
+	ErrAffiliateSelfBinding     = infraerrors.BadRequest("AFFILIATE_SELF_BINDING", "a user cannot invite themselves")
 	ErrAffiliateQuotaEmpty      = infraerrors.BadRequest("AFFILIATE_QUOTA_EMPTY", "no affiliate quota available to transfer")
 )
 
@@ -25,6 +26,13 @@ const (
 	// 12-char codes and admin-customized codes (e.g. "VIP2026").
 	AffiliateCodeMinLength = 4
 	AffiliateCodeMaxLength = 32
+)
+
+type AffiliateBindingSource string
+
+const (
+	AffiliateBindingSourceRegistration AffiliateBindingSource = "registration"
+	AffiliateBindingSourceAdmin        AffiliateBindingSource = "admin"
 )
 
 // affiliateCodeValidChar accepts uppercase letters, digits, underscore and dash.
@@ -58,17 +66,19 @@ func isValidAffiliateCodeFormat(code string) bool {
 }
 
 type AffiliateSummary struct {
-	UserID               int64     `json:"user_id"`
-	AffCode              string    `json:"aff_code"`
-	AffCodeCustom        bool      `json:"aff_code_custom"`
-	AffRebateRatePercent *float64  `json:"aff_rebate_rate_percent,omitempty"`
-	InviterID            *int64    `json:"inviter_id,omitempty"`
-	AffCount             int       `json:"aff_count"`
-	AffQuota             float64   `json:"aff_quota"`
-	AffFrozenQuota       float64   `json:"aff_frozen_quota"`
-	AffHistoryQuota      float64   `json:"aff_history_quota"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	UserID               int64      `json:"user_id"`
+	AffCode              string     `json:"aff_code"`
+	AffCodeCustom        bool       `json:"aff_code_custom"`
+	AffRebateRatePercent *float64   `json:"aff_rebate_rate_percent,omitempty"`
+	InviterID            *int64     `json:"inviter_id,omitempty"`
+	InviterBoundAt       *time.Time `json:"inviter_bound_at,omitempty"`
+	InviterBindSource    string     `json:"inviter_bind_source,omitempty"`
+	AffCount             int        `json:"aff_count"`
+	AffQuota             float64    `json:"aff_quota"`
+	AffFrozenQuota       float64    `json:"aff_frozen_quota"`
+	AffHistoryQuota      float64    `json:"aff_history_quota"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 type AffiliateInvitee struct {
@@ -97,7 +107,7 @@ type AffiliateDetail struct {
 type AffiliateRepository interface {
 	EnsureUserAffiliate(ctx context.Context, userID int64) (*AffiliateSummary, error)
 	GetAffiliateByCode(ctx context.Context, code string) (*AffiliateSummary, error)
-	BindInviter(ctx context.Context, userID, inviterID int64) (bool, error)
+	BindInviter(ctx context.Context, userID, inviterID int64, source AffiliateBindingSource) (bool, error)
 	AccrueQuota(ctx context.Context, inviterID, inviteeUserID int64, amount float64, freezeHours int, sourceOrderID *int64) (bool, error)
 	GetAccruedRebateFromInvitee(ctx context.Context, inviterID, inviteeUserID int64) (float64, error)
 	ThawFrozenQuota(ctx context.Context, userID int64) (float64, error)
@@ -152,6 +162,7 @@ type AffiliateInviteRecord struct {
 	InviteeEmail    string    `json:"invitee_email"`
 	InviteeUsername string    `json:"invitee_username"`
 	AffCode         string    `json:"aff_code"`
+	BindSource      string    `json:"bind_source"`
 	TotalRebate     float64   `json:"total_rebate"`
 	CreatedAt       time.Time `json:"created_at"`
 }
@@ -301,7 +312,7 @@ func (s *AffiliateService) BindInviterByCode(ctx context.Context, userID int64, 
 		return ErrAffiliateCodeInvalid
 	}
 
-	bound, err := s.repo.BindInviter(ctx, userID, inviterSummary.UserID)
+	bound, err := s.repo.BindInviter(ctx, userID, inviterSummary.UserID, AffiliateBindingSourceRegistration)
 	if err != nil {
 		return err
 	}
@@ -343,7 +354,8 @@ func (s *AffiliateService) AccrueInviteRebateForOrder(ctx context.Context, invit
 	// 有效期检查：超过返利有效期后不再产生返利
 	if s.settingService != nil {
 		if durationDays := s.settingService.GetAffiliateRebateDurationDays(ctx); durationDays > 0 {
-			if time.Now().After(inviteeSummary.CreatedAt.AddDate(0, 0, durationDays)) {
+			boundAt := affiliateRebateStartsAt(inviteeSummary)
+			if time.Now().After(boundAt.AddDate(0, 0, durationDays)) {
 				return 0, nil
 			}
 		}
@@ -384,6 +396,16 @@ func (s *AffiliateService) AccrueInviteRebateForOrder(ctx context.Context, invit
 		return 0, nil
 	}
 	return rebate, nil
+}
+
+func affiliateRebateStartsAt(summary *AffiliateSummary) time.Time {
+	if summary == nil {
+		return time.Time{}
+	}
+	if summary.InviterBoundAt != nil {
+		return *summary.InviterBoundAt
+	}
+	return summary.CreatedAt
 }
 
 // resolveRebateRatePercent returns the inviter's exclusive rate when set,
@@ -557,6 +579,45 @@ func (s *AffiliateService) AdminBatchSetUserRebateRate(ctx context.Context, user
 		return nil
 	}
 	return s.repo.BatchSetUserRebateRate(ctx, cleaned, ratePercent)
+}
+
+// AdminBindInviter manually binds an unbound customer to an inviter. Existing
+// relationships are immutable because changing them would alter future
+// financial attribution while historical ledger entries remain with the old
+// inviter.
+func (s *AffiliateService) AdminBindInviter(ctx context.Context, inviteeID, inviterID int64) error {
+	if s == nil || s.repo == nil {
+		return infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
+	}
+	if inviteeID <= 0 || inviterID <= 0 {
+		return infraerrors.BadRequest("INVALID_USER", "invalid user")
+	}
+	if inviteeID == inviterID {
+		return ErrAffiliateSelfBinding
+	}
+
+	invitee, err := s.repo.EnsureUserAffiliate(ctx, inviteeID)
+	if err != nil {
+		return err
+	}
+	if invitee.InviterID != nil {
+		if *invitee.InviterID == inviterID && invitee.InviterBindSource == string(AffiliateBindingSourceAdmin) {
+			return nil
+		}
+		return ErrAffiliateAlreadyBound
+	}
+	if _, err := s.repo.EnsureUserAffiliate(ctx, inviterID); err != nil {
+		return err
+	}
+
+	bound, err := s.repo.BindInviter(ctx, inviteeID, inviterID, AffiliateBindingSourceAdmin)
+	if err != nil {
+		return err
+	}
+	if !bound {
+		return ErrAffiliateAlreadyBound
+	}
+	return nil
 }
 
 // AdminListCustomUsers 列出有专属配置的用户。

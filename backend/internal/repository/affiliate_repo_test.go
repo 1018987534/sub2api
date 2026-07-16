@@ -26,3 +26,13 @@ func TestAffiliateRecordQueriesUseLedgerAuditFields(t *testing.T) {
 	require.NotContains(t, content, "parseAffiliateRebateAmount")
 	require.NotContains(t, content, `"current_balance": "u.balance"`)
 }
+
+func TestAffiliateInviteQueriesUseBindingMetadata(t *testing.T) {
+	source, err := os.ReadFile("affiliate_repo.go")
+	require.NoError(t, err)
+	content := string(source)
+
+	require.Contains(t, content, "inviter_bound_at = NOW()")
+	require.Contains(t, content, "inviter_bind_source = $2")
+	require.Contains(t, content, "COALESCE(ua.inviter_bound_at, ua.created_at)")
+}

@@ -4,11 +4,109 @@ package service
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestAdminBindInviter(t *testing.T) {
+	t.Parallel()
+
+	t.Run("binds an unbound customer with admin source", func(t *testing.T) {
+		t.Parallel()
+		repo := &paymentFulfillmentAffiliateRepoStub{
+			inviteeSummary: &AffiliateSummary{UserID: 21},
+			inviterSummary: &AffiliateSummary{UserID: 10},
+			bindResult:     true,
+		}
+		svc := &AffiliateService{repo: repo}
+
+		require.NoError(t, svc.AdminBindInviter(context.Background(), 21, 10))
+		require.Len(t, repo.bindCalls, 1)
+		require.Equal(t, int64(21), repo.bindCalls[0].inviteeID)
+		require.Equal(t, int64(10), repo.bindCalls[0].inviterID)
+		require.Equal(t, AffiliateBindingSourceAdmin, repo.bindCalls[0].source)
+	})
+
+	t.Run("rejects self binding", func(t *testing.T) {
+		t.Parallel()
+		svc := &AffiliateService{repo: &paymentFulfillmentAffiliateRepoStub{}}
+		err := svc.AdminBindInviter(context.Background(), 10, 10)
+		require.ErrorIs(t, err, ErrAffiliateSelfBinding)
+	})
+
+	t.Run("does not overwrite an existing relationship", func(t *testing.T) {
+		t.Parallel()
+		oldInviterID := int64(9)
+		repo := &paymentFulfillmentAffiliateRepoStub{
+			inviteeSummary: &AffiliateSummary{UserID: 21, InviterID: &oldInviterID},
+			inviterSummary: &AffiliateSummary{UserID: 10},
+		}
+		svc := &AffiliateService{repo: repo}
+
+		err := svc.AdminBindInviter(context.Background(), 21, 10)
+		require.ErrorIs(t, err, ErrAffiliateAlreadyBound)
+		require.Empty(t, repo.bindCalls)
+	})
+
+	t.Run("is idempotent for the same admin match", func(t *testing.T) {
+		t.Parallel()
+		inviterID := int64(10)
+		repo := &paymentFulfillmentAffiliateRepoStub{
+			inviteeSummary: &AffiliateSummary{
+				UserID:            21,
+				InviterID:         &inviterID,
+				InviterBindSource: string(AffiliateBindingSourceAdmin),
+			},
+		}
+		svc := &AffiliateService{repo: repo}
+
+		require.NoError(t, svc.AdminBindInviter(context.Background(), 21, 10))
+		require.Empty(t, repo.bindCalls)
+	})
+
+	t.Run("reports a concurrent bind as conflict", func(t *testing.T) {
+		t.Parallel()
+		repo := &paymentFulfillmentAffiliateRepoStub{
+			inviteeSummary: &AffiliateSummary{UserID: 21},
+			inviterSummary: &AffiliateSummary{UserID: 10},
+			bindResult:     false,
+		}
+		svc := &AffiliateService{repo: repo}
+
+		err := svc.AdminBindInviter(context.Background(), 21, 10)
+		require.ErrorIs(t, err, ErrAffiliateAlreadyBound)
+	})
+
+	t.Run("propagates repository failures", func(t *testing.T) {
+		t.Parallel()
+		bindErr := errors.New("database unavailable")
+		repo := &paymentFulfillmentAffiliateRepoStub{
+			inviteeSummary: &AffiliateSummary{UserID: 21},
+			inviterSummary: &AffiliateSummary{UserID: 10},
+			bindResult:     true,
+			bindErr:        bindErr,
+		}
+		svc := &AffiliateService{repo: repo}
+
+		require.ErrorIs(t, svc.AdminBindInviter(context.Background(), 21, 10), bindErr)
+	})
+}
+
+func TestAffiliateRebateStartsAt(t *testing.T) {
+	t.Parallel()
+	createdAt := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
+	boundAt := time.Date(2026, 7, 16, 9, 30, 0, 0, time.UTC)
+
+	require.Equal(t, boundAt, affiliateRebateStartsAt(&AffiliateSummary{
+		CreatedAt:      createdAt,
+		InviterBoundAt: &boundAt,
+	}))
+	require.Equal(t, createdAt, affiliateRebateStartsAt(&AffiliateSummary{CreatedAt: createdAt}))
+}
 
 // TestResolveRebateRatePercent_PerUserOverride verifies that per-inviter
 // AffRebateRatePercent overrides the global rate, that NULL falls back to the

@@ -386,7 +386,7 @@ func (r *oauthEmailAffiliateRepoStub) GetAffiliateByCode(_ context.Context, code
 	return &service.AffiliateSummary{UserID: userID, AffCode: strings.ToUpper(strings.TrimSpace(code))}, nil
 }
 
-func (r *oauthEmailAffiliateRepoStub) BindInviter(_ context.Context, userID, inviterID int64) (bool, error) {
+func (r *oauthEmailAffiliateRepoStub) BindInviter(_ context.Context, userID, inviterID int64, _ service.AffiliateBindingSource) (bool, error) {
 	r.bindCalls = append(r.bindCalls, oauthEmailAffiliateBindCall{userID: userID, inviterID: inviterID})
 	return true, nil
 }

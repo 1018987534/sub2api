@@ -53,6 +53,13 @@ type paymentFulfillmentAffiliateRepoStub struct {
 	inviteeSummary *AffiliateSummary
 	inviterSummary *AffiliateSummary
 	accrueCalls    []paymentFulfillmentAffiliateAccrueCall
+	bindCalls      []struct {
+		inviteeID int64
+		inviterID int64
+		source    AffiliateBindingSource
+	}
+	bindResult bool
+	bindErr    error
 }
 
 func (r *paymentFulfillmentAffiliateRepoStub) EnsureUserAffiliate(_ context.Context, userID int64) (*AffiliateSummary, error) {
@@ -72,8 +79,13 @@ func (r *paymentFulfillmentAffiliateRepoStub) GetAffiliateByCode(context.Context
 	panic("unexpected GetAffiliateByCode call")
 }
 
-func (r *paymentFulfillmentAffiliateRepoStub) BindInviter(context.Context, int64, int64) (bool, error) {
-	panic("unexpected BindInviter call")
+func (r *paymentFulfillmentAffiliateRepoStub) BindInviter(_ context.Context, inviteeID, inviterID int64, source AffiliateBindingSource) (bool, error) {
+	r.bindCalls = append(r.bindCalls, struct {
+		inviteeID int64
+		inviterID int64
+		source    AffiliateBindingSource
+	}{inviteeID: inviteeID, inviterID: inviterID, source: source})
+	return r.bindResult, r.bindErr
 }
 
 func (r *paymentFulfillmentAffiliateRepoStub) AccrueQuota(_ context.Context, inviterID, inviteeUserID int64, amount float64, freezeHours int, sourceOrderID *int64) (bool, error) {

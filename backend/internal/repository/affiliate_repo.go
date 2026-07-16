@@ -76,7 +76,10 @@ func (r *affiliateRepository) GetAffiliateByCode(ctx context.Context, code strin
 	return queryAffiliateByCode(ctx, client, code)
 }
 
-func (r *affiliateRepository) BindInviter(ctx context.Context, userID, inviterID int64) (bool, error) {
+func (r *affiliateRepository) BindInviter(ctx context.Context, userID, inviterID int64, source service.AffiliateBindingSource) (bool, error) {
+	if source != service.AffiliateBindingSourceAdmin {
+		source = service.AffiliateBindingSourceRegistration
+	}
 	var bound bool
 	err := r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {
 		if _, err := ensureUserAffiliateWithClient(txCtx, txClient, userID); err != nil {
@@ -87,8 +90,8 @@ func (r *affiliateRepository) BindInviter(ctx context.Context, userID, inviterID
 		}
 
 		res, err := txClient.ExecContext(txCtx,
-			"UPDATE user_affiliates SET inviter_id = $1, updated_at = NOW() WHERE user_id = $2 AND inviter_id IS NULL",
-			inviterID, userID,
+			"UPDATE user_affiliates SET inviter_id = $1, inviter_bound_at = NOW(), inviter_bind_source = $2, updated_at = NOW() WHERE user_id = $3 AND inviter_id IS NULL",
+			inviterID, string(source), userID,
 		)
 		if err != nil {
 			return fmt.Errorf("bind inviter: %w", err)
@@ -350,7 +353,7 @@ func (r *affiliateRepository) ListInvitees(ctx context.Context, inviterID int64,
 SELECT ua.user_id,
        COALESCE(u.email, ''),
        COALESCE(u.username, ''),
-       ua.created_at,
+       COALESCE(ua.inviter_bound_at, ua.created_at) AS invited_at,
        COALESCE(SUM(ual.amount), 0)::double precision AS total_rebate
 FROM user_affiliates ua
 LEFT JOIN users u ON u.id = ua.user_id
@@ -359,8 +362,8 @@ LEFT JOIN user_affiliate_ledger ual
       AND ual.source_user_id = ua.user_id
       AND ual.action = 'accrue'
 WHERE ua.inviter_id = $1
-GROUP BY ua.user_id, u.email, u.username, ua.created_at
-ORDER BY ua.created_at DESC
+GROUP BY ua.user_id, u.email, u.username, ua.inviter_bound_at, ua.created_at
+ORDER BY invited_at DESC
 LIMIT $2`, inviterID, limit)
 	if err != nil {
 		return nil, err
@@ -385,7 +388,7 @@ LIMIT $2`, inviterID, limit)
 
 func (r *affiliateRepository) ListAffiliateInviteRecords(ctx context.Context, filter service.AffiliateRecordFilter) ([]service.AffiliateInviteRecord, int64, error) {
 	client := clientFromContext(ctx, r.client)
-	where, args := buildAffiliateRecordWhere(filter, "ua.created_at", []string{
+	where, args := buildAffiliateRecordWhere(filter, "COALESCE(ua.inviter_bound_at, ua.created_at)", []string{
 		"inviter.email", "inviter.username", "invitee.email", "invitee.username",
 		"ua.inviter_id::text", "ua.user_id::text", "inviter_aff.aff_code",
 	})
@@ -405,9 +408,10 @@ JOIN user_affiliates inviter_aff ON inviter_aff.user_id = ua.inviter_id
 		"inviter":      "inviter.email",
 		"invitee":      "invitee.email",
 		"aff_code":     "inviter_aff.aff_code",
+		"bind_source":  "ua.inviter_bind_source",
 		"total_rebate": "total_rebate",
-		"created_at":   "ua.created_at",
-	}, "ua.created_at")
+		"created_at":   "COALESCE(ua.inviter_bound_at, ua.created_at)",
+	}, "COALESCE(ua.inviter_bound_at, ua.created_at)")
 	args = append(args, filter.PageSize, (filter.Page-1)*filter.PageSize)
 	rows, err := client.QueryContext(ctx, `
 SELECT ua.inviter_id,
@@ -417,8 +421,9 @@ SELECT ua.inviter_id,
        COALESCE(invitee.email, ''),
        COALESCE(invitee.username, ''),
        COALESCE(inviter_aff.aff_code, ''),
+       COALESCE(ua.inviter_bind_source, 'registration'),
        COALESCE(SUM(ual.amount), 0)::double precision AS total_rebate,
-       ua.created_at
+       COALESCE(ua.inviter_bound_at, ua.created_at) AS invited_at
 FROM user_affiliates ua
 JOIN users invitee ON invitee.id = ua.user_id
 JOIN users inviter ON inviter.id = ua.inviter_id
@@ -428,7 +433,7 @@ LEFT JOIN user_affiliate_ledger ual
       AND ual.source_user_id = ua.user_id
       AND ual.action = 'accrue'
 `+where+`
-GROUP BY ua.inviter_id, inviter.email, inviter.username, ua.user_id, invitee.email, invitee.username, inviter_aff.aff_code, ua.created_at
+GROUP BY ua.inviter_id, inviter.email, inviter.username, ua.user_id, invitee.email, invitee.username, inviter_aff.aff_code, ua.inviter_bind_source, ua.inviter_bound_at, ua.created_at
 `+orderBy+`
 LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args)), args...)
 	if err != nil {
@@ -447,6 +452,7 @@ LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args)), args...)
 			&item.InviteeEmail,
 			&item.InviteeUsername,
 			&item.AffCode,
+			&item.BindSource,
 			&item.TotalRebate,
 			&item.CreatedAt,
 		); err != nil {
@@ -785,6 +791,8 @@ SELECT user_id,
        aff_code_custom,
        aff_rebate_rate_percent,
        inviter_id,
+       inviter_bound_at,
+       inviter_bind_source,
        aff_count,
        aff_quota::double precision,
        aff_frozen_quota::double precision,
@@ -806,6 +814,8 @@ WHERE user_id = $1`, userID)
 
 	var out service.AffiliateSummary
 	var inviterID sql.NullInt64
+	var inviterBoundAt sql.NullTime
+	var inviterBindSource sql.NullString
 	var rebateRate sql.NullFloat64
 	if err := rows.Scan(
 		&out.UserID,
@@ -813,6 +823,8 @@ WHERE user_id = $1`, userID)
 		&out.AffCodeCustom,
 		&rebateRate,
 		&inviterID,
+		&inviterBoundAt,
+		&inviterBindSource,
 		&out.AffCount,
 		&out.AffQuota,
 		&out.AffFrozenQuota,
@@ -824,6 +836,13 @@ WHERE user_id = $1`, userID)
 	}
 	if inviterID.Valid {
 		out.InviterID = &inviterID.Int64
+	}
+	if inviterBoundAt.Valid {
+		boundAt := inviterBoundAt.Time
+		out.InviterBoundAt = &boundAt
+	}
+	if inviterBindSource.Valid {
+		out.InviterBindSource = inviterBindSource.String
 	}
 	if rebateRate.Valid {
 		v := rebateRate.Float64
@@ -839,6 +858,8 @@ SELECT user_id,
        aff_code_custom,
        aff_rebate_rate_percent,
        inviter_id,
+       inviter_bound_at,
+       inviter_bind_source,
        aff_count,
        aff_quota::double precision,
        aff_frozen_quota::double precision,
@@ -862,6 +883,8 @@ LIMIT 1`, strings.ToUpper(strings.TrimSpace(code)))
 
 	var out service.AffiliateSummary
 	var inviterID sql.NullInt64
+	var inviterBoundAt sql.NullTime
+	var inviterBindSource sql.NullString
 	var rebateRate sql.NullFloat64
 	if err := rows.Scan(
 		&out.UserID,
@@ -869,6 +892,8 @@ LIMIT 1`, strings.ToUpper(strings.TrimSpace(code)))
 		&out.AffCodeCustom,
 		&rebateRate,
 		&inviterID,
+		&inviterBoundAt,
+		&inviterBindSource,
 		&out.AffCount,
 		&out.AffQuota,
 		&out.AffFrozenQuota,
@@ -880,6 +905,13 @@ LIMIT 1`, strings.ToUpper(strings.TrimSpace(code)))
 	}
 	if inviterID.Valid {
 		out.InviterID = &inviterID.Int64
+	}
+	if inviterBoundAt.Valid {
+		boundAt := inviterBoundAt.Time
+		out.InviterBoundAt = &boundAt
+	}
+	if inviterBindSource.Valid {
+		out.InviterBindSource = inviterBindSource.String
 	}
 	if rebateRate.Valid {
 		v := rebateRate.Float64
