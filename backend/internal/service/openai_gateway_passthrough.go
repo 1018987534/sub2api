@@ -731,6 +731,14 @@ func openAIStreamClientOutputStarted(c *gin.Context, localStarted bool) bool {
 	if localStarted {
 		return true
 	}
+	if c != nil {
+		if _, ok := c.Get(openAICompactSSEKeepaliveKey); ok {
+			// Compact keepalive comments commit the HTTP response but carry no
+			// semantic model output. Keep failover available until real stream
+			// bytes have been written.
+			return OpenAICompactKeepaliveAdjustedWrittenSize(c) >= 0
+		}
+	}
 	return c != nil && c.Writer != nil && c.Writer.Written()
 }
 

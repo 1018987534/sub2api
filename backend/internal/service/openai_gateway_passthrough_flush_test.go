@@ -175,6 +175,32 @@ func TestOpenAIStreamingPassthroughFailedBeforeOutputCanStillFailOverWithoutFlus
 	require.Empty(t, writer.flushBodyLengths)
 }
 
+func TestOpenAIStreamingPassthroughStalledFailureAfterCompactKeepaliveCanFailOver(t *testing.T) {
+	upstream := "event: response.created\n" +
+		`data: {"type":"response.created","response":{"id":"resp_stalled"}}` + "\n\n" +
+		"event: response.failed\n" +
+		`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
+
+	_, recorder, writer, err := runPassthroughFlushTest(
+		t,
+		io.NopCloser(strings.NewReader(upstream)),
+		-1,
+		func(c *gin.Context) {
+			MarkOpenAICompactClientStream(c)
+			stop := StartOpenAICompactSSEKeepalive(c, keepaliveTestInterval)
+			waitForKeepaliveBeats()
+			stop()
+		},
+	)
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.Empty(t, stripKeepaliveComments(recorder.Body.String()))
+	require.NotEmpty(t, writer.flushBodyLengths, "test must commit at least one keepalive before the upstream failure")
+}
+
 func TestOpenAIStreamingPassthroughNonRetryableFailedBeforeOutputFlushesAtBoundary(t *testing.T) {
 	upstream := "event: response.failed\n" +
 		`data: {"type":"response.failed","error":{"code":"content_policy","message":"request blocked by policy"},"usage":{"input_tokens":6,"output_tokens":0,"total_tokens":6}}` + "\n\n"
