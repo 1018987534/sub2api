@@ -104,6 +104,49 @@ func runPassthroughFlushTest(
 	return result, recorder, writer, err
 }
 
+func xiaobaishuMetadataPreamble(responseID string) string {
+	return `data: {"type":"codex.rate_limits","rate_limits":{"allowed":true}}` + "\n\n" +
+		`data: {"type":"codex.response.metadata","headers":{"x-codex-safety-buffering-enabled":"true"}}` + "\n\n" +
+		`data: {"type":"response.created","response":{"id":"` + responseID + `"}}` + "\n\n" +
+		`data: {"type":"response.in_progress","response":{"id":"` + responseID + `"}}` + "\n\n" +
+		`data: {"type":"response.metadata","response_id":"` + responseID + `","metadata":{}}` + "\n\n" +
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_pending","type":"message","status":"in_progress","content":[]}}` + "\n\n" +
+		`data: {"type":"response.content_part.added","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}` + "\n\n"
+}
+
+func TestOpenAIStreamDataStartsClientOutputRequiresSemanticData(t *testing.T) {
+	tests := []struct {
+		name      string
+		data      string
+		eventType string
+		want      bool
+	}{
+		{name: "empty", data: "", want: false},
+		{name: "done marker", data: "[DONE]", want: true},
+		{name: "codex rate limits", data: `{"type":"codex.rate_limits","rate_limits":{"allowed":true}}`, eventType: "codex.rate_limits", want: false},
+		{name: "codex metadata", data: `{"type":"codex.response.metadata","headers":{}}`, eventType: "codex.response.metadata", want: false},
+		{name: "response metadata", data: `{"type":"response.metadata","metadata":{}}`, eventType: "response.metadata", want: false},
+		{name: "empty content part", data: `{"type":"response.content_part.added","part":{"type":"output_text","text":""}}`, eventType: "response.content_part.added", want: false},
+		{name: "unknown event", data: `{"type":"response.future_metadata","value":"x"}`, eventType: "response.future_metadata", want: false},
+		{name: "empty text delta", data: `{"type":"response.output_text.delta","delta":""}`, eventType: "response.output_text.delta", want: false},
+		{name: "whitespace text delta", data: `{"type":"response.output_text.delta","delta":" "}`, eventType: "response.output_text.delta", want: true},
+		{name: "reasoning delta", data: `{"type":"response.reasoning_summary_text.delta","delta":"thinking"}`, eventType: "response.reasoning_summary_text.delta", want: true},
+		{name: "function arguments delta", data: `{"type":"response.function_call_arguments.delta","delta":"{}"}`, eventType: "response.function_call_arguments.delta", want: true},
+		{name: "output text done", data: `{"type":"response.output_text.done","text":"answer"}`, eventType: "response.output_text.done", want: true},
+		{name: "function arguments done", data: `{"type":"response.function_call_arguments.done","arguments":"{}"}`, eventType: "response.function_call_arguments.done", want: true},
+		{name: "partial image", data: `{"type":"response.image_generation_call.partial_image","partial_image_b64":"aGVsbG8="}`, eventType: "response.image_generation_call.partial_image", want: true},
+		{name: "bare error", data: `{"type":"error","error":{"message":"failed"}}`, eventType: "error", want: true},
+		{name: "completed", data: `{"type":"response.completed","response":{"status":"completed"}}`, eventType: "response.completed", want: true},
+		{name: "failed", data: `{"type":"response.failed","error":{"message":"failed"}}`, eventType: "response.failed", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, openAIStreamDataStartsClientOutput(tt.data, tt.eventType))
+		})
+	}
+}
+
 func TestOpenAIStreamingPassthroughFlushesAtCompleteEventBoundaries(t *testing.T) {
 	firstEvent := "event: response.output_text.delta\n" +
 		"id: event-1\n" +
@@ -128,13 +171,7 @@ func TestOpenAIStreamingPassthroughFlushesAtCompleteEventBoundaries(t *testing.T
 }
 
 func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(t *testing.T) {
-	preamble := "event: response.created\n" +
-		`data: {"type":"response.created","response":{"id":"resp_pending"}}` + "\n\n" +
-		"event: response.output_item.added\n" +
-		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_pending","type":"reasoning","status":"in_progress"}}` + "\n\n" +
-		"event: response.reasoning_summary_part.added\n" +
-		`data: {"type":"response.reasoning_summary_part.added","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}` + "\n\n" +
-		": waiting\n\n"
+	preamble := xiaobaishuMetadataPreamble("resp_pending") + ": waiting\n\n"
 	firstOutput := `data: {"type":"response.output_text.delta","delta":"ready"}` + "\n\n"
 	terminalEvent := `data: {"type":"response.completed","response":{"id":"resp_pending","usage":{"input_tokens":4,"output_tokens":1,"total_tokens":5}}}` + "\n\n"
 	upstream := preamble + firstOutput + terminalEvent
@@ -150,12 +187,7 @@ func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(
 }
 
 func TestOpenAIStreamingPassthroughStalledFailureAfterMetadataPreambleCanFailOver(t *testing.T) {
-	upstream := "event: response.created\n" +
-		`data: {"type":"response.created","response":{"id":"resp_stalled"}}` + "\n\n" +
-		"event: response.output_item.added\n" +
-		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_stalled","type":"reasoning","status":"in_progress"}}` + "\n\n" +
-		"event: response.reasoning_summary_part.added\n" +
-		`data: {"type":"response.reasoning_summary_part.added","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}` + "\n\n" +
+	upstream := xiaobaishuMetadataPreamble("resp_stalled") +
 		"event: response.failed\n" +
 		`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
 

@@ -742,27 +742,57 @@ func openAIStreamClientOutputStarted(c *gin.Context, localStarted bool) bool {
 	return c != nil && c.Writer != nil && c.Writer.Written()
 }
 
-func openAIStreamEventIsPreamble(eventType string) bool {
-	switch strings.TrimSpace(eventType) {
-	case "response.created",
-		"response.in_progress",
-		"response.output_item.added",
-		"response.reasoning_summary_part.added":
-		return true
-	default:
-		return false
-	}
-}
-
 func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)
 	if trimmed == "" {
 		return false
 	}
-	if strings.TrimSpace(eventType) == "response.failed" {
+	if trimmed == "[DONE]" {
+		return true
+	}
+
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "response.failed" {
 		return false
 	}
-	return !openAIStreamEventIsPreamble(eventType)
+	if eventType == "error" {
+		// Bare protocol errors are already client-facing terminal information.
+		// Preserve the established behavior of dispatching them immediately.
+		return true
+	}
+	if openAIStreamEventIsTerminal(trimmed) {
+		return true
+	}
+
+	// Unknown events stay attempt-local until an explicit semantic boundary.
+	// Real Codex streams can start with vendor metadata such as codex.rate_limits,
+	// codex.response.metadata, response.metadata, and response.content_part.added.
+	// Treating every non-preamble event as output commits those bytes before a
+	// later response.failed and prevents safe account failover.
+	if strings.HasSuffix(eventType, ".delta") {
+		return openAIStreamSemanticFieldPresent(trimmed, "delta")
+	}
+	switch eventType {
+	case "response.output_text.done", "response.reasoning_summary_text.done":
+		return openAIStreamSemanticFieldPresent(trimmed, "text")
+	case "response.function_call_arguments.done":
+		return openAIStreamSemanticFieldPresent(trimmed, "arguments")
+	case "response.image_generation_call.partial_image":
+		return openAIStreamSemanticFieldPresent(trimmed, "partial_image_b64")
+	default:
+		return false
+	}
+}
+
+func openAIStreamSemanticFieldPresent(data, path string) bool {
+	value := gjson.Get(data, path)
+	if !value.Exists() {
+		return false
+	}
+	if value.Type == gjson.String {
+		return value.String() != ""
+	}
+	return value.Raw != "" && value.Raw != "null"
 }
 
 func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
