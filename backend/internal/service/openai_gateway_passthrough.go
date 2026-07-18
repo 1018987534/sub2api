@@ -792,15 +792,11 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	}
 }
 
-func openAIXiaobaishuReplayGuardStarts(account *Account, eventType string, clientOutputStarted bool) bool {
-	return !clientOutputStarted &&
-		account != nil &&
-		account.ID == openAIXiaobaishuAccountID &&
-		strings.TrimSpace(eventType) == "error"
-}
-
-func openAIPassthroughStreamDataStartsClientOutput(account *Account, data, eventType string, replayGuard bool) bool {
-	if replayGuard && account != nil && account.ID == openAIXiaobaishuAccountID && !openAIStreamEventIsTerminal(data) {
+func openAIPassthroughStreamDataStartsClientOutput(account *Account, data, eventType string) bool {
+	if account != nil && account.ID == openAIXiaobaishuAccountID && !openAIStreamEventIsTerminal(data) {
+		// Xiaobaishu can stall after different early event types. Keep the complete
+		// attempt private until a successful terminal event; response.failed is
+		// handled before this point and can therefore always switch accounts.
 		return false
 	}
 	return openAIStreamDataStartsClientOutput(data, eventType)
@@ -1058,7 +1054,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	sawFailedEvent := false
 	failedMessage := ""
 	clientOutputStarted := false
-	xiaobaishuReplayGuard := false
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
 	// pendingLines 在首个可见输出前保留前导事件，确保无输出失败仍可安全 failover。
 	pendingLines := make([]string, 0, 8)
@@ -1204,22 +1199,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				trimmedData = strings.TrimSpace(string(sanitizedData))
 				line = "data: " + string(sanitizedData)
 			}
-			if !xiaobaishuReplayGuard && openAIXiaobaishuReplayGuardStarts(
-				account,
-				eventType,
-				openAIStreamClientOutputStarted(c, clientOutputStarted),
-			) {
-				// A production xiaobaishu stream can emit a bare error, stay open,
-				// then report its 5-minute stalled response.failed. From that signal
-				// onward, keep the whole attempt private until a successful terminal
-				// event so a stalled attempt can be discarded and retried elsewhere.
-				xiaobaishuReplayGuard = true
-			}
 			semanticOutputStarts := openAIPassthroughStreamDataStartsClientOutput(
 				account,
 				trimmedData,
 				eventType,
-				xiaobaishuReplayGuard,
 			)
 			lineStartsClientOutput = forceFlushFailedEvent || semanticOutputStarts
 			if firstTokenMs == nil && lineStartsClientOutput && trimmedData != "[DONE]" {

@@ -165,36 +165,32 @@ func TestOpenAIStreamDataStartsClientOutputRequiresSemanticData(t *testing.T) {
 	}
 }
 
-func TestOpenAIPassthroughStreamDataStartsClientOutputGuardsXiaobaishuAttemptAfterError(t *testing.T) {
+func TestOpenAIPassthroughStreamDataStartsClientOutputBuffersXiaobaishuUntilTerminal(t *testing.T) {
 	errorEvent := `{"type":"error","error":{"message":"upstream warning"}}`
-	require.True(t, openAIXiaobaishuReplayGuardStarts(
-		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
-		"error",
-		false,
-	))
 	require.False(t, openAIPassthroughStreamDataStartsClientOutput(
 		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
 		errorEvent,
 		"error",
-		true,
 	))
 	require.False(t, openAIPassthroughStreamDataStartsClientOutput(
 		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
 		`{"type":"response.custom_tool_call_input.delta","delta":"partial"}`,
 		"response.custom_tool_call_input.delta",
-		true,
+	))
+	require.False(t, openAIPassthroughStreamDataStartsClientOutput(
+		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
+		`{"type":"response.output_text.delta","delta":"partial"}`,
+		"response.output_text.delta",
 	))
 	require.True(t, openAIPassthroughStreamDataStartsClientOutput(
 		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
 		`{"type":"response.completed","response":{"status":"completed"}}`,
 		"response.completed",
-		true,
 	))
 	require.True(t, openAIPassthroughStreamDataStartsClientOutput(
 		&Account{ID: 11799, Name: "plus-sj"},
 		errorEvent,
 		"error",
-		true,
 	))
 }
 
