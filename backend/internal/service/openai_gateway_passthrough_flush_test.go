@@ -257,6 +257,7 @@ func TestOpenAIStreamingPassthroughStalledFailureAfterMetadataPreambleCanFailOve
 		`data: {"type":"response.custom_tool_call_input.delta","delta":"partial tool input"}` + "\n\n" +
 		`data: {"type":"response.reasoning_summary_text.delta","delta":"Investigating the request"}` + "\n\n" +
 		`data: {"type":"response.reasoning_summary_text.done","text":"Investigating the request"}` + "\n\n" +
+		`data: {"type":"response.failed","error":{"code":"content_policy","message":"initial policy failure"}}` + "\n\n" +
 		`data: {"type":"response.completed","response":{"id":"resp_stalled","status":"completed"}}` + "\n\n" +
 		"event: response.failed\n" +
 		`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"

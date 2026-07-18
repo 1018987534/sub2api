@@ -1157,8 +1157,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						UpstreamOutTok: usage.OutputTokens,
 					})
 				}
-				xiaobaishuAttemptPrivate := account != nil && account.ID == openAIXiaobaishuAccountID && !clientOutputStarted
-				if xiaobaishuAttemptPrivate && openAIStreamFailedEventShouldFailover(dataBytes, failedMessage) {
+				xiaobaishuAttempt := account != nil && account.ID == openAIXiaobaishuAccountID
+				if xiaobaishuAttempt && openAIStreamFailedEventShouldFailover(dataBytes, failedMessage) {
 					failoverErr := s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage)
 					failoverErr.SafeToFailoverAfterWrite = c.Writer != nil && c.Writer.Written()
 					return resultWithUsage(), failoverErr
@@ -1183,7 +1183,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 							s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage)
 					}
 				}
-				forceFlushFailedEvent = true
+				forceFlushFailedEvent = !xiaobaishuAttempt
 				sawFailedEvent = true
 			}
 			if trimmedData == "[DONE]" {
@@ -1274,6 +1274,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", err)
 	}
 	if sawFailedEvent {
+		if account != nil && account.ID == openAIXiaobaishuAccountID && !clientDisconnected {
+			if writePendingLines() {
+				flushPending = true
+				flushPendingOutput()
+			}
+		}
 		return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 	}
 	if !clientDisconnected && !sawDone && !sawTerminalEvent && ctx.Err() == nil {

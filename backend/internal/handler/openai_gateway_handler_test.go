@@ -1538,6 +1538,7 @@ func (u *openAIHTTPMetadataStallThenSuccessUpstream) Do(_ *http.Request, _ strin
 			`data: {"type":"response.custom_tool_call_input.delta","delta":"partial tool input"}` + "\n\n" +
 			`data: {"type":"response.reasoning_summary_text.delta","delta":"Investigating the request"}` + "\n\n" +
 			`data: {"type":"response.reasoning_summary_text.done","text":"Investigating the request"}` + "\n\n" +
+			`data: {"type":"response.failed","error":{"code":"content_policy","message":"initial policy failure"}}` + "\n\n" +
 			`data: {"type":"response.completed","response":{"id":"resp_stalled","status":"completed"}}` + "\n\n" +
 			`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
 	}
@@ -1786,6 +1787,7 @@ func TestOpenAIResponses_APIKeyPassthroughMetadataStallSwitchesAccountBeforeOutp
 	require.NotContains(t, rec.Body.String(), "codex upstream stalled")
 	require.NotContains(t, rec.Body.String(), "upstream warning", "failed attempt error event must remain private")
 	require.NotContains(t, rec.Body.String(), "partial tool input", "failed attempt tool delta must remain private")
+	require.NotContains(t, rec.Body.String(), "initial policy failure", "earlier failed event must remain private")
 	require.Contains(t, rec.Body.String(), "resp_success")
 	require.Contains(t, rec.Body.String(), `"type":"response.output_text.delta"`)
 	require.Contains(t, rec.Body.String(), `"delta":"OK"`)
