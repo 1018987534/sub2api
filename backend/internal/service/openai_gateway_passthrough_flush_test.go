@@ -130,6 +130,10 @@ func TestOpenAIStreamingPassthroughFlushesAtCompleteEventBoundaries(t *testing.T
 func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(t *testing.T) {
 	preamble := "event: response.created\n" +
 		`data: {"type":"response.created","response":{"id":"resp_pending"}}` + "\n\n" +
+		"event: response.output_item.added\n" +
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_pending","type":"reasoning","status":"in_progress"}}` + "\n\n" +
+		"event: response.reasoning_summary_part.added\n" +
+		`data: {"type":"response.reasoning_summary_part.added","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}` + "\n\n" +
 		": waiting\n\n"
 	firstOutput := `data: {"type":"response.output_text.delta","delta":"ready"}` + "\n\n"
 	terminalEvent := `data: {"type":"response.completed","response":{"id":"resp_pending","usage":{"input_tokens":4,"output_tokens":1,"total_tokens":5}}}` + "\n\n"
@@ -143,6 +147,26 @@ func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(
 		len(preamble) + len(firstOutput),
 		len(upstream),
 	}, writer.flushBodyLengths)
+}
+
+func TestOpenAIStreamingPassthroughStalledFailureAfterMetadataPreambleCanFailOver(t *testing.T) {
+	upstream := "event: response.created\n" +
+		`data: {"type":"response.created","response":{"id":"resp_stalled"}}` + "\n\n" +
+		"event: response.output_item.added\n" +
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_stalled","type":"reasoning","status":"in_progress"}}` + "\n\n" +
+		"event: response.reasoning_summary_part.added\n" +
+		`data: {"type":"response.reasoning_summary_part.added","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}` + "\n\n" +
+		"event: response.failed\n" +
+		`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
+
+	_, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.Empty(t, recorder.Body.String())
+	require.Empty(t, writer.flushBodyLengths)
 }
 
 func TestOpenAIStreamingPassthroughFlushesTerminalEventAtEOFWithoutBlankLine(t *testing.T) {
