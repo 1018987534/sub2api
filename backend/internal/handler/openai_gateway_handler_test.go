@@ -1534,7 +1534,9 @@ func (u *openAIHTTPMetadataStallThenSuccessUpstream) Do(_ *http.Request, _ strin
 		`data: {"type":"response.completed","response":{"id":"resp_success","status":"completed","usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}}` + "\n\n"
 	if first {
 		responseID = "resp_stalled"
-		terminal = `data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
+		terminal = `data: {"type":"response.reasoning_summary_text.delta","delta":"Investigating the request"}` + "\n\n" +
+			`data: {"type":"response.reasoning_summary_text.done","text":"Investigating the request"}` + "\n\n" +
+			`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
 	}
 	body := `data: {"type":"codex.rate_limits","rate_limits":{"allowed":true}}` + "\n\n" +
 		`data: {"type":"codex.response.metadata","headers":{}}` + "\n\n" +

@@ -770,10 +770,16 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	// Treating every non-preamble event as output commits those bytes before a
 	// later response.failed and prevents safe account failover.
 	if strings.HasSuffix(eventType, ".delta") {
+		if eventType == "response.reasoning_summary_text.delta" {
+			// Reasoning summaries are informational and safe to replay. Some Codex
+			// upstreams emit them before their own "no real data" stall watchdog
+			// fires, so committing them would still block account failover.
+			return false
+		}
 		return openAIStreamSemanticFieldPresent(trimmed, "delta")
 	}
 	switch eventType {
-	case "response.output_text.done", "response.reasoning_summary_text.done":
+	case "response.output_text.done":
 		return openAIStreamSemanticFieldPresent(trimmed, "text")
 	case "response.function_call_arguments.done":
 		return openAIStreamSemanticFieldPresent(trimmed, "arguments")

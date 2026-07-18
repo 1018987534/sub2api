@@ -130,7 +130,8 @@ func TestOpenAIStreamDataStartsClientOutputRequiresSemanticData(t *testing.T) {
 		{name: "unknown event", data: `{"type":"response.future_metadata","value":"x"}`, eventType: "response.future_metadata", want: false},
 		{name: "empty text delta", data: `{"type":"response.output_text.delta","delta":""}`, eventType: "response.output_text.delta", want: false},
 		{name: "whitespace text delta", data: `{"type":"response.output_text.delta","delta":" "}`, eventType: "response.output_text.delta", want: true},
-		{name: "reasoning delta", data: `{"type":"response.reasoning_summary_text.delta","delta":"thinking"}`, eventType: "response.reasoning_summary_text.delta", want: true},
+		{name: "reasoning delta", data: `{"type":"response.reasoning_summary_text.delta","delta":"thinking"}`, eventType: "response.reasoning_summary_text.delta", want: false},
+		{name: "reasoning done", data: `{"type":"response.reasoning_summary_text.done","text":"thinking"}`, eventType: "response.reasoning_summary_text.done", want: false},
 		{name: "function arguments delta", data: `{"type":"response.function_call_arguments.delta","delta":"{}"}`, eventType: "response.function_call_arguments.delta", want: true},
 		{name: "output text done", data: `{"type":"response.output_text.done","text":"answer"}`, eventType: "response.output_text.done", want: true},
 		{name: "function arguments done", data: `{"type":"response.function_call_arguments.done","arguments":"{}"}`, eventType: "response.function_call_arguments.done", want: true},
@@ -188,6 +189,8 @@ func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(
 
 func TestOpenAIStreamingPassthroughStalledFailureAfterMetadataPreambleCanFailOver(t *testing.T) {
 	upstream := xiaobaishuMetadataPreamble("resp_stalled") +
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"Investigating the request"}` + "\n\n" +
+		`data: {"type":"response.reasoning_summary_text.done","text":"Investigating the request"}` + "\n\n" +
 		"event: response.failed\n" +
 		`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
 
