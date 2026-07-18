@@ -719,7 +719,7 @@ type openaiStreamingResultPassthrough struct {
 	imageOutputSizes []string
 }
 
-const openAIXiaobaishuDiagnosticAccountID int64 = 11590
+const openAIXiaobaishuAccountID int64 = 11590
 
 type openaiNonStreamingResultPassthrough struct {
 	*OpenAIUsage
@@ -792,29 +792,18 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	}
 }
 
-func logOpenAIXiaobaishuFirstSemanticOutputEvent(
-	ctx context.Context,
-	account *Account,
-	upstreamRequestID string,
-	eventType string,
-	alreadyLogged bool,
-	startsClientOutput bool,
-) bool {
-	if alreadyLogged || !startsClientOutput || account == nil || account.ID != openAIXiaobaishuDiagnosticAccountID {
-		return alreadyLogged
+func openAIXiaobaishuReplayGuardStarts(account *Account, eventType string, clientOutputStarted bool) bool {
+	return !clientOutputStarted &&
+		account != nil &&
+		account.ID == openAIXiaobaishuAccountID &&
+		strings.TrimSpace(eventType) == "error"
+}
+
+func openAIPassthroughStreamDataStartsClientOutput(account *Account, data, eventType string, replayGuard bool) bool {
+	if replayGuard && account != nil && account.ID == openAIXiaobaishuAccountID && !openAIStreamEventIsTerminal(data) {
+		return false
 	}
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		eventType = "unknown"
-	}
-	logger.FromContext(ctx).With(
-		zap.String("component", "service.openai_gateway"),
-		zap.Int64("account_id", account.ID),
-		zap.String("account_name", account.Name),
-		zap.String("upstream_request_id", strings.TrimSpace(upstreamRequestID)),
-		zap.String("event_type", eventType),
-	).Info("openai.xiaobaishu.first_semantic_output_event")
-	return true
+	return openAIStreamDataStartsClientOutput(data, eventType)
 }
 
 func openAIStreamSemanticFieldPresent(data, path string) bool {
@@ -1069,7 +1058,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	sawFailedEvent := false
 	failedMessage := ""
 	clientOutputStarted := false
-	xiaobaishuFirstSemanticOutputLogged := false
+	xiaobaishuReplayGuard := false
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
 	// pendingLines 在首个可见输出前保留前导事件，确保无输出失败仍可安全 failover。
 	pendingLines := make([]string, 0, 8)
@@ -1215,16 +1204,24 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				trimmedData = strings.TrimSpace(string(sanitizedData))
 				line = "data: " + string(sanitizedData)
 			}
-			semanticOutputStarts := openAIStreamDataStartsClientOutput(trimmedData, eventType)
-			lineStartsClientOutput = forceFlushFailedEvent || semanticOutputStarts
-			xiaobaishuFirstSemanticOutputLogged = logOpenAIXiaobaishuFirstSemanticOutputEvent(
-				ctx,
+			if !xiaobaishuReplayGuard && openAIXiaobaishuReplayGuardStarts(
 				account,
-				upstreamRequestID,
 				eventType,
-				xiaobaishuFirstSemanticOutputLogged,
-				semanticOutputStarts,
+				openAIStreamClientOutputStarted(c, clientOutputStarted),
+			) {
+				// A production xiaobaishu stream can emit a bare error, stay open,
+				// then report its 5-minute stalled response.failed. From that signal
+				// onward, keep the whole attempt private until a successful terminal
+				// event so a stalled attempt can be discarded and retried elsewhere.
+				xiaobaishuReplayGuard = true
+			}
+			semanticOutputStarts := openAIPassthroughStreamDataStartsClientOutput(
+				account,
+				trimmedData,
+				eventType,
+				xiaobaishuReplayGuard,
 			)
+			lineStartsClientOutput = forceFlushFailedEvent || semanticOutputStarts
 			if firstTokenMs == nil && lineStartsClientOutput && trimmedData != "[DONE]" {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms

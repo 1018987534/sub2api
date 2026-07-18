@@ -12,11 +12,8 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest/observer"
 )
 
 type passthroughFlushTestWriter struct {
@@ -72,6 +69,23 @@ func runPassthroughFlushTest(
 	setups ...func(*gin.Context),
 ) (*openaiStreamingResultPassthrough, *httptest.ResponseRecorder, *passthroughFlushTestWriter, error) {
 	t.Helper()
+	return runPassthroughFlushTestForAccount(
+		t,
+		body,
+		failAfterWrites,
+		&Account{ID: 1, Platform: PlatformOpenAI, Name: "flush-test"},
+		setups...,
+	)
+}
+
+func runPassthroughFlushTestForAccount(
+	t *testing.T,
+	body io.ReadCloser,
+	failAfterWrites int,
+	account *Account,
+	setups ...func(*gin.Context),
+) (*openaiStreamingResultPassthrough, *httptest.ResponseRecorder, *passthroughFlushTestWriter, error) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	recorder := httptest.NewRecorder()
@@ -99,7 +113,7 @@ func runPassthroughFlushTest(
 		context.Background(),
 		resp,
 		c,
-		&Account{ID: 1, Platform: PlatformOpenAI, Name: "flush-test"},
+		account,
 		time.Now(),
 		"",
 		"",
@@ -151,49 +165,37 @@ func TestOpenAIStreamDataStartsClientOutputRequiresSemanticData(t *testing.T) {
 	}
 }
 
-func TestLogOpenAIXiaobaishuFirstSemanticOutputEventIsTargetedAndOneShot(t *testing.T) {
-	core, observed := observer.New(zap.InfoLevel)
-	ctx := logger.IntoContext(context.Background(), zap.New(core))
-	xiaobaishu := &Account{ID: openAIXiaobaishuDiagnosticAccountID, Name: "plus-xiaobaishu"}
-
-	logged := logOpenAIXiaobaishuFirstSemanticOutputEvent(
-		ctx,
-		xiaobaishu,
-		"req-upstream-1",
-		"response.reasoning_text.delta",
+func TestOpenAIPassthroughStreamDataStartsClientOutputGuardsXiaobaishuAttemptAfterError(t *testing.T) {
+	errorEvent := `{"type":"error","error":{"message":"upstream warning"}}`
+	require.True(t, openAIXiaobaishuReplayGuardStarts(
+		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
+		"error",
 		false,
+	))
+	require.False(t, openAIPassthroughStreamDataStartsClientOutput(
+		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
+		errorEvent,
+		"error",
 		true,
-	)
-	require.True(t, logged)
-
-	logged = logOpenAIXiaobaishuFirstSemanticOutputEvent(
-		ctx,
-		xiaobaishu,
-		"req-upstream-1",
-		"response.output_text.delta",
-		logged,
+	))
+	require.False(t, openAIPassthroughStreamDataStartsClientOutput(
+		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
+		`{"type":"response.custom_tool_call_input.delta","delta":"partial"}`,
+		"response.custom_tool_call_input.delta",
 		true,
-	)
-	require.True(t, logged)
-	require.Len(t, observed.All(), 1)
-	entry := observed.All()[0]
-	require.Equal(t, "openai.xiaobaishu.first_semantic_output_event", entry.Message)
-	require.Equal(t, "response.reasoning_text.delta", entry.ContextMap()["event_type"])
-	require.Equal(t, int64(openAIXiaobaishuDiagnosticAccountID), entry.ContextMap()["account_id"])
-	require.NotContains(t, entry.ContextMap(), "delta")
-	require.NotContains(t, entry.ContextMap(), "text")
-	require.NotContains(t, entry.ContextMap(), "arguments")
-
-	otherLogged := logOpenAIXiaobaishuFirstSemanticOutputEvent(
-		ctx,
+	))
+	require.True(t, openAIPassthroughStreamDataStartsClientOutput(
+		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
+		`{"type":"response.completed","response":{"status":"completed"}}`,
+		"response.completed",
+		true,
+	))
+	require.True(t, openAIPassthroughStreamDataStartsClientOutput(
 		&Account{ID: 11799, Name: "plus-sj"},
-		"req-upstream-2",
-		"response.output_text.delta",
-		false,
+		errorEvent,
+		"error",
 		true,
-	)
-	require.False(t, otherLogged)
-	require.Len(t, observed.All(), 1)
+	))
 }
 
 func TestOpenAIStreamingPassthroughFlushesAtCompleteEventBoundaries(t *testing.T) {
@@ -237,12 +239,19 @@ func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(
 
 func TestOpenAIStreamingPassthroughStalledFailureAfterMetadataPreambleCanFailOver(t *testing.T) {
 	upstream := xiaobaishuMetadataPreamble("resp_stalled") +
+		`data: {"type":"error","error":{"message":"upstream warning"}}` + "\n\n" +
+		`data: {"type":"response.custom_tool_call_input.delta","delta":"partial tool input"}` + "\n\n" +
 		`data: {"type":"response.reasoning_summary_text.delta","delta":"Investigating the request"}` + "\n\n" +
 		`data: {"type":"response.reasoning_summary_text.done","text":"Investigating the request"}` + "\n\n" +
 		"event: response.failed\n" +
 		`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
 
-	_, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
+	_, recorder, writer, err := runPassthroughFlushTestForAccount(
+		t,
+		io.NopCloser(strings.NewReader(upstream)),
+		-1,
+		&Account{ID: openAIXiaobaishuAccountID, Platform: PlatformOpenAI, Name: "plus-xiaobaishu"},
+	)
 
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError

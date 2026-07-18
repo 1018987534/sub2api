@@ -1534,7 +1534,9 @@ func (u *openAIHTTPMetadataStallThenSuccessUpstream) Do(_ *http.Request, _ strin
 		`data: {"type":"response.completed","response":{"id":"resp_success","status":"completed","usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}}` + "\n\n"
 	if first {
 		responseID = "resp_stalled"
-		terminal = `data: {"type":"response.reasoning_summary_text.delta","delta":"Investigating the request"}` + "\n\n" +
+		terminal = `data: {"type":"error","error":{"message":"upstream warning"}}` + "\n\n" +
+			`data: {"type":"response.custom_tool_call_input.delta","delta":"partial tool input"}` + "\n\n" +
+			`data: {"type":"response.reasoning_summary_text.delta","delta":"Investigating the request"}` + "\n\n" +
 			`data: {"type":"response.reasoning_summary_text.done","text":"Investigating the request"}` + "\n\n" +
 			`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
 	}
@@ -1730,7 +1732,7 @@ func TestOpenAIResponses_APIKeyPassthroughMetadataStallSwitchesAccountBeforeOutp
 	groupID := int64(4204)
 	accounts := []service.Account{
 		{
-			ID: 9920, Name: "stalled-api-key", Platform: service.PlatformOpenAI,
+			ID: 11590, Name: "plus-xiaobaishu", Platform: service.PlatformOpenAI,
 			Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Priority: 1,
 			Credentials: map[string]any{"api_key": "sk-stalled", "base_url": "https://api.example.test"},
 			Extra:       map[string]any{"openai_passthrough": true},
@@ -1777,10 +1779,12 @@ func TestOpenAIResponses_APIKeyPassthroughMetadataStallSwitchesAccountBeforeOutp
 
 	h.Responses(c)
 
-	require.Equal(t, []int64{9920, 9921}, upstream.calls(), "metadata-only stall must switch to the next account")
+	require.Equal(t, []int64{11590, 9921}, upstream.calls(), "xiaobaishu stall must switch to the next account")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotContains(t, rec.Body.String(), "resp_stalled", "failed attempt metadata must remain private")
 	require.NotContains(t, rec.Body.String(), "codex upstream stalled")
+	require.NotContains(t, rec.Body.String(), "upstream warning", "failed attempt error event must remain private")
+	require.NotContains(t, rec.Body.String(), "partial tool input", "failed attempt tool delta must remain private")
 	require.Contains(t, rec.Body.String(), "resp_success")
 	require.Contains(t, rec.Body.String(), `"type":"response.output_text.delta"`)
 	require.Contains(t, rec.Body.String(), `"delta":"OK"`)
