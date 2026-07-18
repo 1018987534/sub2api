@@ -12,8 +12,11 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type passthroughFlushTestWriter struct {
@@ -146,6 +149,51 @@ func TestOpenAIStreamDataStartsClientOutputRequiresSemanticData(t *testing.T) {
 			require.Equal(t, tt.want, openAIStreamDataStartsClientOutput(tt.data, tt.eventType))
 		})
 	}
+}
+
+func TestLogOpenAIXiaobaishuFirstSemanticOutputEventIsTargetedAndOneShot(t *testing.T) {
+	core, observed := observer.New(zap.InfoLevel)
+	ctx := logger.IntoContext(context.Background(), zap.New(core))
+	xiaobaishu := &Account{ID: openAIXiaobaishuDiagnosticAccountID, Name: "plus-xiaobaishu"}
+
+	logged := logOpenAIXiaobaishuFirstSemanticOutputEvent(
+		ctx,
+		xiaobaishu,
+		"req-upstream-1",
+		"response.reasoning_text.delta",
+		false,
+		true,
+	)
+	require.True(t, logged)
+
+	logged = logOpenAIXiaobaishuFirstSemanticOutputEvent(
+		ctx,
+		xiaobaishu,
+		"req-upstream-1",
+		"response.output_text.delta",
+		logged,
+		true,
+	)
+	require.True(t, logged)
+	require.Len(t, observed.All(), 1)
+	entry := observed.All()[0]
+	require.Equal(t, "openai.xiaobaishu.first_semantic_output_event", entry.Message)
+	require.Equal(t, "response.reasoning_text.delta", entry.ContextMap()["event_type"])
+	require.Equal(t, int64(openAIXiaobaishuDiagnosticAccountID), entry.ContextMap()["account_id"])
+	require.NotContains(t, entry.ContextMap(), "delta")
+	require.NotContains(t, entry.ContextMap(), "text")
+	require.NotContains(t, entry.ContextMap(), "arguments")
+
+	otherLogged := logOpenAIXiaobaishuFirstSemanticOutputEvent(
+		ctx,
+		&Account{ID: 11799, Name: "plus-sj"},
+		"req-upstream-2",
+		"response.output_text.delta",
+		false,
+		true,
+	)
+	require.False(t, otherLogged)
+	require.Len(t, observed.All(), 1)
 }
 
 func TestOpenAIStreamingPassthroughFlushesAtCompleteEventBoundaries(t *testing.T) {

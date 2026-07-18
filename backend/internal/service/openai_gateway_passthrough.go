@@ -719,6 +719,8 @@ type openaiStreamingResultPassthrough struct {
 	imageOutputSizes []string
 }
 
+const openAIXiaobaishuDiagnosticAccountID int64 = 11590
+
 type openaiNonStreamingResultPassthrough struct {
 	*OpenAIUsage
 	usage            *OpenAIUsage
@@ -788,6 +790,31 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	default:
 		return false
 	}
+}
+
+func logOpenAIXiaobaishuFirstSemanticOutputEvent(
+	ctx context.Context,
+	account *Account,
+	upstreamRequestID string,
+	eventType string,
+	alreadyLogged bool,
+	startsClientOutput bool,
+) bool {
+	if alreadyLogged || !startsClientOutput || account == nil || account.ID != openAIXiaobaishuDiagnosticAccountID {
+		return alreadyLogged
+	}
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		eventType = "unknown"
+	}
+	logger.FromContext(ctx).With(
+		zap.String("component", "service.openai_gateway"),
+		zap.Int64("account_id", account.ID),
+		zap.String("account_name", account.Name),
+		zap.String("upstream_request_id", strings.TrimSpace(upstreamRequestID)),
+		zap.String("event_type", eventType),
+	).Info("openai.xiaobaishu.first_semantic_output_event")
+	return true
 }
 
 func openAIStreamSemanticFieldPresent(data, path string) bool {
@@ -1042,6 +1069,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	sawFailedEvent := false
 	failedMessage := ""
 	clientOutputStarted := false
+	xiaobaishuFirstSemanticOutputLogged := false
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
 	// pendingLines 在首个可见输出前保留前导事件，确保无输出失败仍可安全 failover。
 	pendingLines := make([]string, 0, 8)
@@ -1187,7 +1215,16 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				trimmedData = strings.TrimSpace(string(sanitizedData))
 				line = "data: " + string(sanitizedData)
 			}
-			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
+			semanticOutputStarts := openAIStreamDataStartsClientOutput(trimmedData, eventType)
+			lineStartsClientOutput = forceFlushFailedEvent || semanticOutputStarts
+			xiaobaishuFirstSemanticOutputLogged = logOpenAIXiaobaishuFirstSemanticOutputEvent(
+				ctx,
+				account,
+				upstreamRequestID,
+				eventType,
+				xiaobaishuFirstSemanticOutputLogged,
+				semanticOutputStarts,
+			)
 			if firstTokenMs == nil && lineStartsClientOutput && trimmedData != "[DONE]" {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
