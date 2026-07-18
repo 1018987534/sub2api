@@ -793,10 +793,10 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 }
 
 func openAIPassthroughStreamDataStartsClientOutput(account *Account, data, eventType string) bool {
-	if account != nil && account.ID == openAIXiaobaishuAccountID && !openAIStreamEventIsTerminal(data) {
-		// Xiaobaishu can stall after different early event types. Keep the complete
-		// attempt private until a successful terminal event; response.failed is
-		// handled before this point and can therefore always switch accounts.
+	if account != nil && account.ID == openAIXiaobaishuAccountID {
+		// Xiaobaishu can emit apparent terminal events and still remain open until
+		// its stalled watchdog fires. Keep every event private until a clean EOF;
+		// response.failed is handled before EOF and can always switch accounts.
 		return false
 	}
 	return openAIStreamDataStartsClientOutput(data, eventType)
@@ -1157,6 +1157,12 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						UpstreamOutTok: usage.OutputTokens,
 					})
 				}
+				xiaobaishuAttemptPrivate := account != nil && account.ID == openAIXiaobaishuAccountID && !clientOutputStarted
+				if xiaobaishuAttemptPrivate && openAIStreamFailedEventShouldFailover(dataBytes, failedMessage) {
+					failoverErr := s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage)
+					failoverErr.SafeToFailoverAfterWrite = c.Writer != nil && c.Writer.Written()
+					return resultWithUsage(), failoverErr
+				}
 				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 					if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
 						// 命中透传规则也要记录 ops 上游错误事件（对齐 CC/Messages 与
@@ -1281,6 +1287,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
 		}
 		return resultWithUsage(), errors.New("stream usage incomplete: missing terminal event")
+	}
+	if account != nil && account.ID == openAIXiaobaishuAccountID && !clientDisconnected && !sawFailedEvent {
+		if writePendingLines() {
+			clientOutputStarted = true
+			flushPending = true
+			flushPendingOutput()
+		}
 	}
 
 	return resultWithUsage(), nil

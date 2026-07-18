@@ -165,7 +165,7 @@ func TestOpenAIStreamDataStartsClientOutputRequiresSemanticData(t *testing.T) {
 	}
 }
 
-func TestOpenAIPassthroughStreamDataStartsClientOutputBuffersXiaobaishuUntilTerminal(t *testing.T) {
+func TestOpenAIPassthroughStreamDataStartsClientOutputBuffersXiaobaishuUntilEOF(t *testing.T) {
 	errorEvent := `{"type":"error","error":{"message":"upstream warning"}}`
 	require.False(t, openAIPassthroughStreamDataStartsClientOutput(
 		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
@@ -182,7 +182,7 @@ func TestOpenAIPassthroughStreamDataStartsClientOutputBuffersXiaobaishuUntilTerm
 		`{"type":"response.output_text.delta","delta":"partial"}`,
 		"response.output_text.delta",
 	))
-	require.True(t, openAIPassthroughStreamDataStartsClientOutput(
+	require.False(t, openAIPassthroughStreamDataStartsClientOutput(
 		&Account{ID: openAIXiaobaishuAccountID, Name: "plus-xiaobaishu"},
 		`{"type":"response.completed","response":{"status":"completed"}}`,
 		"response.completed",
@@ -192,6 +192,24 @@ func TestOpenAIPassthroughStreamDataStartsClientOutputBuffersXiaobaishuUntilTerm
 		errorEvent,
 		"error",
 	))
+}
+
+func TestOpenAIStreamingPassthroughFlushesSuccessfulXiaobaishuAttemptAtEOF(t *testing.T) {
+	upstream := xiaobaishuMetadataPreamble("resp_success") +
+		`data: {"type":"response.output_text.delta","delta":"OK"}` + "\n\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_success","status":"completed","usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}}` + "\n\n"
+
+	result, recorder, writer, err := runPassthroughFlushTestForAccount(
+		t,
+		io.NopCloser(strings.NewReader(upstream)),
+		-1,
+		&Account{ID: openAIXiaobaishuAccountID, Platform: PlatformOpenAI, Name: "plus-xiaobaishu"},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, upstream, recorder.Body.String())
+	require.Equal(t, []int{len(upstream)}, writer.flushBodyLengths)
 }
 
 func TestOpenAIStreamingPassthroughFlushesAtCompleteEventBoundaries(t *testing.T) {
@@ -239,6 +257,7 @@ func TestOpenAIStreamingPassthroughStalledFailureAfterMetadataPreambleCanFailOve
 		`data: {"type":"response.custom_tool_call_input.delta","delta":"partial tool input"}` + "\n\n" +
 		`data: {"type":"response.reasoning_summary_text.delta","delta":"Investigating the request"}` + "\n\n" +
 		`data: {"type":"response.reasoning_summary_text.done","text":"Investigating the request"}` + "\n\n" +
+		`data: {"type":"response.completed","response":{"id":"resp_stalled","status":"completed"}}` + "\n\n" +
 		"event: response.failed\n" +
 		`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
 
@@ -255,6 +274,31 @@ func TestOpenAIStreamingPassthroughStalledFailureAfterMetadataPreambleCanFailOve
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	require.Empty(t, recorder.Body.String())
 	require.Empty(t, writer.flushBodyLengths)
+}
+
+func TestOpenAIStreamingPassthroughXiaobaishuStallCanFailOverAfterOuterWriterCommit(t *testing.T) {
+	const outerWrite = ": outer keepalive\n\n"
+	upstream := xiaobaishuMetadataPreamble("resp_stalled_outer") +
+		`data: {"type":"response.completed","response":{"id":"resp_stalled_outer","status":"completed"}}` + "\n\n" +
+		`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
+
+	_, recorder, _, err := runPassthroughFlushTestForAccount(
+		t,
+		io.NopCloser(strings.NewReader(upstream)),
+		-1,
+		&Account{ID: openAIXiaobaishuAccountID, Platform: PlatformOpenAI, Name: "plus-xiaobaishu"},
+		func(c *gin.Context) {
+			_, writeErr := c.Writer.WriteString(outerWrite)
+			require.NoError(t, writeErr)
+			c.Writer.Flush()
+		},
+	)
+
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.True(t, failoverErr.SafeToFailoverAfterWrite)
+	require.Equal(t, outerWrite, recorder.Body.String())
 }
 
 func TestOpenAIStreamingPassthroughFlushesTerminalEventAtEOFWithoutBlankLine(t *testing.T) {
