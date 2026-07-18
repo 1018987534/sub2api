@@ -1773,7 +1773,7 @@ func TestOpenAIStreamingClientDisconnectDrainsUpstreamUsage(t *testing.T) {
 	}
 }
 
-func TestOpenAIStreamingMetadataOnlyEOFReturnsFailover(t *testing.T) {
+func TestOpenAIStreamingMissingTerminalEventReturnsIncompleteError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{
 		Gateway: config.GatewayConfig{
@@ -1802,13 +1802,12 @@ func TestOpenAIStreamingMetadataOnlyEOFReturnsFailover(t *testing.T) {
 
 	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "model", "model")
 	_ = pr.Close()
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Empty(t, rec.Body.String())
+	if err == nil || !strings.Contains(err.Error(), "missing terminal event") {
+		t.Fatalf("expected missing terminal event error, got %v", err)
+	}
 }
 
-func TestOpenAIStreamingPassthroughMetadataOnlyEOFReturnsFailover(t *testing.T) {
+func TestOpenAIStreamingPassthroughMissingTerminalEventReturnsIncompleteError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{
 		Gateway: config.GatewayConfig{
@@ -1835,10 +1834,9 @@ func TestOpenAIStreamingPassthroughMetadataOnlyEOFReturnsFailover(t *testing.T) 
 
 	_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, &Account{ID: 1}, time.Now(), "", "")
 	_ = pr.Close()
-	require.Error(t, err)
-	var failoverErr *UpstreamFailoverError
-	require.ErrorAs(t, err, &failoverErr)
-	require.Empty(t, rec.Body.String())
+	if err == nil || !strings.Contains(err.Error(), "missing terminal event") {
+		t.Fatalf("expected missing terminal event error, got %v", err)
+	}
 }
 
 func TestOpenAIStreamingPassthroughResponseFailedBeforeOutputReturnsFailover(t *testing.T) {

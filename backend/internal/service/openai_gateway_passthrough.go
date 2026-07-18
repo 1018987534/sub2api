@@ -719,8 +719,6 @@ type openaiStreamingResultPassthrough struct {
 	imageOutputSizes []string
 }
 
-const openAIXiaobaishuAccountID int64 = 11590
-
 type openaiNonStreamingResultPassthrough struct {
 	*OpenAIUsage
 	usage            *OpenAIUsage
@@ -733,15 +731,16 @@ func openAIStreamClientOutputStarted(c *gin.Context, localStarted bool) bool {
 	if localStarted {
 		return true
 	}
-	if c != nil {
-		if _, ok := c.Get(openAICompactSSEKeepaliveKey); ok {
-			// Compact keepalive comments commit the HTTP response but carry no
-			// semantic model output. Keep failover available until real stream
-			// bytes have been written.
-			return OpenAICompactKeepaliveAdjustedWrittenSize(c) >= 0
-		}
-	}
 	return c != nil && c.Writer != nil && c.Writer.Written()
+}
+
+func openAIStreamEventIsPreamble(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "response.created", "response.in_progress":
+		return true
+	default:
+		return false
+	}
 }
 
 func openAIStreamDataStartsClientOutput(data, eventType string) bool {
@@ -749,68 +748,10 @@ func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	if trimmed == "" {
 		return false
 	}
-	if trimmed == "[DONE]" {
-		return true
-	}
-
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "response.failed" {
+	if strings.TrimSpace(eventType) == "response.failed" {
 		return false
 	}
-	if eventType == "error" {
-		// Bare protocol errors are already client-facing terminal information.
-		// Preserve the established behavior of dispatching them immediately.
-		return true
-	}
-	if openAIStreamEventIsTerminal(trimmed) {
-		return true
-	}
-
-	// Unknown events stay attempt-local until an explicit semantic boundary.
-	// Real Codex streams can start with vendor metadata such as codex.rate_limits,
-	// codex.response.metadata, response.metadata, and response.content_part.added.
-	// Treating every non-preamble event as output commits those bytes before a
-	// later response.failed and prevents safe account failover.
-	if strings.HasSuffix(eventType, ".delta") {
-		if eventType == "response.reasoning_summary_text.delta" {
-			// Reasoning summaries are informational and safe to replay. Some Codex
-			// upstreams emit them before their own "no real data" stall watchdog
-			// fires, so committing them would still block account failover.
-			return false
-		}
-		return openAIStreamSemanticFieldPresent(trimmed, "delta")
-	}
-	switch eventType {
-	case "response.output_text.done":
-		return openAIStreamSemanticFieldPresent(trimmed, "text")
-	case "response.function_call_arguments.done":
-		return openAIStreamSemanticFieldPresent(trimmed, "arguments")
-	case "response.image_generation_call.partial_image":
-		return openAIStreamSemanticFieldPresent(trimmed, "partial_image_b64")
-	default:
-		return false
-	}
-}
-
-func openAIPassthroughStreamDataStartsClientOutput(account *Account, data, eventType string) bool {
-	if account != nil && account.ID == openAIXiaobaishuAccountID {
-		// Xiaobaishu can emit apparent terminal events and still remain open until
-		// its stalled watchdog fires. Keep every event private until a clean EOF;
-		// response.failed is handled before EOF and can always switch accounts.
-		return false
-	}
-	return openAIStreamDataStartsClientOutput(data, eventType)
-}
-
-func openAIStreamSemanticFieldPresent(data, path string) bool {
-	value := gjson.Get(data, path)
-	if !value.Exists() {
-		return false
-	}
-	if value.Type == gjson.String {
-		return value.String() != ""
-	}
-	return value.Raw != "" && value.Raw != "null"
+	return !openAIStreamEventIsPreamble(eventType)
 }
 
 func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
@@ -1157,12 +1098,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 						UpstreamOutTok: usage.OutputTokens,
 					})
 				}
-				xiaobaishuAttempt := account != nil && account.ID == openAIXiaobaishuAccountID
-				if xiaobaishuAttempt && openAIStreamFailedEventShouldFailover(dataBytes, failedMessage) {
-					failoverErr := s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage)
-					failoverErr.SafeToFailoverAfterWrite = c.Writer != nil && c.Writer.Written()
-					return resultWithUsage(), failoverErr
-				}
 				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 					if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
 						// 命中透传规则也要记录 ops 上游错误事件（对齐 CC/Messages 与
@@ -1183,7 +1118,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 							s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage)
 					}
 				}
-				forceFlushFailedEvent = !xiaobaishuAttempt
+				forceFlushFailedEvent = true
 				sawFailedEvent = true
 			}
 			if trimmedData == "[DONE]" {
@@ -1205,12 +1140,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				trimmedData = strings.TrimSpace(string(sanitizedData))
 				line = "data: " + string(sanitizedData)
 			}
-			semanticOutputStarts := openAIPassthroughStreamDataStartsClientOutput(
-				account,
-				trimmedData,
-				eventType,
-			)
-			lineStartsClientOutput = forceFlushFailedEvent || semanticOutputStarts
+			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
 			if firstTokenMs == nil && lineStartsClientOutput && trimmedData != "[DONE]" {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
@@ -1274,12 +1204,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", err)
 	}
 	if sawFailedEvent {
-		if account != nil && account.ID == openAIXiaobaishuAccountID && !clientDisconnected {
-			if writePendingLines() {
-				flushPending = true
-				flushPendingOutput()
-			}
-		}
 		return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)
 	}
 	if !clientDisconnected && !sawDone && !sawTerminalEvent && ctx.Err() == nil {
@@ -1293,13 +1217,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
 		}
 		return resultWithUsage(), errors.New("stream usage incomplete: missing terminal event")
-	}
-	if account != nil && account.ID == openAIXiaobaishuAccountID && !clientDisconnected && !sawFailedEvent {
-		if writePendingLines() {
-			clientOutputStarted = true
-			flushPending = true
-			flushPendingOutput()
-		}
 	}
 
 	return resultWithUsage(), nil

@@ -1500,12 +1500,6 @@ type openAIHTTPPassthroughFailoverUpstream struct {
 	accountIDs []int64
 }
 
-type openAIHTTPMetadataStallThenSuccessUpstream struct {
-	service.HTTPUpstream
-	mu         sync.Mutex
-	accountIDs []int64
-}
-
 func (u *openAIHTTPPassthroughFailoverUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
 	u.mu.Lock()
 	u.accountIDs = append(u.accountIDs, accountID)
@@ -1518,50 +1512,6 @@ func (u *openAIHTTPPassthroughFailoverUpstream) Do(_ *http.Request, _ string, ac
 }
 
 func (u *openAIHTTPPassthroughFailoverUpstream) calls() []int64 {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return append([]int64(nil), u.accountIDs...)
-}
-
-func (u *openAIHTTPMetadataStallThenSuccessUpstream) Do(_ *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
-	u.mu.Lock()
-	u.accountIDs = append(u.accountIDs, accountID)
-	first := len(u.accountIDs) == 1
-	u.mu.Unlock()
-
-	responseID := "resp_success"
-	terminal := `data: {"type":"response.output_text.delta","delta":"OK"}` + "\n\n" +
-		`data: {"type":"response.completed","response":{"id":"resp_success","status":"completed","usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}}` + "\n\n"
-	if first {
-		responseID = "resp_stalled"
-		terminal = `data: {"type":"error","error":{"message":"upstream warning"}}` + "\n\n" +
-			`data: {"type":"response.custom_tool_call_input.delta","delta":"partial tool input"}` + "\n\n" +
-			`data: {"type":"response.reasoning_summary_text.delta","delta":"Investigating the request"}` + "\n\n" +
-			`data: {"type":"response.reasoning_summary_text.done","text":"Investigating the request"}` + "\n\n" +
-			`data: {"type":"response.failed","error":{"code":"content_policy","message":"initial policy failure"}}` + "\n\n" +
-			`data: {"type":"response.completed","response":{"id":"resp_stalled","status":"completed"}}` + "\n\n" +
-			`data: {"type":"response.failed","error":{"code":"server_error","message":"codex upstream stalled: no real data for 5m0s, connection recycled"}}` + "\n\n"
-	}
-	body := `data: {"type":"codex.rate_limits","rate_limits":{"allowed":true}}` + "\n\n" +
-		`data: {"type":"codex.response.metadata","headers":{}}` + "\n\n" +
-		`data: {"type":"response.created","response":{"id":"` + responseID + `"}}` + "\n\n" +
-		`data: {"type":"response.in_progress","response":{"id":"` + responseID + `"}}` + "\n\n" +
-		`data: {"type":"response.metadata","response_id":"` + responseID + `","metadata":{}}` + "\n\n" +
-		`data: {"type":"response.output_item.added","item":{"id":"msg_pending","type":"message","content":[]}}` + "\n\n" +
-		`data: {"type":"response.content_part.added","part":{"type":"output_text","text":""}}` + "\n\n" +
-		terminal
-
-	return &http.Response{
-		StatusCode: http.StatusOK,
-		Header: http.Header{
-			"Content-Type": []string{"text/event-stream"},
-			"X-Request-Id": []string{"req_" + responseID},
-		},
-		Body: io.NopCloser(strings.NewReader(body)),
-	}, nil
-}
-
-func (u *openAIHTTPMetadataStallThenSuccessUpstream) calls() []int64 {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return append([]int64(nil), u.accountIDs...)
@@ -1727,70 +1677,6 @@ func TestOpenAIResponses_APIKeyPassthroughPool5xxRetriesThenExhaustsMaxSwitches(
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
-}
-
-func TestOpenAIResponses_APIKeyPassthroughMetadataStallSwitchesAccountBeforeOutput(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	groupID := int64(4204)
-	accounts := []service.Account{
-		{
-			ID: 11590, Name: "plus-xiaobaishu", Platform: service.PlatformOpenAI,
-			Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Priority: 1,
-			Credentials: map[string]any{"api_key": "sk-stalled", "base_url": "https://api.example.test"},
-			Extra:       map[string]any{"openai_passthrough": true},
-		},
-		{
-			ID: 9921, Name: "healthy-api-key", Platform: service.PlatformOpenAI,
-			Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Priority: 2,
-			Credentials: map[string]any{"api_key": "sk-healthy", "base_url": "https://api.example.test"},
-			Extra:       map[string]any{"openai_passthrough": true},
-		},
-	}
-	cfg := &config.Config{RunMode: config.RunModeSimple}
-	cfg.Default.RateMultiplier = 1
-	cfg.Security.URLAllowlist.Enabled = false
-	cfg.Gateway.MaxAccountSwitches = 2
-
-	accountRepo := &openAIWSFailoverHandlerAccountRepoStub{accounts: accounts}
-	upstream := &openAIHTTPMetadataStallThenSuccessUpstream{}
-	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-	t.Cleanup(billingCacheSvc.Stop)
-	gatewaySvc := service.NewOpenAIGatewayService(
-		accountRepo, nil, nil, nil, nil, nil, nil, cfg, nil, nil,
-		service.NewBillingService(cfg, nil), nil, billingCacheSvc, upstream,
-		&service.DeferredService{}, nil, nil, nil, nil, nil, nil, nil,
-	)
-	h := NewOpenAIGatewayHandler(
-		gatewaySvc,
-		service.NewConcurrencyService(nil),
-		billingCacheSvc,
-		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
-		nil, nil, nil, nil, cfg,
-	)
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","input":"hello","stream":true}`))
-	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
-		ID: 1804, GroupID: &groupID,
-		User:  &service.User{ID: 1704, Status: service.StatusActive},
-		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
-	})
-	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 1704, Concurrency: 0})
-
-	h.Responses(c)
-
-	require.Equal(t, []int64{11590, 9921}, upstream.calls(), "xiaobaishu stall must switch to the next account")
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.NotContains(t, rec.Body.String(), "resp_stalled", "failed attempt metadata must remain private")
-	require.NotContains(t, rec.Body.String(), "codex upstream stalled")
-	require.NotContains(t, rec.Body.String(), "upstream warning", "failed attempt error event must remain private")
-	require.NotContains(t, rec.Body.String(), "partial tool input", "failed attempt tool delta must remain private")
-	require.NotContains(t, rec.Body.String(), "initial policy failure", "earlier failed event must remain private")
-	require.Contains(t, rec.Body.String(), "resp_success")
-	require.Contains(t, rec.Body.String(), `"type":"response.output_text.delta"`)
-	require.Contains(t, rec.Body.String(), `"delta":"OK"`)
 }
 
 func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T) {
