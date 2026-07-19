@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -21,6 +22,10 @@ var (
 	ErrDefaultSubGroupDuplicate = infraerrors.BadRequest(
 		"DEFAULT_SUBSCRIPTION_GROUP_DUPLICATE",
 		"default subscription group cannot be duplicated",
+	)
+	ErrDefaultSignupAPIKeyGroupInvalid = infraerrors.BadRequest(
+		"DEFAULT_SIGNUP_API_KEY_GROUP_INVALID",
+		"default signup API key group must exist and be active",
 	)
 )
 
@@ -241,6 +246,26 @@ func (s *SettingService) GetAllSettings(ctx context.Context) (*SystemSettings, e
 	}
 
 	return s.parseSettings(settings), nil
+}
+
+// GetDefaultSignupAPIKeyGroupID returns the configured group for API keys
+// provisioned during signup. Zero preserves the legacy active GPT lookup.
+func (s *SettingService) GetDefaultSignupAPIKeyGroupID(ctx context.Context) (int64, error) {
+	if s == nil || s.settingRepo == nil {
+		return 0, nil
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyDefaultSignupAPIKeyGroupID)
+	if err != nil {
+		if errors.Is(err, ErrSettingNotFound) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("get default signup api key group: %w", err)
+	}
+	groupID, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || groupID < 0 {
+		return 0, fmt.Errorf("parse default signup api key group %q", value)
+	}
+	return groupID, nil
 }
 
 // SetOnUpdateCallback sets a callback function to be called when settings are updated

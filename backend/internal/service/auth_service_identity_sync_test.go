@@ -201,6 +201,39 @@ func TestAuthServiceRegisterCreatesDefaultGPTAPIKey(t *testing.T) {
 	require.Contains(t, keys[0].Key, "sk-")
 }
 
+func TestAuthServiceRegisterUsesConfiguredDefaultAPIKeyGroup(t *testing.T) {
+	svc, _, client := newAuthServiceWithEnt(t, map[string]string{
+		service.SettingKeyRegistrationEnabled:        "true",
+		service.SettingKeyDefaultSignupAPIKeyGroupID: "2",
+	}, nil)
+	ctx := context.Background()
+
+	_, err := client.Group.Create().
+		SetName("GPT").
+		SetPlatform(service.PlatformOpenAI).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	configuredGroup, err := client.Group.Create().
+		SetName("FREE").
+		SetPlatform(service.PlatformOpenAI).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+
+	_, user, err := svc.Register(ctx, "configured-default-key@example.com", "password")
+	require.NoError(t, err)
+	require.NotNil(t, user)
+
+	keys, err := client.APIKey.Query().
+		Where(apikey.UserIDEQ(user.ID), apikey.DeletedAtIsNil()).
+		All(ctx)
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	require.NotNil(t, keys[0].GroupID)
+	require.Equal(t, configuredGroup.ID, *keys[0].GroupID)
+}
+
 func TestAuthServiceLoginDefersLastLoginTouchUntilRecordSuccessfulLogin(t *testing.T) {
 	svc, _, client := newAuthServiceWithEnt(t, map[string]string{
 		service.SettingKeyRegistrationEnabled: "true",

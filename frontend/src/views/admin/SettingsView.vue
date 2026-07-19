@@ -3194,6 +3194,21 @@
                     {{ t("admin.settings.defaults.defaultUserRpmLimitHint") }}
                   </p>
                 </div>
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.defaults.defaultSignupAPIKeyGroup") }}
+                  </label>
+                  <Select
+                    v-model="form.default_signup_api_key_group_id"
+                    :options="defaultSignupAPIKeyGroupOptions"
+                    :search-placeholder="t('common.searchPlaceholder')"
+                  />
+                  <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.defaults.defaultSignupAPIKeyGroupHint") }}
+                  </p>
+                </div>
               </div>
 
               <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
@@ -7777,6 +7792,7 @@ const adminApiKeyExists = ref(false);
 const adminApiKeyMasked = ref("");
 const adminApiKeyOperating = ref(false);
 const newAdminApiKey = ref("");
+const activeGroups = ref<AdminGroup[]>([]);
 const subscriptionGroups = ref<AdminGroup[]>([]);
 
 // Upstream billing probe state
@@ -8335,6 +8351,7 @@ const form = reactive<SettingsForm>({
   login_agreement_updated_at: "2026-03-31",
   login_agreement_documents: defaultLoginAgreementDocuments(),
   default_balance: 0,
+  default_signup_api_key_group_id: 0,
   default_platform_quotas: normalizePlatformQuotasMap() as DefaultPlatformQuotasMap,
   affiliate_rebate_rate: 20,
   affiliate_rebate_freeze_hours: 0,
@@ -8908,6 +8925,17 @@ const defaultSubscriptionGroupOptions = computed<
   })),
 );
 
+const defaultSignupAPIKeyGroupOptions = computed(() => [
+  {
+    value: 0,
+    label: t("admin.settings.defaults.defaultSignupAPIKeyGroupAuto"),
+  },
+  ...activeGroups.value.map((group) => ({
+    value: group.id,
+    label: `${group.name} · ${group.platform} (#${group.id})`,
+  })),
+]);
+
 const registrationEmailSuffixWhitelistSeparatorKeys = new Set([
   " ",
   ",",
@@ -9473,11 +9501,12 @@ async function loadSettings() {
 async function loadSubscriptionGroups() {
   try {
     const groups = await adminAPI.groups.getAll();
-    subscriptionGroups.value = groups.filter(
-      (group) =>
-        group.subscription_type === "subscription" && group.status === "active",
+    activeGroups.value = groups.filter((group) => group.status === "active");
+    subscriptionGroups.value = activeGroups.value.filter(
+      (group) => group.subscription_type === "subscription",
     );
   } catch (_error: unknown) {
+    activeGroups.value = [];
     subscriptionGroups.value = [];
   }
 }
@@ -9707,6 +9736,7 @@ async function saveSettings() {
       login_agreement_updated_at: form.login_agreement_updated_at,
       login_agreement_documents: form.login_agreement_documents,
       default_balance: form.default_balance,
+      default_signup_api_key_group_id: form.default_signup_api_key_group_id,
       affiliate_rebate_rate: Math.min(
         100,
         Math.max(0, Number(form.affiliate_rebate_rate) || 0),

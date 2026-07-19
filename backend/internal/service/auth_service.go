@@ -933,17 +933,28 @@ func (s *AuthService) provisionDefaultSignupAPIKey(ctx context.Context, userID i
 		return
 	}
 
-	gptGroup, err := s.entClient.Group.Query().
-		Where(
+	groupID := int64(0)
+	if s.settingService != nil {
+		groupID, err = s.settingService.GetDefaultSignupAPIKeyGroupID(ctx)
+		if err != nil {
+			logger.LegacyPrintf("service.auth", "[Auth] Failed to load default signup api key group: user_id=%d err=%v", userID, err)
+			return
+		}
+	}
+
+	groupQuery := s.entClient.Group.Query().
+		Where(entgroup.StatusEQ(StatusActive), entgroup.DeletedAtIsNil())
+	if groupID > 0 {
+		groupQuery = groupQuery.Where(entgroup.IDEQ(groupID))
+	} else {
+		groupQuery = groupQuery.Where(
 			entgroup.NameEQ("GPT"),
 			entgroup.PlatformEQ(PlatformOpenAI),
-			entgroup.StatusEQ(StatusActive),
-			entgroup.DeletedAtIsNil(),
-		).
-		Order(dbent.Asc(entgroup.FieldID)).
-		First(ctx)
+		)
+	}
+	defaultGroup, err := groupQuery.Order(dbent.Asc(entgroup.FieldID)).First(ctx)
 	if err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to find active GPT group for default api key: user_id=%d err=%v", userID, err)
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to find active default api key group: user_id=%d configured_group_id=%d err=%v", userID, groupID, err)
 		return
 	}
 
@@ -958,9 +969,9 @@ func (s *AuthService) provisionDefaultSignupAPIKey(ctx context.Context, userID i
 		SetKey(apiKeyValue).
 		SetName(defaultSignupAPIKeyName).
 		SetStatus(StatusAPIKeyActive).
-		SetGroupID(gptGroup.ID).
+		SetGroupID(defaultGroup.ID).
 		Save(ctx); err != nil {
-		logger.LegacyPrintf("service.auth", "[Auth] Failed to create default api key: user_id=%d group_id=%d err=%v", userID, gptGroup.ID, err)
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to create default api key: user_id=%d group_id=%d err=%v", userID, defaultGroup.ID, err)
 	}
 }
 
