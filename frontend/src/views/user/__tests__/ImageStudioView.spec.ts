@@ -254,7 +254,7 @@ describe('ImageStudioView', () => {
     const panel = wrapper.get('[data-test="history-panel"]')
     expect(panel.classes()).not.toContain('min-h-[680px]')
     const grid = panel.get('[data-test="history-grid"]')
-    expect(grid.classes()).toContain('grid-cols-[repeat(auto-fill,minmax(150px,1fr))]')
+    expect(grid.classes()).toContain('grid-cols-[repeat(auto-fill,minmax(min(150px,100%),1fr))]')
     expect(grid.findAll('img').map((image) => image.attributes('src'))).toEqual([
       'https://cdn.example.com/concept-1.png',
       'https://cdn.example.com/concept-2.png',

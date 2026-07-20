@@ -205,7 +205,7 @@
 
             <div v-else class="flex flex-1 flex-col" data-test="job-list">
               <div
-                class="grid flex-1 content-start grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3 bg-gray-50 p-3 dark:bg-dark-900/50 sm:p-4"
+                class="grid flex-1 content-start grid-cols-[repeat(auto-fill,minmax(min(150px,100%),1fr))] gap-3 bg-gray-50 p-3 dark:bg-dark-900/50 sm:p-4"
                 data-test="history-grid"
               >
                 <article
