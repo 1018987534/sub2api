@@ -1278,6 +1278,65 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyMultiImageUsesSingleUpstreamReq
 	require.Equal(t, "aW1hZ2UtMg==", gjson.Get(rec.Body.String(), "data.1.b64_json").String())
 }
 
+func TestOpenAIGatewayServiceForwardImages_APIKeyMultiImageFillsMissingOutputs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-image-2","prompt":"draw two cats","n":2,"response_format":"b64_json"}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+
+	upstream := &httpUpstreamRecorder{
+		responses: []*http.Response{
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"created":1710000007,"data":[{"b64_json":"aW1hZ2UtMQ==","revised_prompt":"cat one"}]}`)),
+			},
+			{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"created":1710000008,"data":[{"b64_json":"aW1hZ2UtMg==","revised_prompt":"cat two"}]}`)),
+			},
+		},
+	}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{},
+		httpUpstream: upstream,
+	}
+	parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+
+	account := &Account{
+		ID:       6,
+		Name:     "remote-sub2api",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":  "test-api-key",
+			"base_url": "https://image-upstream.example/v1",
+		},
+	}
+
+	result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 2, result.ImageCount)
+	require.Len(t, upstream.requests, 2)
+	require.Len(t, upstream.bodies, 2)
+	require.Equal(t, int64(2), gjson.GetBytes(upstream.bodies[0], "n").Int())
+	require.Equal(t, "draw two cats", gjson.GetBytes(upstream.bodies[0], "prompt").String())
+	require.Equal(t, int64(1), gjson.GetBytes(upstream.bodies[1], "n").Int())
+	require.Contains(t, gjson.GetBytes(upstream.bodies[1], "prompt").String(), "output 2 of 2")
+	require.Len(t, gjson.Get(rec.Body.String(), "data").Array(), 2)
+	require.Equal(t, "aW1hZ2UtMQ==", gjson.Get(rec.Body.String(), "data.0.b64_json").String())
+	require.Equal(t, "aW1hZ2UtMg==", gjson.Get(rec.Body.String(), "data.1.b64_json").String())
+	require.Equal(t, int64(2), gjson.Get(rec.Body.String(), "requested_count").Int())
+	require.Equal(t, int64(2), gjson.Get(rec.Body.String(), "completed_count").Int())
+}
+
 func TestOpenAIGatewayServiceForwardImages_APIKeyStreamJSONResponseBillsImage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","stream":true,"response_format":"b64_json"}`)

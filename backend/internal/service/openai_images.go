@@ -563,6 +563,9 @@ func (s *OpenAIGatewayService) ForwardImages(
 	if shouldSplitOpenAIImagesRequest(account, parsed) {
 		return s.forwardOpenAIImagesIndependently(ctx, c, account, body, parsed, channelMappedModel)
 	}
+	if shouldAttemptAtomicOpenAIImagesRequest(account, parsed) {
+		return s.forwardOpenAIImagesAPIKeyWithFallback(ctx, c, account, body, parsed, channelMappedModel)
+	}
 	return s.forwardOpenAIImagesOnce(ctx, c, account, body, parsed, channelMappedModel)
 }
 
@@ -585,14 +588,135 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOnce(
 }
 
 func shouldSplitOpenAIImagesRequest(account *Account, parsed *OpenAIImagesRequest) bool {
-	// API-key accounts may point at another OpenAI-compatible gateway. Preserve
-	// one upstream request with the original n so that the remote gateway can
-	// record and bill the whole multi-image operation as one task.
 	return account != nil && account.Type == AccountTypeOAuth &&
-		parsed != nil &&
+		isOpenAIImagesMultiOutputRequest(parsed)
+}
+
+func shouldAttemptAtomicOpenAIImagesRequest(account *Account, parsed *OpenAIImagesRequest) bool {
+	// API-key accounts may point at another OpenAI-compatible gateway. Try the
+	// original n first so a capable remote gateway can record the operation as
+	// one task, then fill missing outputs when that gateway ignores n.
+	return account != nil && account.Type == AccountTypeAPIKey &&
+		isOpenAIImagesMultiOutputRequest(parsed)
+}
+
+func isOpenAIImagesMultiOutputRequest(parsed *OpenAIImagesRequest) bool {
+	return parsed != nil &&
 		!parsed.Stream &&
 		parsed.N > 1 && parsed.N <= 4 &&
 		IsGPTImageGenerationModel(parsed.Model)
+}
+
+func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKeyWithFallback(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	parsed *OpenAIImagesRequest,
+	channelMappedModel string,
+) (*OpenAIForwardResult, error) {
+	startedAt := time.Now()
+	captureCtx, recorder := newOpenAIImagesForwardCaptureContext(c, ctx, body, parsed.ContentType)
+	combinedResult, forwardErr := s.forwardOpenAIImagesOnce(ctx, captureCtx, account, body, parsed, channelMappedModel)
+	capturedBody := bytes.TrimSpace(recorder.Body.Bytes())
+	if forwardErr != nil {
+		copyOpenAIImagesCapturedError(c, recorder, capturedBody)
+		return nil, forwardErr
+	}
+	if combinedResult == nil {
+		return nil, fmt.Errorf("atomic image generation returned no forwarding result")
+	}
+
+	combinedTop, combinedData, combinedUsage, err := parseOpenAIImagesCapturedResponse(capturedBody)
+	if err != nil {
+		return nil, err
+	}
+	if len(combinedData) >= parsed.N {
+		responseheaders.WriteFilteredHeaders(c.Writer.Header(), recorder.Header(), s.responseHeaderFilter)
+		contentType := strings.TrimSpace(recorder.Header().Get("Content-Type"))
+		if contentType == "" {
+			contentType = "application/json; charset=utf-8"
+		}
+		c.Data(recorder.Code, contentType, capturedBody)
+		return combinedResult, nil
+	}
+
+	responseHeader := recorder.Header().Clone()
+	responseStatus := recorder.Code
+	for len(combinedData) < parsed.N {
+		outputIndex := len(combinedData)
+		independentBody, independentContentType, err := rewriteOpenAIImagesIndependentRequest(
+			body,
+			parsed.ContentType,
+			parsed.Prompt,
+			outputIndex,
+			parsed.N,
+		)
+		if err != nil {
+			return nil, err
+		}
+		independent := *parsed
+		independent.N = 1
+		independent.Prompt = buildOpenAIImagesStandalonePrompt(parsed.Prompt, outputIndex, parsed.N)
+		independent.ContentType = independentContentType
+		independent.Body = independentBody
+		if len(independentBody) > 0 {
+			sum := sha256.Sum256(independentBody)
+			independent.bodyHash = hex.EncodeToString(sum[:8])
+		}
+
+		fallbackCtx, fallbackRecorder := newOpenAIImagesForwardCaptureContext(c, ctx, independentBody, independentContentType)
+		result, fallbackErr := s.forwardOpenAIImagesOnce(ctx, fallbackCtx, account, independentBody, &independent, channelMappedModel)
+		fallbackBody := bytes.TrimSpace(fallbackRecorder.Body.Bytes())
+		if fallbackErr != nil {
+			copyOpenAIImagesCapturedError(c, fallbackRecorder, fallbackBody)
+			return nil, fallbackErr
+		}
+		if result == nil {
+			return nil, fmt.Errorf("fallback image output %d returned no forwarding result", outputIndex+1)
+		}
+
+		_, responseData, responseUsage, err := parseOpenAIImagesCapturedResponse(fallbackBody)
+		if err != nil {
+			return nil, fmt.Errorf("fallback image output %d: %w", outputIndex+1, err)
+		}
+		if len(responseData) == 0 {
+			return nil, fmt.Errorf("fallback image output %d returned no image", outputIndex+1)
+		}
+		if remaining := parsed.N - len(combinedData); len(responseData) > remaining {
+			responseData = responseData[:remaining]
+		}
+		combinedData = append(combinedData, responseData...)
+		combinedUsage = mergeOpenAIImagesUsageObjects(combinedUsage, responseUsage)
+		combinedResult = mergeOpenAIImagesForwardResults(combinedResult, result)
+	}
+
+	combinedResult.ImageCount = len(combinedData)
+	combinedResult.Duration = time.Since(startedAt)
+	encodedData, err := json.Marshal(combinedData)
+	if err != nil {
+		return nil, fmt.Errorf("encode atomic image outputs: %w", err)
+	}
+	combinedTop["data"] = encodedData
+	if len(combinedUsage) > 0 {
+		encodedUsage, err := json.Marshal(combinedUsage)
+		if err != nil {
+			return nil, fmt.Errorf("encode atomic image usage: %w", err)
+		}
+		combinedTop["usage"] = encodedUsage
+	}
+	combinedTop["requested_count"], _ = json.Marshal(parsed.N)
+	combinedTop["completed_count"], _ = json.Marshal(len(combinedData))
+	responseBody, err := json.Marshal(combinedTop)
+	if err != nil {
+		return nil, fmt.Errorf("encode atomic image response: %w", err)
+	}
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), responseHeader, s.responseHeaderFilter)
+	if responseStatus < http.StatusOK || responseStatus >= http.StatusMultipleChoices {
+		responseStatus = http.StatusOK
+	}
+	c.Data(responseStatus, "application/json; charset=utf-8", responseBody)
+	return combinedResult, nil
 }
 
 func (s *OpenAIGatewayService) forwardOpenAIImagesIndependently(
