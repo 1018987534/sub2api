@@ -40,6 +40,12 @@ describe('AppSidebar scroll position persistence', () => {
     expect(componentSource).toContain('appStore.sidebarScrollTop')
     expect(componentSource).toContain('nextTick')
   })
+
+  it('preserves scroll position when the image studio layout is kept alive', () => {
+    expect(componentSource).toContain('onActivated(restoreSidebarScrollPosition)')
+    expect(componentSource).toContain('onDeactivated(persistSidebarScrollPosition)')
+    expect(componentSource).toContain('onBeforeUnmount(persistSidebarScrollPosition)')
+  })
 })
 
 describe('AppSidebar header styles', () => {

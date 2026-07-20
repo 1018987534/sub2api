@@ -188,7 +188,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
@@ -959,26 +959,34 @@ watch(
   { immediate: true }
 )
 
+function restoreSidebarScrollPosition() {
+  if (appStore.sidebarScrollTop <= 0 || !sidebarNavRef.value) return
+  void nextTick(() => {
+    if (sidebarNavRef.value) {
+      sidebarNavRef.value.scrollTop = appStore.sidebarScrollTop
+    }
+  })
+}
+
+function persistSidebarScrollPosition() {
+  if (sidebarNavRef.value) {
+    appStore.sidebarScrollTop = sidebarNavRef.value.scrollTop
+  }
+}
+
 onMounted(() => {
   void refreshBatchImageAccess()
   if (isAdmin.value) {
     adminSettingsStore.fetch()
   }
-  // Restore sidebar scroll position after route change re-mounts the component
-  if (appStore.sidebarScrollTop > 0 && sidebarNavRef.value) {
-    void nextTick(() => {
-      if (sidebarNavRef.value) {
-        sidebarNavRef.value.scrollTop = appStore.sidebarScrollTop
-      }
-    })
-  }
+  restoreSidebarScrollPosition()
 })
 
-onBeforeUnmount(() => {
-  if (sidebarNavRef.value) {
-    appStore.sidebarScrollTop = sidebarNavRef.value.scrollTop
-  }
-})
+// ImageStudioView is kept alive together with its layout. Persist and restore
+// the nested sidebar when that cached route is deactivated or activated.
+onActivated(restoreSidebarScrollPosition)
+onDeactivated(persistSidebarScrollPosition)
+onBeforeUnmount(persistSidebarScrollPosition)
 </script>
 
 <style scoped>
