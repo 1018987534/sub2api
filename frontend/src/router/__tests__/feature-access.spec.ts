@@ -121,32 +121,12 @@ describe('feature route guard', () => {
     appStore.fetchPublicSettings.mockReset()
   })
 
-  it('allows the designated administrator to access the image studio preview', async () => {
-    authStore.isAdmin = true
-    authStore.user = { role: 'admin', email: 'menghuandeyao@163.com' }
-
-    const { navigation, next } = runGuard(
-      { requiresAdmin: true, requiresImageStudioPreview: true },
-      '/image-studio',
-    )
+  it('allows any authenticated user to access image studio', async () => {
+    const { navigation, next } = runGuard({ requiresAdmin: false }, '/image-studio')
     await navigation
 
     expect(next).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledWith()
-  })
-
-  it('redirects other administrators away from the image studio preview', async () => {
-    authStore.isAdmin = true
-    authStore.user = { role: 'admin', email: 'other-admin@example.com' }
-
-    const { navigation, next } = runGuard(
-      { requiresAdmin: true, requiresImageStudioPreview: true },
-      '/image-studio',
-    )
-    await navigation
-
-    expect(next).toHaveBeenCalledOnce()
-    expect(next).toHaveBeenCalledWith('/admin/dashboard')
   })
 
   it('waits for the first public-settings request before deciding payment access', async () => {

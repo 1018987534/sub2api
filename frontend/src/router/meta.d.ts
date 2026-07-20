@@ -20,12 +20,6 @@ declare module 'vue-router' {
     requiresAdmin?: boolean
 
     /**
-     * Whether this route is limited to the image-studio preview account.
-     * @default false
-     */
-    requiresImageStudioPreview?: boolean
-
-    /**
      * Page title for this route
      */
     title?: string

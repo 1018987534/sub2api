@@ -54,10 +54,10 @@ describe('AppSidebar header styles', () => {
   })
 })
 
-describe('AppSidebar image studio preview access', () => {
-  it('filters the image studio item through the preview-account policy', () => {
-    expect(componentSource).toContain('const flagImageStudioPreview = () => canAccessImageStudioPreview(authStore.user)')
-    expect(componentSource).toContain("path: '/image-studio'")
-    expect(componentSource).toContain('featureFlag: flagImageStudioPreview')
+describe('AppSidebar image studio access', () => {
+  it('shows the image studio item to every authenticated user', () => {
+    expect(componentSource).toContain("{ path: '/image-studio', label: t('nav.imageStudio'), icon: BatchImageIcon }")
+    expect(componentSource).not.toContain('flagImageStudioPreview')
+    expect(componentSource).not.toContain('canAccessImageStudioPreview')
   })
 })
