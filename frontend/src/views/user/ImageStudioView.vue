@@ -23,7 +23,7 @@
               :key="option.value"
               type="button"
               role="tab"
-              class="flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors"
+              class="flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-1 text-xs font-medium transition-colors sm:gap-2 sm:text-sm"
               :class="form.mode === option.value
                 ? 'bg-white text-gray-900 shadow-sm dark:bg-dark-700 dark:text-white'
                 : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'"
@@ -57,7 +57,7 @@
 
             <div>
               <label class="input-label">{{ t('imageStudio.model') }}</label>
-              <div class="flex h-10 items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 dark:border-dark-600 dark:bg-dark-900">
+              <div class="flex min-h-10 flex-col items-start justify-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-600 dark:bg-dark-900 sm:h-10 sm:flex-row sm:items-center sm:py-0">
                 <span class="text-sm font-medium text-gray-800 dark:text-gray-100">GPT Image 2</span>
                 <span class="rounded-md bg-emerald-100 px-2 py-1 font-mono text-[11px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
                   {{ IMAGE_STUDIO_MODEL }}
@@ -111,7 +111,7 @@
               <div class="mt-1 text-right text-xs text-gray-400">{{ form.prompt.length }} / 32000</div>
             </div>
 
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label class="input-label" for="image-studio-size">{{ t('imageStudio.size') }}</label>
                 <select id="image-studio-size" v-model="form.size" class="input">
@@ -128,7 +128,7 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-3 gap-2">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-2">
               <div>
                 <label class="input-label" for="image-studio-quality">{{ t('imageStudio.quality') }}</label>
                 <select id="image-studio-quality" v-model="form.quality" class="input px-2 text-sm">
