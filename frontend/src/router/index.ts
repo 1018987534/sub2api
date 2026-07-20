@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import { canAccessImageStudioPreview } from '@/utils/imageStudioAccess'
 
 /**
  * Route definitions with lazy loading
@@ -203,6 +204,19 @@ const routes: RouteRecordRaw[] = [
       title: 'API Keys',
       titleKey: 'keys.title',
       descriptionKey: 'keys.description'
+    }
+  },
+  {
+    path: '/image-studio',
+    name: 'ImageStudio',
+    component: () => import('@/views/user/ImageStudioView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      requiresImageStudioPreview: true,
+      title: 'AI Images',
+      titleKey: 'imageStudio.title',
+      descriptionKey: 'imageStudio.description'
     }
   },
   {
@@ -833,6 +847,11 @@ router.beforeEach(async (to, _from, next) => {
   if (requiresAdmin && !authStore.isAdmin) {
     // User is authenticated but not admin, redirect to user dashboard
     next('/dashboard')
+    return
+  }
+
+  if (to.meta.requiresImageStudioPreview && !canAccessImageStudioPreview(authStore.user)) {
+    next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
     return
   }
 

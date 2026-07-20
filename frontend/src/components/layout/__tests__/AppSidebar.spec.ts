@@ -53,3 +53,11 @@ describe('AppSidebar header styles', () => {
     expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
   })
 })
+
+describe('AppSidebar image studio preview access', () => {
+  it('filters the image studio item through the preview-account policy', () => {
+    expect(componentSource).toContain('const flagImageStudioPreview = () => canAccessImageStudioPreview(authStore.user)')
+    expect(componentSource).toContain("path: '/image-studio'")
+    expect(componentSource).toContain('featureFlag: flagImageStudioPreview')
+  })
+})

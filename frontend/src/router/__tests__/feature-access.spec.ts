@@ -16,6 +16,7 @@ const authStore = vi.hoisted(() => ({
   isAdmin: false,
   isSimpleMode: false,
   hasPendingAuthSession: false,
+  user: { role: 'user', email: 'regular-user@example.com' },
 }))
 
 const appStore = vi.hoisted(() => ({
@@ -114,9 +115,38 @@ describe('feature route guard', () => {
     authStore.isAuthenticated = true
     authStore.isAdmin = false
     authStore.isSimpleMode = false
+    authStore.user = { role: 'user', email: 'regular-user@example.com' }
     appStore.publicSettingsLoaded = false
     appStore.cachedPublicSettings = null
     appStore.fetchPublicSettings.mockReset()
+  })
+
+  it('allows the designated administrator to access the image studio preview', async () => {
+    authStore.isAdmin = true
+    authStore.user = { role: 'admin', email: 'menghuandeyao@163.com' }
+
+    const { navigation, next } = runGuard(
+      { requiresAdmin: true, requiresImageStudioPreview: true },
+      '/image-studio',
+    )
+    await navigation
+
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  it('redirects other administrators away from the image studio preview', async () => {
+    authStore.isAdmin = true
+    authStore.user = { role: 'admin', email: 'other-admin@example.com' }
+
+    const { navigation, next } = runGuard(
+      { requiresAdmin: true, requiresImageStudioPreview: true },
+      '/image-studio',
+    )
+    await navigation
+
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith('/admin/dashboard')
   })
 
   it('waits for the first public-settings request before deciding payment access', async () => {
