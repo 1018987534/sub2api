@@ -50,7 +50,7 @@ export default {
     submitting: '正在提交...',
     processing: '正在生成图片...',
     results: '最近 24 小时创作',
-    historyCount: '{count} 个任务',
+    historyCount: '{count} 个创作',
     loadHistoryFailed: '加载生图记录失败',
     deleteHistoryFailed: '删除生图记录失败',
     clearCompleted: '清理已完成记录',

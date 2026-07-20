@@ -50,7 +50,7 @@ export default {
     submitting: 'Submitting...',
     processing: 'Generating images...',
     results: 'Creations from the last 24 hours',
-    historyCount: '{count} jobs',
+    historyCount: '{count} creations',
     loadHistoryFailed: 'Failed to load image history',
     deleteHistoryFailed: 'Failed to delete image history',
     clearCompleted: 'Clear finished records',

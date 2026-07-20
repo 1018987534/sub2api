@@ -225,7 +225,7 @@ describe('ImageStudioView', () => {
     wrapper.unmount()
   })
 
-  it('renders multiple history images inside one large results panel', async () => {
+  it('renders every output as a separate compact history card', async () => {
     mocks.listTasks.mockResolvedValue([{
       id: 'imgtask_multi',
       task_id: 'imgtask_multi',
@@ -249,16 +249,51 @@ describe('ImageStudioView', () => {
     await flushPromises()
 
     expect(wrapper.findAll('[data-test="history-panel"]')).toHaveLength(1)
-    expect(wrapper.findAll('[data-test="history-job"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(3)
 
     const panel = wrapper.get('[data-test="history-panel"]')
-    const grid = panel.get('[data-test="job-output-grid"]')
-    expect(grid.classes()).toEqual(expect.arrayContaining(['sm:grid-cols-2', 'xl:grid-cols-3']))
+    expect(panel.classes()).not.toContain('min-h-[680px]')
+    const grid = panel.get('[data-test="history-grid"]')
+    expect(grid.classes()).toContain('grid-cols-[repeat(auto-fill,minmax(150px,1fr))]')
     expect(grid.findAll('img').map((image) => image.attributes('src'))).toEqual([
       'https://cdn.example.com/concept-1.png',
       'https://cdn.example.com/concept-2.png',
       'https://cdn.example.com/concept-3.png',
     ])
+
+    wrapper.unmount()
+  })
+
+  it('paginates flattened image cards eight at a time', async () => {
+    mocks.listTasks.mockResolvedValue([{
+      id: 'imgtask_paginated',
+      task_id: 'imgtask_paginated',
+      status: 'completed',
+      mode: 'generate',
+      prompt: 'A paginated concept set',
+      size: '1024x1024',
+      quality: 'auto',
+      output_format: 'png',
+      created_at: 1_721_430_000,
+      result: {
+        data: Array.from({ length: 9 }, (_, index) => ({ url: `https://cdn.example.com/page-${index + 1}.png` })),
+      },
+    }])
+
+    const wrapper = mount(ImageStudioView, { global: globalOptions })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(8)
+    expect(wrapper.find('[data-test="history-pagination"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-test="history-grid"] img').map((image) => image.attributes('src'))).not.toContain('https://cdn.example.com/page-9.png')
+
+    const nextButton = wrapper.find('button[aria-label="pagination.next"]')
+    expect(nextButton.exists()).toBe(true)
+    await nextButton.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-test="history-grid"] img').map((image) => image.attributes('src'))).toEqual(['https://cdn.example.com/page-9.png'])
 
     wrapper.unmount()
   })
