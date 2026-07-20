@@ -560,7 +560,7 @@ func (s *OpenAIGatewayService) ForwardImages(
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}
-	if shouldSplitOpenAIImagesRequest(parsed) {
+	if shouldSplitOpenAIImagesRequest(account, parsed) {
 		return s.forwardOpenAIImagesIndependently(ctx, c, account, body, parsed, channelMappedModel)
 	}
 	return s.forwardOpenAIImagesOnce(ctx, c, account, body, parsed, channelMappedModel)
@@ -584,8 +584,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOnce(
 	}
 }
 
-func shouldSplitOpenAIImagesRequest(parsed *OpenAIImagesRequest) bool {
-	return parsed != nil &&
+func shouldSplitOpenAIImagesRequest(account *Account, parsed *OpenAIImagesRequest) bool {
+	// API-key accounts may point at another OpenAI-compatible gateway. Preserve
+	// one upstream request with the original n so that the remote gateway can
+	// record and bill the whole multi-image operation as one task.
+	return account != nil && account.Type == AccountTypeOAuth &&
+		parsed != nil &&
 		!parsed.Stream &&
 		parsed.N > 1 && parsed.N <= 4 &&
 		IsGPTImageGenerationModel(parsed.Model)
