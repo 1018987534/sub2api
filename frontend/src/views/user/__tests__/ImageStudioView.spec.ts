@@ -252,7 +252,8 @@ describe('ImageStudioView', () => {
     expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(3)
 
     const panel = wrapper.get('[data-test="history-panel"]')
-    expect(panel.classes()).not.toContain('min-h-[680px]')
+    expect(panel.classes()).toEqual(expect.arrayContaining(['h-full', 'min-h-[680px]']))
+    expect(panel.find('[data-test="history-pagination"]').exists()).toBe(true)
     const grid = panel.get('[data-test="history-grid"]')
     expect(grid.classes()).toContain('grid-cols-[repeat(auto-fill,minmax(min(150px,100%),1fr))]')
     expect(grid.findAll('img').map((image) => image.attributes('src'))).toEqual([
@@ -287,7 +288,7 @@ describe('ImageStudioView', () => {
     expect(wrapper.find('[data-test="history-pagination"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-test="history-grid"] img').map((image) => image.attributes('src'))).not.toContain('https://cdn.example.com/page-9.png')
 
-    const nextButton = wrapper.find('button[aria-label="pagination.next"]')
+    const nextButton = wrapper.find('[data-test="history-next-page"]')
     expect(nextButton.exists()).toBe(true)
     await nextButton.trigger('click')
     await wrapper.vm.$nextTick()

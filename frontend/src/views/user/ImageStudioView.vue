@@ -174,7 +174,7 @@
 
         <section class="min-w-0" aria-live="polite">
           <div
-            class="flex w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800"
+            class="flex h-full min-h-[680px] w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800"
             data-test="history-panel"
           >
             <div class="flex min-h-16 items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700 sm:px-5">
@@ -267,15 +267,45 @@
                 </article>
               </div>
 
-              <Pagination
-                v-if="historyItems.length > HISTORY_PAGE_SIZE"
-                :total="historyItems.length"
-                :page="historyPage"
-                :page-size="HISTORY_PAGE_SIZE"
-                :show-page-size-selector="false"
+              <div
+                class="flex flex-col gap-3 border-t border-gray-200 bg-white px-4 py-3 dark:border-dark-700 dark:bg-dark-800 sm:flex-row sm:items-center sm:justify-between"
                 data-test="history-pagination"
-                @update:page="setHistoryPage"
-              />
+              >
+                <p class="text-sm text-gray-600 dark:text-gray-300">
+                  {{ t('pagination.showing') }}
+                  <span class="font-medium text-gray-900 dark:text-white">{{ historyFromItem }}</span>
+                  {{ t('pagination.to') }}
+                  <span class="font-medium text-gray-900 dark:text-white">{{ historyToItem }}</span>
+                  {{ t('pagination.of') }}
+                  <span class="font-medium text-gray-900 dark:text-white">{{ historyItems.length }}</span>
+                  {{ t('pagination.results') }}
+                </p>
+                <div class="flex items-center justify-between gap-3 sm:justify-end">
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    :disabled="historyPage <= 1"
+                    data-test="history-previous-page"
+                    @click="setHistoryPage(historyPage - 1)"
+                  >
+                    <Icon name="chevronLeft" size="sm" class="mr-1" />
+                    {{ t('pagination.previous') }}
+                  </button>
+                  <span class="min-w-20 text-center text-sm font-medium text-gray-700 dark:text-gray-200">
+                    {{ t('pagination.pageOf', { page: historyPage, total: historyTotalPages }) }}
+                  </span>
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    :disabled="historyPage >= historyTotalPages"
+                    data-test="history-next-page"
+                    @click="setHistoryPage(historyPage + 1)"
+                  >
+                    {{ t('pagination.next') }}
+                    <Icon name="chevronRight" size="sm" class="ml-1" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -310,7 +340,6 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import Pagination from '@/components/common/Pagination.vue'
 import { keysAPI } from '@/api'
 import imageStudioAPI, {
   IMAGE_STUDIO_MODEL,
@@ -418,6 +447,8 @@ const historyItems = computed<StudioHistoryItem[]>(() => jobs.value.flatMap((job
   return [{ id: job.localID, job, outputIndex: 0 }]
 }))
 const historyTotalPages = computed(() => Math.max(1, Math.ceil(historyItems.value.length / HISTORY_PAGE_SIZE)))
+const historyFromItem = computed(() => historyItems.value.length === 0 ? 0 : (historyPage.value - 1) * HISTORY_PAGE_SIZE + 1)
+const historyToItem = computed(() => Math.min(historyPage.value * HISTORY_PAGE_SIZE, historyItems.value.length))
 const paginatedHistoryItems = computed(() => {
   const start = (historyPage.value - 1) * HISTORY_PAGE_SIZE
   return historyItems.value.slice(start, start + HISTORY_PAGE_SIZE)
