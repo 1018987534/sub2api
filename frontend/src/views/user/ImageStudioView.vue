@@ -401,7 +401,7 @@ interface StudioHistoryItem {
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 const POLL_INTERVAL_MS = 3000
-const HISTORY_PAGE_SIZE = 8
+const HISTORY_PAGE_SIZE = 10
 
 const { t } = useI18n()
 const appStore = useAppStore()

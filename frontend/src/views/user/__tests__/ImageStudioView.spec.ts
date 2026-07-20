@@ -272,7 +272,7 @@ describe('ImageStudioView', () => {
     wrapper.unmount()
   })
 
-  it('paginates flattened image cards eight at a time', async () => {
+  it('paginates flattened image cards ten at a time', async () => {
     mocks.listTasks.mockResolvedValue([{
       id: 'imgtask_paginated',
       task_id: 'imgtask_paginated',
@@ -284,16 +284,16 @@ describe('ImageStudioView', () => {
       output_format: 'png',
       created_at: 1_721_430_000,
       result: {
-        data: Array.from({ length: 9 }, (_, index) => ({ url: `https://cdn.example.com/page-${index + 1}.png` })),
+        data: Array.from({ length: 11 }, (_, index) => ({ url: `https://cdn.example.com/page-${index + 1}.png` })),
       },
     }])
 
     const wrapper = mount(ImageStudioView, { global: globalOptions })
     await flushPromises()
 
-    expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(8)
+    expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(10)
     expect(wrapper.find('[data-test="history-pagination"]').exists()).toBe(true)
-    expect(wrapper.findAll('[data-test="history-grid"] img').map((image) => image.attributes('src'))).not.toContain('https://cdn.example.com/page-9.png')
+    expect(wrapper.findAll('[data-test="history-grid"] img').map((image) => image.attributes('src'))).not.toContain('https://cdn.example.com/page-11.png')
 
     const nextButton = wrapper.find('[data-test="history-next-page"]')
     expect(nextButton.exists()).toBe(true)
@@ -301,7 +301,7 @@ describe('ImageStudioView', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(1)
-    expect(wrapper.findAll('[data-test="history-grid"] img').map((image) => image.attributes('src'))).toEqual(['https://cdn.example.com/page-9.png'])
+    expect(wrapper.findAll('[data-test="history-grid"] img').map((image) => image.attributes('src'))).toEqual(['https://cdn.example.com/page-11.png'])
 
     wrapper.unmount()
   })
