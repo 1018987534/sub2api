@@ -57,7 +57,7 @@ describe('AppSidebar header styles', () => {
 describe('AppSidebar image studio access', () => {
   it('shows image studio below profile and before custom recharge menus', () => {
     const profileIndex = componentSource.indexOf("{ path: '/profile', label: t('nav.profile'), icon: UserIcon }")
-    const imageStudioIndex = componentSource.indexOf("{ path: '/image-studio', label: t('nav.imageStudio'), icon: ImageIcon }")
+    const imageStudioIndex = componentSource.indexOf("{ path: '/image-studio', label: t('nav.imageStudio'), icon: AIImageIcon }")
     const customMenuIndex = componentSource.indexOf('...customMenuItemsForUser.value.map')
 
     expect(profileIndex).toBeGreaterThan(-1)
@@ -67,8 +67,10 @@ describe('AppSidebar image studio access', () => {
     expect(componentSource).not.toContain('canAccessImageStudioPreview')
   })
 
-  it('uses a dedicated image icon instead of the batch camera icon', () => {
-    expect(componentSource).toContain('const ImageIcon = {')
-    expect(componentSource).toContain("{ path: '/image-studio', label: t('nav.imageStudio'), icon: ImageIcon }")
+  it('uses a dedicated colored sparkle icon instead of the batch camera icon', () => {
+    expect(componentSource).toContain('const AIImageIcon = {')
+    expect(componentSource).toContain("stroke: '#2dd4bf'")
+    expect(componentSource).toContain("stroke: '#34d399'")
+    expect(componentSource).toContain("{ path: '/image-studio', label: t('nav.imageStudio'), icon: AIImageIcon }")
   })
 })
