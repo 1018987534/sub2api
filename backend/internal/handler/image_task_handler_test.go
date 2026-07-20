@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -44,6 +45,33 @@ func (s *asyncImageMemoryStore) Get(_ context.Context, id string) (*service.Imag
 	return &copy, nil
 }
 
+func (s *asyncImageMemoryStore) List(_ context.Context, owner service.ImageTaskOwner, limit int) ([]*service.ImageTaskRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	tasks := make([]*service.ImageTaskRecord, 0, len(s.tasks))
+	for _, task := range s.tasks {
+		if task.UserID != owner.UserID || task.APIKeyID != owner.APIKeyID {
+			continue
+		}
+		copy := *task
+		copy.Result = append(json.RawMessage(nil), task.Result...)
+		copy.Error = append(json.RawMessage(nil), task.Error...)
+		tasks = append(tasks, &copy)
+	}
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].CreatedAt > tasks[j].CreatedAt })
+	if limit > 0 && len(tasks) > limit {
+		tasks = tasks[:limit]
+	}
+	return tasks, nil
+}
+
+func (s *asyncImageMemoryStore) Delete(_ context.Context, task *service.ImageTaskRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.tasks, task.ID)
+	return nil
+}
+
 func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := &asyncImageMemoryStore{tasks: make(map[string]*service.ImageTaskRecord)}
@@ -67,7 +95,9 @@ func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {
 		c.Next()
 	})
 	router.POST("/v1/images/generations/async", h.Submit)
+	router.GET("/v1/images/tasks", h.List)
 	router.GET("/v1/images/tasks/:task_id", h.Get)
+	router.DELETE("/v1/images/tasks/:task_id", h.Delete)
 
 	requestCtx, cancelRequest := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations/async", strings.NewReader(`{"model":"gpt-image-1","prompt":"cat"}`)).WithContext(requestCtx)
@@ -104,6 +134,23 @@ func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {
 	require.Equal(t, "no-store", pollWriter.Header().Get("Cache-Control"))
 	require.Empty(t, pollWriter.Header().Get("Retry-After"))
 	require.Contains(t, pollWriter.Body.String(), "https://example.test/image.png")
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/images/tasks?limit=20", nil)
+	listWriter := httptest.NewRecorder()
+	router.ServeHTTP(listWriter, listReq)
+	require.Equal(t, http.StatusOK, listWriter.Code)
+	require.Contains(t, listWriter.Body.String(), accepted.TaskID)
+	require.Contains(t, listWriter.Body.String(), `"prompt":"cat"`)
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, accepted.PollURL, nil)
+	deleteWriter := httptest.NewRecorder()
+	router.ServeHTTP(deleteWriter, deleteReq)
+	require.Equal(t, http.StatusNoContent, deleteWriter.Code)
+
+	listAfterDeleteWriter := httptest.NewRecorder()
+	router.ServeHTTP(listAfterDeleteWriter, listReq)
+	require.Equal(t, http.StatusOK, listAfterDeleteWriter.Code)
+	require.JSONEq(t, `{"data":[],"object":"list"}`, listAfterDeleteWriter.Body.String())
 }
 
 // When object storage is not configured the feature is fully disabled: the

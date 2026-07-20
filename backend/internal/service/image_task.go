@@ -26,37 +26,56 @@ const (
 var (
 	ErrImageTaskNotFound    = infraerrors.New(http.StatusNotFound, "IMAGE_TASK_NOT_FOUND", "image task not found")
 	ErrImageTaskForbidden   = infraerrors.New(http.StatusForbidden, "IMAGE_TASK_FORBIDDEN", "image task does not belong to this API key")
+	ErrImageTaskProcessing  = infraerrors.New(http.StatusConflict, "IMAGE_TASK_PROCESSING", "processing image tasks cannot be deleted")
 	ErrImageTaskUnavailable = infraerrors.New(http.StatusServiceUnavailable, "IMAGE_TASK_UNAVAILABLE", "image task storage is unavailable")
 )
+
+type ImageTaskMetadata struct {
+	Mode         string
+	Prompt       string
+	Size         string
+	Quality      string
+	OutputFormat string
+}
 
 // ImageTaskRecord is the private Redis representation of an asynchronous image
 // request. Ownership fields are intentionally omitted from the public view.
 type ImageTaskRecord struct {
-	ID          string          `json:"id"`
-	UserID      int64           `json:"user_id"`
-	APIKeyID    int64           `json:"api_key_id"`
-	Status      string          `json:"status"`
-	HTTPStatus  int             `json:"http_status,omitempty"`
-	Result      json.RawMessage `json:"result,omitempty"`
-	Error       json.RawMessage `json:"error,omitempty"`
-	CreatedAt   int64           `json:"created_at"`
-	CompletedAt *int64          `json:"completed_at,omitempty"`
-	ExpiresAt   int64           `json:"expires_at"`
+	ID           string          `json:"id"`
+	UserID       int64           `json:"user_id"`
+	APIKeyID     int64           `json:"api_key_id"`
+	Mode         string          `json:"mode,omitempty"`
+	Prompt       string          `json:"prompt,omitempty"`
+	Size         string          `json:"size,omitempty"`
+	Quality      string          `json:"quality,omitempty"`
+	OutputFormat string          `json:"output_format,omitempty"`
+	Status       string          `json:"status"`
+	HTTPStatus   int             `json:"http_status,omitempty"`
+	Result       json.RawMessage `json:"result,omitempty"`
+	Error        json.RawMessage `json:"error,omitempty"`
+	CreatedAt    int64           `json:"created_at"`
+	CompletedAt  *int64          `json:"completed_at,omitempty"`
+	ExpiresAt    int64           `json:"expires_at"`
 }
 
 // ImageTask is the API-safe task representation returned to callers.
 type ImageTask struct {
-	ID          string          `json:"id"`
-	TaskID      string          `json:"task_id"`
-	Object      string          `json:"object"`
-	Status      string          `json:"status"`
-	HTTPStatus  int             `json:"http_status,omitempty"`
-	ImageURL    string          `json:"image_url,omitempty"`
-	Result      json.RawMessage `json:"result,omitempty"`
-	Error       json.RawMessage `json:"error,omitempty"`
-	CreatedAt   int64           `json:"created_at"`
-	CompletedAt *int64          `json:"completed_at,omitempty"`
-	ExpiresAt   int64           `json:"expires_at"`
+	ID           string          `json:"id"`
+	TaskID       string          `json:"task_id"`
+	Object       string          `json:"object"`
+	Mode         string          `json:"mode,omitempty"`
+	Prompt       string          `json:"prompt,omitempty"`
+	Size         string          `json:"size,omitempty"`
+	Quality      string          `json:"quality,omitempty"`
+	OutputFormat string          `json:"output_format,omitempty"`
+	Status       string          `json:"status"`
+	HTTPStatus   int             `json:"http_status,omitempty"`
+	ImageURL     string          `json:"image_url,omitempty"`
+	Result       json.RawMessage `json:"result,omitempty"`
+	Error        json.RawMessage `json:"error,omitempty"`
+	CreatedAt    int64           `json:"created_at"`
+	CompletedAt  *int64          `json:"completed_at,omitempty"`
+	ExpiresAt    int64           `json:"expires_at"`
 }
 
 type ImageTaskOwner struct {
@@ -67,6 +86,8 @@ type ImageTaskOwner struct {
 type ImageTaskStore interface {
 	Save(ctx context.Context, task *ImageTaskRecord, ttl time.Duration) error
 	Get(ctx context.Context, id string) (*ImageTaskRecord, error)
+	List(ctx context.Context, owner ImageTaskOwner, limit int) ([]*ImageTaskRecord, error)
+	Delete(ctx context.Context, task *ImageTaskRecord) error
 }
 
 type ImageTaskService struct {
@@ -113,23 +134,54 @@ func (s *ImageTaskService) ExecutionTimeout() time.Duration {
 	return s.executionTimeout
 }
 
-func (s *ImageTaskService) Create(ctx context.Context, owner ImageTaskOwner) (*ImageTask, error) {
+func (s *ImageTaskService) Create(ctx context.Context, owner ImageTaskOwner, metadata ...ImageTaskMetadata) (*ImageTask, error) {
 	if s == nil || s.store == nil {
 		return nil, ErrImageTaskUnavailable
 	}
+	meta := normalizeImageTaskMetadata(metadata)
 	now := time.Now().UTC()
 	task := &ImageTaskRecord{
-		ID:        "imgtask_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
-		UserID:    owner.UserID,
-		APIKeyID:  owner.APIKeyID,
-		Status:    ImageTaskStatusProcessing,
-		CreatedAt: now.Unix(),
-		ExpiresAt: now.Add(s.ttl).Unix(),
+		ID:           "imgtask_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		UserID:       owner.UserID,
+		APIKeyID:     owner.APIKeyID,
+		Mode:         meta.Mode,
+		Prompt:       meta.Prompt,
+		Size:         meta.Size,
+		Quality:      meta.Quality,
+		OutputFormat: meta.OutputFormat,
+		Status:       ImageTaskStatusProcessing,
+		CreatedAt:    now.Unix(),
+		ExpiresAt:    now.Add(s.ttl).Unix(),
 	}
 	if err := s.store.Save(ctx, task, s.ttl); err != nil {
 		return nil, ErrImageTaskUnavailable.WithCause(err)
 	}
 	return imageTaskToPublic(task), nil
+}
+
+func normalizeImageTaskMetadata(values []ImageTaskMetadata) ImageTaskMetadata {
+	meta := ImageTaskMetadata{}
+	if len(values) > 0 {
+		meta = values[0]
+	}
+	meta.Mode = strings.ToLower(strings.TrimSpace(meta.Mode))
+	if meta.Mode != "edit" {
+		meta.Mode = "generate"
+	}
+	meta.Prompt = strings.TrimSpace(meta.Prompt)
+	meta.Size = strings.TrimSpace(meta.Size)
+	if meta.Size == "" {
+		meta.Size = "1024x1024"
+	}
+	meta.Quality = strings.ToLower(strings.TrimSpace(meta.Quality))
+	if meta.Quality == "" {
+		meta.Quality = "auto"
+	}
+	meta.OutputFormat = strings.ToLower(strings.TrimSpace(meta.OutputFormat))
+	if meta.OutputFormat == "" {
+		meta.OutputFormat = "png"
+	}
+	return meta
 }
 
 func (s *ImageTaskService) Get(ctx context.Context, owner ImageTaskOwner, id string) (*ImageTask, error) {
@@ -148,6 +200,53 @@ func (s *ImageTaskService) Get(ctx context.Context, owner ImageTaskOwner, id str
 		return nil, ErrImageTaskNotFound
 	}
 	return imageTaskToPublic(task), nil
+}
+
+func (s *ImageTaskService) List(ctx context.Context, owner ImageTaskOwner, limit int) ([]*ImageTask, error) {
+	if s == nil || s.store == nil {
+		return nil, ErrImageTaskUnavailable
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	records, err := s.store.List(ctx, owner, limit)
+	if err != nil {
+		return nil, ErrImageTaskUnavailable.WithCause(err)
+	}
+	tasks := make([]*ImageTask, 0, len(records))
+	for _, record := range records {
+		if record == nil || record.UserID != owner.UserID || record.APIKeyID != owner.APIKeyID {
+			continue
+		}
+		tasks = append(tasks, imageTaskToPublic(record))
+	}
+	return tasks, nil
+}
+
+func (s *ImageTaskService) Delete(ctx context.Context, owner ImageTaskOwner, id string) error {
+	if s == nil || s.store == nil {
+		return ErrImageTaskUnavailable
+	}
+	record, err := s.store.Get(ctx, strings.TrimSpace(id))
+	if err != nil {
+		if errors.Is(err, ErrImageTaskNotFound) {
+			return ErrImageTaskNotFound
+		}
+		return ErrImageTaskUnavailable.WithCause(err)
+	}
+	if record.UserID != owner.UserID || record.APIKeyID != owner.APIKeyID {
+		return ErrImageTaskNotFound
+	}
+	if record.Status == ImageTaskStatusProcessing {
+		return ErrImageTaskProcessing
+	}
+	if err := s.store.Delete(ctx, record); err != nil {
+		return ErrImageTaskUnavailable.WithCause(err)
+	}
+	return nil
 }
 
 func (s *ImageTaskService) Complete(ctx context.Context, id string, statusCode int, result json.RawMessage) error {
@@ -203,17 +302,22 @@ func imageTaskToPublic(task *ImageTaskRecord) *ImageTask {
 		return nil
 	}
 	return &ImageTask{
-		ID:          task.ID,
-		TaskID:      task.ID,
-		Object:      "image.generation.task",
-		Status:      task.Status,
-		HTTPStatus:  task.HTTPStatus,
-		ImageURL:    firstImageTaskURL(task.Result),
-		Result:      task.Result,
-		Error:       task.Error,
-		CreatedAt:   task.CreatedAt,
-		CompletedAt: task.CompletedAt,
-		ExpiresAt:   task.ExpiresAt,
+		ID:           task.ID,
+		TaskID:       task.ID,
+		Object:       "image.generation.task",
+		Mode:         task.Mode,
+		Prompt:       task.Prompt,
+		Size:         task.Size,
+		Quality:      task.Quality,
+		OutputFormat: task.OutputFormat,
+		Status:       task.Status,
+		HTTPStatus:   task.HTTPStatus,
+		ImageURL:     firstImageTaskURL(task.Result),
+		Result:       task.Result,
+		Error:        task.Error,
+		CreatedAt:    task.CreatedAt,
+		CompletedAt:  task.CompletedAt,
+		ExpiresAt:    task.ExpiresAt,
 	}
 }
 

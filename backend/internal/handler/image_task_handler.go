@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,7 +95,11 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 	}
 
 	taskCtx, recorder, cancel := newAsyncImageContext(c, body, h.tasks.ExecutionTimeout())
-	task, err := h.tasks.Create(c.Request.Context(), service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID})
+	task, err := h.tasks.Create(
+		c.Request.Context(),
+		service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID},
+		h.taskMetadata(c, platform, body),
+	)
 	if err != nil {
 		cancel()
 		imageTaskError(c, err)
@@ -174,6 +179,72 @@ func (h *AsyncImageHandler) Get(c *gin.Context) {
 		c.Header("Retry-After", "3")
 	}
 	c.JSON(http.StatusOK, task)
+}
+
+func (h *AsyncImageHandler) List(c *gin.Context) {
+	if !h.enabled() {
+		imageTaskJSONError(c, http.StatusNotFound, "not_found_error", "async image tasks are not enabled")
+		return
+	}
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil || apiKey.UserID <= 0 || apiKey.ID <= 0 {
+		imageTaskError(c, service.ErrImageTaskForbidden)
+		return
+	}
+	limit, _ := strconv.Atoi(strings.TrimSpace(c.DefaultQuery("limit", "50")))
+	tasks, err := h.tasks.List(c.Request.Context(), service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID}, limit)
+	if err != nil {
+		imageTaskError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"object": "list", "data": tasks})
+}
+
+func (h *AsyncImageHandler) Delete(c *gin.Context) {
+	if !h.enabled() {
+		imageTaskJSONError(c, http.StatusNotFound, "not_found_error", "async image tasks are not enabled")
+		return
+	}
+	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
+	if !ok || apiKey == nil || apiKey.UserID <= 0 || apiKey.ID <= 0 {
+		imageTaskError(c, service.ErrImageTaskForbidden)
+		return
+	}
+	if err := h.tasks.Delete(c.Request.Context(), service.ImageTaskOwner{UserID: apiKey.UserID, APIKeyID: apiKey.ID}, c.Param("task_id")); err != nil {
+		imageTaskError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *AsyncImageHandler) taskMetadata(c *gin.Context, platform string, body []byte) service.ImageTaskMetadata {
+	metadata := service.ImageTaskMetadata{Mode: "generate"}
+	if strings.Contains(c.Request.URL.Path, "/images/edits") {
+		metadata.Mode = "edit"
+	}
+	if platform == service.PlatformOpenAI && h.openAI != nil && h.openAI.gatewayService != nil {
+		if parsed, err := h.openAI.gatewayService.ParseOpenAIImagesRequest(c, body); err == nil {
+			metadata.Prompt = parsed.Prompt
+			metadata.Size = parsed.Size
+			metadata.Quality = parsed.Quality
+			metadata.OutputFormat = parsed.OutputFormat
+			return metadata
+		}
+	}
+	var payload struct {
+		Prompt       string `json:"prompt"`
+		Size         string `json:"size"`
+		Quality      string `json:"quality"`
+		OutputFormat string `json:"output_format"`
+	}
+	if json.Unmarshal(body, &payload) == nil {
+		metadata.Prompt = payload.Prompt
+		metadata.Size = payload.Size
+		metadata.Quality = payload.Quality
+		metadata.OutputFormat = payload.OutputFormat
+	}
+	return metadata
 }
 
 func (h *AsyncImageHandler) validateRequest(c *gin.Context, platform string, body []byte) error {

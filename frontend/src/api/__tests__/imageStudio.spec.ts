@@ -4,6 +4,8 @@ import {
   ImageStudioAPIError,
   extractImageStudioOutputs,
   isAsyncImageUnavailable,
+  deleteImageStudioTask,
+  listImageStudioTasks,
   listImageStudioModels,
   submitImageStudioTask,
 } from '@/api/imageStudio'
@@ -88,6 +90,24 @@ describe('imageStudio API', () => {
     })).toEqual([
       { url: 'https://cdn.example.com/a.png', revisedPrompt: 'revised' },
       { url: 'data:image/webp;base64,aW1hZ2U=', revisedPrompt: undefined },
+    ])
+  })
+
+  it('lists and deletes persisted image tasks with the selected API key', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ object: 'list', data: [{ id: 'imgtask_1', status: 'completed' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    await expect(listImageStudioTasks('sk-image', 50)).resolves.toEqual([{ id: 'imgtask_1', status: 'completed' }])
+    await expect(deleteImageStudioTask('sk-image', 'imgtask_1')).resolves.toBeUndefined()
+
+    expect(fetchMock.mock.calls[0][0]).toContain('/v1/images/tasks?limit=50')
+    expect(fetchMock.mock.calls[1]).toEqual([
+      expect.stringContaining('/v1/images/tasks/imgtask_1'),
+      expect.objectContaining({ method: 'DELETE', headers: { Authorization: 'Bearer sk-image' } }),
     ])
   })
 

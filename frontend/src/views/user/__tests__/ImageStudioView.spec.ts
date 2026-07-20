@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   listModels: vi.fn(),
   submitTask: vi.fn(),
   getTask: vi.fn(),
+  listTasks: vi.fn(),
+  deleteTask: vi.fn(),
   generateSync: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
@@ -26,6 +28,8 @@ vi.mock('@/api/imageStudio', async (importOriginal) => {
       listModels: mocks.listModels,
       submitTask: mocks.submitTask,
       getTask: mocks.getTask,
+      listTasks: mocks.listTasks,
+      deleteTask: mocks.deleteTask,
       generateSync: mocks.generateSync,
     },
   }
@@ -144,6 +148,8 @@ describe('ImageStudioView', () => {
     const geminiKey = makeKey(3, makeGroup({ id: 33, name: 'Gemini Group', platform: 'gemini' }))
     mocks.listKeys.mockResolvedValue({ items: [textKey, geminiKey, imageKey], total: 3, page: 1, page_size: 100, pages: 1 })
     mocks.listModels.mockResolvedValue([IMAGE_STUDIO_MODEL])
+    mocks.listTasks.mockResolvedValue([])
+    mocks.deleteTask.mockResolvedValue(undefined)
     mocks.submitTask.mockResolvedValue({ id: 'imgtask_1', task_id: 'imgtask_1', status: 'processing' })
     mocks.getTask.mockResolvedValue({
       id: 'imgtask_1',
@@ -192,5 +198,30 @@ describe('ImageStudioView', () => {
 
     wrapper.unmount()
     vi.useRealTimers()
+  })
+
+  it('loads completed tasks from the selected key history', async () => {
+    mocks.listTasks.mockResolvedValue([{
+      id: 'imgtask_history',
+      task_id: 'imgtask_history',
+      status: 'completed',
+      mode: 'generate',
+      prompt: 'A saved lighthouse',
+      size: '1536x1024',
+      quality: 'high',
+      output_format: 'png',
+      created_at: 1_721_430_000,
+      result: { data: [{ url: 'https://cdn.example.com/history.png' }] },
+    }])
+
+    const wrapper = mount(ImageStudioView, { global: globalOptions })
+    await flushPromises()
+
+    expect(mocks.listTasks).toHaveBeenCalledWith('sk-key-1', 50, expect.any(AbortSignal))
+    expect(wrapper.text()).toContain('A saved lighthouse')
+    expect(wrapper.text()).toContain('1536x1024')
+    expect(wrapper.findAll('img').map((image) => image.attributes('src'))).toContain('https://cdn.example.com/history.png')
+
+    wrapper.unmount()
   })
 })

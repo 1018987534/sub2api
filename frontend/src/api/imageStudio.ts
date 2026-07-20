@@ -34,6 +34,11 @@ export interface ImageStudioTask {
   id: string
   task_id?: string
   object?: string
+  mode?: ImageStudioMode
+  prompt?: string
+  size?: string
+  quality?: string
+  output_format?: string
   status: 'processing' | 'completed' | 'failed' | string
   poll_url?: string
   http_status?: number
@@ -47,6 +52,11 @@ export interface ImageStudioTask {
   created_at?: number
   completed_at?: number
   expires_at?: number
+}
+
+export interface ImageStudioTaskList {
+  object: 'list'
+  data: ImageStudioTask[]
 }
 
 export class ImageStudioAPIError extends Error {
@@ -133,6 +143,23 @@ export async function getImageStudioTask(
   return requestJSON<ImageStudioTask>(`/v1/images/tasks/${encodeURIComponent(taskID)}`, apiKey, { signal })
 }
 
+export async function listImageStudioTasks(
+  apiKey: string,
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<ImageStudioTask[]> {
+  const response = await requestJSON<ImageStudioTaskList>(`/v1/images/tasks?limit=${Math.max(1, Math.min(100, limit))}`, apiKey, { signal })
+  return response.data || []
+}
+
+export async function deleteImageStudioTask(apiKey: string, taskID: string): Promise<void> {
+  const response = await fetch(buildGatewayUrl(`/v1/images/tasks/${encodeURIComponent(taskID)}`), {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+  if (!response.ok) throw await parseError(response)
+}
+
 export async function generateImageStudioSync(
   apiKey: string,
   mode: ImageStudioMode,
@@ -174,6 +201,8 @@ export const imageStudioAPI = {
   listModels: listImageStudioModels,
   submitTask: submitImageStudioTask,
   getTask: getImageStudioTask,
+  listTasks: listImageStudioTasks,
+  deleteTask: deleteImageStudioTask,
   generateSync: generateImageStudioSync,
 }
 

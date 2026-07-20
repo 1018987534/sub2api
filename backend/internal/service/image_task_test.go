@@ -39,12 +39,33 @@ func (s *imageTaskMemoryStore) Get(_ context.Context, _ string) (*ImageTaskRecor
 	return &copy, nil
 }
 
+func (s *imageTaskMemoryStore) List(_ context.Context, owner ImageTaskOwner, _ int) ([]*ImageTaskRecord, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.task == nil || s.task.UserID != owner.UserID || s.task.APIKeyID != owner.APIKeyID {
+		return []*ImageTaskRecord{}, nil
+	}
+	copy := *s.task
+	return []*ImageTaskRecord{&copy}, nil
+}
+
+func (s *imageTaskMemoryStore) Delete(_ context.Context, _ *ImageTaskRecord) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	s.task = nil
+	return nil
+}
+
 func TestImageTaskServiceLifecycleAndOwnership(t *testing.T) {
 	store := &imageTaskMemoryStore{}
 	svc := NewImageTaskServiceWithOptions(store, time.Hour, 10*time.Minute)
 	owner := ImageTaskOwner{UserID: 7, APIKeyID: 9}
 
-	created, err := svc.Create(context.Background(), owner)
+	created, err := svc.Create(context.Background(), owner, ImageTaskMetadata{
+		Mode: "edit", Prompt: "change the sky", Size: "1536x1024", Quality: "high", OutputFormat: "webp",
+	})
 	require.NoError(t, err)
 	require.Equal(t, ImageTaskStatusProcessing, created.Status)
 	require.Equal(t, created.ID, created.TaskID)
@@ -52,6 +73,11 @@ func TestImageTaskServiceLifecycleAndOwnership(t *testing.T) {
 	require.Equal(t, time.Hour, store.ttl)
 	require.Equal(t, owner.UserID, store.task.UserID)
 	require.Equal(t, owner.APIKeyID, store.task.APIKeyID)
+	require.Equal(t, "edit", created.Mode)
+	require.Equal(t, "change the sky", created.Prompt)
+	require.Equal(t, "1536x1024", created.Size)
+	require.Equal(t, "high", created.Quality)
+	require.Equal(t, "webp", created.OutputFormat)
 
 	_, err = svc.Get(context.Background(), ImageTaskOwner{UserID: 7, APIKeyID: 10}, created.ID)
 	require.ErrorIs(t, err, ErrImageTaskNotFound)
@@ -66,6 +92,15 @@ func TestImageTaskServiceLifecycleAndOwnership(t *testing.T) {
 	require.Equal(t, "https://example.test/image.png", completed.ImageURL)
 	require.JSONEq(t, string(result), string(completed.Result))
 	require.NotNil(t, completed.CompletedAt)
+
+	listed, err := svc.List(context.Background(), owner, 50)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, completed.ID, listed[0].ID)
+
+	require.NoError(t, svc.Delete(context.Background(), owner, completed.ID))
+	_, err = svc.Get(context.Background(), owner, completed.ID)
+	require.ErrorIs(t, err, ErrImageTaskNotFound)
 }
 
 func TestImageTaskServiceInvalidResultBecomesFailed(t *testing.T) {
@@ -88,4 +123,14 @@ func TestImageTaskServiceMapsStoreFailures(t *testing.T) {
 
 	_, err := svc.Create(context.Background(), ImageTaskOwner{UserID: 1, APIKeyID: 2})
 	require.ErrorIs(t, err, ErrImageTaskUnavailable)
+}
+
+func TestImageTaskServiceDoesNotDeleteProcessingTask(t *testing.T) {
+	store := &imageTaskMemoryStore{}
+	svc := NewImageTaskServiceWithOptions(store, time.Hour, time.Minute)
+	owner := ImageTaskOwner{UserID: 1, APIKeyID: 2}
+	created, err := svc.Create(context.Background(), owner)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, svc.Delete(context.Background(), owner, created.ID), ErrImageTaskProcessing)
 }

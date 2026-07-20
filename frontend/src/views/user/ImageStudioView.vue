@@ -176,15 +176,15 @@
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
               <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('imageStudio.results') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('imageStudio.sessionCount', { count: jobs.length }) }}</p>
+              <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('imageStudio.historyCount', { count: jobs.length }) }}</p>
             </div>
-            <button v-if="jobs.length" type="button" class="btn btn-secondary btn-sm" @click="clearCompletedJobs">
-              <Icon name="trash" size="sm" />
+            <button v-if="hasFinishedJobs" type="button" class="btn btn-secondary btn-sm" :disabled="clearingHistory" @click="clearCompletedJobs">
+              <Icon :name="clearingHistory ? 'refresh' : 'trash'" size="sm" :class="clearingHistory ? 'animate-spin' : ''" />
               <span class="ml-1.5">{{ t('imageStudio.clearCompleted') }}</span>
             </button>
           </div>
 
-          <div v-if="loadingKeys" class="flex min-h-[520px] items-center justify-center rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
+          <div v-if="loadingKeys || loadingHistory" class="flex min-h-[520px] items-center justify-center rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
             <Icon name="refresh" size="lg" class="animate-spin text-emerald-600" />
           </div>
 
@@ -211,10 +211,10 @@
                   <p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" :title="job.prompt">{{ job.prompt }}</p>
                 </div>
                 <div class="flex flex-shrink-0 items-center gap-1">
-                  <button type="button" class="btn-ghost btn-icon" :title="t('imageStudio.reuse')" @click="reuseJob(job)">
+                  <button v-if="job.canReuse" type="button" class="btn-ghost btn-icon" :title="t('imageStudio.reuse')" @click="reuseJob(job)">
                     <Icon name="edit" size="sm" />
                   </button>
-                  <button type="button" class="btn-ghost btn-icon text-red-600 dark:text-red-400" :title="t('common.delete')" @click="removeJob(job.localID)">
+                  <button v-if="job.status !== 'processing'" type="button" class="btn-ghost btn-icon text-red-600 dark:text-red-400" :title="t('common.delete')" @click="removeJob(job)">
                     <Icon name="trash" size="sm" />
                   </button>
                 </div>
@@ -321,6 +321,7 @@ interface StudioJob {
   outputs: ImageStudioOutput[]
   error: string
   createdAt: number
+  canReuse: boolean
 }
 
 interface PreviewState {
@@ -350,6 +351,8 @@ const form = reactive({
 
 const imageKeys = ref<ApiKey[]>([])
 const loadingKeys = ref(false)
+const loadingHistory = ref(false)
+const clearingHistory = ref(false)
 const submitting = ref(false)
 const modelLoading = ref(false)
 const modelSupported = ref<boolean | null>(null)
@@ -361,6 +364,7 @@ const jobs = ref<StudioJob[]>([])
 const preview = ref<PreviewState | null>(null)
 
 let modelRequestController: AbortController | null = null
+let historyRequestController: AbortController | null = null
 const jobControllers = new Map<string, AbortController>()
 
 const selectedKey = computed(() => imageKeys.value.find((key) => key.id === form.apiKeyId) || null)
@@ -371,6 +375,7 @@ const canSubmit = computed(() => Boolean(
   form.prompt.trim() &&
   (form.mode === 'generate' || sourceImage.value),
 ))
+const hasFinishedJobs = computed(() => jobs.value.some((job) => job.status !== 'processing'))
 
 const modeOptions = computed(() => [
   { value: 'generate' as const, label: t('imageStudio.generateMode') },
@@ -424,13 +429,78 @@ async function loadKeys() {
     if (!imageKeys.value.some((key) => key.id === form.apiKeyId)) {
       form.apiKeyId = imageKeys.value[0]?.id || 0
     } else {
-      await validateSelectedKey()
+      await Promise.all([validateSelectedKey(), loadHistory()])
     }
   } catch (error) {
     appStore.showError(errorMessage(error, t('imageStudio.loadKeysFailed')))
   } finally {
     loadingKeys.value = false
   }
+}
+
+async function loadHistory() {
+  historyRequestController?.abort()
+  for (const controller of jobControllers.values()) controller.abort()
+  jobControllers.clear()
+
+  const key = selectedKey.value
+  if (!key) {
+    jobs.value = []
+    loadingHistory.value = false
+    return
+  }
+
+  const controller = new AbortController()
+  historyRequestController = controller
+  loadingHistory.value = true
+  try {
+    const tasks = await imageStudioAPI.listTasks(key.key, 50, controller.signal)
+    if (controller.signal.aborted) return
+    jobs.value = tasks.map((task) => historyTaskToJob(task, key.id))
+    for (const job of jobs.value) {
+      if (job.status !== 'processing' || !job.taskID) continue
+      const jobController = new AbortController()
+      jobControllers.set(job.localID, jobController)
+      void monitorTask(job, key, jobController)
+    }
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      jobs.value = []
+      appStore.showError(errorMessage(error, t('imageStudio.loadHistoryFailed')))
+    }
+  } finally {
+    if (historyRequestController === controller) {
+      loadingHistory.value = false
+      historyRequestController = null
+    }
+  }
+}
+
+function historyTaskToJob(task: ImageStudioTask, keyID: number): StudioJob {
+  const outputFormat = task.output_format || inferTaskOutputFormat(task) || 'png'
+  const status: StudioJobStatus = task.status === 'completed' || task.status === 'failed' ? task.status : 'processing'
+  return {
+    localID: `history_${task.task_id || task.id}`,
+    taskID: task.task_id || task.id,
+    keyID,
+    mode: task.mode === 'edit' ? 'edit' : 'generate',
+    prompt: task.prompt?.trim() || t('imageStudio.apiTask'),
+    size: task.size || '1024x1024',
+    quality: task.quality || 'auto',
+    outputFormat,
+    status,
+    outputs: status === 'completed' ? extractImageStudioOutputs(task.result, outputFormat) : [],
+    error: task.error?.message || '',
+    createdAt: task.created_at ? task.created_at * 1000 : Date.now(),
+    canReuse: Boolean(task.prompt?.trim()),
+  }
+}
+
+function inferTaskOutputFormat(task: ImageStudioTask): string {
+  const url = task.image_url || task.result?.data?.find((item) => item.url)?.url || ''
+  const match = url.match(/\.([a-z0-9]+)(?:\?|$)/i)
+  const format = match?.[1]?.toLowerCase()
+  return format === 'jpg' ? 'jpeg' : format || ''
 }
 
 async function validateSelectedKey() {
@@ -543,6 +613,7 @@ async function submitGeneration() {
     outputs: [],
     error: '',
     createdAt: Date.now(),
+    canReuse: true,
   })
   jobs.value.unshift(job)
   submitting.value = true
@@ -673,16 +744,29 @@ function reuseJob(job: StudioJob) {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-function removeJob(localID: string) {
-  jobControllers.get(localID)?.abort()
-  jobControllers.delete(localID)
-  jobs.value = jobs.value.filter((job) => job.localID !== localID)
-  if (preview.value?.job.localID === localID) closePreview()
+async function removeJob(job: StudioJob) {
+  if (job.status === 'processing') return
+  if (job.taskID) {
+    const key = imageKeys.value.find((item) => item.id === job.keyID)
+    if (!key) return
+    try {
+      await imageStudioAPI.deleteTask(key.key, job.taskID)
+    } catch (error) {
+      appStore.showError(errorMessage(error, t('imageStudio.deleteHistoryFailed')))
+      return
+    }
+  }
+  jobs.value = jobs.value.filter((item) => item.localID !== job.localID)
+  if (preview.value?.job.localID === job.localID) closePreview()
 }
 
-function clearCompletedJobs() {
-  jobs.value = jobs.value.filter((job) => job.status === 'processing')
-  if (preview.value && preview.value.job.status !== 'processing') closePreview()
+async function clearCompletedJobs() {
+  clearingHistory.value = true
+  try {
+    await Promise.all(jobs.value.filter((job) => job.status !== 'processing').map((job) => removeJob(job)))
+  } finally {
+    clearingHistory.value = false
+  }
 }
 
 function jobStatusLabel(status: StudioJobStatus): string {
@@ -705,6 +789,7 @@ function handleEscape(event: KeyboardEvent) {
 
 watch(() => form.apiKeyId, () => {
   void validateSelectedKey()
+  void loadHistory()
 })
 
 watch(() => form.outputFormat, (format) => {
@@ -723,6 +808,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleEscape)
   modelRequestController?.abort()
+  historyRequestController?.abort()
   for (const controller of jobControllers.values()) controller.abort()
   jobControllers.clear()
   if (sourcePreviewURL.value) URL.revokeObjectURL(sourcePreviewURL.value)
