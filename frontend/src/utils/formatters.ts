@@ -8,11 +8,13 @@ export function formatCacheTokens(tokens: number): string {
 }
 
 /**
- * 自适应精度格式化倍率（确保小数值如 0.001 不被截断）
+ * 自适应精度格式化倍率，保留最少 2 位并显示额外有效小数。
  */
 export function formatMultiplier(val: number): string {
-  if (val >= 0.01) return val.toFixed(2)
-  if (val >= 0.001) return val.toFixed(3)
-  if (val >= 0.0001) return val.toFixed(4)
-  return val.toPrecision(2)
+  if (!Number.isFinite(val)) return '-'
+  if (val !== 0 && Math.abs(val) < 0.0001) return val.toPrecision(2)
+
+  const [integer, fraction = ''] = val.toFixed(4).split('.')
+  const significantFraction = fraction.replace(/0+$/, '')
+  return `${integer}.${significantFraction.padEnd(2, '0')}`
 }
