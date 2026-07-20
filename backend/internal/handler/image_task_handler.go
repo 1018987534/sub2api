@@ -115,6 +115,7 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		"task_id":    task.TaskID,
 		"object":     task.Object,
 		"status":     task.Status,
+		"n":          task.N,
 		"created_at": task.CreatedAt,
 		"expires_at": task.ExpiresAt,
 		"poll_url":   pollURL,
@@ -229,6 +230,7 @@ func (h *AsyncImageHandler) taskMetadata(c *gin.Context, platform string, body [
 			metadata.Size = parsed.Size
 			metadata.Quality = parsed.Quality
 			metadata.OutputFormat = parsed.OutputFormat
+			metadata.N = parsed.N
 			return metadata
 		}
 	}
@@ -237,12 +239,14 @@ func (h *AsyncImageHandler) taskMetadata(c *gin.Context, platform string, body [
 		Size         string `json:"size"`
 		Quality      string `json:"quality"`
 		OutputFormat string `json:"output_format"`
+		N            int    `json:"n"`
 	}
 	if json.Unmarshal(body, &payload) == nil {
 		metadata.Prompt = payload.Prompt
 		metadata.Size = payload.Size
 		metadata.Quality = payload.Quality
 		metadata.OutputFormat = payload.OutputFormat
+		metadata.N = payload.N
 	}
 	return metadata
 }

@@ -22,6 +22,8 @@ export interface ImageStudioOutput {
 
 export interface ImageStudioResponse {
   created?: number
+  requested_count?: number
+  completed_count?: number
   data?: Array<{
     url?: string
     b64_json?: string
@@ -39,6 +41,7 @@ export interface ImageStudioTask {
   size?: string
   quality?: string
   output_format?: string
+  n?: number
   status: 'processing' | 'completed' | 'failed' | string
   poll_url?: string
   http_status?: number

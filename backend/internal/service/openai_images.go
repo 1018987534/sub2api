@@ -13,6 +13,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"net/textproto"
 	"strconv"
 	"strings"
@@ -559,6 +560,20 @@ func (s *OpenAIGatewayService) ForwardImages(
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}
+	if shouldSplitOpenAIImagesRequest(parsed) {
+		return s.forwardOpenAIImagesIndependently(ctx, c, account, body, parsed, channelMappedModel)
+	}
+	return s.forwardOpenAIImagesOnce(ctx, c, account, body, parsed, channelMappedModel)
+}
+
+func (s *OpenAIGatewayService) forwardOpenAIImagesOnce(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	parsed *OpenAIImagesRequest,
+	channelMappedModel string,
+) (*OpenAIForwardResult, error) {
 	switch account.Type {
 	case AccountTypeAPIKey:
 		return s.forwardOpenAIImagesAPIKey(ctx, c, account, body, parsed, channelMappedModel)
@@ -567,6 +582,226 @@ func (s *OpenAIGatewayService) ForwardImages(
 	default:
 		return nil, fmt.Errorf("unsupported account type: %s", account.Type)
 	}
+}
+
+func shouldSplitOpenAIImagesRequest(parsed *OpenAIImagesRequest) bool {
+	return parsed != nil &&
+		!parsed.Stream &&
+		parsed.N > 1 && parsed.N <= 4 &&
+		IsGPTImageGenerationModel(parsed.Model)
+}
+
+func (s *OpenAIGatewayService) forwardOpenAIImagesIndependently(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	parsed *OpenAIImagesRequest,
+	channelMappedModel string,
+) (*OpenAIForwardResult, error) {
+	startedAt := time.Now()
+	var (
+		combinedResult *OpenAIForwardResult
+		combinedTop    map[string]json.RawMessage
+		combinedData   []json.RawMessage
+		combinedUsage  map[string]any
+		responseHeader http.Header
+		responseStatus = http.StatusOK
+	)
+
+	for outputIndex := 0; outputIndex < parsed.N; outputIndex++ {
+		independentBody, independentContentType, err := rewriteOpenAIImagesIndependentRequest(
+			body,
+			parsed.ContentType,
+			parsed.Prompt,
+			outputIndex,
+			parsed.N,
+		)
+		if err != nil {
+			return nil, err
+		}
+		independent := *parsed
+		independent.N = 1
+		independent.Prompt = buildOpenAIImagesStandalonePrompt(parsed.Prompt, outputIndex, parsed.N)
+		independent.ContentType = independentContentType
+		independent.Body = independentBody
+		if len(independentBody) > 0 {
+			sum := sha256.Sum256(independentBody)
+			independent.bodyHash = hex.EncodeToString(sum[:8])
+		}
+
+		captureCtx, recorder := newOpenAIImagesForwardCaptureContext(c, ctx, independentBody, independentContentType)
+		result, forwardErr := s.forwardOpenAIImagesOnce(ctx, captureCtx, account, independentBody, &independent, channelMappedModel)
+		capturedBody := bytes.TrimSpace(recorder.Body.Bytes())
+		if forwardErr != nil {
+			copyOpenAIImagesCapturedError(c, recorder, capturedBody)
+			return nil, forwardErr
+		}
+		if result == nil {
+			return nil, fmt.Errorf("independent image output %d returned no forwarding result", outputIndex+1)
+		}
+
+		responseTop, responseData, responseUsage, err := parseOpenAIImagesCapturedResponse(capturedBody)
+		if err != nil {
+			return nil, fmt.Errorf("independent image output %d: %w", outputIndex+1, err)
+		}
+		if len(responseData) == 0 {
+			return nil, fmt.Errorf("independent image output %d returned no image", outputIndex+1)
+		}
+		if combinedTop == nil {
+			combinedTop = responseTop
+			responseHeader = recorder.Header().Clone()
+			responseStatus = recorder.Code
+		}
+		combinedData = append(combinedData, responseData...)
+		combinedUsage = mergeOpenAIImagesUsageObjects(combinedUsage, responseUsage)
+		combinedResult = mergeOpenAIImagesForwardResults(combinedResult, result)
+	}
+
+	if combinedResult == nil || len(combinedData) == 0 {
+		return nil, fmt.Errorf("independent image generation returned no images")
+	}
+	combinedResult.ImageCount = len(combinedData)
+	combinedResult.Duration = time.Since(startedAt)
+
+	encodedData, err := json.Marshal(combinedData)
+	if err != nil {
+		return nil, fmt.Errorf("encode independent image outputs: %w", err)
+	}
+	combinedTop["data"] = encodedData
+	if len(combinedUsage) > 0 {
+		encodedUsage, err := json.Marshal(combinedUsage)
+		if err != nil {
+			return nil, fmt.Errorf("encode independent image usage: %w", err)
+		}
+		combinedTop["usage"] = encodedUsage
+	}
+	combinedTop["requested_count"], _ = json.Marshal(parsed.N)
+	combinedTop["completed_count"], _ = json.Marshal(len(combinedData))
+	responseBody, err := json.Marshal(combinedTop)
+	if err != nil {
+		return nil, fmt.Errorf("encode independent image response: %w", err)
+	}
+	responseheaders.WriteFilteredHeaders(c.Writer.Header(), responseHeader, s.responseHeaderFilter)
+	if responseStatus < http.StatusOK || responseStatus >= http.StatusMultipleChoices {
+		responseStatus = http.StatusOK
+	}
+	c.Data(responseStatus, "application/json; charset=utf-8", responseBody)
+	return combinedResult, nil
+}
+
+func newOpenAIImagesForwardCaptureContext(c *gin.Context, ctx context.Context, body []byte, contentType string) (*gin.Context, *httptest.ResponseRecorder) {
+	recorder := httptest.NewRecorder()
+	recorderCtx, _ := gin.CreateTestContext(recorder)
+	captureCtx := c.Copy()
+	captureCtx.Writer = recorderCtx.Writer
+	delete(captureCtx.Keys, openAIImagesJSONKeepaliveKey)
+	request := c.Request.Clone(ctx)
+	request.Body = io.NopCloser(bytes.NewReader(body))
+	request.ContentLength = int64(len(body))
+	request.Header = c.Request.Header.Clone()
+	if strings.TrimSpace(contentType) != "" {
+		request.Header.Set("Content-Type", contentType)
+	}
+	captureCtx.Request = request
+	return captureCtx, recorder
+}
+
+func copyOpenAIImagesCapturedError(c *gin.Context, recorder *httptest.ResponseRecorder, body []byte) {
+	if c == nil || recorder == nil || len(body) == 0 || recorder.Code < http.StatusBadRequest {
+		return
+	}
+	for key, values := range recorder.Header() {
+		for _, value := range values {
+			c.Writer.Header().Add(key, value)
+		}
+	}
+	c.Data(recorder.Code, recorder.Header().Get("Content-Type"), body)
+}
+
+func parseOpenAIImagesCapturedResponse(body []byte) (map[string]json.RawMessage, []json.RawMessage, map[string]any, error) {
+	if len(body) == 0 || !json.Valid(body) {
+		return nil, nil, nil, fmt.Errorf("upstream returned an invalid image response")
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return nil, nil, nil, fmt.Errorf("parse image response: %w", err)
+	}
+	var data []json.RawMessage
+	if err := json.Unmarshal(top["data"], &data); err != nil {
+		return nil, nil, nil, fmt.Errorf("parse image response data: %w", err)
+	}
+	var usage map[string]any
+	if raw := top["usage"]; len(raw) > 0 {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		_ = decoder.Decode(&usage)
+	}
+	delete(top, "data")
+	delete(top, "usage")
+	return top, data, usage, nil
+}
+
+func mergeOpenAIImagesUsageObjects(dst, src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[string]any, len(src))
+	}
+	for key, value := range src {
+		switch typed := value.(type) {
+		case json.Number:
+			current, _ := dst[key].(json.Number)
+			currentValue, _ := strconv.ParseInt(current.String(), 10, 64)
+			valueInt, err := strconv.ParseInt(typed.String(), 10, 64)
+			if err == nil {
+				dst[key] = json.Number(strconv.FormatInt(currentValue+valueInt, 10))
+			}
+		case map[string]any:
+			current, _ := dst[key].(map[string]any)
+			dst[key] = mergeOpenAIImagesUsageObjects(current, typed)
+		default:
+			if _, exists := dst[key]; !exists {
+				dst[key] = value
+			}
+		}
+	}
+	return dst
+}
+
+func mergeOpenAIImagesForwardResults(dst, src *OpenAIForwardResult) *OpenAIForwardResult {
+	if src == nil {
+		return dst
+	}
+	if dst == nil {
+		copy := *src
+		copy.ResponseHeaders = src.ResponseHeaders.Clone()
+		copy.ImageOutputSizes = append([]string(nil), src.ImageOutputSizes...)
+		copy.ImageSizeBreakdown = cloneImageSizeBreakdown(src.ImageSizeBreakdown)
+		return &copy
+	}
+	addOpenAIUsage(&dst.Usage, src.Usage)
+	dst.ImageCount += src.ImageCount
+	dst.ImageOutputSizes = append(dst.ImageOutputSizes, src.ImageOutputSizes...)
+	for size, count := range src.ImageSizeBreakdown {
+		if dst.ImageSizeBreakdown == nil {
+			dst.ImageSizeBreakdown = make(map[string]int)
+		}
+		dst.ImageSizeBreakdown[size] += count
+	}
+	return dst
+}
+
+func cloneImageSizeBreakdown(src map[string]int) map[string]int {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]int, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }
 
 func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
@@ -798,7 +1033,7 @@ func rewriteOpenAIImagesModel(body []byte, contentType string, model string) ([]
 	}
 	mediaType, _, err := mime.ParseMediaType(contentType)
 	if err == nil && strings.EqualFold(mediaType, "multipart/form-data") {
-		rewrittenBody, rewrittenType, rewriteErr := rewriteOpenAIImagesMultipartModel(body, contentType, model)
+		rewrittenBody, rewrittenType, rewriteErr := rewriteOpenAIImagesMultipartFields(body, contentType, []openAIImagesMultipartField{{name: "model", value: model}})
 		return rewrittenBody, rewrittenType, rewriteErr
 	}
 	rewritten, err := sjson.SetBytes(body, "model", model)
@@ -808,7 +1043,50 @@ func rewriteOpenAIImagesModel(body []byte, contentType string, model string) ([]
 	return rewritten, contentType, nil
 }
 
-func rewriteOpenAIImagesMultipartModel(body []byte, contentType string, model string) ([]byte, string, error) {
+// rewriteOpenAIImagesIndependentRequest turns one item in a multi-output image
+// request into a standalone upstream request. Each request asks for exactly one
+// image so the model cannot satisfy n by composing several scenes on one canvas.
+func rewriteOpenAIImagesIndependentRequest(body []byte, contentType, prompt string, outputIndex, outputCount int) ([]byte, string, error) {
+	if outputCount <= 1 {
+		return body, contentType, nil
+	}
+	if outputIndex < 0 || outputIndex >= outputCount {
+		return nil, "", fmt.Errorf("invalid independent image output index")
+	}
+	standalonePrompt := buildOpenAIImagesStandalonePrompt(prompt, outputIndex, outputCount)
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err == nil && strings.EqualFold(mediaType, "multipart/form-data") {
+		return rewriteOpenAIImagesMultipartFields(body, contentType, []openAIImagesMultipartField{
+			{name: "n", value: "1"},
+			{name: "prompt", value: standalonePrompt},
+		})
+	}
+	rewritten, err := sjson.SetBytes(body, "n", 1)
+	if err != nil {
+		return nil, "", fmt.Errorf("rewrite image request count: %w", err)
+	}
+	rewritten, err = sjson.SetBytes(rewritten, "prompt", standalonePrompt)
+	if err != nil {
+		return nil, "", fmt.Errorf("rewrite image request prompt: %w", err)
+	}
+	return rewritten, contentType, nil
+}
+
+func buildOpenAIImagesStandalonePrompt(prompt string, outputIndex, outputCount int) string {
+	return fmt.Sprintf(
+		"Create exactly one standalone image for output %d of %d. Do not create a collage, grid, contact sheet, split-screen, diptych, triptych, or multi-panel composition. If the request mentions multiple images, produce one independent variation of the requested subject in this output.\n\nOriginal request:\n%s",
+		outputIndex+1,
+		outputCount,
+		strings.TrimSpace(prompt),
+	)
+}
+
+type openAIImagesMultipartField struct {
+	name  string
+	value string
+}
+
+func rewriteOpenAIImagesMultipartFields(body []byte, contentType string, fields []openAIImagesMultipartField) ([]byte, string, error) {
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		return nil, "", fmt.Errorf("parse multipart content-type: %w", err)
@@ -821,7 +1099,10 @@ func rewriteOpenAIImagesMultipartModel(body []byte, contentType string, model st
 	reader := multipart.NewReader(bytes.NewReader(body), boundary)
 	var buffer bytes.Buffer
 	writer := multipart.NewWriter(&buffer)
-	modelWritten := false
+	pending := make(map[string]string, len(fields))
+	for _, field := range fields {
+		pending[field.name] = field.value
+	}
 
 	for {
 		part, err := reader.NextPart()
@@ -840,12 +1121,12 @@ func rewriteOpenAIImagesMultipartModel(body []byte, contentType string, model st
 			return nil, "", fmt.Errorf("create multipart part: %w", err)
 		}
 
-		if formName == "model" && part.FileName() == "" {
-			if _, err := target.Write([]byte(model)); err != nil {
+		if value, ok := pending[formName]; ok && part.FileName() == "" {
+			if _, err := target.Write([]byte(value)); err != nil {
 				_ = part.Close()
-				return nil, "", fmt.Errorf("rewrite multipart model: %w", err)
+				return nil, "", fmt.Errorf("rewrite multipart field %s: %w", formName, err)
 			}
-			modelWritten = true
+			delete(pending, formName)
 			_ = part.Close()
 			continue
 		}
@@ -856,10 +1137,15 @@ func rewriteOpenAIImagesMultipartModel(body []byte, contentType string, model st
 		_ = part.Close()
 	}
 
-	if !modelWritten {
-		if err := writer.WriteField("model", model); err != nil {
-			return nil, "", fmt.Errorf("append multipart model field: %w", err)
+	for _, field := range fields {
+		value, ok := pending[field.name]
+		if !ok {
+			continue
 		}
+		if err := writer.WriteField(field.name, value); err != nil {
+			return nil, "", fmt.Errorf("append multipart field %s: %w", field.name, err)
+		}
+		delete(pending, field.name)
 	}
 	if err := writer.Close(); err != nil {
 		return nil, "", fmt.Errorf("finalize multipart body: %w", err)

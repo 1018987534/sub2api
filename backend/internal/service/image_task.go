@@ -36,6 +36,7 @@ type ImageTaskMetadata struct {
 	Size         string
 	Quality      string
 	OutputFormat string
+	N            int
 }
 
 // ImageTaskRecord is the private Redis representation of an asynchronous image
@@ -49,6 +50,7 @@ type ImageTaskRecord struct {
 	Size         string          `json:"size,omitempty"`
 	Quality      string          `json:"quality,omitempty"`
 	OutputFormat string          `json:"output_format,omitempty"`
+	N            int             `json:"n,omitempty"`
 	Status       string          `json:"status"`
 	HTTPStatus   int             `json:"http_status,omitempty"`
 	Result       json.RawMessage `json:"result,omitempty"`
@@ -68,6 +70,7 @@ type ImageTask struct {
 	Size         string          `json:"size,omitempty"`
 	Quality      string          `json:"quality,omitempty"`
 	OutputFormat string          `json:"output_format,omitempty"`
+	N            int             `json:"n,omitempty"`
 	Status       string          `json:"status"`
 	HTTPStatus   int             `json:"http_status,omitempty"`
 	ImageURL     string          `json:"image_url,omitempty"`
@@ -149,6 +152,7 @@ func (s *ImageTaskService) Create(ctx context.Context, owner ImageTaskOwner, met
 		Size:         meta.Size,
 		Quality:      meta.Quality,
 		OutputFormat: meta.OutputFormat,
+		N:            meta.N,
 		Status:       ImageTaskStatusProcessing,
 		CreatedAt:    now.Unix(),
 		ExpiresAt:    now.Add(s.ttl).Unix(),
@@ -180,6 +184,9 @@ func normalizeImageTaskMetadata(values []ImageTaskMetadata) ImageTaskMetadata {
 	meta.OutputFormat = strings.ToLower(strings.TrimSpace(meta.OutputFormat))
 	if meta.OutputFormat == "" {
 		meta.OutputFormat = "png"
+	}
+	if meta.N <= 0 {
+		meta.N = 1
 	}
 	return meta
 }
@@ -310,6 +317,7 @@ func imageTaskToPublic(task *ImageTaskRecord) *ImageTask {
 		Size:         task.Size,
 		Quality:      task.Quality,
 		OutputFormat: task.OutputFormat,
+		N:            task.N,
 		Status:       task.Status,
 		HTTPStatus:   task.HTTPStatus,
 		ImageURL:     firstImageTaskURL(task.Result),

@@ -112,9 +112,11 @@ func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {
 		TaskID  string `json:"task_id"`
 		Status  string `json:"status"`
 		PollURL string `json:"poll_url"`
+		N       int    `json:"n"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &accepted))
 	require.Equal(t, service.ImageTaskStatusProcessing, accepted.Status)
+	require.Equal(t, 1, accepted.N)
 	require.Equal(t, "/v1/images/tasks/"+accepted.TaskID, accepted.PollURL)
 	require.Equal(t, accepted.PollURL, w.Header().Get("Location"))
 
@@ -141,6 +143,7 @@ func TestAsyncImageHandlerSubmitAndPoll(t *testing.T) {
 	require.Equal(t, http.StatusOK, listWriter.Code)
 	require.Contains(t, listWriter.Body.String(), accepted.TaskID)
 	require.Contains(t, listWriter.Body.String(), `"prompt":"cat"`)
+	require.Contains(t, listWriter.Body.String(), `"n":1`)
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, accepted.PollURL, nil)
 	deleteWriter := httptest.NewRecorder()

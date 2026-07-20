@@ -180,7 +180,9 @@
             <div class="flex min-h-16 items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700 sm:px-5">
               <div>
                 <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('imageStudio.results') }}</h3>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('imageStudio.historyCount', { count: historyItems.length }) }}</p>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400" data-test="history-summary">
+                  {{ t('imageStudio.historyCount', { tasks: historyTaskCount, images: historyImageCount }) }}
+                </p>
               </div>
               <button v-if="hasFinishedJobs" type="button" class="btn btn-secondary btn-sm" :disabled="clearingHistory" @click="clearCompletedJobs">
                 <Icon :name="clearingHistory ? 'refresh' : 'trash'" size="sm" :class="clearingHistory ? 'animate-spin' : ''" />
@@ -236,6 +238,14 @@
                       {{ jobStatusLabel(item.job.status) }}
                     </span>
 
+                    <span
+                      v-if="item.output && item.job.requestedCount > 1"
+                      class="absolute right-2 top-2 rounded-md bg-gray-900/80 px-1.5 py-1 text-[11px] font-semibold text-white shadow-sm"
+                      data-test="output-position"
+                    >
+                      {{ item.outputIndex + 1 }}/{{ item.job.requestedCount }}
+                    </span>
+
                     <div v-if="item.output" class="absolute bottom-2 right-2 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                       <button type="button" class="flex h-8 w-8 items-center justify-center rounded-md bg-white/95 text-gray-700 shadow-md hover:text-emerald-600 dark:bg-dark-800/95 dark:text-gray-200" :title="t('imageStudio.preview')" @click="openPreview(item.output, item.job, item.outputIndex)">
                         <Icon name="eye" size="sm" />
@@ -258,7 +268,7 @@
                         <button v-if="item.job.canReuse" type="button" class="btn-ghost btn-icon h-7 w-7" :title="t('imageStudio.reuse')" @click="reuseJob(item.job)">
                           <Icon name="edit" size="xs" />
                         </button>
-                        <button v-if="item.job.status !== 'processing'" type="button" class="btn-ghost btn-icon h-7 w-7 text-red-600 dark:text-red-400" :title="t('common.delete')" @click="removeJob(item.job)">
+                        <button v-if="item.job.status !== 'processing'" type="button" class="btn-ghost btn-icon h-7 w-7 text-red-600 dark:text-red-400" :title="t('imageStudio.deleteTask')" @click="removeJob(item.job)">
                           <Icon name="trash" size="xs" />
                         </button>
                       </div>
@@ -367,6 +377,7 @@ interface StudioJob {
   size: string
   quality: string
   outputFormat: string
+  requestedCount: number
   status: StudioJobStatus
   outputs: ImageStudioOutput[]
   error: string
@@ -446,6 +457,8 @@ const historyItems = computed<StudioHistoryItem[]>(() => jobs.value.flatMap((job
   }
   return [{ id: job.localID, job, outputIndex: 0 }]
 }))
+const historyTaskCount = computed(() => jobs.value.length)
+const historyImageCount = computed(() => jobs.value.reduce((count, job) => count + job.outputs.length, 0))
 const historyTotalPages = computed(() => Math.max(1, Math.ceil(historyItems.value.length / HISTORY_PAGE_SIZE)))
 const historyFromItem = computed(() => historyItems.value.length === 0 ? 0 : (historyPage.value - 1) * HISTORY_PAGE_SIZE + 1)
 const historyToItem = computed(() => Math.min(historyPage.value * HISTORY_PAGE_SIZE, historyItems.value.length))
@@ -557,6 +570,7 @@ async function loadHistory() {
 function historyTaskToJob(task: ImageStudioTask, keyID: number): StudioJob {
   const outputFormat = task.output_format || inferTaskOutputFormat(task) || 'png'
   const status: StudioJobStatus = task.status === 'completed' || task.status === 'failed' ? task.status : 'processing'
+  const outputs = status === 'completed' ? extractImageStudioOutputs(task.result, outputFormat) : []
   return {
     localID: `history_${task.task_id || task.id}`,
     taskID: task.task_id || task.id,
@@ -566,8 +580,9 @@ function historyTaskToJob(task: ImageStudioTask, keyID: number): StudioJob {
     size: task.size || '1024x1024',
     quality: task.quality || 'auto',
     outputFormat,
+    requestedCount: Math.max(1, task.n || outputs.length || 1),
     status,
-    outputs: status === 'completed' ? extractImageStudioOutputs(task.result, outputFormat) : [],
+    outputs,
     error: task.error?.message || '',
     createdAt: task.created_at ? task.created_at * 1000 : Date.now(),
     canReuse: Boolean(task.prompt?.trim()),
@@ -687,6 +702,7 @@ async function submitGeneration() {
     size: form.size,
     quality: form.quality,
     outputFormat: form.outputFormat,
+    requestedCount: form.count,
     status: 'processing',
     outputs: [],
     error: '',

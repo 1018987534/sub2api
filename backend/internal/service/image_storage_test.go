@@ -134,6 +134,35 @@ func TestImageTaskServiceCompleteOffloadsToStorage(t *testing.T) {
 	require.Len(t, storage.saved, 1)
 }
 
+func TestImageTaskServiceCompleteOffloadsEveryAggregatedOutput(t *testing.T) {
+	store := &imageTaskMemoryStore{}
+	storage := &fakeImageStorage{}
+	uploader := NewImageResultUploader(storage, "images/", 0, nil)
+	svc := NewImageTaskServiceWithUploader(store, uploader, time.Hour, time.Minute)
+
+	owner := ImageTaskOwner{UserID: 1, APIKeyID: 2}
+	created, err := svc.Create(context.Background(), owner, ImageTaskMetadata{N: 2})
+	require.NoError(t, err)
+	require.Equal(t, 2, created.N)
+
+	b64 := base64.StdEncoding.EncodeToString(pngBytes)
+	result := json.RawMessage(`{"data":[{"b64_json":"` + b64 + `"},{"b64_json":"` + b64 + `"}]}`)
+	require.NoError(t, svc.Complete(context.Background(), created.ID, http.StatusOK, result))
+
+	got, err := svc.Get(context.Background(), owner, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, got.N)
+	require.Len(t, storage.saved, 2)
+	require.Equal(t, "images/"+created.ID+"-0.png", storage.saved[0].key)
+	require.Equal(t, "images/"+created.ID+"-1.png", storage.saved[1].key)
+	var response struct {
+		Data []map[string]json.RawMessage `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(got.Result, &response))
+	require.Len(t, response.Data, 2)
+	require.NotContains(t, string(got.Result), "b64_json")
+}
+
 func TestImageTaskServiceCompleteOffloadFailureMarksFailed(t *testing.T) {
 	store := &imageTaskMemoryStore{}
 	storage := &fakeImageStorage{err: errors.New("bucket unreachable")}

@@ -47,7 +47,11 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string, params?: Record<string, unknown>) => params?.count === undefined ? key : `${key}:${params.count}`,
+      t: (key: string, params?: Record<string, unknown>) => {
+        if (params?.count !== undefined) return `${key}:${params.count}`
+        if (params?.tasks !== undefined && params?.images !== undefined) return `${key}:${params.tasks}:${params.images}`
+        return key
+      },
     }),
   }
 })
@@ -235,6 +239,7 @@ describe('ImageStudioView', () => {
       size: '1024x1024',
       quality: 'high',
       output_format: 'png',
+      n: 3,
       created_at: 1_721_430_000,
       result: {
         data: [
@@ -250,6 +255,8 @@ describe('ImageStudioView', () => {
 
     expect(wrapper.findAll('[data-test="history-panel"]')).toHaveLength(1)
     expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(3)
+    expect(wrapper.get('[data-test="history-summary"]').text()).toBe('imageStudio.historyCount:1:3')
+    expect(wrapper.findAll('[data-test="output-position"]').map((badge) => badge.text())).toEqual(['1/3', '2/3', '3/3'])
 
     const panel = wrapper.get('[data-test="history-panel"]')
     expect(panel.classes()).toEqual(expect.arrayContaining(['h-full', 'min-h-[680px]']))
