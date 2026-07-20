@@ -224,4 +224,42 @@ describe('ImageStudioView', () => {
 
     wrapper.unmount()
   })
+
+  it('renders multiple history images inside one large results panel', async () => {
+    mocks.listTasks.mockResolvedValue([{
+      id: 'imgtask_multi',
+      task_id: 'imgtask_multi',
+      status: 'completed',
+      mode: 'generate',
+      prompt: 'Three product concepts',
+      size: '1024x1024',
+      quality: 'high',
+      output_format: 'png',
+      created_at: 1_721_430_000,
+      result: {
+        data: [
+          { url: 'https://cdn.example.com/concept-1.png' },
+          { url: 'https://cdn.example.com/concept-2.png' },
+          { url: 'https://cdn.example.com/concept-3.png' },
+        ],
+      },
+    }])
+
+    const wrapper = mount(ImageStudioView, { global: globalOptions })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="history-panel"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-test="history-job"]')).toHaveLength(1)
+
+    const panel = wrapper.get('[data-test="history-panel"]')
+    const grid = panel.get('[data-test="job-output-grid"]')
+    expect(grid.classes()).toEqual(expect.arrayContaining(['sm:grid-cols-2', 'xl:grid-cols-3']))
+    expect(grid.findAll('img').map((image) => image.attributes('src'))).toEqual([
+      'https://cdn.example.com/concept-1.png',
+      'https://cdn.example.com/concept-2.png',
+      'https://cdn.example.com/concept-3.png',
+    ])
+
+    wrapper.unmount()
+  })
 })

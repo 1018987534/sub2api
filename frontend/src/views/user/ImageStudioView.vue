@@ -173,90 +173,105 @@
         </section>
 
         <section class="min-w-0" aria-live="polite">
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('imageStudio.results') }}</h3>
-              <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('imageStudio.historyCount', { count: jobs.length }) }}</p>
+          <div
+            class="flex min-h-[680px] w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800"
+            data-test="history-panel"
+          >
+            <div class="flex min-h-16 items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700 sm:px-5">
+              <div>
+                <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('imageStudio.results') }}</h3>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{{ t('imageStudio.historyCount', { count: jobs.length }) }}</p>
+              </div>
+              <button v-if="hasFinishedJobs" type="button" class="btn btn-secondary btn-sm" :disabled="clearingHistory" @click="clearCompletedJobs">
+                <Icon :name="clearingHistory ? 'refresh' : 'trash'" size="sm" :class="clearingHistory ? 'animate-spin' : ''" />
+                <span class="ml-1.5">{{ t('imageStudio.clearCompleted') }}</span>
+              </button>
             </div>
-            <button v-if="hasFinishedJobs" type="button" class="btn btn-secondary btn-sm" :disabled="clearingHistory" @click="clearCompletedJobs">
-              <Icon :name="clearingHistory ? 'refresh' : 'trash'" size="sm" :class="clearingHistory ? 'animate-spin' : ''" />
-              <span class="ml-1.5">{{ t('imageStudio.clearCompleted') }}</span>
-            </button>
-          </div>
 
-          <div v-if="loadingKeys || loadingHistory" class="flex min-h-[520px] items-center justify-center rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
-            <Icon name="refresh" size="lg" class="animate-spin text-emerald-600" />
-          </div>
+            <div v-if="loadingKeys || loadingHistory" class="flex min-h-[614px] flex-1 items-center justify-center">
+              <Icon name="refresh" size="lg" class="animate-spin text-emerald-600" />
+            </div>
 
-          <div v-else-if="imageKeys.length === 0" class="flex min-h-[520px] flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white px-6 text-center dark:border-dark-600 dark:bg-dark-800">
-            <Icon name="key" size="xl" class="text-gray-400" />
-            <h3 class="mt-4 text-base font-semibold text-gray-900 dark:text-white">{{ t('imageStudio.noImageKey') }}</h3>
-            <router-link to="/keys" class="btn btn-primary mt-5">{{ t('imageStudio.manageKeys') }}</router-link>
-          </div>
+            <div v-else-if="imageKeys.length === 0" class="flex min-h-[614px] flex-1 flex-col items-center justify-center px-6 text-center">
+              <Icon name="key" size="xl" class="text-gray-400" />
+              <h3 class="mt-4 text-base font-semibold text-gray-900 dark:text-white">{{ t('imageStudio.noImageKey') }}</h3>
+              <router-link to="/keys" class="btn btn-primary mt-5">{{ t('imageStudio.manageKeys') }}</router-link>
+            </div>
 
-          <div v-else-if="jobs.length === 0" class="flex min-h-[520px] flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 bg-white dark:border-dark-600 dark:bg-dark-800">
-            <Icon name="sparkles" size="xl" class="text-gray-400" />
-            <p class="mt-4 text-sm font-medium text-gray-600 dark:text-gray-300">{{ t('imageStudio.noResults') }}</p>
-          </div>
+            <div v-else-if="jobs.length === 0" class="flex min-h-[614px] flex-1 flex-col items-center justify-center">
+              <Icon name="sparkles" size="xl" class="text-gray-400" />
+              <p class="mt-4 text-sm font-medium text-gray-600 dark:text-gray-300">{{ t('imageStudio.noResults') }}</p>
+            </div>
 
-          <div v-else class="grid gap-4 2xl:grid-cols-2" data-test="job-list">
-            <article v-for="job in jobs" :key="job.localID" class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800">
-              <div class="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700">
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="h-2 w-2 rounded-full" :class="jobStatusDot(job.status)" />
-                    <span class="text-sm font-medium text-gray-900 dark:text-white">{{ jobStatusLabel(job.status) }}</span>
-                    <span class="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500 dark:bg-dark-700 dark:text-gray-300">{{ job.mode === 'edit' ? t('imageStudio.editMode') : t('imageStudio.generateMode') }}</span>
+            <div v-else class="flex flex-1 flex-col divide-y divide-gray-200 dark:divide-dark-700" data-test="job-list">
+              <article v-for="job in jobs" :key="job.localID" data-test="history-job">
+                <div class="flex items-start justify-between gap-3 px-4 py-3 sm:px-5">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="h-2 w-2 rounded-full" :class="jobStatusDot(job.status)" />
+                      <span class="text-sm font-medium text-gray-900 dark:text-white">{{ jobStatusLabel(job.status) }}</span>
+                      <span class="rounded-md bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-500 dark:bg-dark-700 dark:text-gray-300">{{ job.mode === 'edit' ? t('imageStudio.editMode') : t('imageStudio.generateMode') }}</span>
+                    </div>
+                    <p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" :title="job.prompt">{{ job.prompt }}</p>
                   </div>
-                  <p class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400" :title="job.prompt">{{ job.prompt }}</p>
-                </div>
-                <div class="flex flex-shrink-0 items-center gap-1">
-                  <button v-if="job.canReuse" type="button" class="btn-ghost btn-icon" :title="t('imageStudio.reuse')" @click="reuseJob(job)">
-                    <Icon name="edit" size="sm" />
-                  </button>
-                  <button v-if="job.status !== 'processing'" type="button" class="btn-ghost btn-icon text-red-600 dark:text-red-400" :title="t('common.delete')" @click="removeJob(job)">
-                    <Icon name="trash" size="sm" />
-                  </button>
-                </div>
-              </div>
-
-              <div v-if="job.status === 'processing'" class="grid min-h-64 place-items-center bg-gray-50 p-6 dark:bg-dark-900/50">
-                <div class="text-center">
-                  <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
-                    <Icon name="sparkles" size="lg" class="animate-pulse text-emerald-600 dark:text-emerald-400" />
-                  </div>
-                  <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">{{ t('imageStudio.processing') }}</p>
-                </div>
-              </div>
-
-              <div v-else-if="job.status === 'failed'" class="grid min-h-64 place-items-center bg-red-50/50 p-6 dark:bg-red-950/10">
-                <div class="max-w-md text-center">
-                  <Icon name="exclamationCircle" size="lg" class="mx-auto text-red-500" />
-                  <p class="mt-3 text-sm font-medium text-red-700 dark:text-red-300">{{ job.error || t('imageStudio.failed') }}</p>
-                </div>
-              </div>
-
-              <div v-else class="grid gap-px bg-gray-200 dark:bg-dark-700" :class="job.outputs.length > 1 ? 'grid-cols-2' : 'grid-cols-1'">
-                <div v-for="(output, outputIndex) in job.outputs" :key="`${job.localID}-${outputIndex}`" class="group relative min-h-64 bg-gray-50 dark:bg-dark-900">
-                  <button type="button" class="block h-full w-full" @click="openPreview(output, job)">
-                    <img :src="displayImageURL(output.url)" :alt="job.prompt" class="h-full min-h-64 w-full object-contain" loading="lazy" />
-                  </button>
-                  <div class="absolute bottom-3 right-3 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                    <button type="button" class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/95 text-gray-700 shadow-md hover:text-emerald-600 dark:bg-dark-800/95 dark:text-gray-200" :title="t('imageStudio.preview')" @click="openPreview(output, job)">
-                      <Icon name="eye" size="sm" />
+                  <div class="flex flex-shrink-0 items-center gap-1">
+                    <button v-if="job.canReuse" type="button" class="btn-ghost btn-icon" :title="t('imageStudio.reuse')" @click="reuseJob(job)">
+                      <Icon name="edit" size="sm" />
                     </button>
-                    <button type="button" class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/95 text-gray-700 shadow-md hover:text-emerald-600 dark:bg-dark-800/95 dark:text-gray-200" :title="t('imageStudio.download')" @click="downloadOutput(output, job, outputIndex)">
-                      <Icon name="download" size="sm" />
+                    <button v-if="job.status !== 'processing'" type="button" class="btn-ghost btn-icon text-red-600 dark:text-red-400" :title="t('common.delete')" @click="removeJob(job)">
+                      <Icon name="trash" size="sm" />
                     </button>
                   </div>
                 </div>
-              </div>
 
-              <div class="flex items-center justify-between px-4 py-2 text-xs text-gray-500 dark:text-gray-400">
-                <span>{{ formatJobTime(job.createdAt) }}</span>
-                <span>{{ job.size }} · {{ job.quality }} · {{ job.outputFormat.toUpperCase() }}</span>
-              </div>
-            </article>
+                <div v-if="job.status === 'processing'" class="grid min-h-[420px] place-items-center border-t border-gray-100 bg-gray-50 p-6 dark:border-dark-700 dark:bg-dark-900/50">
+                  <div class="text-center">
+                    <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+                      <Icon name="sparkles" size="lg" class="animate-pulse text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                    <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">{{ t('imageStudio.processing') }}</p>
+                  </div>
+                </div>
+
+                <div v-else-if="job.status === 'failed'" class="grid min-h-[320px] place-items-center border-t border-gray-100 bg-red-50/50 p-6 dark:border-dark-700 dark:bg-red-950/10">
+                  <div class="max-w-md text-center">
+                    <Icon name="exclamationCircle" size="lg" class="mx-auto text-red-500" />
+                    <p class="mt-3 text-sm font-medium text-red-700 dark:text-red-300">{{ job.error || t('imageStudio.failed') }}</p>
+                  </div>
+                </div>
+
+                <div
+                  v-else
+                  class="grid grid-cols-1 gap-3 border-t border-gray-100 bg-gray-50 p-3 dark:border-dark-700 dark:bg-dark-900/50 sm:p-4"
+                  :class="job.outputs.length > 1 ? 'sm:grid-cols-2 xl:grid-cols-3' : ''"
+                  data-test="job-output-grid"
+                >
+                  <div
+                    v-for="(output, outputIndex) in job.outputs"
+                    :key="`${job.localID}-${outputIndex}`"
+                    class="group relative overflow-hidden rounded-md border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900"
+                    :class="jobImageAspectClass(job.size)"
+                  >
+                    <button type="button" class="block h-full w-full" @click="openPreview(output, job)">
+                      <img :src="displayImageURL(output.url)" :alt="job.prompt" class="h-full w-full object-contain" loading="lazy" />
+                    </button>
+                    <div class="absolute bottom-3 right-3 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                      <button type="button" class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/95 text-gray-700 shadow-md hover:text-emerald-600 dark:bg-dark-800/95 dark:text-gray-200" :title="t('imageStudio.preview')" @click="openPreview(output, job)">
+                        <Icon name="eye" size="sm" />
+                      </button>
+                      <button type="button" class="flex h-9 w-9 items-center justify-center rounded-lg bg-white/95 text-gray-700 shadow-md hover:text-emerald-600 dark:bg-dark-800/95 dark:text-gray-200" :title="t('imageStudio.download')" @click="downloadOutput(output, job, outputIndex)">
+                        <Icon name="download" size="sm" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex items-center justify-between gap-3 border-t border-gray-100 px-4 py-2 text-xs text-gray-500 dark:border-dark-700 dark:text-gray-400 sm:px-5">
+                  <span>{{ formatJobTime(job.createdAt) }}</span>
+                  <span class="text-right">{{ job.size }} · {{ job.quality }} · {{ job.outputFormat.toUpperCase() }}</span>
+                </div>
+              </article>
+            </div>
           </div>
         </section>
       </div>
@@ -711,6 +726,12 @@ function errorMessage(error: unknown, fallback: string): string {
 
 function displayImageURL(url: string): string {
   return sanitizeUrl(url, { allowRelative: true, allowDataUrl: true })
+}
+
+function jobImageAspectClass(size: string): string {
+  if (size === '1536x1024') return 'aspect-[3/2]'
+  if (size === '1024x1536') return 'aspect-[2/3]'
+  return 'aspect-square'
 }
 
 function openPreview(output: ImageStudioOutput, job: StudioJob, index = job.outputs.indexOf(output)) {
