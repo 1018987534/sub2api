@@ -30,7 +30,7 @@
     </div>
 
     <!-- Navigation -->
-    <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
+    <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide" @scroll.passive="handleSidebarScroll">
       <!-- Admin View: Admin menu first, then personal menu -->
       <template v-if="isAdmin">
         <!-- Admin Section -->
@@ -248,6 +248,7 @@ const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
+const lastKnownSidebarScrollTop = ref(appStore.sidebarScrollTop)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
 const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
@@ -961,17 +962,23 @@ watch(
 
 function restoreSidebarScrollPosition() {
   if (appStore.sidebarScrollTop <= 0 || !sidebarNavRef.value) return
+  const scrollTop = appStore.sidebarScrollTop
   void nextTick(() => {
     if (sidebarNavRef.value) {
-      sidebarNavRef.value.scrollTop = appStore.sidebarScrollTop
+      sidebarNavRef.value.scrollTop = scrollTop
+      lastKnownSidebarScrollTop.value = scrollTop
     }
   })
 }
 
+function handleSidebarScroll(event: Event) {
+  const scrollTop = (event.currentTarget as HTMLElement).scrollTop
+  lastKnownSidebarScrollTop.value = scrollTop
+  appStore.sidebarScrollTop = scrollTop
+}
+
 function persistSidebarScrollPosition() {
-  if (sidebarNavRef.value) {
-    appStore.sidebarScrollTop = sidebarNavRef.value.scrollTop
-  }
+  appStore.sidebarScrollTop = lastKnownSidebarScrollTop.value
 }
 
 onMounted(() => {
@@ -982,8 +989,8 @@ onMounted(() => {
   restoreSidebarScrollPosition()
 })
 
-// ImageStudioView is kept alive together with its layout. Persist and restore
-// the nested sidebar when that cached route is deactivated or activated.
+// ImageStudioView is kept alive together with its layout. The DOM can report
+// scrollTop=0 after deactivation, so persist the last value captured by scroll.
 onActivated(restoreSidebarScrollPosition)
 onDeactivated(persistSidebarScrollPosition)
 onBeforeUnmount(persistSidebarScrollPosition)

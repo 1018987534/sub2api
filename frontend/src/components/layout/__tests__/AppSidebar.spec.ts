@@ -29,6 +29,12 @@ describe('AppSidebar scroll position persistence', () => {
     expect(componentSource).toContain("const sidebarNavRef = ref<HTMLElement | null>(null)")
   })
 
+  it('persists the latest position while the sidebar is scrolling', () => {
+    expect(componentSource).toContain('@scroll.passive="handleSidebarScroll"')
+    expect(componentSource).toContain('lastKnownSidebarScrollTop.value = scrollTop')
+    expect(componentSource).toContain('appStore.sidebarScrollTop = scrollTop')
+  })
+
   it('saves scroll position on beforeUnmount', () => {
     expect(componentSource).toContain('onBeforeUnmount')
     expect(componentSource).toContain('appStore.sidebarScrollTop')
@@ -45,6 +51,7 @@ describe('AppSidebar scroll position persistence', () => {
     expect(componentSource).toContain('onActivated(restoreSidebarScrollPosition)')
     expect(componentSource).toContain('onDeactivated(persistSidebarScrollPosition)')
     expect(componentSource).toContain('onBeforeUnmount(persistSidebarScrollPosition)')
+    expect(componentSource).toContain('appStore.sidebarScrollTop = lastKnownSidebarScrollTop.value')
   })
 })
 
