@@ -55,9 +55,20 @@ describe('AppSidebar header styles', () => {
 })
 
 describe('AppSidebar image studio access', () => {
-  it('shows the image studio item to every authenticated user', () => {
-    expect(componentSource).toContain("{ path: '/image-studio', label: t('nav.imageStudio'), icon: BatchImageIcon }")
+  it('shows image studio below profile and before custom recharge menus', () => {
+    const profileIndex = componentSource.indexOf("{ path: '/profile', label: t('nav.profile'), icon: UserIcon }")
+    const imageStudioIndex = componentSource.indexOf("{ path: '/image-studio', label: t('nav.imageStudio'), icon: ImageIcon }")
+    const customMenuIndex = componentSource.indexOf('...customMenuItemsForUser.value.map')
+
+    expect(profileIndex).toBeGreaterThan(-1)
+    expect(imageStudioIndex).toBeGreaterThan(profileIndex)
+    expect(customMenuIndex).toBeGreaterThan(imageStudioIndex)
     expect(componentSource).not.toContain('flagImageStudioPreview')
     expect(componentSource).not.toContain('canAccessImageStudioPreview')
+  })
+
+  it('uses a dedicated image icon instead of the batch camera icon', () => {
+    expect(componentSource).toContain('const ImageIcon = {')
+    expect(componentSource).toContain("{ path: '/image-studio', label: t('nav.imageStudio'), icon: ImageIcon }")
   })
 })
