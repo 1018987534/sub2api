@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import type { ApiKey, Group } from '@/types'
+import type { ApiKey, Group, User } from '@/types'
 import { IMAGE_STUDIO_MODEL } from '@/api/imageStudio'
+import { useAuthStore } from '@/stores/auth'
 import ImageStudioView from '../ImageStudioView.vue'
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +42,12 @@ vi.mock('@/stores/app', () => ({
     showSuccess: mocks.showSuccess,
   }),
 }))
+
+vi.mock('@/stores/auth', async () => {
+  const { reactive } = await vi.importActual<typeof import('vue')>('vue')
+  const authStore = reactive<{ user: User | null }>({ user: { id: 1 } as User })
+  return { useAuthStore: () => authStore }
+})
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -99,10 +106,10 @@ function makeGroup(overrides: Partial<Group> = {}): Group {
   }
 }
 
-function makeKey(id: number, group: Group): ApiKey {
+function makeKey(id: number, group: Group, userID = 1): ApiKey {
   return {
     id,
-    user_id: 1,
+    user_id: userID,
     key: `sk-key-${id}`,
     name: `key-${id}`,
     group_id: group.id,
@@ -146,6 +153,7 @@ describe('ImageStudioView', () => {
   beforeEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+    useAuthStore().user = { id: 1 } as User
 
     const imageKey = makeKey(1, makeGroup())
     const textKey = makeKey(2, makeGroup({ id: 22, name: 'Text Group', allow_image_generation: false }))
@@ -302,6 +310,46 @@ describe('ImageStudioView', () => {
 
     expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(1)
     expect(wrapper.findAll('[data-test="history-grid"] img').map((image) => image.attributes('src'))).toEqual(['https://cdn.example.com/page-11.png'])
+
+    wrapper.unmount()
+  })
+
+  it('clears cached keys and history before loading a different user session', async () => {
+    const authStore = useAuthStore()
+    const oldKey = makeKey(1, makeGroup(), 1)
+    const newKey = makeKey(8, makeGroup({ id: 18, name: 'New Image Group' }), 8)
+    type KeyListResponse = { items: ApiKey[]; total: number; page: number; page_size: number; pages: number }
+    let resolveNewKeys!: (value: KeyListResponse) => void
+    const newKeys = new Promise<KeyListResponse>((resolve) => { resolveNewKeys = resolve })
+
+    mocks.listKeys.mockImplementation(() => {
+      if (authStore.user?.id === 8) return newKeys
+      return Promise.resolve({ items: [oldKey], total: 1, page: 1, page_size: 100, pages: 1 })
+    })
+    mocks.listTasks.mockImplementation((apiKey: string) => Promise.resolve(apiKey === oldKey.key ? [{
+      id: 'imgtask_old_owner',
+      task_id: 'imgtask_old_owner',
+      status: 'completed',
+      prompt: 'Old owner private image',
+      result: { data: [{ url: 'https://cdn.example.com/old-owner.png' }] },
+    }] : []))
+
+    const wrapper = mount(ImageStudioView, { global: globalOptions })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Old owner private image')
+    expect(wrapper.find('[data-test="api-key-select"]').text()).toContain('key-1')
+
+    authStore.user = { id: 8 } as User
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).not.toContain('Old owner private image')
+    expect(wrapper.find('[data-test="api-key-select"]').text()).not.toContain('key-1')
+    expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(0)
+
+    resolveNewKeys({ items: [newKey], total: 1, page: 1, page_size: 100, pages: 1 })
+    await flushPromises()
+    expect(wrapper.find('[data-test="api-key-select"]').text()).toContain('key-8 · New Image Group')
+    expect(mocks.listTasks).toHaveBeenCalledWith(newKey.key, 50, expect.any(AbortSignal))
 
     wrapper.unmount()
   })

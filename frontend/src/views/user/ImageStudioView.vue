@@ -346,7 +346,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -361,6 +361,7 @@ import imageStudioAPI, {
   type ImageStudioTask,
 } from '@/api/imageStudio'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { sanitizeUrl } from '@/utils/url'
 import type { ApiKey } from '@/types'
 
@@ -405,18 +406,23 @@ const HISTORY_PAGE_SIZE = 10
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 
-const form = reactive({
-  mode: 'generate' as ImageStudioMode,
-  apiKeyId: 0,
-  prompt: '',
-  size: '1024x1024',
-  count: 1,
-  quality: 'auto',
-  background: 'auto',
-  outputFormat: 'png',
-  inputFidelity: 'high',
-})
+function createDefaultForm() {
+  return {
+    mode: 'generate' as ImageStudioMode,
+    apiKeyId: 0,
+    prompt: '',
+    size: '1024x1024',
+    count: 1,
+    quality: 'auto',
+    background: 'auto',
+    outputFormat: 'png',
+    inputFidelity: 'high',
+  }
+}
+
+const form = reactive(createDefaultForm())
 
 const imageKeys = ref<ApiKey[]>([])
 const loadingKeys = ref(false)
@@ -436,6 +442,9 @@ const preview = ref<PreviewState | null>(null)
 let modelRequestController: AbortController | null = null
 let historyRequestController: AbortController | null = null
 const jobControllers = new Map<string, AbortController>()
+let sessionRevision = 0
+let loadingOwnerUserID = 0
+let loadedOwnerUserID = 0
 
 const selectedKey = computed(() => imageKeys.value.find((key) => key.id === form.apiKeyId) || null)
 const canSubmit = computed(() => Boolean(
@@ -502,7 +511,71 @@ function isImageStudioKey(key: ApiKey): boolean {
     key.group.allow_image_generation === true
 }
 
-async function loadKeys() {
+function currentUserID(): number {
+  return authStore.user?.id || 0
+}
+
+function isCurrentSession(userID: number, revision: number): boolean {
+  return userID > 0 && currentUserID() === userID && sessionRevision === revision
+}
+
+function abortImageStudioRequests() {
+  modelRequestController?.abort()
+  modelRequestController = null
+  historyRequestController?.abort()
+  historyRequestController = null
+  for (const controller of jobControllers.values()) controller.abort()
+  jobControllers.clear()
+}
+
+function resetImageStudioSession() {
+  sessionRevision++
+  abortImageStudioRequests()
+
+  if (sourcePreviewURL.value) URL.revokeObjectURL(sourcePreviewURL.value)
+  sourcePreviewURL.value = ''
+  sourceImage.value = null
+  maskImage.value = null
+  preview.value = null
+  imageKeys.value = []
+  jobs.value = []
+  historyPage.value = 1
+  Object.assign(form, createDefaultForm())
+
+  loadingKeys.value = false
+  loadingHistory.value = false
+  clearingHistory.value = false
+  submitting.value = false
+  modelLoading.value = false
+  modelSupported.value = null
+  modelError.value = ''
+  loadingOwnerUserID = 0
+  loadedOwnerUserID = 0
+}
+
+function synchronizeImageStudioOwner() {
+  const userID = currentUserID()
+  if (userID <= 0) {
+    resetImageStudioSession()
+    return
+  }
+  if (loadedOwnerUserID === userID || loadingOwnerUserID === userID) return
+
+  resetImageStudioSession()
+  void loadKeysForUser(userID, sessionRevision)
+}
+
+function loadKeys() {
+  const userID = currentUserID()
+  if (userID <= 0) {
+    resetImageStudioSession()
+    return Promise.resolve()
+  }
+  return loadKeysForUser(userID, sessionRevision)
+}
+
+async function loadKeysForUser(userID: number, revision: number) {
+  loadingOwnerUserID = userID
   loadingKeys.value = true
   try {
     const keys: ApiKey[] = []
@@ -510,21 +583,29 @@ async function loadKeys() {
     let pages = 1
     do {
       const response = await keysAPI.list(page, 100, { status: 'active', sort_by: 'created_at', sort_order: 'desc' })
+      if (!isCurrentSession(userID, revision)) return
       keys.push(...response.items)
       pages = Math.max(1, response.pages || 1)
       page++
     } while (page <= pages)
 
+    if (!isCurrentSession(userID, revision)) return
     imageKeys.value = keys.filter(isImageStudioKey)
+    loadedOwnerUserID = userID
     if (!imageKeys.value.some((key) => key.id === form.apiKeyId)) {
       form.apiKeyId = imageKeys.value[0]?.id || 0
     } else {
       await Promise.all([validateSelectedKey(), loadHistory()])
     }
   } catch (error) {
-    appStore.showError(errorMessage(error, t('imageStudio.loadKeysFailed')))
+    if (isCurrentSession(userID, revision)) {
+      appStore.showError(errorMessage(error, t('imageStudio.loadKeysFailed')))
+    }
   } finally {
-    loadingKeys.value = false
+    if (isCurrentSession(userID, revision)) {
+      loadingKeys.value = false
+      if (loadingOwnerUserID === userID) loadingOwnerUserID = 0
+    }
   }
 }
 
@@ -693,6 +774,9 @@ function buildRequestBody(): ImageStudioGenerationPayload | FormData {
 async function submitGeneration() {
   const key = selectedKey.value
   if (!key || !canSubmit.value) return
+  const ownerUserID = currentUserID()
+  const revision = sessionRevision
+  if (!isCurrentSession(ownerUserID, revision)) return
 
   const job = reactive<StudioJob>({
     localID: `studio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -719,9 +803,11 @@ async function submitGeneration() {
     let task: ImageStudioTask
     try {
       task = await imageStudioAPI.submitTask(key.key, form.mode, buildRequestBody(), controller.signal)
+      if (!isCurrentSession(ownerUserID, revision)) return
     } catch (error) {
       if (!isAsyncImageUnavailable(error)) throw error
       const response = await imageStudioAPI.generateSync(key.key, form.mode, buildRequestBody(), controller.signal)
+      if (!isCurrentSession(ownerUserID, revision)) return
       completeJob(job, extractImageStudioOutputs(response, form.outputFormat))
       jobControllers.delete(job.localID)
       return
@@ -738,7 +824,7 @@ async function submitGeneration() {
       jobControllers.delete(job.localID)
       return
     }
-    void monitorTask(job, key, controller)
+    void monitorTask(job, key, controller, ownerUserID, revision)
   } catch (error) {
     if (!controller.signal.aborted) failJob(job, errorMessage(error, t('imageStudio.failed')))
     jobControllers.delete(job.localID)
@@ -747,12 +833,13 @@ async function submitGeneration() {
   }
 }
 
-async function monitorTask(job: StudioJob, key: ApiKey, controller: AbortController) {
+async function monitorTask(job: StudioJob, key: ApiKey, controller: AbortController, ownerUserID = currentUserID(), revision = sessionRevision) {
   try {
-    while (!controller.signal.aborted && job.status === 'processing') {
+    while (!controller.signal.aborted && isCurrentSession(ownerUserID, revision) && job.status === 'processing') {
       await sleep(POLL_INTERVAL_MS, controller.signal)
       if (!job.taskID) throw new Error(t('imageStudio.taskMissing'))
       const task = await imageStudioAPI.getTask(key.key, job.taskID, controller.signal)
+      if (!isCurrentSession(ownerUserID, revision)) return
       if (task.status === 'completed') {
         completeJob(job, extractImageStudioOutputs(task.result, job.outputFormat))
         return
@@ -886,6 +973,12 @@ function handleEscape(event: KeyboardEvent) {
   if (event.key === 'Escape') closePreview()
 }
 
+watch(
+  () => authStore.user?.id || 0,
+  () => synchronizeImageStudioOwner(),
+  { flush: 'sync' },
+)
+
 watch(() => form.apiKeyId, () => {
   void validateSelectedKey()
   void loadHistory()
@@ -905,15 +998,14 @@ watch(() => historyItems.value.length, () => {
 
 onMounted(() => {
   document.addEventListener('keydown', handleEscape)
-  void loadKeys()
+  synchronizeImageStudioOwner()
 })
+
+onActivated(synchronizeImageStudioOwner)
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleEscape)
-  modelRequestController?.abort()
-  historyRequestController?.abort()
-  for (const controller of jobControllers.values()) controller.abort()
-  jobControllers.clear()
+  abortImageStudioRequests()
   if (sourcePreviewURL.value) URL.revokeObjectURL(sourcePreviewURL.value)
 })
 </script>
