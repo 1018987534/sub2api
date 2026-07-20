@@ -138,7 +138,11 @@ onMounted(async () => {
 
 <template>
   <NavigationProgress />
-  <RouterView />
+  <RouterView v-slot="{ Component }">
+    <KeepAlive include="ImageStudioView">
+      <component :is="Component" />
+    </KeepAlive>
+  </RouterView>
   <Toast />
   <AnnouncementPopup />
   <AdminComplianceDialog />

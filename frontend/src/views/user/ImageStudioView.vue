@@ -304,6 +304,8 @@ import { useAppStore } from '@/stores/app'
 import { sanitizeUrl } from '@/utils/url'
 import type { ApiKey } from '@/types'
 
+defineOptions({ name: 'ImageStudioView' })
+
 type StudioJobStatus = 'processing' | 'completed' | 'failed'
 
 interface StudioJob {
