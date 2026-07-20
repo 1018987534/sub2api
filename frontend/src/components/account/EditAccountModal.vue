@@ -1207,6 +1207,58 @@
         </div>
       </div>
 
+      <!-- Periodic scheduling pause -->
+      <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
+        <div class="flex items-center justify-between gap-4">
+          <label class="input-label mb-0">{{ t('admin.accounts.periodicSchedulePause.title') }}</label>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="periodicSchedulePauseEnabled"
+            data-testid="periodic-schedule-pause-toggle"
+            @click="periodicSchedulePauseEnabled = !periodicSchedulePauseEnabled"
+            :class="[
+              'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+              periodicSchedulePauseEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+            ]"
+          >
+            <span
+              :class="[
+                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                periodicSchedulePauseEnabled ? 'translate-x-5' : 'translate-x-0'
+              ]"
+            />
+          </button>
+        </div>
+
+        <div v-if="periodicSchedulePauseEnabled" class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.periodicSchedulePause.runMinutes') }}</label>
+            <input
+              v-model.number="periodicScheduleRunMinutes"
+              data-testid="periodic-schedule-run-minutes"
+              type="number"
+              min="1"
+              max="10080"
+              step="1"
+              class="input"
+            />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.periodicSchedulePause.pauseMinutes') }}</label>
+            <input
+              v-model.number="periodicSchedulePauseMinutes"
+              data-testid="periodic-schedule-pause-minutes"
+              type="number"
+              min="1"
+              max="10080"
+              step="1"
+              class="input"
+            />
+          </div>
+        </div>
+      </div>
+
       <!-- Temp Unschedulable Rules -->
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4">
         <div class="mb-3 flex items-center justify-between">
@@ -2850,6 +2902,9 @@ const grokOAuthBaseUrl = ref('')
 
 const interceptWarmupRequests = ref(false)
 const autoPauseOnExpired = ref(false)
+const periodicSchedulePauseEnabled = ref(false)
+const periodicScheduleRunMinutes = ref<number | null>(30)
+const periodicSchedulePauseMinutes = ref<number | null>(5)
 const autoPause5hThreshold = ref<number | null>(null)
 const autoPause7dThreshold = ref<number | null>(null)
 const autoPause5hDisabled = ref(false)
@@ -3319,6 +3374,14 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   const credentials = newAccount.credentials as Record<string, unknown> | undefined
   interceptWarmupRequests.value = credentials?.intercept_warmup_requests === true
   autoPauseOnExpired.value = newAccount.auto_pause_on_expired === true
+  const periodicSchedulePause = newAccount.periodic_schedule_pause
+  periodicSchedulePauseEnabled.value = periodicSchedulePause?.enabled === true
+  periodicScheduleRunMinutes.value = periodicSchedulePause?.enabled
+    ? periodicSchedulePause.run_minutes
+    : 30
+  periodicSchedulePauseMinutes.value = periodicSchedulePause?.enabled
+    ? periodicSchedulePause.pause_minutes
+    : 5
   editVertexProjectId.value = ''
   editVertexClientEmail.value = ''
   editVertexLocation.value = 'us-central1'
@@ -4177,6 +4240,21 @@ const handleSubmit = async () => {
       updatePayload.load_factor = 0
     }
     updatePayload.auto_pause_on_expired = autoPauseOnExpired.value
+    if (periodicSchedulePauseEnabled.value) {
+      const runMinutes = Number(periodicScheduleRunMinutes.value)
+      const pauseMinutes = Number(periodicSchedulePauseMinutes.value)
+      const validRun = Number.isInteger(runMinutes) && runMinutes >= 1 && runMinutes <= 10080
+      const validPause = Number.isInteger(pauseMinutes) && pauseMinutes >= 1 && pauseMinutes <= 10080
+      if (!validRun || !validPause) {
+        appStore.showError(t('admin.accounts.periodicSchedulePause.invalid'))
+        return
+      }
+      updatePayload.periodic_schedule_run_minutes = runMinutes
+      updatePayload.periodic_schedule_pause_minutes = pauseMinutes
+    } else {
+      updatePayload.periodic_schedule_run_minutes = 0
+      updatePayload.periodic_schedule_pause_minutes = 0
+    }
 
     // For apikey type, handle credentials update
     if (props.account.type === 'apikey') {

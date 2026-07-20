@@ -134,6 +134,8 @@ export default {
         rateLimited: 'Rate Limited',
         overloaded: 'Overloaded',
         tempUnschedulable: 'Temp Unschedulable',
+        periodicPaused: 'Periodic Pause',
+        periodicPausedUntil: 'Periodic pause active; scheduling resumes at {time}',
         quotaExceeded: 'Quota Exceeded',
         unschedulable: 'Unschedulable',
         rateLimitedUntil: 'Rate limited and removed from scheduling. Auto resumes at {time}',
@@ -299,6 +301,12 @@ export default {
           unavailableLabel: '503 Unavailable',
           unavailableDesc: 'Unavailable - pause 30 minutes'
         }
+      },
+      periodicSchedulePause: {
+        title: 'Periodic Scheduling Pause',
+        runMinutes: 'Run Time (minutes)',
+        pauseMinutes: 'Pause Time (minutes)',
+        invalid: 'Run time and pause time must be integers between 1 and 10080.'
       },
       clearRateLimit: 'Clear Rate Limit',
       resetQuota: 'Reset Quota',

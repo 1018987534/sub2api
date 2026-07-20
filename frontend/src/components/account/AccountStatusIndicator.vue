@@ -23,7 +23,7 @@
       >
         {{ statusText }}
       </button>
-      <span v-else :class="['badge text-xs', statusClass]">
+      <span v-else :class="['badge text-xs', statusClass]" :title="periodicPauseTitle">
         {{ statusText }}
       </span>
     </template>
@@ -284,6 +284,20 @@ const isTempUnschedulable = computed(() => {
   return new Date(props.account.temp_unschedulable_until) > new Date()
 })
 
+const isPeriodicSchedulePaused = computed(() => {
+  const status = props.account.periodic_schedule_pause
+  if (!status?.enabled || !status.resume_at) return false
+  return new Date(status.resume_at) > new Date()
+})
+
+const periodicPauseTitle = computed(() => {
+  const status = props.account.periodic_schedule_pause
+  if (!isPeriodicSchedulePaused.value || !status?.resume_at) return undefined
+  return t('admin.accounts.status.periodicPausedUntil', {
+    time: formatDateTime(status.resume_at)
+  })
+})
+
 // Computed: has error status
 const hasError = computed(() => {
   return props.account.status === 'error'
@@ -322,6 +336,9 @@ const statusClass = computed(() => {
   if (isTempUnschedulable.value) {
     return 'badge-warning'
   }
+  if (isPeriodicSchedulePaused.value) {
+    return 'badge-warning'
+  }
   if (props.account.status !== 'active') {
     return props.account.status === 'error' ? 'badge-danger' : 'badge-gray'
   }
@@ -341,6 +358,9 @@ const statusText = computed(() => {
   }
   if (isTempUnschedulable.value) {
     return t('admin.accounts.status.tempUnschedulable')
+  }
+  if (isPeriodicSchedulePaused.value) {
+    return t('admin.accounts.status.periodicPaused')
   }
   if (props.account.status !== 'active') {
     return t(`admin.accounts.status.${props.account.status}`)

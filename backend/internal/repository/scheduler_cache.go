@@ -934,6 +934,10 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		return nil
 	}
 	keys := []string{
+		service.PeriodicSchedulePauseEnabledExtraKey,
+		service.PeriodicScheduleRunMinutesExtraKey,
+		service.PeriodicSchedulePauseMinutesExtraKey,
+		service.PeriodicSchedulePauseAnchorAtExtraKey,
 		"mixed_scheduling",
 		"window_cost_limit",
 		"window_cost_sticky_reserve",

@@ -203,8 +203,9 @@ type Account struct {
 	RateLimitResetAt *time.Time `json:"rate_limit_reset_at"`
 	OverloadUntil    *time.Time `json:"overload_until"`
 
-	TempUnschedulableUntil  *time.Time `json:"temp_unschedulable_until"`
-	TempUnschedulableReason string     `json:"temp_unschedulable_reason"`
+	TempUnschedulableUntil  *time.Time                  `json:"temp_unschedulable_until"`
+	TempUnschedulableReason string                      `json:"temp_unschedulable_reason"`
+	PeriodicSchedulePause   PeriodicSchedulePauseStatus `json:"periodic_schedule_pause"`
 
 	SessionWindowStart  *time.Time `json:"session_window_start"`
 	SessionWindowEnd    *time.Time `json:"session_window_end"`
@@ -288,6 +289,16 @@ type Account struct {
 
 	GroupIDs []int64  `json:"group_ids,omitempty"`
 	Groups   []*Group `json:"groups,omitempty"`
+}
+
+type PeriodicSchedulePauseStatus struct {
+	Enabled      bool       `json:"enabled"`
+	RunMinutes   int        `json:"run_minutes"`
+	PauseMinutes int        `json:"pause_minutes"`
+	AnchorAt     *time.Time `json:"anchor_at"`
+	Paused       bool       `json:"paused"`
+	NextPauseAt  *time.Time `json:"next_pause_at"`
+	ResumeAt     *time.Time `json:"resume_at"`
 }
 
 type AccountGroup struct {

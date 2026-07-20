@@ -685,6 +685,10 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			grokBillingExtraKey,
 			UpstreamBillingProbeEnabledExtraKey,
 			UpstreamBillingProbeExtraKey,
+			PeriodicSchedulePauseEnabledExtraKey,
+			PeriodicScheduleRunMinutesExtraKey,
+			PeriodicSchedulePauseMinutesExtraKey,
+			PeriodicSchedulePauseAnchorAtExtraKey,
 		} {
 			if v, ok := account.Extra[key]; ok {
 				normalizedExtra[key] = v
@@ -770,6 +774,14 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if input.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *input.AutoPauseOnExpired
 	}
+	if err := applyPeriodicSchedulePauseUpdate(
+		account,
+		input.PeriodicScheduleRunMinutes,
+		input.PeriodicSchedulePauseMinutes,
+		time.Now(),
+	); err != nil {
+		return nil, err
+	}
 
 	// 先验证分组是否存在（在任何写操作之前）
 	if input.GroupIDs != nil {
@@ -828,6 +840,49 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		return nil, err
 	}
 	return updated, nil
+}
+
+func applyPeriodicSchedulePauseUpdate(account *Account, runMinutes, pauseMinutes *int, now time.Time) error {
+	if runMinutes == nil && pauseMinutes == nil {
+		return nil
+	}
+	if account == nil {
+		return ErrAccountNotFound
+	}
+	if runMinutes == nil || pauseMinutes == nil {
+		return infraerrors.BadRequest(
+			"INVALID_PERIODIC_SCHEDULE_PAUSE",
+			"periodic_schedule_run_minutes and periodic_schedule_pause_minutes must be provided together",
+		)
+	}
+	if *runMinutes == 0 && *pauseMinutes == 0 {
+		delete(account.Extra, PeriodicSchedulePauseEnabledExtraKey)
+		delete(account.Extra, PeriodicScheduleRunMinutesExtraKey)
+		delete(account.Extra, PeriodicSchedulePauseMinutesExtraKey)
+		delete(account.Extra, PeriodicSchedulePauseAnchorAtExtraKey)
+		return nil
+	}
+	if *runMinutes < 1 || *runMinutes > MaxPeriodicSchedulePauseWindowMinutes ||
+		*pauseMinutes < 1 || *pauseMinutes > MaxPeriodicSchedulePauseWindowMinutes {
+		return infraerrors.BadRequest(
+			"INVALID_PERIODIC_SCHEDULE_PAUSE",
+			fmt.Sprintf("periodic schedule run and pause minutes must be between 1 and %d", MaxPeriodicSchedulePauseWindowMinutes),
+		)
+	}
+
+	anchorAt := now.UTC()
+	if current, ok := account.GetPeriodicSchedulePauseConfig(); ok &&
+		current.RunMinutes == *runMinutes && current.PauseMinutes == *pauseMinutes {
+		anchorAt = current.AnchorAt
+	}
+	if account.Extra == nil {
+		account.Extra = make(map[string]any)
+	}
+	account.Extra[PeriodicSchedulePauseEnabledExtraKey] = true
+	account.Extra[PeriodicScheduleRunMinutesExtraKey] = *runMinutes
+	account.Extra[PeriodicSchedulePauseMinutesExtraKey] = *pauseMinutes
+	account.Extra[PeriodicSchedulePauseAnchorAtExtraKey] = anchorAt.Format(time.RFC3339Nano)
+	return nil
 }
 
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键

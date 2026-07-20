@@ -51,6 +51,32 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it('周期暂停窗口内显示自动恢复状态', () => {
+    const wrapper = mount(AccountStatusIndicator, {
+      props: {
+        account: makeAccount({
+          periodic_schedule_pause: {
+            enabled: true,
+            run_minutes: 30,
+            pause_minutes: 5,
+            anchor_at: '2026-07-20T10:00:00Z',
+            paused: true,
+            next_pause_at: null,
+            resume_at: '2099-07-20T10:35:00Z'
+          }
+        })
+      },
+      global: {
+        stubs: {
+          Icon: true
+        }
+      }
+    })
+
+    expect(wrapper.find('.badge-warning').text()).toBe('admin.accounts.status.periodicPaused')
+    expect(wrapper.find('.badge-warning').attributes('title')).toContain('admin.accounts.status.periodicPausedUntil')
+  })
+
   it('Grok 账号额度限流时显示自动恢复时间而非临时不可调度', () => {
     const wrapper = mount(AccountStatusIndicator, {
       props: {

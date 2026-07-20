@@ -37,6 +37,27 @@ func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
 	require.Empty(t, metadata.GetCredential("access_token"))
 }
 
+func TestSchedulerMetadataAccountKeepsPeriodicSchedulePause(t *testing.T) {
+	account := service.Account{
+		ID: 25,
+		Extra: map[string]any{
+			service.PeriodicSchedulePauseEnabledExtraKey:  true,
+			service.PeriodicScheduleRunMinutesExtraKey:    30,
+			service.PeriodicSchedulePauseMinutesExtraKey:  5,
+			service.PeriodicSchedulePauseAnchorAtExtraKey: "2026-07-20T10:00:00Z",
+			"unused_large_field":                          "drop-me",
+		},
+	}
+
+	metadata := buildSchedulerMetadataAccount(account)
+
+	require.Equal(t, true, metadata.Extra[service.PeriodicSchedulePauseEnabledExtraKey])
+	require.Equal(t, 30, metadata.Extra[service.PeriodicScheduleRunMinutesExtraKey])
+	require.Equal(t, 5, metadata.Extra[service.PeriodicSchedulePauseMinutesExtraKey])
+	require.Equal(t, "2026-07-20T10:00:00Z", metadata.Extra[service.PeriodicSchedulePauseAnchorAtExtraKey])
+	require.NotContains(t, metadata.Extra, "unused_large_field")
+}
+
 func TestSchedulerMetadataAccountProjectsUpstreamBillingProbe(t *testing.T) {
 	lastError := strings.Repeat("upstream diagnostic ", 512)
 	probe := map[string]any{

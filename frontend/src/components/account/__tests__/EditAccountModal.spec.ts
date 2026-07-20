@@ -368,6 +368,65 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('loads and submits the per-account periodic scheduling pause', async () => {
+    const account = buildAccount()
+    account.periodic_schedule_pause = {
+      enabled: true,
+      run_minutes: 30,
+      pause_minutes: 5,
+      anchor_at: '2026-07-20T10:00:00Z',
+      paused: false,
+      next_pause_at: '2026-07-20T10:30:00Z',
+      resume_at: null
+    }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+
+    expect(wrapper.get('[data-testid="periodic-schedule-pause-toggle"]').attributes('aria-checked')).toBe('true')
+    expect((wrapper.get('[data-testid="periodic-schedule-run-minutes"]').element as HTMLInputElement).value).toBe('30')
+    expect((wrapper.get('[data-testid="periodic-schedule-pause-minutes"]').element as HTMLInputElement).value).toBe('5')
+
+    await wrapper.get('[data-testid="periodic-schedule-run-minutes"]').setValue('45')
+    await wrapper.get('[data-testid="periodic-schedule-pause-minutes"]').setValue('7')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({
+      periodic_schedule_run_minutes: 45,
+      periodic_schedule_pause_minutes: 7
+    })
+  })
+
+  it('submits zero values when disabling the periodic scheduling pause', async () => {
+    const account = buildAccount()
+    account.periodic_schedule_pause = {
+      enabled: true,
+      run_minutes: 30,
+      pause_minutes: 5,
+      anchor_at: '2026-07-20T10:00:00Z',
+      paused: true,
+      next_pause_at: null,
+      resume_at: '2026-07-20T10:35:00Z'
+    }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="periodic-schedule-pause-toggle"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]).toMatchObject({
+      periodic_schedule_run_minutes: 0,
+      periodic_schedule_pause_minutes: 0
+    })
+  })
+
   it('submits OpenAI compact mode and compact-only model mapping', async () => {
     const account = buildAccount()
     account.extra = {

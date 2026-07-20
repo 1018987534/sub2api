@@ -877,6 +877,16 @@ export interface TempUnschedulableStatus {
   state?: TempUnschedulableState
 }
 
+export interface PeriodicSchedulePauseStatus {
+  enabled: boolean
+  run_minutes: number
+  pause_minutes: number
+  anchor_at: string | null
+  paused: boolean
+  next_pause_at: string | null
+  resume_at: string | null
+}
+
 export interface UpstreamBillingData {
   object: 'sub2api.key_billing'
   schema_version: 1
@@ -971,6 +981,7 @@ export interface Account {
   overload_until: string | null
   temp_unschedulable_until: string | null
   temp_unschedulable_reason: string | null
+  periodic_schedule_pause?: PeriodicSchedulePauseStatus
 
   // Session window fields (5-hour window)
   session_window_start: string | null
@@ -1238,6 +1249,8 @@ export interface UpdateAccountRequest {
   group_ids?: number[]
   expires_at?: number | null
   auto_pause_on_expired?: boolean
+  periodic_schedule_run_minutes?: number
+  periodic_schedule_pause_minutes?: number
   confirm_mixed_channel_risk?: boolean
 }
 

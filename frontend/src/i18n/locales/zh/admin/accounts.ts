@@ -289,6 +289,8 @@ export default {
         rateLimited: '限流中',
         overloaded: '过载中',
         tempUnschedulable: '临时不可调度',
+        periodicPaused: '周期暂停中',
+        periodicPausedUntil: '周期暂停中，{time} 自动恢复调度',
         quotaExceeded: '配额超限',
         unschedulable: '不可调度',
         rateLimitedUntil: '限流中，当前不参与调度，预计 {time} 自动恢复',
@@ -352,6 +354,12 @@ export default {
           unavailableLabel: '503 维护',
           unavailableDesc: '服务不可用 - 暂停 30 分钟'
         }
+      },
+      periodicSchedulePause: {
+        title: '周期停止调度',
+        runMinutes: '连续调度时间（分钟）',
+        pauseMinutes: '暂停时间（分钟）',
+        invalid: '连续调度时间和暂停时间必须是 1 到 10080 之间的整数。'
       },
       usageWindow: {
         statsTitle: '5小时窗口用量统计',

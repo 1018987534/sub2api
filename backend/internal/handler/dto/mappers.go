@@ -217,6 +217,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		return nil
 	}
 	redactedCreds, credsStatus := RedactCredentials(a.Credentials)
+	periodicPause := a.PeriodicSchedulePauseStatusAt(time.Now())
 	out := &Account{
 		ID:                      a.ID,
 		Name:                    a.Name,
@@ -246,12 +247,21 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		OverloadUntil:           a.OverloadUntil,
 		TempUnschedulableUntil:  a.TempUnschedulableUntil,
 		TempUnschedulableReason: a.TempUnschedulableReason,
-		SessionWindowStart:      a.SessionWindowStart,
-		SessionWindowEnd:        a.SessionWindowEnd,
-		SessionWindowStatus:     a.SessionWindowStatus,
-		GroupIDs:                a.GroupIDs,
-		ParentAccountID:         a.ParentAccountID,
-		QuotaDimension:          a.QuotaDimension,
+		PeriodicSchedulePause: PeriodicSchedulePauseStatus{
+			Enabled:      periodicPause.Enabled,
+			RunMinutes:   periodicPause.RunMinutes,
+			PauseMinutes: periodicPause.PauseMinutes,
+			AnchorAt:     periodicPause.AnchorAt,
+			Paused:       periodicPause.Paused,
+			NextPauseAt:  periodicPause.NextPauseAt,
+			ResumeAt:     periodicPause.ResumeAt,
+		},
+		SessionWindowStart:  a.SessionWindowStart,
+		SessionWindowEnd:    a.SessionWindowEnd,
+		SessionWindowStatus: a.SessionWindowStatus,
+		GroupIDs:            a.GroupIDs,
+		ParentAccountID:     a.ParentAccountID,
+		QuotaDimension:      a.QuotaDimension,
 	}
 
 	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）
