@@ -807,7 +807,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if current := usageMeta.reasoningEffort.Load(); current != nil {
 				reasoningEffort = *current
 			}
-			timeout := s.openAIFirstOutputTimeout(reasoningEffort)
+			startedAt := time.Now()
+			_, timeout := s.openAIFirstOutputDeadline(account, reasoningEffort, startedAt)
 			if timeout <= 0 {
 				timeout = s.openAIWSPassthroughIdleTimeout()
 			}
@@ -820,7 +821,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			return openAIWSPassthroughFirstOutputDeadline{
 				timeout:         timeout,
-				startedAt:       time.Now(),
+				startedAt:       startedAt,
 				requestModel:    model,
 				reasoningEffort: reasoningEffort,
 			}

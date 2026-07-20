@@ -164,6 +164,136 @@ func TestOpenAIFirstOutputTimeoutForReasoningEffort(t *testing.T) {
 	require.Equal(t, 300*time.Second, svc.openAIFirstOutputTimeout("max"))
 }
 
+func TestOpenAIFirstOutputDeadlineUsesPeriodicPauseBoundary(t *testing.T) {
+	now := time.Date(2026, time.July, 20, 10, 0, 30, 0, time.UTC)
+	account := periodicPauseAccount(now.Add(-30*time.Second), 1, 1)
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{
+		OpenAIFirstOutputTimeoutSeconds: 120,
+	}}}
+
+	deadline, timeout := svc.openAIFirstOutputDeadline(account, "low", now)
+
+	require.Equal(t, now.Add(30*time.Second), deadline)
+	require.Equal(t, 30*time.Second, timeout)
+}
+
+func TestOpenAIFirstOutputDeadlineIsImmediateDuringPeriodicPause(t *testing.T) {
+	now := time.Date(2026, time.July, 20, 10, 1, 30, 0, time.UTC)
+	account := periodicPauseAccount(now.Add(-90*time.Second), 1, 1)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+
+	deadline, timeout := svc.openAIFirstOutputDeadline(account, "low", now)
+
+	require.Equal(t, now, deadline)
+	require.Equal(t, time.Nanosecond, timeout)
+}
+
+func TestOpenAIFirstOutputDeadlineDisabledWithoutTimeoutOrPeriodicPause(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+
+	deadline, timeout := svc.openAIFirstOutputDeadline(&Account{}, "low", time.Now())
+
+	require.True(t, deadline.IsZero())
+	require.Zero(t, timeout)
+}
+
+func TestOpenAIPassthroughPeriodicPauseCancelsResponseHeaderWait(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	upstream := &blockingOpenAIResponseHeaderUpstream{canceled: make(chan struct{})}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}},
+		httpUpstream: upstream,
+	}
+	body := []byte(`{"model":"gpt-5.6-sol","stream":true,"input":"hello"}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	account := periodicPauseAccount(time.Now().Add(-time.Minute+300*time.Millisecond), 1, 1)
+	account.ID = 1
+	account.Name = "periodic-passthrough"
+	account.Platform = PlatformOpenAI
+	account.Type = AccountTypeAPIKey
+	account.Concurrency = 1
+	account.Credentials = map[string]any{"api_key": "test-key"}
+	account.Extra["openai_passthrough"] = true
+
+	started := time.Now()
+	_, err := svc.Forward(context.Background(), c, account, body)
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusGatewayTimeout, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "periodic_schedule_pause")
+	require.True(t, failoverErr.SafeToFailoverAfterWrite)
+	require.Less(t, time.Since(started), time.Second)
+	require.Empty(t, rec.Body.String())
+	select {
+	case <-upstream.canceled:
+	default:
+		t.Fatal("periodic pause did not cancel the passthrough response-header wait")
+	}
+}
+
+func TestOpenAIPassthroughPeriodicPauseCancelsPreambleOnlyStream(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+	pr, pw := io.Pipe()
+	body := &firstOutputCloseTrackingBody{ReadCloser: pr, closed: make(chan struct{})}
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		defer func() { _ = pw.Close() }()
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_periodic\"}}\n\n"))
+		<-body.closed
+	}()
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: body}
+	account := periodicPauseAccount(time.Now().Add(-time.Minute+250*time.Millisecond), 1, 1)
+	account.ID = 1
+	account.Platform = PlatformOpenAI
+
+	_, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "model", "model")
+
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.Equal(t, http.StatusGatewayTimeout, failoverErr.StatusCode)
+	require.Contains(t, string(failoverErr.ResponseBody), "periodic_schedule_pause")
+	require.True(t, failoverErr.SafeToFailoverAfterWrite)
+	require.Empty(t, rec.Body.String())
+	select {
+	case <-writerDone:
+	case <-time.After(time.Second):
+		t.Fatal("preamble-only passthrough stream did not stop at the periodic pause")
+	}
+}
+
+func TestOpenAIPassthroughPeriodicPauseKeepsSemanticStreamAlive(t *testing.T) {
+	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}}
+	pr, pw := io.Pipe()
+	go func() {
+		defer func() { _ = pw.Close() }()
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"ready\"}\n\n"))
+		time.Sleep(350 * time.Millisecond)
+		_, _ = pw.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_periodic_done\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"))
+	}()
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: pr}
+	account := periodicPauseAccount(time.Now().Add(-time.Minute+150*time.Millisecond), 1, 1)
+	account.ID = 1
+	account.Platform = PlatformOpenAI
+
+	result, err := svc.handleStreamingResponsePassthrough(c.Request.Context(), resp, c, account, time.Now(), "model", "model")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "resp_periodic_done", result.responseID)
+	require.Contains(t, rec.Body.String(), "response.output_text.delta")
+	require.Contains(t, rec.Body.String(), "response.completed")
+}
+
 func TestOpenAIFirstOutputStageDefaultLimitIsIndependentFromScannerLimit(t *testing.T) {
 	stage := newDefaultOpenAIFirstOutputStage()
 	defer func() { require.NoError(t, stage.Close()) }()

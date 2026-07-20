@@ -77,6 +77,13 @@ func TestFilterPeriodicSchedulePausedAccountsRestoresAfterPause(t *testing.T) {
 	require.Equal(t, []int64{1, 2}, []int64{resumed[0].ID, resumed[1].ID})
 }
 
+func TestPeriodicSchedulePauseClearsStickySelection(t *testing.T) {
+	anchor := time.Now().Add(-32 * time.Minute)
+	account := periodicPauseAccount(anchor, 30, 5)
+
+	require.True(t, shouldClearStickySession(account, "gpt-5.6-sol"))
+}
+
 func TestApplyPeriodicSchedulePauseUpdate(t *testing.T) {
 	startedAt := time.Date(2026, time.July, 20, 10, 0, 0, 0, time.UTC)
 	account := &Account{Extra: map[string]any{}}

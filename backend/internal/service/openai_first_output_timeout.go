@@ -243,6 +243,37 @@ func (s *OpenAIGatewayService) openAIFirstOutputTimeout(reasoningEffort string) 
 	return time.Duration(seconds) * time.Second
 }
 
+// openAIFirstOutputDeadline returns the earliest configured first-output
+// deadline and the account's next periodic scheduling pause. A periodic pause
+// must affect requests that are already in flight, otherwise a stalled stream
+// can keep the account pinned until the upstream's own timeout expires.
+func (s *OpenAIGatewayService) openAIFirstOutputDeadline(account *Account, reasoningEffort string, now time.Time) (time.Time, time.Duration) {
+	deadline := time.Time{}
+	if timeout := s.openAIFirstOutputTimeout(reasoningEffort); timeout > 0 {
+		deadline = now.Add(timeout)
+	}
+	if account != nil {
+		status := account.PeriodicSchedulePauseStatusAt(now)
+		if status.Enabled {
+			periodicDeadline := now
+			if !status.Paused && status.NextPauseAt != nil {
+				periodicDeadline = *status.NextPauseAt
+			}
+			if deadline.IsZero() || periodicDeadline.Before(deadline) {
+				deadline = periodicDeadline
+			}
+		}
+	}
+	if deadline.IsZero() {
+		return time.Time{}, 0
+	}
+	timeout := deadline.Sub(now)
+	if timeout <= 0 {
+		timeout = time.Nanosecond
+	}
+	return deadline, timeout
+}
+
 func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	ctx context.Context,
 	c *gin.Context,
@@ -255,24 +286,33 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	responseHeaders http.Header,
 ) *UpstreamFailoverError {
 	elapsed := time.Since(startTime)
+	periodicPause := account != nil && account.IsInPeriodicSchedulePause(time.Now())
+	failureKind := "first_output_timeout"
+	failureMessage := "OpenAI upstream produced no semantic output before the deadline"
+	clientMessage := "Upstream produced no output before the deadline"
+	if periodicPause {
+		failureKind = "periodic_schedule_pause"
+		failureMessage = "OpenAI account entered its periodic scheduling pause before semantic output"
+		clientMessage = "Account entered its periodic scheduling pause before producing output"
+	}
 	logger.LegacyPrintf(
 		"service.openai_gateway",
-		"OpenAI first output timeout: account=%d model=%s effort=%s phase=%s elapsed=%s limit=%s",
-		account.ID, originalModel, reasoningEffort, phase, elapsed, timeout,
+		"OpenAI first output deadline reached: account=%d model=%s effort=%s phase=%s reason=%s elapsed=%s limit=%s",
+		account.ID, originalModel, reasoningEffort, phase, failureKind, elapsed, timeout,
 	)
 	requestID := strings.TrimSpace(responseHeaders.Get("x-request-id"))
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
 		UpstreamStatusCode: http.StatusGatewayTimeout, UpstreamRequestID: requestID,
-		Kind: "first_output_timeout", Message: "OpenAI upstream produced no semantic output before the deadline",
-		Detail: fmt.Sprintf("phase=%s elapsed_ms=%d timeout_ms=%d", phase, elapsed.Milliseconds(), timeout.Milliseconds()),
+		Kind: failureKind, Message: failureMessage,
+		Detail: fmt.Sprintf("phase=%s reason=%s elapsed_ms=%d timeout_ms=%d", phase, failureKind, elapsed.Milliseconds(), timeout.Milliseconds()),
 	})
-	if s.rateLimitService != nil {
+	if !periodicPause && s.rateLimitService != nil {
 		s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
 	}
 	return &UpstreamFailoverError{
 		StatusCode:      http.StatusGatewayTimeout,
-		ResponseBody:    []byte(`{"error":{"type":"first_output_timeout","message":"Upstream produced no output before the deadline"}}`),
+		ResponseBody:    []byte(fmt.Sprintf(`{"error":{"type":%q,"message":%q}}`, failureKind, clientMessage)),
 		ResponseHeaders: responseHeaders.Clone(), SafeToFailoverAfterWrite: true,
 	}
 }
@@ -332,4 +372,85 @@ func (r *openAIRequestContextReadCloser) Close() error {
 		r.err = r.ReadCloser.Close()
 	})
 	return r.err
+}
+
+// openAIFirstOutputBodyGuard closes an upstream response body at the first
+// output deadline, but stops that timer once semantic output has started. It
+// is used by the passthrough scanner, which otherwise blocks synchronously on
+// Read and cannot observe a timer through a select loop.
+type openAIFirstOutputBodyGuard struct {
+	io.ReadCloser
+	mu        sync.Mutex
+	timer     *time.Timer
+	semantic  bool
+	fired     bool
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func newOpenAIFirstOutputBodyGuard(body io.ReadCloser, deadline time.Time) *openAIFirstOutputBodyGuard {
+	guard := &openAIFirstOutputBodyGuard{ReadCloser: body}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		remaining = time.Nanosecond
+	}
+	guard.timer = time.AfterFunc(remaining, guard.fire)
+	return guard
+}
+
+func (g *openAIFirstOutputBodyGuard) fire() {
+	g.mu.Lock()
+	if g.semantic {
+		g.mu.Unlock()
+		return
+	}
+	g.fired = true
+	g.mu.Unlock()
+	_ = g.closeBody()
+}
+
+func (g *openAIFirstOutputBodyGuard) MarkSemanticOutput() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.semantic = true
+	if g.timer != nil {
+		g.timer.Stop()
+	}
+	g.mu.Unlock()
+}
+
+func (g *openAIFirstOutputBodyGuard) Fired() bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	fired := g.fired
+	g.mu.Unlock()
+	return fired
+}
+
+func (g *openAIFirstOutputBodyGuard) Close() error {
+	if g == nil {
+		return nil
+	}
+	g.mu.Lock()
+	if g.timer != nil {
+		g.timer.Stop()
+	}
+	g.mu.Unlock()
+	return g.closeBody()
+}
+
+func (g *openAIFirstOutputBodyGuard) closeBody() error {
+	g.closeOnce.Do(func() {
+		g.mu.Lock()
+		body := g.ReadCloser
+		g.mu.Unlock()
+		if body != nil {
+			g.closeErr = body.Close()
+		}
+	})
+	return g.closeErr
 }
