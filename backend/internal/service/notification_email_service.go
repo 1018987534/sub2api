@@ -530,6 +530,9 @@ func (s *NotificationEmailService) sampleVariables(ctx context.Context, event, l
 		variables[key] = value
 	}
 	variables["site_name"] = s.siteName(ctx)
+	if siteURL := s.siteURL(ctx); siteURL != "" {
+		variables["site_url"] = siteURL
+	}
 	if variables["unsubscribe_url"] == "" && info.Optional {
 		variables["unsubscribe_url"] = "https://example.com/unsubscribe"
 	}
@@ -570,6 +573,9 @@ func (s *NotificationEmailService) runtimeVariables(ctx context.Context, event, 
 		}
 	}
 	variables["site_name"] = s.siteName(ctx)
+	if siteURL := s.siteURL(ctx); siteURL != "" {
+		variables["site_url"] = siteURL
+	}
 	variables["recipient_email"] = input.RecipientEmail
 	if strings.TrimSpace(input.RecipientName) != "" {
 		variables["recipient_name"] = input.RecipientName
@@ -604,6 +610,24 @@ func (s *NotificationEmailService) baseURL(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+func (s *NotificationEmailService) siteURL(ctx context.Context) string {
+	if s == nil || s.settingRepo == nil {
+		return ""
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyFrontendURL); err == nil && strings.TrimSpace(value) != "" {
+		return strings.TrimRight(strings.TrimSpace(value), "/")
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyAPIBaseURL)
+	if err != nil || strings.TrimSpace(value) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		return parsed.Scheme + "://" + parsed.Host
+	}
+	return strings.TrimRight(strings.TrimSpace(value), "/")
 }
 
 func (s *NotificationEmailService) buildUnsubscribeURL(ctx context.Context, email, event string) (string, error) {
@@ -911,6 +935,7 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 	if normalizeNotificationLocale(locale) == notificationEmailLocaleChinese {
 		variables := map[string]string{
 			"site_name":           defaultSiteName,
+			"site_url":            "https://example.com",
 			"recipient_name":      "张三",
 			"recipient_email":     "user@example.com",
 			"verification_code":   "123456",
@@ -960,6 +985,7 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 	}
 	variables := map[string]string{
 		"site_name":           defaultSiteName,
+		"site_url":            "https://example.com",
 		"recipient_name":      "Alex",
 		"recipient_email":     "user@example.com",
 		"verification_code":   "123456",
@@ -1114,7 +1140,7 @@ var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
 		Description:  "Optional campaign email sent by an administrator to selected inactive users.",
 		Category:     "marketing",
 		Optional:     true,
-		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "rate_multiplier", "unsubscribe_url"),
+		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "rate_multiplier", "site_url", "unsubscribe_url"),
 	},
 	NotificationEmailEventAccountQuotaAlert: {
 		Event:       NotificationEmailEventAccountQuotaAlert,
@@ -1326,6 +1352,8 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
   <strong style="display:block;margin-top:6px;color:#065f46;font-size:32px;line-height:1.2;">{{rate_multiplier}}</strong>
 </div>
 <p>We would be glad to have you back. Sign in to {{site_name}} and continue using the service whenever you are ready.</p>
+<p style="margin:24px 0;text-align:center;"><a href="{{site_url}}" style="display:inline-block;padding:12px 22px;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:600;border-radius:6px;">Return to {{site_name}}</a></p>
+<p>Official website: <a href="{{site_url}}" style="color:#0f766e;">{{site_url}}</a></p>
 <p style="margin-top:28px;color:#6b7280;font-size:12px;">You are receiving this email because you have not used the service recently. <a href="{{unsubscribe_url}}" style="color:#0f766e;">Unsubscribe from reengagement emails</a>.</p>`),
 		},
 		notificationEmailLocaleChinese: {
@@ -1338,6 +1366,8 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
   <strong style="display:block;margin-top:6px;color:#065f46;font-size:32px;line-height:1.2;">{{rate_multiplier}}</strong>
 </div>
 <p>希望您能回来继续使用。登录 {{site_name}} 后即可继续调用服务。</p>
+<p style="margin:24px 0;text-align:center;"><a href="{{site_url}}" style="display:inline-block;padding:12px 22px;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:600;border-radius:6px;">立即返回官网</a></p>
+<p>官网链接：<a href="{{site_url}}" style="color:#0f766e;">{{site_url}}</a></p>
 <p style="margin-top:28px;color:#6b7280;font-size:12px;">您收到这封邮件，是因为近期未使用平台。如不希望再收到召回邮件，可<a href="{{unsubscribe_url}}" style="color:#0f766e;">退订此类邮件</a>。</p>`),
 		},
 	},

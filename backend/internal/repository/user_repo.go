@@ -450,6 +450,9 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	if len(filters.UserIDs) > 0 {
 		q = q.Where(dbuser.IDIn(filters.UserIDs...))
 	}
+	if filters.HasRecharged != nil {
+		q = q.Where(userHasRecharged(*filters.HasRecharged))
+	}
 	if filters.NeverUsed {
 		q = q.Where(userHasNoUsage())
 	} else if filters.InactiveDays > 0 {
@@ -562,6 +565,13 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	}
 
 	return outUsers, paginationResultFromTotal(int64(total), params), nil
+}
+
+func userHasRecharged(hasRecharged bool) predicate.User {
+	if hasRecharged {
+		return dbuser.TotalRechargedGT(0)
+	}
+	return dbuser.TotalRechargedLTE(0)
 }
 
 func userHasNoUsageSince(cutoff time.Time) predicate.User {

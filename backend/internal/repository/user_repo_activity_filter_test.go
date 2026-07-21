@@ -44,3 +44,26 @@ func TestUserActivityFiltersRenderCorrelatedNotExistsQueries(t *testing.T) {
 		})
 	}
 }
+
+func TestUserRechargeFilterRendersTotalRechargedPredicate(t *testing.T) {
+	tests := []struct {
+		name         string
+		hasRecharged bool
+		wantOperator string
+	}{
+		{name: "recharged", hasRecharged: true, wantOperator: ">"},
+		{name: "not recharged", hasRecharged: false, wantOperator: "<="},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			users := entsql.Table(dbuser.Table)
+			selector := entsql.Select(users.C(dbuser.FieldID)).From(users)
+			userHasRecharged(test.hasRecharged)(selector)
+			query, args := selector.Query()
+
+			require.Contains(t, query, "`users`.`total_recharged` "+test.wantOperator+" ?")
+			require.Equal(t, []any{float64(0)}, args)
+		})
+	}
+}

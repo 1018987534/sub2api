@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
@@ -40,6 +42,7 @@ type UserHandler struct {
 	userService           *service.UserService
 	settingService        *service.SettingService // step-up 功能开关
 	notificationEmail     notificationEmailSender
+	reengagementRunning   atomic.Bool
 }
 
 // SetNotificationEmailService wires the shared editable notification-template sender.
@@ -133,6 +136,7 @@ type BindUserAuthIdentityChannelRequest struct {
 //   - api_key_group_id: filter by the exact group bound to the user's API keys
 //   - inactive_days: users with no usage logs in the trailing N-day window (includes never-used users)
 //   - never_used: only users who have never generated a usage log
+//   - has_recharged: whether total successful recharge credits are greater than zero
 func (h *UserHandler) List(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
 
@@ -173,6 +177,14 @@ func (h *UserHandler) List(c *gin.Context) {
 		if neverUsed {
 			filters.InactiveDays = 0
 		}
+	}
+	if raw := strings.TrimSpace(c.Query("has_recharged")); raw != "" {
+		hasRecharged, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			response.BadRequest(c, "has_recharged must be a boolean")
+			return
+		}
+		filters.HasRecharged = &hasRecharged
 	}
 	sortBy := c.DefaultQuery("sort_by", "created_at")
 	sortOrder := c.DefaultQuery("sort_order", "desc")
@@ -216,10 +228,23 @@ func (h *UserHandler) List(c *gin.Context) {
 
 const maxReengagementEmailRecipients = 500
 
+const (
+	reengagementCampaignPageSize = 500
+	reengagementCampaignTimeout  = 6 * time.Hour
+)
+
 type SendReengagementEmailRequest struct {
-	UserIDs      []int64 `json:"user_ids"`
-	InactiveDays int     `json:"inactive_days"`
-	NeverUsed    bool    `json:"never_used"`
+	UserIDs       []int64          `json:"user_ids"`
+	SendAll       bool             `json:"send_all"`
+	InactiveDays  int              `json:"inactive_days"`
+	NeverUsed     bool             `json:"never_used"`
+	HasRecharged  *bool            `json:"has_recharged"`
+	Status        string           `json:"status"`
+	Role          string           `json:"role"`
+	Search        string           `json:"search"`
+	GroupName     string           `json:"group_name"`
+	APIKeyGroupID int64            `json:"api_key_group_id"`
+	Attributes    map[int64]string `json:"attributes"`
 }
 
 // SendReengagementEmails sends the editable marketing template to selected inactive users.
@@ -237,6 +262,10 @@ func (h *UserHandler) SendReengagementEmails(c *gin.Context) {
 	}
 	if !req.NeverUsed && (req.InactiveDays < 1 || req.InactiveDays > 3650) {
 		response.BadRequest(c, "inactive_days must be an integer between 1 and 3650")
+		return
+	}
+	if req.SendAll {
+		h.sendAllReengagementEmails(c, req)
 		return
 	}
 
@@ -261,6 +290,7 @@ func (h *UserHandler) SendReengagementEmails(c *gin.Context) {
 			Role:                 service.RoleUser,
 			InactiveDays:         req.InactiveDays,
 			NeverUsed:            req.NeverUsed,
+			HasRecharged:         req.HasRecharged,
 			IncludeSubscriptions: &includeSubscriptions,
 		},
 		"id",
@@ -271,15 +301,154 @@ func (h *UserHandler) SendReengagementEmails(c *gin.Context) {
 		return
 	}
 
-	sent := 0
-	skipped := len(userIDs) - len(users)
-	failed := 0
+	counts := h.sendReengagementUsers(c.Request.Context(), users, time.Now().UTC().Format("2006-01-02"))
+	counts.Skipped += len(userIDs) - len(users)
+
+	response.Success(c, gin.H{
+		"queued":   false,
+		"selected": len(userIDs),
+		"matched":  len(users),
+		"sent":     counts.Sent,
+		"skipped":  counts.Skipped,
+		"failed":   counts.Failed,
+	})
+}
+
+type reengagementSendCounts struct {
+	Sent    int
+	Skipped int
+	Failed  int
+}
+
+func (h *UserHandler) sendAllReengagementEmails(c *gin.Context, req SendReengagementEmailRequest) {
+	if !h.reengagementRunning.CompareAndSwap(false, true) {
+		response.Error(c, http.StatusConflict, "a reengagement email campaign is already running")
+		return
+	}
+
+	filters, eligible := reengagementFiltersFromRequest(req)
+	if !eligible {
+		h.reengagementRunning.Store(false)
+		response.Accepted(c, gin.H{
+			"queued":   false,
+			"selected": 0,
+			"matched":  0,
+			"sent":     0,
+			"skipped":  0,
+			"failed":   0,
+		})
+		return
+	}
+
+	_, total, err := h.adminService.ListUsers(c.Request.Context(), 1, 1, filters, "id", "asc")
+	if err != nil {
+		h.reengagementRunning.Store(false)
+		response.ErrorFrom(c, err)
+		return
+	}
+	if total == 0 {
+		h.reengagementRunning.Store(false)
+		response.Accepted(c, gin.H{
+			"queued":   false,
+			"selected": 0,
+			"matched":  0,
+			"sent":     0,
+			"skipped":  0,
+			"failed":   0,
+		})
+		return
+	}
+
+	reminderKey := time.Now().UTC().Format("2006-01-02")
+	go h.runReengagementCampaign(filters, reminderKey, total)
+
+	response.Accepted(c, gin.H{
+		"queued":   true,
+		"selected": total,
+		"matched":  total,
+		"sent":     0,
+		"skipped":  0,
+		"failed":   0,
+	})
+}
+
+func reengagementFiltersFromRequest(req SendReengagementEmailRequest) (service.UserListFilters, bool) {
+	if role := strings.TrimSpace(req.Role); role != "" && role != service.RoleUser {
+		return service.UserListFilters{}, false
+	}
+	if status := strings.TrimSpace(req.Status); status != "" && status != service.StatusActive {
+		return service.UserListFilters{}, false
+	}
+
+	includeSubscriptions := false
+	search := strings.TrimSpace(req.Search)
+	if runes := []rune(search); len(runes) > 100 {
+		search = string(runes[:100])
+	}
+	attributes := make(map[int64]string, len(req.Attributes))
+	for id, value := range req.Attributes {
+		if id > 0 && strings.TrimSpace(value) != "" {
+			attributes[id] = value
+		}
+	}
+
+	return service.UserListFilters{
+		Status:               service.StatusActive,
+		Role:                 service.RoleUser,
+		Search:               search,
+		GroupName:            strings.TrimSpace(req.GroupName),
+		APIKeyGroupID:        max(req.APIKeyGroupID, 0),
+		Attributes:           attributes,
+		InactiveDays:         req.InactiveDays,
+		NeverUsed:            req.NeverUsed,
+		HasRecharged:         req.HasRecharged,
+		IncludeSubscriptions: &includeSubscriptions,
+	}, true
+}
+
+func (h *UserHandler) runReengagementCampaign(filters service.UserListFilters, reminderKey string, expected int64) {
+	defer h.reengagementRunning.Store(false)
+	ctx, cancel := context.WithTimeout(context.Background(), reengagementCampaignTimeout)
+	defer cancel()
+
+	totalCounts := reengagementSendCounts{}
+	matched := 0
+	for page := 1; ; page++ {
+		users, total, err := h.adminService.ListUsers(ctx, page, reengagementCampaignPageSize, filters, "id", "asc")
+		if err != nil {
+			slog.Error("user reengagement campaign list failed", "page", page, "expected", expected, "matched", matched, "err", err.Error())
+			return
+		}
+		if len(users) == 0 {
+			break
+		}
+
+		counts := h.sendReengagementUsers(ctx, users, reminderKey)
+		matched += len(users)
+		totalCounts.Sent += counts.Sent
+		totalCounts.Skipped += counts.Skipped
+		totalCounts.Failed += counts.Failed
+		if int64(page*reengagementCampaignPageSize) >= total {
+			break
+		}
+	}
+
+	slog.Info("user reengagement campaign completed",
+		"expected", expected,
+		"matched", matched,
+		"sent", totalCounts.Sent,
+		"skipped", totalCounts.Skipped,
+		"failed", totalCounts.Failed,
+	)
+}
+
+func (h *UserHandler) sendReengagementUsers(ctx context.Context, users []service.User, reminderKey string) reengagementSendCounts {
+	counts := reengagementSendCounts{}
 	var resultMu sync.Mutex
 	jobs := make(chan service.User)
 	workerCount := min(4, len(users))
 	var workers sync.WaitGroup
 	workers.Add(workerCount)
-	reminderKey := time.Now().UTC().Format("2006-01-02")
 	for range workerCount {
 		go func() {
 			defer workers.Done()
@@ -288,7 +457,7 @@ func (h *UserHandler) SendReengagementEmails(c *gin.Context) {
 				if recipientName == "" {
 					recipientName = user.Email
 				}
-				result, err := h.notificationEmail.SendWithResult(c.Request.Context(), service.NotificationEmailSendInput{
+				result, err := h.notificationEmail.SendWithResult(ctx, service.NotificationEmailSendInput{
 					Event:          service.NotificationEmailEventUserReengagement,
 					RecipientEmail: user.Email,
 					RecipientName:  recipientName,
@@ -302,12 +471,12 @@ func (h *UserHandler) SendReengagementEmails(c *gin.Context) {
 				})
 				resultMu.Lock()
 				if err != nil {
-					failed++
+					counts.Failed++
 					slog.Warn("user reengagement email failed", "user_id", user.ID, "err", err.Error())
 				} else if result.Sent {
-					sent++
+					counts.Sent++
 				} else {
-					skipped++
+					counts.Skipped++
 				}
 				resultMu.Unlock()
 			}
@@ -318,14 +487,7 @@ func (h *UserHandler) SendReengagementEmails(c *gin.Context) {
 	}
 	close(jobs)
 	workers.Wait()
-
-	response.Success(c, gin.H{
-		"selected": len(userIDs),
-		"matched":  len(users),
-		"sent":     sent,
-		"skipped":  skipped,
-		"failed":   failed,
-	})
+	return counts
 }
 
 func uniquePositiveUserIDs(userIDs []int64) []int64 {

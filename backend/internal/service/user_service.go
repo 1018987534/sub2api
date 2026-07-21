@@ -69,6 +69,9 @@ type UserListFilters struct {
 	Role      string // User role filter
 	Search    string // Search in email, username
 	GroupName string // Filter by allowed group name (fuzzy match)
+	// HasRecharged filters by cumulative successful balance credits.
+	// nil means no recharge filter; true means total_recharged > 0; false means total_recharged <= 0.
+	HasRecharged *bool
 	// UserIDs limits the result to a specific admin-selected set. An empty slice means no ID filter.
 	UserIDs []int64
 	// InactiveDays returns users with no usage log in the trailing N-day window.

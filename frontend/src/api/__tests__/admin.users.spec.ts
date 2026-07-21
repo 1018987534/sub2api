@@ -87,7 +87,15 @@ const reengagementRequestContractExact: Assert<
   IsExact<
     SendUserReengagementEmailRequest,
     {
-      user_ids: number[]
+      status?: 'active' | 'disabled'
+      role?: 'admin' | 'user'
+      search?: string
+      group_name?: string
+      api_key_group_id?: number
+      attributes?: Record<number, string>
+      has_recharged?: boolean
+      user_ids?: number[]
+      send_all?: boolean
       inactive_days?: number
       never_used?: boolean
     }
@@ -97,6 +105,7 @@ const reengagementResponseContractExact: Assert<
   IsExact<
     SendUserReengagementEmailResponse,
     {
+      queued: boolean
       selected: number
       matched: number
       sent: number
@@ -179,6 +188,7 @@ describe('admin users api auth identity binding', () => {
       inactive_days: 14,
     }
     const response: SendUserReengagementEmailResponse = {
+      queued: false,
       selected: 2,
       matched: 1,
       sent: 1,
@@ -193,5 +203,33 @@ describe('admin users api auth identity binding', () => {
     expect(result).toEqual(response)
     expect(reengagementRequestContractExact).toBe(true)
     expect(reengagementResponseContractExact).toBe(true)
+  })
+
+  it('posts every current audience filter for a background reengagement campaign', async () => {
+    const request: SendUserReengagementEmailRequest = {
+      send_all: true,
+      inactive_days: 14,
+      status: 'active',
+      role: 'user',
+      search: 'legacy',
+      group_name: 'GPT',
+      api_key_group_id: 5,
+      attributes: { 3: 'enterprise' },
+      has_recharged: false,
+    }
+    const response: SendUserReengagementEmailResponse = {
+      queued: true,
+      selected: 602,
+      matched: 602,
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+    }
+    post.mockResolvedValue({ data: response })
+
+    const result = await sendReengagementEmail(request)
+
+    expect(post).toHaveBeenCalledWith('/admin/users/send-reengagement-email', request)
+    expect(result).toEqual(response)
   })
 })

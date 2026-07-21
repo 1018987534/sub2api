@@ -160,7 +160,9 @@ func TestNotificationEmailAdditionalEventsAreListedAndPreviewable(t *testing.T) 
 
 func TestNotificationEmailUserReengagementTemplateIsOptionalAndPreviewable(t *testing.T) {
 	ctx := context.Background()
-	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)
+	repo := newNotificationEmailMemorySettingRepo()
+	require.NoError(t, repo.Set(ctx, SettingKeyAPIBaseURL, "https://official.example.com/v1/"))
+	svc := NewNotificationEmailService(repo, nil)
 
 	infos := svc.ListEventInfos()
 	var info NotificationEmailEventInfo
@@ -174,6 +176,7 @@ func TestNotificationEmailUserReengagementTemplateIsOptionalAndPreviewable(t *te
 	require.Equal(t, "marketing", info.Category)
 	require.True(t, info.Optional)
 	require.Contains(t, info.Placeholders, "rate_multiplier")
+	require.Contains(t, info.Placeholders, "site_url")
 	require.Contains(t, info.Placeholders, "unsubscribe_url")
 
 	preview, err := svc.PreviewTemplate(ctx, NotificationEmailPreviewInput{
@@ -187,6 +190,9 @@ func TestNotificationEmailUserReengagementTemplateIsOptionalAndPreviewable(t *te
 	require.Contains(t, preview.Subject, "当前倍率 0.06")
 	require.Contains(t, preview.HTML, "期待你回来")
 	require.Contains(t, preview.HTML, "0.06")
+	require.Contains(t, preview.HTML, "立即返回官网")
+	require.Contains(t, preview.HTML, `href="https://official.example.com"`)
+	require.Contains(t, preview.HTML, "官网链接")
 	require.Contains(t, preview.HTML, "unsubscribe")
 	require.NotContains(t, preview.HTML, "{{")
 }

@@ -120,11 +120,14 @@ const BulkEditUserModalStub = {
 }
 
 const UserReengagementEmailModalStub = {
-  props: ['show', 'selectedIds', 'initialActivity'],
+  props: ['show', 'selectedIds', 'filteredTotal', 'initialMode', 'initialActivity', 'audienceFilters'],
   emits: ['close', 'success'],
   template: `
     <div v-if="show" data-test="reengagement-modal">
       <span data-test="reengagement-modal-ids">{{ selectedIds.join(',') }}</span>
+      <span data-test="reengagement-modal-total">{{ filteredTotal }}</span>
+      <span data-test="reengagement-modal-mode">{{ initialMode }}</span>
+      <span data-test="reengagement-modal-recharge">{{ String(audienceFilters?.has_recharged) }}</span>
     </div>
   `
 }
@@ -362,6 +365,7 @@ describe('admin UsersView', () => {
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('42')
     expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="send-reengagement-email"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="send-reengagement-email-all"]').exists()).toBe(true)
 
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
@@ -372,6 +376,7 @@ describe('admin UsersView', () => {
 
     await wrapper.get('[data-test="send-reengagement-email"]').trigger('click')
     expect(wrapper.get('[data-test="reengagement-modal-ids"]').text()).toBe('42,43')
+    expect(wrapper.get('[data-test="reengagement-modal-mode"]').text()).toBe('selected')
 
     await wrapper.get('[data-test="bulk-edit-limits"]').trigger('click')
     expect(wrapper.get('[data-test="bulk-modal-ids"]').text()).toBe('42,43')
@@ -385,5 +390,61 @@ describe('admin UsersView', () => {
     expect(wrapper.get('[data-test="row-order"]').text()).toBe('refreshed-page-two@example.com')
     expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('')
+  })
+
+  it('restores the recharge filter and passes it to list and all-filtered reengagement sends', async () => {
+    localStorage.setItem('user-filter-values', JSON.stringify({ recharge: 'no' }))
+    listUsers.mockResolvedValue({
+      items: [createAdminUser()],
+      total: 73,
+      page: 1,
+      page_size: 20,
+      pages: 4
+    })
+
+    const wrapper = mount(UsersView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          TablePageLayout: {
+            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+          },
+          DataTable: DataTableStub,
+          Pagination: true,
+          ConfirmDialog: true,
+          EmptyState: true,
+          GroupBadge: true,
+          Select: true,
+          UserAttributesConfigModal: true,
+          UserConcurrencyCell: true,
+          UserCreateModal: true,
+          UserEditModal: true,
+          BulkEditUserModal: BulkEditUserModalStub,
+          UserReengagementEmailModal: UserReengagementEmailModalStub,
+          UserPlatformQuotaModal: true,
+          UserApiKeysModal: true,
+          UserAllowedGroupsModal: true,
+          UserBalanceModal: true,
+          UserBalanceHistoryModal: true,
+          GroupReplaceModal: true,
+          Icon: true,
+          Teleport: true
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(listUsers).toHaveBeenLastCalledWith(
+      1,
+      20,
+      expect.objectContaining({ has_recharged: false }),
+      expect.any(Object)
+    )
+
+    await wrapper.get('[data-test="send-reengagement-email-all"]').trigger('click')
+    expect(wrapper.get('[data-test="reengagement-modal-total"]').text()).toBe('73')
+    expect(wrapper.get('[data-test="reengagement-modal-mode"]').text()).toBe('all')
+    expect(wrapper.get('[data-test="reengagement-modal-recharge"]').text()).toBe('false')
   })
 })

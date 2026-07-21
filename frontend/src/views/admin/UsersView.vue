@@ -30,6 +30,14 @@
               />
             </div>
 
+            <div class="w-full sm:w-40">
+              <Select
+                v-model="filters.recharge"
+                :options="rechargeFilterOptions"
+                @change="applyFilter"
+              />
+            </div>
+
             <!-- Role Filter (visible when enabled) -->
             <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
               <Select
@@ -254,10 +262,20 @@
               v-if="selectedCount > 0"
               class="btn btn-secondary flex-1 md:flex-initial"
               data-test="send-reengagement-email"
-              @click="showReengagementEmailModal = true"
+              @click="openReengagementEmailModal('selected')"
             >
               <Icon name="mail" size="md" class="mr-2" />
               {{ t('admin.users.reengagement.action', { count: selectedCount }) }}
+            </button>
+
+            <button
+              v-if="pagination.total > 0"
+              class="btn btn-secondary flex-1 md:flex-initial"
+              data-test="send-reengagement-email-all"
+              @click="openReengagementEmailModal('all')"
+            >
+              <Icon name="mail" size="md" class="mr-2" />
+              {{ t('admin.users.reengagement.actionAll', { count: pagination.total }) }}
             </button>
 
             <button
@@ -777,7 +795,10 @@
     <UserReengagementEmailModal
       :show="showReengagementEmailModal"
       :selected-ids="selectedIds"
+      :filtered-total="pagination.total"
+      :initial-mode="reengagementInitialMode"
       :initial-activity="filters.activity"
+      :audience-filters="reengagementAudienceFilters"
       @close="showReengagementEmailModal = false"
       @success="handleReengagementSuccess"
     />
@@ -1136,6 +1157,7 @@ const filters = reactive({
   role: '',
   status: '',
   activity: '',
+  recharge: '',
   group: '',  // group name for fuzzy match, '' = all
   apiKeyGroup: null as number | null  // group id bound to the user's API keys, null = all
 })
@@ -1146,6 +1168,11 @@ const activityFilterOptions = computed(() => [
   { value: '30', label: t('admin.users.reengagement.inactiveDays', { days: 30 }) },
   { value: '90', label: t('admin.users.reengagement.inactiveDays', { days: 90 }) },
   { value: 'never', label: t('admin.users.reengagement.neverUsed') }
+])
+const rechargeFilterOptions = computed(() => [
+  { value: '', label: t('admin.users.reengagement.allRechargeStatuses') },
+  { value: 'yes', label: t('admin.users.reengagement.recharged') },
+  { value: 'no', label: t('admin.users.reengagement.notRecharged') }
 ])
 const activeAttributeFilters = reactive<Record<number, string>>({})
 
@@ -1194,6 +1221,7 @@ const loadSavedFilters = () => {
       if (parsed.role) filters.role = parsed.role
       if (parsed.status) filters.status = parsed.status
       if (['7', '14', '30', '90', 'never'].includes(parsed.activity)) filters.activity = parsed.activity
+      if (['yes', 'no'].includes(parsed.recharge)) filters.recharge = parsed.recharge
       if (parsed.group) filters.group = parsed.group
       if (typeof parsed.apiKeyGroup === 'number') filters.apiKeyGroup = parsed.apiKeyGroup
       if (parsed.attributes) {
@@ -1215,6 +1243,7 @@ const saveFiltersToStorage = () => {
       role: filters.role,
       status: filters.status,
       activity: filters.activity,
+      recharge: filters.recharge,
       group: filters.group,
       apiKeyGroup: filters.apiKeyGroup,
       attributes: activeAttributeFilters
@@ -1355,10 +1384,31 @@ const pagination = reactive({
   pages: 0
 })
 
+const reengagementAudienceFilters = computed(() => {
+  const attributes: Record<number, string> = {}
+  for (const [attrId, value] of Object.entries(activeAttributeFilters)) {
+    if (value) attributes[Number(attrId)] = value
+  }
+  return {
+    role: filters.role ? filters.role as 'admin' | 'user' : undefined,
+    status: filters.status ? filters.status as 'active' | 'disabled' : undefined,
+    search: searchQuery.value || undefined,
+    group_name: filters.group || undefined,
+    api_key_group_id: filters.apiKeyGroup ?? undefined,
+    attributes: Object.keys(attributes).length > 0 ? attributes : undefined,
+    has_recharged: filters.recharge === 'yes'
+      ? true
+      : filters.recharge === 'no'
+        ? false
+        : undefined
+  }
+})
+
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const showBulkEditModal = ref(false)
 const showReengagementEmailModal = ref(false)
+const reengagementInitialMode = ref<'selected' | 'all'>('selected')
 const showDeleteDialog = ref(false)
 const showApiKeysModal = ref(false)
 const showAttributesModal = ref(false)
@@ -1367,6 +1417,11 @@ const editingUser = ref<AdminUser | null>(null)
 const deletingUser = ref<AdminUser | null>(null)
 const viewingUser = ref<AdminUser | null>(null)
 const platformQuotaUser = ref<AdminUser | null>(null)
+
+const openReengagementEmailModal = (mode: 'selected' | 'all') => {
+  reengagementInitialMode.value = mode
+  showReengagementEmailModal.value = true
+}
 
 const handlePlatformQuota = (user: AdminUser) => {
   platformQuotaUser.value = user
@@ -1628,6 +1683,11 @@ const loadUsers = async () => {
           ? Number(filters.activity)
           : undefined,
         never_used: filters.activity === 'never' ? true : undefined,
+        has_recharged: filters.recharge === 'yes'
+          ? true
+          : filters.recharge === 'no'
+            ? false
+            : undefined,
         sort_by: sortState.sort_by,
         sort_order: sortState.sort_order
       },
