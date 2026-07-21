@@ -162,6 +162,22 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 	return h
 }
 
+// ProvideAdminUserHandler attaches the shared notification-template sender used by batch reengagement.
+func ProvideAdminUserHandler(
+	adminService service.AdminService,
+	concurrencyService *service.ConcurrencyService,
+	userPlatformQuotaRepo service.UserPlatformQuotaRepository,
+	billingCache service.BillingCache,
+	totpService *service.TotpService,
+	userService *service.UserService,
+	settingService *service.SettingService,
+	notificationEmailService *service.NotificationEmailService,
+) *admin.UserHandler {
+	h := admin.NewUserHandler(adminService, concurrencyService, userPlatformQuotaRepo, billingCache, totpService, userService, settingService)
+	h.SetNotificationEmailService(notificationEmailService)
+	return h
+}
+
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
 	authHandler *AuthHandler,
@@ -230,7 +246,7 @@ var ProviderSet = wire.NewSet(
 
 	// Admin handlers
 	admin.NewDashboardHandler,
-	admin.NewUserHandler,
+	ProvideAdminUserHandler,
 	admin.NewGroupHandler,
 	admin.ProvideAccountHandler,
 	admin.NewAnnouncementHandler,

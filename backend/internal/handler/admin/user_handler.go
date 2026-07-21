@@ -8,6 +8,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
@@ -25,6 +26,10 @@ type UserWithConcurrency struct {
 	CurrentConcurrency int `json:"current_concurrency"`
 }
 
+type notificationEmailSender interface {
+	SendWithResult(context.Context, service.NotificationEmailSendInput) (service.NotificationEmailSendResult, error)
+}
+
 // UserHandler handles admin user management
 type UserHandler struct {
 	adminService          service.AdminService
@@ -34,6 +39,12 @@ type UserHandler struct {
 	totpService           *service.TotpService                // 角色提升为管理员的 step-up 门控
 	userService           *service.UserService
 	settingService        *service.SettingService // step-up 功能开关
+	notificationEmail     notificationEmailSender
+}
+
+// SetNotificationEmailService wires the shared editable notification-template sender.
+func (h *UserHandler) SetNotificationEmailService(sender *service.NotificationEmailService) {
+	h.notificationEmail = sender
 }
 
 // NewUserHandler creates a new admin user handler
@@ -120,6 +131,8 @@ type BindUserAuthIdentityChannelRequest struct {
 //   - attr[{id}]: filter by custom attribute value, e.g. attr[1]=company
 //   - group_name: fuzzy filter by allowed group name
 //   - api_key_group_id: filter by the exact group bound to the user's API keys
+//   - inactive_days: users with no usage logs in the trailing N-day window (includes never-used users)
+//   - never_used: only users who have never generated a usage log
 func (h *UserHandler) List(c *gin.Context) {
 	page, pageSize := response.ParsePagination(c)
 
@@ -140,6 +153,25 @@ func (h *UserHandler) List(c *gin.Context) {
 	if raw := strings.TrimSpace(c.Query("api_key_group_id")); raw != "" {
 		if id, parseErr := strconv.ParseInt(raw, 10, 64); parseErr == nil && id > 0 {
 			filters.APIKeyGroupID = id
+		}
+	}
+	if raw := strings.TrimSpace(c.Query("inactive_days")); raw != "" {
+		days, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || days < 1 || days > 3650 {
+			response.BadRequest(c, "inactive_days must be an integer between 1 and 3650")
+			return
+		}
+		filters.InactiveDays = days
+	}
+	if raw := strings.TrimSpace(c.Query("never_used")); raw != "" {
+		neverUsed, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			response.BadRequest(c, "never_used must be a boolean")
+			return
+		}
+		filters.NeverUsed = neverUsed
+		if neverUsed {
+			filters.InactiveDays = 0
 		}
 	}
 	sortBy := c.DefaultQuery("sort_by", "created_at")
@@ -180,6 +212,136 @@ func (h *UserHandler) List(c *gin.Context) {
 	}
 
 	response.Paginated(c, out, total, page, pageSize)
+}
+
+const maxReengagementEmailRecipients = 500
+
+type SendReengagementEmailRequest struct {
+	UserIDs      []int64 `json:"user_ids"`
+	InactiveDays int     `json:"inactive_days"`
+	NeverUsed    bool    `json:"never_used"`
+}
+
+// SendReengagementEmails sends the editable marketing template to selected inactive users.
+// POST /api/v1/admin/users/send-reengagement-email
+func (h *UserHandler) SendReengagementEmails(c *gin.Context) {
+	if h.notificationEmail == nil {
+		response.InternalError(c, "notification email service is not configured")
+		return
+	}
+
+	var req SendReengagementEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if !req.NeverUsed && (req.InactiveDays < 1 || req.InactiveDays > 3650) {
+		response.BadRequest(c, "inactive_days must be an integer between 1 and 3650")
+		return
+	}
+
+	userIDs := uniquePositiveUserIDs(req.UserIDs)
+	if len(userIDs) == 0 {
+		response.BadRequest(c, "user_ids is required")
+		return
+	}
+	if len(userIDs) > maxReengagementEmailRecipients {
+		response.BadRequest(c, fmt.Sprintf("user_ids cannot exceed %d", maxReengagementEmailRecipients))
+		return
+	}
+
+	includeSubscriptions := false
+	users, _, err := h.adminService.ListUsers(
+		c.Request.Context(),
+		1,
+		maxReengagementEmailRecipients,
+		service.UserListFilters{
+			UserIDs:              userIDs,
+			Status:               service.StatusActive,
+			Role:                 service.RoleUser,
+			InactiveDays:         req.InactiveDays,
+			NeverUsed:            req.NeverUsed,
+			IncludeSubscriptions: &includeSubscriptions,
+		},
+		"id",
+		"asc",
+	)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	sent := 0
+	skipped := len(userIDs) - len(users)
+	failed := 0
+	var resultMu sync.Mutex
+	jobs := make(chan service.User)
+	workerCount := min(4, len(users))
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	reminderKey := time.Now().UTC().Format("2006-01-02")
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for user := range jobs {
+				recipientName := strings.TrimSpace(user.Username)
+				if recipientName == "" {
+					recipientName = user.Email
+				}
+				result, err := h.notificationEmail.SendWithResult(c.Request.Context(), service.NotificationEmailSendInput{
+					Event:          service.NotificationEmailEventUserReengagement,
+					RecipientEmail: user.Email,
+					RecipientName:  recipientName,
+					UserID:         user.ID,
+					SourceType:     "user_reengagement",
+					SourceID:       strconv.FormatInt(user.ID, 10),
+					ReminderKey:    reminderKey,
+					Variables: map[string]string{
+						"rate_multiplier": "0.06",
+					},
+				})
+				resultMu.Lock()
+				if err != nil {
+					failed++
+					slog.Warn("user reengagement email failed", "user_id", user.ID, "err", err.Error())
+				} else if result.Sent {
+					sent++
+				} else {
+					skipped++
+				}
+				resultMu.Unlock()
+			}
+		}()
+	}
+	for _, user := range users {
+		jobs <- user
+	}
+	close(jobs)
+	workers.Wait()
+
+	response.Success(c, gin.H{
+		"selected": len(userIDs),
+		"matched":  len(users),
+		"sent":     sent,
+		"skipped":  skipped,
+		"failed":   failed,
+	})
+}
+
+func uniquePositiveUserIDs(userIDs []int64) []int64 {
+	seen := make(map[int64]struct{}, len(userIDs))
+	unique := make([]int64, 0, len(userIDs))
+	for _, userID := range userIDs {
+		if userID <= 0 {
+			continue
+		}
+		if _, exists := seen[userID]; exists {
+			continue
+		}
+		seen[userID] = struct{}{}
+		unique = append(unique, userID)
+	}
+	return unique
 }
 
 // parseAttributeFilters extracts attribute filters from query params

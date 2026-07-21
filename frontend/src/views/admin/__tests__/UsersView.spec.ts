@@ -119,6 +119,16 @@ const BulkEditUserModalStub = {
   `
 }
 
+const UserReengagementEmailModalStub = {
+  props: ['show', 'selectedIds', 'initialActivity'],
+  emits: ['close', 'success'],
+  template: `
+    <div v-if="show" data-test="reengagement-modal">
+      <span data-test="reengagement-modal-ids">{{ selectedIds.join(',') }}</span>
+    </div>
+  `
+}
+
 describe('admin UsersView', () => {
   beforeEach(() => {
     vi.useRealTimers()
@@ -166,6 +176,7 @@ describe('admin UsersView', () => {
           UserCreateModal: true,
           UserEditModal: true,
           BulkEditUserModal: BulkEditUserModalStub,
+          UserReengagementEmailModal: UserReengagementEmailModalStub,
           UserPlatformQuotaModal: true,
           UserApiKeysModal: true,
           UserAllowedGroupsModal: true,
@@ -252,6 +263,7 @@ describe('admin UsersView', () => {
           UserCreateModal: true,
           UserEditModal: true,
           BulkEditUserModal: BulkEditUserModalStub,
+          UserReengagementEmailModal: UserReengagementEmailModalStub,
           UserPlatformQuotaModal: true,
           UserApiKeysModal: true,
           UserAllowedGroupsModal: true,
@@ -330,6 +342,7 @@ describe('admin UsersView', () => {
           UserCreateModal: true,
           UserEditModal: true,
           BulkEditUserModal: BulkEditUserModalStub,
+          UserReengagementEmailModal: UserReengagementEmailModalStub,
           UserPlatformQuotaModal: true,
           UserApiKeysModal: true,
           UserAllowedGroupsModal: true,
@@ -348,6 +361,7 @@ describe('admin UsersView', () => {
     await wrapper.get('[data-test="select-42"]').trigger('click')
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('42')
     expect(wrapper.find('[data-test="bulk-edit-limits"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="send-reengagement-email"]').exists()).toBe(true)
 
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
@@ -355,6 +369,9 @@ describe('admin UsersView', () => {
 
     await wrapper.get('[data-test="select-43"]').trigger('click')
     expect(wrapper.get('[data-test="selected-keys"]').text()).toBe('42,43')
+
+    await wrapper.get('[data-test="send-reengagement-email"]').trigger('click')
+    expect(wrapper.get('[data-test="reengagement-modal-ids"]').text()).toBe('42,43')
 
     await wrapper.get('[data-test="bulk-edit-limits"]').trigger('click')
     expect(wrapper.get('[data-test="bulk-modal-ids"]').text()).toBe('42,43')

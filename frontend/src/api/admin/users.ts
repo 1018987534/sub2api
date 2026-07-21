@@ -55,6 +55,20 @@ export interface BatchUpdateUserLimitsResponse {
   affected: number
 }
 
+export interface SendUserReengagementEmailRequest {
+  user_ids: number[]
+  inactive_days?: number
+  never_used?: boolean
+}
+
+export interface SendUserReengagementEmailResponse {
+  selected: number
+  matched: number
+  sent: number
+  skipped: number
+  failed: number
+}
+
 /**
  * List all users with pagination
  * @param page - Page number (default: 1)
@@ -74,6 +88,8 @@ export async function list(
     api_key_group_id?: number   // filter users by the group their API keys are bound to
     attributes?: Record<number, string>  // attributeId -> value
     include_subscriptions?: boolean
+    inactive_days?: number
+    never_used?: boolean
     sort_by?: string
     sort_order?: 'asc' | 'desc'
   },
@@ -91,6 +107,8 @@ export async function list(
     group_name: filters?.group_name,
     api_key_group_id: filters?.api_key_group_id,
     include_subscriptions: filters?.include_subscriptions,
+    inactive_days: filters?.inactive_days,
+    never_used: filters?.never_used,
     sort_by: filters?.sort_by,
     sort_order: filters?.sort_order
   }
@@ -201,6 +219,17 @@ export async function batchUpdateLimits(
 ): Promise<BatchUpdateUserLimitsResponse> {
   const { data } = await apiClient.post<BatchUpdateUserLimitsResponse>(
     '/admin/users/batch-limits',
+    request
+  )
+  return data
+}
+
+/** Send the editable reengagement template to selected inactive users. */
+export async function sendReengagementEmail(
+  request: SendUserReengagementEmailRequest
+): Promise<SendUserReengagementEmailResponse> {
+  const { data } = await apiClient.post<SendUserReengagementEmailResponse>(
+    '/admin/users/send-reengagement-email',
     request
   )
   return data
@@ -408,6 +437,7 @@ export const usersAPI = {
   updateBalance,
   updateConcurrency,
   batchUpdateLimits,
+  sendReengagementEmail,
   toggleStatus,
   getUserApiKeys,
   getUserUsageStats,

@@ -69,6 +69,13 @@ type UserListFilters struct {
 	Role      string // User role filter
 	Search    string // Search in email, username
 	GroupName string // Filter by allowed group name (fuzzy match)
+	// UserIDs limits the result to a specific admin-selected set. An empty slice means no ID filter.
+	UserIDs []int64
+	// InactiveDays returns users with no usage log in the trailing N-day window.
+	// It includes users who have never generated a usage log. 0 means no activity filter.
+	InactiveDays int
+	// NeverUsed limits the result to users who have no usage logs at all.
+	NeverUsed bool
 	// APIKeyGroupID filters users who own at least one non-soft-deleted API key
 	// bound to this group (api_keys.group_id). 0 = no filter. Covers all three
 	// group types since it matches the key's group directly, not allowed_groups.

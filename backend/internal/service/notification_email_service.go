@@ -27,6 +27,7 @@ const (
 	NotificationEmailEventSubscriptionExpiryReminder  = "subscription.expiry_reminder"
 	NotificationEmailEventBalanceLow                  = "balance.low"
 	NotificationEmailEventBalanceRechargeSuccess      = "balance.recharge_success"
+	NotificationEmailEventUserReengagement            = "marketing.user_reengagement"
 	NotificationEmailEventAccountQuotaAlert           = "account.quota_alert"
 	NotificationEmailEventContentModerationViolation  = "content_moderation.violation_notice"
 	NotificationEmailEventContentModerationDisabled   = "content_moderation.account_disabled"
@@ -126,6 +127,11 @@ type NotificationEmailSendInput struct {
 	ReminderKey      string
 	Variables        map[string]string
 	RawHTMLVariables map[string]string
+}
+
+type NotificationEmailSendResult struct {
+	Sent       bool
+	Suppressed bool
 }
 
 type NotificationEmailUnsubscribeResult struct {
@@ -373,22 +379,28 @@ func (s *NotificationEmailService) PreviewTemplate(ctx context.Context, input No
 }
 
 func (s *NotificationEmailService) Send(ctx context.Context, input NotificationEmailSendInput) error {
+	_, err := s.SendWithResult(ctx, input)
+	return err
+}
+
+// SendWithResult exposes whether a message was delivered or suppressed by preferences/deduplication.
+func (s *NotificationEmailService) SendWithResult(ctx context.Context, input NotificationEmailSendInput) (NotificationEmailSendResult, error) {
 	info, normalizedEvent, err := s.eventInfo(input.Event)
 	if err != nil {
-		return notificationEmailTemplateErr(err)
+		return NotificationEmailSendResult{}, notificationEmailTemplateErr(err)
 	}
 	recipient := strings.TrimSpace(input.RecipientEmail)
 	if recipient == "" {
-		return nil
+		return NotificationEmailSendResult{Suppressed: true}, nil
 	}
 	if info.Optional {
 		unsubscribed, err := s.IsUnsubscribed(ctx, recipient, normalizedEvent)
 		if err != nil {
-			return err
+			return NotificationEmailSendResult{}, err
 		}
 		if unsubscribed {
 			slog.Info("notification email suppressed by unsubscribe preference", "event", normalizedEvent, "recipient_hash", notificationEmailHash(recipient))
-			return nil
+			return NotificationEmailSendResult{Suppressed: true}, nil
 		}
 	}
 
@@ -398,37 +410,37 @@ func (s *NotificationEmailService) Send(ctx context.Context, input NotificationE
 	}
 	tmpl, err := s.GetTemplate(ctx, normalizedEvent, locale)
 	if err != nil {
-		return notificationEmailTemplateErr(err)
+		return NotificationEmailSendResult{}, notificationEmailTemplateErr(err)
 	}
 	variables := s.runtimeVariables(ctx, normalizedEvent, locale, input)
 	rendered, err := renderNotificationEmail(normalizedEvent, tmpl.Subject, tmpl.HTML, variables, input.RawHTMLVariables)
 	if err != nil {
-		return notificationEmailTemplateErr(err)
+		return NotificationEmailSendResult{}, notificationEmailTemplateErr(err)
 	}
 
 	deliveryKey := notificationEmailDeliveryKey(normalizedEvent, input.SourceType, input.SourceID, recipient, input.ReminderKey)
 	if deliveryKey != "" {
 		sent, err := s.deliveryExists(ctx, deliveryKey, legacyNotificationEmailDeliveryKey(normalizedEvent, input.SourceType, input.SourceID, recipient, input.ReminderKey))
 		if err != nil {
-			return err
+			return NotificationEmailSendResult{}, err
 		}
 		if sent {
-			return nil
+			return NotificationEmailSendResult{Suppressed: true}, nil
 		}
 	}
 
 	if s.emailService == nil {
-		return notificationEmailConfigErr(errors.New("email service is not configured"))
+		return NotificationEmailSendResult{}, notificationEmailConfigErr(errors.New("email service is not configured"))
 	}
 	if err := s.emailService.SendEmail(ctx, recipient, rendered.Subject, rendered.HTML); err != nil {
-		return notificationEmailDeliveryErr(err)
+		return NotificationEmailSendResult{}, notificationEmailDeliveryErr(err)
 	}
 	if deliveryKey != "" {
 		if err := s.settingRepo.Set(ctx, deliveryKey, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
+			return NotificationEmailSendResult{}, err
 		}
 	}
-	return nil
+	return NotificationEmailSendResult{Sent: true}, nil
 }
 
 func (s *NotificationEmailService) RememberRecipientLocale(ctx context.Context, userID int64, email, acceptLanguage string) {
@@ -912,6 +924,7 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 			"threshold":           "20.00",
 			"recharge_url":        "https://example.com/recharge",
 			"recharge_amount":     "50.00",
+			"rate_multiplier":     "0.06",
 			"order_id":            "1024",
 			"unsubscribe_url":     "https://example.com/unsubscribe",
 			"account_id":          "1001",
@@ -960,6 +973,7 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 		"threshold":           "20.00",
 		"recharge_url":        "https://example.com/recharge",
 		"recharge_amount":     "50.00",
+		"rate_multiplier":     "0.06",
 		"order_id":            "1024",
 		"unsubscribe_url":     "https://example.com/unsubscribe",
 		"account_id":          "1001",
@@ -1028,6 +1042,7 @@ var notificationEmailEventOrder = []string{
 	NotificationEmailEventSubscriptionExpiryReminder,
 	NotificationEmailEventBalanceLow,
 	NotificationEmailEventBalanceRechargeSuccess,
+	NotificationEmailEventUserReengagement,
 	NotificationEmailEventAccountQuotaAlert,
 	NotificationEmailEventContentModerationViolation,
 	NotificationEmailEventContentModerationDisabled,
@@ -1092,6 +1107,14 @@ var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
 		Category:     "billing",
 		Optional:     false,
 		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "recharge_amount", "current_balance", "order_id"),
+	},
+	NotificationEmailEventUserReengagement: {
+		Event:        NotificationEmailEventUserReengagement,
+		Label:        "Inactive user reengagement",
+		Description:  "Optional campaign email sent by an administrator to selected inactive users.",
+		Category:     "marketing",
+		Optional:     true,
+		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "rate_multiplier", "unsubscribe_url"),
 	},
 	NotificationEmailEventAccountQuotaAlert: {
 		Event:       NotificationEmailEventAccountQuotaAlert,
@@ -1290,6 +1313,32 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
 <p>您的余额充值 <strong>${{recharge_amount}}</strong> 已完成。</p>
 <p>当前余额：<strong>${{current_balance}}</strong></p>
 			<p>订单号：{{order_id}}</p>`),
+		},
+	},
+	NotificationEmailEventUserReengagement: {
+		notificationEmailDefaultLocale: {
+			Subject: "[{{site_name}}] The current rate multiplier is {{rate_multiplier}} - welcome back",
+			HTML: notificationEmailCard("#0f766e", "Welcome back", `
+<p>Hello {{recipient_name}},</p>
+<p>It has been a while since your last visit. The current rate multiplier on {{site_name}} is now:</p>
+<div style="margin:24px 0;padding:20px;text-align:center;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;">
+  <span style="display:block;color:#047857;font-size:13px;font-weight:600;">CURRENT RATE MULTIPLIER</span>
+  <strong style="display:block;margin-top:6px;color:#065f46;font-size:32px;line-height:1.2;">{{rate_multiplier}}</strong>
+</div>
+<p>We would be glad to have you back. Sign in to {{site_name}} and continue using the service whenever you are ready.</p>
+<p style="margin-top:28px;color:#6b7280;font-size:12px;">You are receiving this email because you have not used the service recently. <a href="{{unsubscribe_url}}" style="color:#0f766e;">Unsubscribe from reengagement emails</a>.</p>`),
+		},
+		notificationEmailLocaleChinese: {
+			Subject: "[{{site_name}}] 当前倍率 {{rate_multiplier}}，期待你回来",
+			HTML: notificationEmailCard("#0f766e", "期待你回来", `
+<p>{{recipient_name}}，您好：</p>
+<p>好久不见。您已经有一段时间没有使用 {{site_name}}，目前平台倍率已调整为：</p>
+<div style="margin:24px 0;padding:20px;text-align:center;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;">
+  <span style="display:block;color:#047857;font-size:13px;font-weight:600;">当前倍率</span>
+  <strong style="display:block;margin-top:6px;color:#065f46;font-size:32px;line-height:1.2;">{{rate_multiplier}}</strong>
+</div>
+<p>希望您能回来继续使用。登录 {{site_name}} 后即可继续调用服务。</p>
+<p style="margin-top:28px;color:#6b7280;font-size:12px;">您收到这封邮件，是因为近期未使用平台。如不希望再收到召回邮件，可<a href="{{unsubscribe_url}}" style="color:#0f766e;">退订此类邮件</a>。</p>`),
 		},
 	},
 	NotificationEmailEventAccountQuotaAlert: {

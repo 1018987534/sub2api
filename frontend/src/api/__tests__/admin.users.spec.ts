@@ -13,10 +13,13 @@ vi.mock('@/api/client', () => ({
 import {
   batchUpdateLimits,
   bindUserAuthIdentity,
+  sendReengagementEmail,
   type AdminBindAuthIdentityRequest,
   type AdminBoundAuthIdentity,
   type BatchUpdateUserLimitsRequest,
   type BatchUpdateUserLimitsResponse,
+  type SendUserReengagementEmailRequest,
+  type SendUserReengagementEmailResponse,
 } from '@/api/admin/users'
 
 type Assert<T extends true> = T
@@ -79,6 +82,28 @@ const batchRequestContractExact: Assert<
 > = true
 const batchResponseContractExact: Assert<
   IsExact<BatchUpdateUserLimitsResponse, { affected: number }>
+> = true
+const reengagementRequestContractExact: Assert<
+  IsExact<
+    SendUserReengagementEmailRequest,
+    {
+      user_ids: number[]
+      inactive_days?: number
+      never_used?: boolean
+    }
+  >
+> = true
+const reengagementResponseContractExact: Assert<
+  IsExact<
+    SendUserReengagementEmailResponse,
+    {
+      selected: number
+      matched: number
+      sent: number
+      skipped: number
+      failed: number
+    }
+  >
 > = true
 
 describe('admin users api auth identity binding', () => {
@@ -146,5 +171,27 @@ describe('admin users api auth identity binding', () => {
     expect(result).toEqual({ affected: 2 })
     expect(batchRequestContractExact).toBe(true)
     expect(batchResponseContractExact).toBe(true)
+  })
+
+  it('posts selected users and the inactivity window for reengagement', async () => {
+    const request: SendUserReengagementEmailRequest = {
+      user_ids: [4, 7],
+      inactive_days: 14,
+    }
+    const response: SendUserReengagementEmailResponse = {
+      selected: 2,
+      matched: 1,
+      sent: 1,
+      skipped: 1,
+      failed: 0,
+    }
+    post.mockResolvedValue({ data: response })
+
+    const result = await sendReengagementEmail(request)
+
+    expect(post).toHaveBeenCalledWith('/admin/users/send-reengagement-email', request)
+    expect(result).toEqual(response)
+    expect(reengagementRequestContractExact).toBe(true)
+    expect(reengagementResponseContractExact).toBe(true)
   })
 })
