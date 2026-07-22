@@ -195,9 +195,10 @@ describe('ImageStudioView', () => {
     expect(mocks.submitTask).toHaveBeenCalledWith(
       'sk-key-1',
       'generate',
-      expect.objectContaining({ model: IMAGE_STUDIO_MODEL, prompt: 'A lighthouse in a storm' }),
+      expect.objectContaining({ model: IMAGE_STUDIO_MODEL, prompt: 'A lighthouse in a storm', size: '2048x2048' }),
       expect.any(AbortSignal),
     )
+    expect(wrapper.get('[data-test="resolution-select"]').element).toHaveProperty('value', '2K')
 
     await vi.advanceTimersByTimeAsync(3000)
     await flushPromises()
@@ -210,6 +211,47 @@ describe('ImageStudioView', () => {
 
     wrapper.unmount()
     vi.useRealTimers()
+  })
+
+  it('maps every resolution and orientation to an upstream-valid pixel size', async () => {
+    mocks.submitTask.mockResolvedValue({
+      id: 'imgtask_done',
+      task_id: 'imgtask_done',
+      status: 'completed',
+      result: { data: [{ b64_json: 'aW1hZ2U=', output_format: 'png' }] },
+    })
+    const wrapper = mount(ImageStudioView, { global: globalOptions })
+    await flushPromises()
+
+    const presets = [
+      ['1K', 'square', '1024x1024'],
+      ['1K', 'landscape', '1024x688'],
+      ['1K', 'portrait', '688x1024'],
+      ['2K', 'square', '2048x2048'],
+      ['2K', 'landscape', '2048x1360'],
+      ['2K', 'portrait', '1360x2048'],
+      ['4K', 'square', '2880x2880'],
+      ['4K', 'landscape', '3840x2160'],
+      ['4K', 'portrait', '2160x3840'],
+    ] as const
+
+    for (const [resolution, orientation, size] of presets) {
+      await wrapper.get('[data-test="resolution-select"]').setValue(resolution)
+      await wrapper.get('[data-test="aspect-ratio-select"]').setValue(orientation)
+      await wrapper.find('[data-test="prompt-input"]').setValue(`Generate ${resolution} ${orientation}`)
+      await wrapper.find('[data-test="generate-button"]').trigger('click')
+      await flushPromises()
+
+      expect(mocks.submitTask).toHaveBeenLastCalledWith(
+        'sk-key-1',
+        'generate',
+        expect.objectContaining({ size }),
+        expect.any(AbortSignal),
+      )
+    }
+    expect(wrapper.text()).toContain('4K · 3840x2160')
+
+    wrapper.unmount()
   })
 
   it('loads completed tasks from the selected key history', async () => {

@@ -111,11 +111,17 @@
               <div class="mt-1 text-right text-xs text-gray-400">{{ form.prompt.length }} / 32000</div>
             </div>
 
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
-                <label class="input-label" for="image-studio-size">{{ t('imageStudio.size') }}</label>
-                <select id="image-studio-size" v-model="form.size" class="input">
-                  <option v-for="option in sizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                <label class="input-label" for="image-studio-aspect-ratio">{{ t('imageStudio.aspectRatio') }}</label>
+                <select id="image-studio-aspect-ratio" v-model="form.orientation" class="input px-2 text-sm" data-test="aspect-ratio-select">
+                  <option v-for="option in aspectRatioOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
+              </div>
+              <div>
+                <label class="input-label" for="image-studio-resolution">{{ t('imageStudio.resolution') }}</label>
+                <select id="image-studio-resolution" v-model="form.resolution" class="input px-2 text-sm" data-test="resolution-select">
+                  <option v-for="option in resolutionOptions" :key="option" :value="option">{{ option }}</option>
                 </select>
               </div>
               <div>
@@ -259,7 +265,7 @@
                   <div class="p-2.5">
                     <p class="truncate text-xs font-medium text-gray-800 dark:text-gray-100" :title="item.job.prompt">{{ item.job.prompt }}</p>
                     <div class="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
-                      <span class="min-w-0 truncate">{{ item.job.size }} · {{ item.job.outputFormat.toUpperCase() }}</span>
+                      <span class="min-w-0 truncate">{{ jobSizeLabel(item.job.size) }} · {{ item.job.outputFormat.toUpperCase() }}</span>
                       <span class="flex-shrink-0">{{ formatJobTime(item.job.createdAt) }}</span>
                     </div>
                     <div class="mt-1.5 flex items-center justify-between border-t border-gray-100 pt-1.5 dark:border-dark-700">
@@ -400,9 +406,23 @@ interface StudioHistoryItem {
   outputIndex: number
 }
 
+type ImageStudioOrientation = 'square' | 'landscape' | 'portrait'
+type ImageStudioResolution = '1K' | '2K' | '4K'
+
+interface ImageStudioPreset {
+  orientation: ImageStudioOrientation
+  resolution: ImageStudioResolution
+}
+
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 const POLL_INTERVAL_MS = 3000
 const HISTORY_PAGE_SIZE = 10
+const DEFAULT_IMAGE_STUDIO_PRESET: ImageStudioPreset = { orientation: 'square', resolution: '2K' }
+const IMAGE_STUDIO_SIZE_PRESETS: Record<ImageStudioResolution, Record<ImageStudioOrientation, string>> = {
+  '1K': { square: '1024x1024', landscape: '1024x688', portrait: '688x1024' },
+  '2K': { square: '2048x2048', landscape: '2048x1360', portrait: '1360x2048' },
+  '4K': { square: '2880x2880', landscape: '3840x2160', portrait: '2160x3840' },
+}
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -413,7 +433,8 @@ function createDefaultForm() {
     mode: 'generate' as ImageStudioMode,
     apiKeyId: 0,
     prompt: '',
-    size: '1024x1024',
+    orientation: DEFAULT_IMAGE_STUDIO_PRESET.orientation,
+    resolution: DEFAULT_IMAGE_STUDIO_PRESET.resolution,
     count: 1,
     quality: 'auto',
     background: 'auto',
@@ -480,11 +501,12 @@ const modeOptions = computed(() => [
   { value: 'generate' as const, label: t('imageStudio.generateMode') },
   { value: 'edit' as const, label: t('imageStudio.editMode') },
 ])
-const sizeOptions = computed(() => [
-  { value: '1024x1024', label: t('imageStudio.square') },
-  { value: '1536x1024', label: t('imageStudio.landscape') },
-  { value: '1024x1536', label: t('imageStudio.portrait') },
+const aspectRatioOptions = computed(() => [
+  { value: 'square' as const, label: t('imageStudio.square') },
+  { value: 'landscape' as const, label: t('imageStudio.landscape') },
+  { value: 'portrait' as const, label: t('imageStudio.portrait') },
 ])
+const resolutionOptions: ImageStudioResolution[] = ['1K', '2K', '4K']
 const qualityOptions = computed(() => [
   { value: 'auto', label: t('imageStudio.auto') },
   { value: 'low', label: t('imageStudio.low') },
@@ -513,6 +535,35 @@ function isImageStudioKey(key: ApiKey): boolean {
 
 function currentUserID(): number {
   return authStore.user?.id || 0
+}
+
+function resolveImageStudioSize(preset: ImageStudioPreset): string {
+  return IMAGE_STUDIO_SIZE_PRESETS[preset.resolution][preset.orientation]
+}
+
+function inferImageStudioPreset(size: string): ImageStudioPreset {
+  const normalized = size.trim().toLowerCase()
+  for (const resolution of resolutionOptions) {
+    for (const orientation of Object.keys(IMAGE_STUDIO_SIZE_PRESETS[resolution]) as ImageStudioOrientation[]) {
+      if (IMAGE_STUDIO_SIZE_PRESETS[resolution][orientation].toLowerCase() === normalized) {
+        return { resolution, orientation }
+      }
+    }
+  }
+
+  const match = normalized.match(/^(\d+)x(\d+)$/)
+  if (!match) return { ...DEFAULT_IMAGE_STUDIO_PRESET }
+  const width = Number(match[1])
+  const height = Number(match[2])
+  const maxEdge = Math.max(width, height)
+  const resolution: ImageStudioResolution = maxEdge <= 1024 ? '1K' : maxEdge <= 2048 ? '2K' : '4K'
+  const ratio = width / height
+  const orientation: ImageStudioOrientation = Math.abs(ratio - 1) < 0.1 ? 'square' : ratio > 1 ? 'landscape' : 'portrait'
+  return { resolution, orientation }
+}
+
+function jobSizeLabel(size: string): string {
+  return `${inferImageStudioPreset(size).resolution} · ${size}`
 }
 
 function isCurrentSession(userID: number, revision: number): boolean {
@@ -658,7 +709,7 @@ function historyTaskToJob(task: ImageStudioTask, keyID: number): StudioJob {
     keyID,
     mode: task.mode === 'edit' ? 'edit' : 'generate',
     prompt: task.prompt?.trim() || t('imageStudio.apiTask'),
-    size: task.size || '1024x1024',
+    size: task.size || resolveImageStudioSize(DEFAULT_IMAGE_STUDIO_PRESET),
     quality: task.quality || 'auto',
     outputFormat,
     requestedCount: Math.max(1, task.n || outputs.length || 1),
@@ -742,12 +793,12 @@ function clearMaskImage() {
   maskImage.value = null
 }
 
-function buildRequestBody(): ImageStudioGenerationPayload | FormData {
+function buildRequestBody(size: string): ImageStudioGenerationPayload | FormData {
   if (form.mode === 'generate') {
     return {
       model: IMAGE_STUDIO_MODEL,
       prompt: form.prompt.trim(),
-      size: form.size,
+      size,
       quality: form.quality,
       background: form.background,
       output_format: form.outputFormat,
@@ -759,7 +810,7 @@ function buildRequestBody(): ImageStudioGenerationPayload | FormData {
   const body = new FormData()
   body.append('model', IMAGE_STUDIO_MODEL)
   body.append('prompt', form.prompt.trim())
-  body.append('size', form.size)
+  body.append('size', size)
   body.append('quality', form.quality)
   body.append('background', form.background)
   body.append('output_format', form.outputFormat)
@@ -777,13 +828,15 @@ async function submitGeneration() {
   const ownerUserID = currentUserID()
   const revision = sessionRevision
   if (!isCurrentSession(ownerUserID, revision)) return
+  const size = resolveImageStudioSize({ orientation: form.orientation, resolution: form.resolution })
+  const requestBody = buildRequestBody(size)
 
   const job = reactive<StudioJob>({
     localID: `studio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     keyID: key.id,
     mode: form.mode,
     prompt: form.prompt.trim(),
-    size: form.size,
+    size,
     quality: form.quality,
     outputFormat: form.outputFormat,
     requestedCount: form.count,
@@ -802,11 +855,11 @@ async function submitGeneration() {
   try {
     let task: ImageStudioTask
     try {
-      task = await imageStudioAPI.submitTask(key.key, form.mode, buildRequestBody(), controller.signal)
+      task = await imageStudioAPI.submitTask(key.key, form.mode, requestBody, controller.signal)
       if (!isCurrentSession(ownerUserID, revision)) return
     } catch (error) {
       if (!isAsyncImageUnavailable(error)) throw error
-      const response = await imageStudioAPI.generateSync(key.key, form.mode, buildRequestBody(), controller.signal)
+      const response = await imageStudioAPI.generateSync(key.key, form.mode, requestBody, controller.signal)
       if (!isCurrentSession(ownerUserID, revision)) return
       completeJob(job, extractImageStudioOutputs(response, form.outputFormat))
       jobControllers.delete(job.localID)
@@ -922,7 +975,9 @@ function downloadOutput(output: ImageStudioOutput, job: StudioJob, index: number
 
 function reuseJob(job: StudioJob) {
   form.prompt = job.prompt
-  form.size = job.size
+  const preset = inferImageStudioPreset(job.size)
+  form.orientation = preset.orientation
+  form.resolution = preset.resolution
   form.quality = job.quality
   form.outputFormat = job.outputFormat
   form.mode = 'generate'
