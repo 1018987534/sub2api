@@ -18,7 +18,7 @@ type DomainBrandConfig struct {
 	Domains []DomainBrandProfile `json:"domains"`
 }
 
-// DomainBrandProfile is stored in domain_brand_config. Pointer display fields
+// DomainBrandProfile is stored in domain_brand_config. Pointer public fields
 // distinguish an omitted value (inherit the global setting) from an explicitly
 // empty value (for example, use the packaged default logo).
 type DomainBrandProfile struct {
@@ -26,6 +26,8 @@ type DomainBrandProfile struct {
 	SiteName        *string `json:"site_name,omitempty"`
 	SiteLogo        *string `json:"site_logo,omitempty"`
 	SiteSubtitle    *string `json:"site_subtitle,omitempty"`
+	ContactInfo     *string `json:"contact_info,omitempty"`
+	APIBaseURL      *string `json:"api_base_url,omitempty"`
 	AllowedGroupIDs []int64 `json:"allowed_group_ids"`
 	Configured      bool    `json:"-"`
 }

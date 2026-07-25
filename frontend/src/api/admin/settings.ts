@@ -1387,6 +1387,8 @@ export interface DomainBrandProfile {
   site_name?: string | null;
   site_logo?: string | null;
   site_subtitle?: string | null;
+  contact_info?: string | null;
+  api_base_url?: string | null;
   allowed_group_ids: number[];
 }
 

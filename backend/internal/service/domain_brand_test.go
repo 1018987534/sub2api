@@ -50,8 +50,8 @@ func stringPointer(value string) *string { return &value }
 
 func TestNormalizeDomainHost(t *testing.T) {
 	require.Equal(t, "xiaofanqie.org", NormalizeDomainHost("XIAOFANQIE.ORG.:443"))
-	require.Equal(t, "nideyiyi.com", NormalizeDomainHost(" nideyiyi.com "))
-	require.Empty(t, NormalizeDomainHost("https://nideyiyi.com"))
+	require.Equal(t, "xiaohondou.com", NormalizeDomainHost(" xiaohondou.com "))
+	require.Empty(t, NormalizeDomainHost("https://xiaohondou.com"))
 }
 
 func TestSettingService_UpdateAndResolveDomainBrandConfig(t *testing.T) {
@@ -65,11 +65,17 @@ func TestSettingService_UpdateAndResolveDomainBrandConfig(t *testing.T) {
 	svc.SetOnUpdateCallback(func() { callbackCalls++ })
 
 	saved, err := svc.UpdateDomainBrandConfig(context.Background(), &DomainBrandConfig{Domains: []DomainBrandProfile{
-		{Domain: "NIDEYIYI.COM.", AllowedGroupIDs: []int64{5, 79}},
-		{Domain: "xiaofanqie.org", SiteLogo: stringPointer(""), AllowedGroupIDs: []int64{}},
+		{Domain: "XIAOHONDOU.COM.", AllowedGroupIDs: []int64{5, 79}},
+		{
+			Domain:          "xiaofanqie.org",
+			SiteLogo:        stringPointer(""),
+			ContactInfo:     stringPointer("support@example.com"),
+			APIBaseURL:      stringPointer("https://xiaofanqie.org/v1"),
+			AllowedGroupIDs: []int64{},
+		},
 	}})
 	require.NoError(t, err)
-	require.Equal(t, "nideyiyi.com", saved.Domains[0].Domain)
+	require.Equal(t, "xiaohondou.com", saved.Domains[0].Domain)
 	require.Equal(t, 1, callbackCalls)
 
 	profile, err := svc.ResolveDomainBrandProfile(context.Background(), "XIAOFANQIE.ORG:443")
@@ -77,6 +83,8 @@ func TestSettingService_UpdateAndResolveDomainBrandConfig(t *testing.T) {
 	require.True(t, profile.Configured)
 	require.NotNil(t, profile.SiteLogo)
 	require.Empty(t, *profile.SiteLogo)
+	require.Equal(t, "support@example.com", *profile.ContactInfo)
+	require.Equal(t, "https://xiaofanqie.org/v1", *profile.APIBaseURL)
 	require.False(t, profile.AllowsGroup(5))
 
 	fallback, err := svc.ResolveDomainBrandProfile(context.Background(), "unknown.example")
@@ -103,6 +111,8 @@ func TestSettingService_PublicSettingsOverlayPreservesExplicitEmptyLogo(t *testi
 		SettingKeySiteName:     "Global Name",
 		SettingKeySiteLogo:     "global-logo",
 		SettingKeySiteSubtitle: "Global Subtitle",
+		SettingKeyContactInfo:  "global-support@example.com",
+		SettingKeyAPIBaseURL:   "https://xiaohondou.com/v1",
 	}}
 	svc := NewSettingService(repo, &config.Config{})
 	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
@@ -110,6 +120,8 @@ func TestSettingService_PublicSettingsOverlayPreservesExplicitEmptyLogo(t *testi
 		SiteName:     stringPointer("xiaofanqie.org"),
 		SiteLogo:     stringPointer(""),
 		SiteSubtitle: stringPointer("B-end API Gateway"),
+		ContactInfo:  stringPointer("b2b-support@example.com"),
+		APIBaseURL:   stringPointer("https://xiaofanqie.org/v1"),
 	})
 
 	settings, err := svc.GetPublicSettings(ctx)
@@ -117,6 +129,22 @@ func TestSettingService_PublicSettingsOverlayPreservesExplicitEmptyLogo(t *testi
 	require.Equal(t, "xiaofanqie.org", settings.SiteName)
 	require.Empty(t, settings.SiteLogo)
 	require.Equal(t, "B-end API Gateway", settings.SiteSubtitle)
+	require.Equal(t, "b2b-support@example.com", settings.ContactInfo)
+	require.Equal(t, "https://xiaofanqie.org/v1", settings.APIBaseURL)
+}
+
+func TestSettingService_PublicSettingsOverlayInheritsOmittedFields(t *testing.T) {
+	repo := &settingPublicRepoStub{values: map[string]string{
+		SettingKeyContactInfo: "global-support@example.com",
+		SettingKeyAPIBaseURL:  "https://xiaohondou.com/v1",
+	}}
+	svc := NewSettingService(repo, &config.Config{})
+	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{Configured: true})
+
+	settings, err := svc.GetPublicSettings(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "global-support@example.com", settings.ContactInfo)
+	require.Equal(t, "https://xiaohondou.com/v1", settings.APIBaseURL)
 }
 
 func TestPaymentConfigService_FilterPlansForDomain(t *testing.T) {

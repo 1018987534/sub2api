@@ -40,6 +40,14 @@
               <input v-model="profile.site_subtitle" class="input" placeholder="留空则沿用全局副标题" />
             </label>
             <label class="block">
+              <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">客服联系方式</span>
+              <input v-model="profile.contact_info" class="input" placeholder="留空则沿用全局客服联系方式" />
+            </label>
+            <label class="block">
+              <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">API 端点地址</span>
+              <input v-model="profile.api_base_url" class="input" placeholder="https://example.com/v1" />
+            </label>
+            <label class="block">
               <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Logo</span>
               <select v-model="profile.logo_mode" class="input">
                 <option value="inherit">沿用全局 Logo</option>
@@ -91,6 +99,8 @@ import type { DomainBrandConfig, DomainBrandProfile } from "@/api/admin/settings
 type EditableDomainBrandProfile = Omit<DomainBrandProfile, "site_logo"> & {
   site_name: string | null;
   site_subtitle: string | null;
+  contact_info: string | null;
+  api_base_url: string | null;
   logo_mode: "inherit" | "default";
 };
 
@@ -106,6 +116,8 @@ function toEditable(profile: DomainBrandProfile): EditableDomainBrandProfile {
     domain: profile.domain,
     site_name: profile.site_name ?? null,
     site_subtitle: profile.site_subtitle ?? null,
+    contact_info: profile.contact_info ?? null,
+    api_base_url: profile.api_base_url ?? null,
     logo_mode: profile.site_logo === "" ? "default" : "inherit",
     allowed_group_ids: [...(profile.allowed_group_ids || [])],
   };
@@ -116,6 +128,8 @@ function addDomain(): void {
     domain: "",
     site_name: null,
     site_subtitle: null,
+    contact_info: null,
+    api_base_url: null,
     logo_mode: "inherit",
     allowed_group_ids: [],
   });
@@ -138,6 +152,8 @@ function toRequest(): DomainBrandConfig {
       site_name: profile.site_name?.trim() ? profile.site_name.trim() : null,
       site_logo: profile.logo_mode === "default" ? "" : null,
       site_subtitle: profile.site_subtitle?.trim() ? profile.site_subtitle.trim() : null,
+      contact_info: profile.contact_info?.trim() ? profile.contact_info.trim() : null,
+      api_base_url: profile.api_base_url?.trim() ? profile.api_base_url.trim() : null,
       allowed_group_ids: profile.allowed_group_ids.map(Number),
     })),
   };

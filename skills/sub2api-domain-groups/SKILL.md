@@ -1,11 +1,11 @@
 ---
 name: sub2api-domain-groups
-description: Maintain the Sub2API multi-domain portal customization for 多域名, 域名分组, domain_brand_config, nideyiyi.com, and xiaofanqie.org. Use when changing per-domain Logo/title/subtitle, assigning groups to a domain, filtering portal pricing, debugging Host routing or cross-domain group leaks, merging upstream changes, or deploying this customized feature.
+description: Maintain the Sub2API multi-domain portal customization for 多域名, 域名分组, domain_brand_config, xiaohondou.com, xiaofanqie.org, and legacy nideyiyi.com redirects. Use when changing per-domain Logo/title/subtitle/contact/API endpoint, assigning groups to a domain, filtering portal pricing, debugging Host routing or cross-domain group leaks, merging upstream changes, or deploying this customized feature.
 ---
 
 # Sub2API Domain Groups
 
-This project uses one backend, database, user set, balance, and API gateway for multiple portal domains. The customization is intentionally smaller than multi-tenancy: a configured Host may override three display fields and gets an independent group allowlist.
+This project uses one backend, database, user set, balance, and API gateway for multiple portal domains. The customization is intentionally smaller than multi-tenancy: a configured Host may override five public settings and gets an independent group allowlist.
 
 ## Invariants
 
@@ -16,6 +16,7 @@ This project uses one backend, database, user set, balance, and API gateway for 
 - `/v1`, `/responses`, image/video, and other gateway paths are Host-neutral.
 - Registration follows upstream behavior and does not auto-create a default API key.
 - Domain scoping is a portal pricing/display boundary, not a commercial entitlement boundary.
+- `xiaohondou.com` is the primary C-end domain. `nideyiyi.com` and `api.nideyiyi.com` are legacy redirect-only domains and must not own duplicate group configuration.
 
 ## Stored Config
 
@@ -25,24 +26,28 @@ The `settings` table key is `domain_brand_config`. The value shape is:
 {
   "domains": [
     {
-      "domain": "nideyiyi.com",
+      "domain": "xiaohondou.com",
+      "api_base_url": "https://xiaohondou.com/v1",
       "allowed_group_ids": [5, 79]
     },
     {
       "domain": "xiaofanqie.org",
       "site_name": "xiaofanqie.org",
       "site_logo": "",
+      "contact_info": "B2B support contact",
+      "api_base_url": "https://xiaofanqie.org/v1",
       "allowed_group_ids": []
     }
   ]
 }
 ```
 
-Display field semantics:
+Public field semantics:
 
 - Missing or `null`: inherit the global Setting.
 - `site_logo: ""`: use the frontend packaged `/logo.svg` fallback.
 - Non-empty value: override the global Setting for that Host.
+- The configurable public fields are `site_name`, `site_logo`, `site_subtitle`, `contact_info`, and `api_base_url`.
 
 Host normalization lowercases the value and removes a port, trailing dot, and IPv6 brackets.
 
@@ -82,7 +87,7 @@ When extending this feature, keep all of these aligned:
 5. Available groups plus API key create/update enforcement.
 6. Subscription plan/checkout filtering plus server-side order validation.
 7. Admin UI group picker and API types.
-8. Unit tests for fallback, empty allowlists, explicit empty Logo, duplicate groups, and forged IDs.
+8. Unit tests for fallback, public-setting overlays, empty allowlists, explicit empty Logo, duplicate groups, and forged IDs.
 
 Do not scope existing API key authentication, scheduling snapshots, billing, or gateway forwarding by Host.
 
@@ -101,7 +106,7 @@ Frontend:
 ```bash
 cd frontend
 pnpm typecheck
-pnpm vitest run src/views/admin/__tests__/SettingsView.spec.ts
+pnpm vitest run src/views/admin/__tests__/SettingsView.spec.ts src/views/admin/settings/__tests__/DomainBrandConfigPanel.spec.ts
 pnpm build
 ```
 
@@ -120,6 +125,7 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - Follow the `sub2api-vps-release` binary deployment skill; do not rebuild Compose on the small VPS.
 - Preserve `Host` in Nginx with `proxy_set_header Host $host`.
 - Read and back up the live vhost before edits, run `nginx -t`, then reload Nginx narrowly.
+- Redirect legacy `nideyiyi.com` hosts with HTTP `308` to `xiaohondou.com` so API methods, bodies, paths, and query strings are preserved.
 - DNS must resolve before requesting TLS. If it does not, verify app behavior with an explicit Host header and report DNS as the remaining external blocker.
 - Commit exactly the tested and shipped code, docs, and this skill before declaring the release complete.
 
@@ -129,5 +135,6 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - Filtering only the frontend group selector is insufficient; create/update and payment order validation must reject forged IDs.
 - Treating an empty allowlist as “not configured” exposes every group. Use `Configured` separately from list length.
 - `site_logo` needs pointer semantics so missing and explicit empty values remain distinct.
+- `contact_info` and `api_base_url` use pointer semantics too: missing inherits global settings; a configured value overrides per Host.
 - Resolving domain config on gateway paths adds database work to the inference hot path. Keep those paths bypassed.
 - Direct SQL edits do not invoke HTML cache invalidation. Prefer the admin endpoint; otherwise restart the app or invalidate/reload deliberately.

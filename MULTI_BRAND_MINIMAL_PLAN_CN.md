@@ -4,10 +4,11 @@
 
 采用“域名配置 + 分组白名单”即可满足当前目标：
 
-- `nideyiyi.com` 继续作为默认 C 端站点。
-- 后续 `xxxx.com` 复用同一套前后端、数据库、用户、余额和上游账号池。
+- `xiaohondou.com` 作为默认 C 端主站。
+- `xiaofanqie.org` 复用同一套前后端、数据库、用户、余额和上游账号池。
+- `nideyiyi.com` 和 `api.nideyiyi.com` 作为老域名，以 `308` 重定向到 `xiaohondou.com`。
 - 不创建品牌表、域名表、用户品牌字段、订单品牌字段或品牌成员权限表。
-- 前端只按域名切换 Logo、标题和副标题。
+- 前端按域名切换 Logo、标题、副标题、客服联系方式和 API 端点地址。
 - 后端只按域名限制用户可看见、可选择和可购买的分组。
 
 这不是完整 SaaS 多租户方案，但改动小，适合先验证双品牌价格与展示效果。
@@ -35,14 +36,17 @@
 {
   "domains": [
     {
-      "domain": "nideyiyi.com",
+      "domain": "xiaohondou.com",
+      "api_base_url": "https://xiaohondou.com/v1",
       "allowed_group_ids": [5, 59, 87]
     },
     {
-      "domain": "xxxx.com",
-      "site_name": "XXXX 企业 AI",
+      "domain": "xiaofanqie.org",
+      "site_name": "xiaofanqie.org",
       "site_logo": "",
       "site_subtitle": "面向企业团队的 AI 服务",
+      "contact_info": "企业客服联系方式",
+      "api_base_url": "https://xiaofanqie.org/v1",
       "allowed_group_ids": [101, 102]
     }
   ]
@@ -53,9 +57,10 @@
 
 - Host 统一转为小写并去掉端口后匹配。
 - `allowed_group_ids` 必须全部是存在且启用的分组。
-- 当前未配置 Host 时，回退默认配置，保证现有 `nideyiyi.com`、本地环境和兼容域名不受影响。
+- 当前未配置 Host 时，回退全局配置，保证本地环境和其他兼容入口不受影响。
 - 一个分组 ID 只能归属一个已配置域名。
 - `site_logo` 缺省表示继承全局 Logo，显式空字符串表示使用前端内置默认 Logo。
+- `contact_info` 和 `api_base_url` 缺省表示继承全局设置，配置非空值时按 Host 覆盖。
 
 后台“系统设置”提供域名卡片和活跃分组多选框；配置仍以一条 JSON Setting 保存，不创建品牌管理 CRUD 或新表。
 
@@ -80,11 +85,13 @@ proxy_set_header Host $host;
 
 ### 4.2 前端公开配置
 
-当前公开设置接口和服务端 HTML 注入增加三项覆盖：
+当前公开设置接口增加五项覆盖，其中站点名称和 Logo 也用于服务端 HTML 注入：
 
 - `site_name`
 - `site_logo`
 - `site_subtitle`
+- `contact_info`
+- `api_base_url`
 
 其他现有 Settings 保持不变。前端已能从公开配置读取站点名称和 Logo，因此只需让公开配置按 Host 返回不同值。
 
@@ -93,8 +100,8 @@ proxy_set_header Host $host;
 建议缓存键直接使用规范化 Host，例如：
 
 ```text
-public-html:nideyiyi.com
-public-html:xxxx.com
+public-html:xiaohondou.com
+public-html:xiaofanqie.org
 ```
 
 ### 4.3 分组隔离
@@ -130,7 +137,7 @@ public-html:xxxx.com
 
 继续使用同一份 Vue 构建产物：
 
-- 登录页、侧栏和首页直接使用当前公开设置中的名称、Logo 和副标题。
+- 登录页、侧栏和首页直接使用当前公开设置中的名称、Logo、副标题、客服联系方式和 API 端点地址。
 - 不增加品牌主题系统，不复制页面，不增加品牌路由。
 - API 请求仍使用相对路径，因此两个域名都请求同一后端。
 - 系统设置增加域名卡片与分组选择控件，保存为 `domain_brand_config`。
@@ -141,24 +148,26 @@ public-html:xxxx.com
 
 1. 开发并发布 `domain_brand_config` 解析、按 Host 的公开设置覆盖和 HTML 缓存分片。
 2. 将分组列表、Key 创建/修改、套餐查询和下单校验接入同一分组白名单。
-3. 先只配置 `nideyiyi.com`，其分组列表等于当前 C 端分组，验证行为不变。
-4. 配置新域名的 DNS、TLS 和 Nginx，两个 `server_name` 均代理至同一应用。
+3. 配置 `xiaohondou.com`，其分组列表等于当前 C 端分组，并验证主站行为不变。
+4. 配置新域名的 DNS、TLS 和 Nginx；`xiaohondou.com` 与 `xiaofanqie.org` 代理至同一应用并保留 Host。
 5. 新建 B 端专用分组并给它们配置独立倍率；需要共用的上游账号追加绑定到 B 端分组。
-6. 在 `domain_brand_config` 增加 `xxxx.com` 及其 B 端分组 ID。
-7. 用两个浏览器会话验证页面配置、分组选择、Key 创建和套餐购买。
+6. 在 `domain_brand_config` 增加 `xiaofanqie.org` 及其 B 端分组 ID。
+7. 将 `nideyiyi.com` 和 `api.nideyiyi.com` 以 `308` 重定向到 `xiaohondou.com`，保留路径、查询参数和非 GET 请求方法。
+8. 用两个浏览器会话验证页面配置、分组选择、Key 创建和套餐购买。
 
 ## 7. 验收标准
 
 ### 默认 C 端兼容
 
-- `nideyiyi.com` 的名称、Logo、副标题和可用分组与改造前一致。
+- `xiaohondou.com` 的名称、Logo、副标题、客服信息和可用分组与原 C 端一致。
+- `nideyiyi.com` 与 `api.nideyiyi.com` 永久重定向到 `xiaohondou.com`。
 - 注册流程保持远端行为，不自动创建默认 API Key。
 - 现有 API Key、余额、用量、订单和网关调用没有数据迁移或行为变化。
 - 未配置 Host 回退默认 C 端配置。
 
 ### 新域名验证
 
-- `xxxx.com` 显示自己的名称、Logo 和副标题。
+- `xiaofanqie.org` 显示自己的名称、Logo、副标题、客服联系方式和 API 端点地址。
 - A/B 两个域名交替刷新时不串标题、Logo 或 HTML ETag。
 - 两个域名的“可用分组”接口只返回各自白名单分组。
 - 在 A 域名提交 B 分组 ID 创建或修改 Key 时，服务端拒绝。
@@ -176,6 +185,6 @@ public-html:xxxx.com
 - 按品牌统计用户、订单、收入或用量。
 - B/C 端余额、支付渠道、邮件、合同或客服需要隔离。
 - B 端需要独立账号池、容量和 SLA。
-- 前端页面结构而非仅名称/Logo/副标题需要显著不同。
+- 前端页面结构而非仅公开配置字段需要显著不同。
 
 在这些需求出现前，不建议提前引入 `brands`、`brand_domains`、用户品牌成员或订单品牌字段。

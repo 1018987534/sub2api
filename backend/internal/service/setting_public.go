@@ -352,6 +352,12 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		if profile.SiteSubtitle != nil {
 			publicSettings.SiteSubtitle = *profile.SiteSubtitle
 		}
+		if profile.ContactInfo != nil {
+			publicSettings.ContactInfo = *profile.ContactInfo
+		}
+		if profile.APIBaseURL != nil {
+			publicSettings.APIBaseURL = *profile.APIBaseURL
+		}
 	}
 
 	return publicSettings, nil
