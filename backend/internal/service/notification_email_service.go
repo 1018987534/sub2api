@@ -27,6 +27,7 @@ const (
 	NotificationEmailEventSubscriptionExpiryReminder  = "subscription.expiry_reminder"
 	NotificationEmailEventBalanceLow                  = "balance.low"
 	NotificationEmailEventBalanceRechargeSuccess      = "balance.recharge_success"
+	NotificationEmailEventUserReengagement            = "marketing.user_reengagement"
 	NotificationEmailEventAccountQuotaAlert           = "account.quota_alert"
 	NotificationEmailEventContentModerationViolation  = "content_moderation.violation_notice"
 	NotificationEmailEventContentModerationDisabled   = "content_moderation.account_disabled"
@@ -518,6 +519,9 @@ func (s *NotificationEmailService) sampleVariables(ctx context.Context, event, l
 		variables[key] = value
 	}
 	variables["site_name"] = s.siteName(ctx)
+	if siteURL := s.siteURL(ctx); siteURL != "" {
+		variables["site_url"] = siteURL
+	}
 	if variables["unsubscribe_url"] == "" && info.Optional {
 		variables["unsubscribe_url"] = "https://example.com/unsubscribe"
 	}
@@ -558,6 +562,9 @@ func (s *NotificationEmailService) runtimeVariables(ctx context.Context, event, 
 		}
 	}
 	variables["site_name"] = s.siteName(ctx)
+	if siteURL := s.siteURL(ctx); siteURL != "" {
+		variables["site_url"] = siteURL
+	}
 	variables["recipient_email"] = input.RecipientEmail
 	if strings.TrimSpace(input.RecipientName) != "" {
 		variables["recipient_name"] = input.RecipientName
@@ -592,6 +599,24 @@ func (s *NotificationEmailService) baseURL(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+func (s *NotificationEmailService) siteURL(ctx context.Context) string {
+	if s == nil || s.settingRepo == nil {
+		return ""
+	}
+	if value, err := s.settingRepo.GetValue(ctx, SettingKeyFrontendURL); err == nil && strings.TrimSpace(value) != "" {
+		return strings.TrimRight(strings.TrimSpace(value), "/")
+	}
+	value, err := s.settingRepo.GetValue(ctx, SettingKeyAPIBaseURL)
+	if err != nil || strings.TrimSpace(value) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		return parsed.Scheme + "://" + parsed.Host
+	}
+	return strings.TrimRight(strings.TrimSpace(value), "/")
 }
 
 func (s *NotificationEmailService) buildUnsubscribeURL(ctx context.Context, email, event string) (string, error) {
@@ -899,6 +924,7 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 	if normalizeNotificationLocale(locale) == notificationEmailLocaleChinese {
 		variables := map[string]string{
 			"site_name":           defaultSiteName,
+			"site_url":            "https://example.com",
 			"recipient_name":      "张三",
 			"recipient_email":     "user@example.com",
 			"verification_code":   "123456",
@@ -912,6 +938,7 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 			"threshold":           "20.00",
 			"recharge_url":        "https://example.com/recharge",
 			"recharge_amount":     "50.00",
+			"rate_multiplier":     "0.06",
 			"order_id":            "1024",
 			"unsubscribe_url":     "https://example.com/unsubscribe",
 			"account_id":          "1001",
@@ -947,6 +974,7 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 	}
 	variables := map[string]string{
 		"site_name":           defaultSiteName,
+		"site_url":            "https://example.com",
 		"recipient_name":      "Alex",
 		"recipient_email":     "user@example.com",
 		"verification_code":   "123456",
@@ -960,6 +988,7 @@ func notificationEmailSampleVariables(locale string) map[string]string {
 		"threshold":           "20.00",
 		"recharge_url":        "https://example.com/recharge",
 		"recharge_amount":     "50.00",
+		"rate_multiplier":     "0.06",
 		"order_id":            "1024",
 		"unsubscribe_url":     "https://example.com/unsubscribe",
 		"account_id":          "1001",
@@ -1028,6 +1057,7 @@ var notificationEmailEventOrder = []string{
 	NotificationEmailEventSubscriptionExpiryReminder,
 	NotificationEmailEventBalanceLow,
 	NotificationEmailEventBalanceRechargeSuccess,
+	NotificationEmailEventUserReengagement,
 	NotificationEmailEventAccountQuotaAlert,
 	NotificationEmailEventContentModerationViolation,
 	NotificationEmailEventContentModerationDisabled,
@@ -1092,6 +1122,14 @@ var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
 		Category:     "billing",
 		Optional:     false,
 		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "recharge_amount", "current_balance", "order_id"),
+	},
+	NotificationEmailEventUserReengagement: {
+		Event:        NotificationEmailEventUserReengagement,
+		Label:        "Inactive user reengagement",
+		Description:  "Editable template for inactive user reengagement email.",
+		Category:     "marketing",
+		Optional:     true,
+		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "rate_multiplier", "site_url", "unsubscribe_url"),
 	},
 	NotificationEmailEventAccountQuotaAlert: {
 		Event:       NotificationEmailEventAccountQuotaAlert,
@@ -1290,6 +1328,36 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
 <p>您的余额充值 <strong>${{recharge_amount}}</strong> 已完成。</p>
 <p>当前余额：<strong>${{current_balance}}</strong></p>
 			<p>订单号：{{order_id}}</p>`),
+		},
+	},
+	NotificationEmailEventUserReengagement: {
+		notificationEmailDefaultLocale: {
+			Subject: "[{{site_name}}] The current rate multiplier is {{rate_multiplier}} - welcome back",
+			HTML: notificationEmailCard("#0f766e", "Welcome back", `
+<p>Hello {{recipient_name}},</p>
+<p>It has been a while since your last visit. The current rate multiplier on {{site_name}} is now:</p>
+<div style="margin:24px 0;padding:20px;text-align:center;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;">
+  <span style="display:block;color:#047857;font-size:13px;font-weight:600;">CURRENT RATE MULTIPLIER</span>
+  <strong style="display:block;margin-top:6px;color:#065f46;font-size:32px;line-height:1.2;">{{rate_multiplier}}</strong>
+</div>
+<p>We would be glad to have you back. Sign in to {{site_name}} and continue using the service whenever you are ready.</p>
+<p style="margin:24px 0;text-align:center;"><a href="{{site_url}}" style="display:inline-block;padding:12px 22px;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:600;border-radius:6px;">Return to {{site_name}}</a></p>
+<p>Official website: <a href="{{site_url}}" style="color:#0f766e;">{{site_url}}</a></p>
+<p style="margin-top:28px;color:#6b7280;font-size:12px;">You are receiving this email because you have not used the service recently. <a href="{{unsubscribe_url}}" style="color:#0f766e;">Unsubscribe from reengagement emails</a>.</p>`),
+		},
+		notificationEmailLocaleChinese: {
+			Subject: "[{{site_name}}] 当前倍率 {{rate_multiplier}}，期待你回来",
+			HTML: notificationEmailCard("#0f766e", "期待你回来", `
+<p>{{recipient_name}}，您好：</p>
+<p>好久不见。您已经有一段时间没有使用 {{site_name}}，目前平台倍率已调整为：</p>
+<div style="margin:24px 0;padding:20px;text-align:center;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;">
+  <span style="display:block;color:#047857;font-size:13px;font-weight:600;">当前倍率</span>
+  <strong style="display:block;margin-top:6px;color:#065f46;font-size:32px;line-height:1.2;">{{rate_multiplier}}</strong>
+</div>
+<p>希望您能回来继续使用。登录 {{site_name}} 后即可继续调用服务。</p>
+<p style="margin:24px 0;text-align:center;"><a href="{{site_url}}" style="display:inline-block;padding:12px 22px;background:#0f766e;color:#ffffff;text-decoration:none;font-weight:600;border-radius:6px;">立即返回官网</a></p>
+<p>官网链接：<a href="{{site_url}}" style="color:#0f766e;">{{site_url}}</a></p>
+<p style="margin-top:28px;color:#6b7280;font-size:12px;">您收到这封邮件，是因为近期未使用平台。如不希望再收到召回邮件，可<a href="{{unsubscribe_url}}" style="color:#0f766e;">退订此类邮件</a>。</p>`),
 		},
 	},
 	NotificationEmailEventAccountQuotaAlert: {

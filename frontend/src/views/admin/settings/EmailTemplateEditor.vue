@@ -375,6 +375,11 @@ const eventDisplayMeta: Record<string, EventDisplayMeta> = {
     timing: "余额充值订单支付完成并入账后发送。",
     categoryLabel: "计费",
   },
+  "marketing.user_reengagement": {
+    label: "老用户召回",
+    timing: "用于编辑和预览老用户召回邮件内容。",
+    categoryLabel: "运营",
+  },
   "account.quota_alert": {
     label: "账号限额告警",
     timing: "上游账号的用量达到配置的额度告警阈值时发送给管理员通知邮箱。",
@@ -437,6 +442,11 @@ const eventDisplayMetaEn: Record<string, EventDisplayMeta> = {
     label: "Balance Recharge Success",
     timing: "Sent after a balance recharge order is paid and credited.",
     categoryLabel: "Billing",
+  },
+  "marketing.user_reengagement": {
+    label: "Inactive User Reengagement",
+    timing: "Used to edit and preview inactive user reengagement email content.",
+    categoryLabel: "Marketing",
   },
   "account.quota_alert": {
     label: "Account Quota Alert",
@@ -504,6 +514,7 @@ function formatCategory(category: string): string {
     auth: { zh: "认证安全", en: "Auth" },
     subscription: { zh: "订阅", en: "Subscription" },
     billing: { zh: "计费", en: "Billing" },
+    marketing: { zh: "运营", en: "Marketing" },
     admin: { zh: "管理告警", en: "Admin" },
     risk_control: { zh: "风控", en: "Risk Control" },
     ops: { zh: "运维", en: "Ops" },

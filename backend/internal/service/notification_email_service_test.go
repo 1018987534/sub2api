@@ -158,6 +158,40 @@ func TestNotificationEmailAdditionalEventsAreListedAndPreviewable(t *testing.T) 
 	}
 }
 
+func TestNotificationEmailUserReengagementTemplateIsOptionalAndPreviewable(t *testing.T) {
+	ctx := context.Background()
+	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)
+
+	infos := svc.ListEventInfos()
+	var info NotificationEmailEventInfo
+	for _, candidate := range infos {
+		if candidate.Event == NotificationEmailEventUserReengagement {
+			info = candidate
+			break
+		}
+	}
+	require.Equal(t, NotificationEmailEventUserReengagement, info.Event)
+	require.Equal(t, "marketing", info.Category)
+	require.True(t, info.Optional)
+	require.Contains(t, info.Placeholders, "rate_multiplier")
+	require.Contains(t, info.Placeholders, "site_url")
+	require.Contains(t, info.Placeholders, "unsubscribe_url")
+
+	preview, err := svc.PreviewTemplate(ctx, NotificationEmailPreviewInput{
+		Event:  NotificationEmailEventUserReengagement,
+		Locale: "zh-CN",
+		Variables: map[string]string{
+			"rate_multiplier": "0.06",
+			"site_url":        "https://example.com",
+		},
+	})
+	require.NoError(t, err)
+	require.Contains(t, preview.Subject, "当前倍率 0.06")
+	require.Contains(t, preview.HTML, "期待你回来")
+	require.Contains(t, preview.HTML, "https://example.com")
+	require.NotContains(t, preview.HTML, "{{")
+}
+
 func TestCyberPolicyNoticeTemplateWrapsLongUpstreamMessages(t *testing.T) {
 	ctx := context.Background()
 	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)
