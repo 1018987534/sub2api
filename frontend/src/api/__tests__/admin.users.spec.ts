@@ -13,13 +13,10 @@ vi.mock('@/api/client', () => ({
 import {
   batchUpdateLimits,
   bindUserAuthIdentity,
-  sendReengagementEmail,
   type AdminBindAuthIdentityRequest,
   type AdminBoundAuthIdentity,
   type BatchUpdateUserLimitsRequest,
   type BatchUpdateUserLimitsResponse,
-  type SendUserReengagementEmailRequest,
-  type SendUserReengagementEmailResponse,
 } from '@/api/admin/users'
 
 type Assert<T extends true> = T
@@ -82,37 +79,6 @@ const batchRequestContractExact: Assert<
 > = true
 const batchResponseContractExact: Assert<
   IsExact<BatchUpdateUserLimitsResponse, { affected: number }>
-> = true
-const reengagementRequestContractExact: Assert<
-  IsExact<
-    SendUserReengagementEmailRequest,
-    {
-      status?: 'active' | 'disabled'
-      role?: 'admin' | 'user'
-      search?: string
-      group_name?: string
-      api_key_group_id?: number
-      attributes?: Record<number, string>
-      has_recharged?: boolean
-      user_ids?: number[]
-      send_all?: boolean
-      inactive_days?: number
-      never_used?: boolean
-    }
-  >
-> = true
-const reengagementResponseContractExact: Assert<
-  IsExact<
-    SendUserReengagementEmailResponse,
-    {
-      queued: boolean
-      selected: number
-      matched: number
-      sent: number
-      skipped: number
-      failed: number
-    }
-  >
 > = true
 
 describe('admin users api auth identity binding', () => {
@@ -180,56 +146,5 @@ describe('admin users api auth identity binding', () => {
     expect(result).toEqual({ affected: 2 })
     expect(batchRequestContractExact).toBe(true)
     expect(batchResponseContractExact).toBe(true)
-  })
-
-  it('posts selected users and the inactivity window for reengagement', async () => {
-    const request: SendUserReengagementEmailRequest = {
-      user_ids: [4, 7],
-      inactive_days: 14,
-    }
-    const response: SendUserReengagementEmailResponse = {
-      queued: false,
-      selected: 2,
-      matched: 1,
-      sent: 1,
-      skipped: 1,
-      failed: 0,
-    }
-    post.mockResolvedValue({ data: response })
-
-    const result = await sendReengagementEmail(request)
-
-    expect(post).toHaveBeenCalledWith('/admin/users/send-reengagement-email', request)
-    expect(result).toEqual(response)
-    expect(reengagementRequestContractExact).toBe(true)
-    expect(reengagementResponseContractExact).toBe(true)
-  })
-
-  it('posts every current audience filter for a background reengagement campaign', async () => {
-    const request: SendUserReengagementEmailRequest = {
-      send_all: true,
-      inactive_days: 14,
-      status: 'active',
-      role: 'user',
-      search: 'legacy',
-      group_name: 'GPT',
-      api_key_group_id: 5,
-      attributes: { 3: 'enterprise' },
-      has_recharged: false,
-    }
-    const response: SendUserReengagementEmailResponse = {
-      queued: true,
-      selected: 602,
-      matched: 602,
-      sent: 0,
-      skipped: 0,
-      failed: 0,
-    }
-    post.mockResolvedValue({ data: response })
-
-    const result = await sendReengagementEmail(request)
-
-    expect(post).toHaveBeenCalledWith('/admin/users/send-reengagement-email', request)
-    expect(result).toEqual(response)
   })
 })

@@ -22,22 +22,6 @@
               />
             </div>
 
-            <div class="w-full sm:w-52">
-              <Select
-                v-model="filters.activity"
-                :options="activityFilterOptions"
-                @change="applyFilter"
-              />
-            </div>
-
-            <div class="w-full sm:w-40">
-              <Select
-                v-model="filters.recharge"
-                :options="rechargeFilterOptions"
-                @change="applyFilter"
-              />
-            </div>
-
             <!-- Role Filter (visible when enabled) -->
             <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
               <Select
@@ -257,26 +241,6 @@
                 <span class="hidden md:inline">{{ t('admin.users.attributes.configButton') }}</span>
               </button>
             </div>
-
-            <button
-              v-if="selectedCount > 0"
-              class="btn btn-secondary flex-1 md:flex-initial"
-              data-test="send-reengagement-email"
-              @click="openReengagementEmailModal('selected')"
-            >
-              <Icon name="mail" size="md" class="mr-2" />
-              {{ t('admin.users.reengagement.action', { count: selectedCount }) }}
-            </button>
-
-            <button
-              v-if="pagination.total > 0"
-              class="btn btn-secondary flex-1 md:flex-initial"
-              data-test="send-reengagement-email-all"
-              @click="openReengagementEmailModal('all')"
-            >
-              <Icon name="mail" size="md" class="mr-2" />
-              {{ t('admin.users.reengagement.actionAll', { count: pagination.total }) }}
-            </button>
 
             <button
               v-if="selectedCount > 0"
@@ -792,16 +756,6 @@
       @close="showBulkEditModal = false"
       @success="handleBulkLimitsSuccess"
     />
-    <UserReengagementEmailModal
-      :show="showReengagementEmailModal"
-      :selected-ids="selectedIds"
-      :filtered-total="pagination.total"
-      :initial-mode="reengagementInitialMode"
-      :initial-activity="filters.activity"
-      :audience-filters="reengagementAudienceFilters"
-      @close="showReengagementEmailModal = false"
-      @success="handleReengagementSuccess"
-    />
     <UserPlatformQuotaModal
       :show="showPlatformQuotaModal"
       :user="platformQuotaUser"
@@ -850,7 +804,6 @@ import UserPlatformQuotaCell from '@/components/user/UserPlatformQuotaCell.vue'
 import UserCreateModal from '@/components/admin/user/UserCreateModal.vue'
 import UserEditModal from '@/components/admin/user/UserEditModal.vue'
 import BulkEditUserModal from '@/components/admin/user/BulkEditUserModal.vue'
-import UserReengagementEmailModal from '@/components/admin/user/UserReengagementEmailModal.vue'
 import UserPlatformQuotaModal from '@/components/admin/user/UserPlatformQuotaModal.vue'
 import UserApiKeysModal from '@/components/admin/user/UserApiKeysModal.vue'
 import UserAllowedGroupsModal from '@/components/admin/user/UserAllowedGroupsModal.vue'
@@ -1156,24 +1109,9 @@ const apiKeyGroupFilterOptions = computed(() =>
 const filters = reactive({
   role: '',
   status: '',
-  activity: '',
-  recharge: '',
   group: '',  // group name for fuzzy match, '' = all
   apiKeyGroup: null as number | null  // group id bound to the user's API keys, null = all
 })
-const activityFilterOptions = computed(() => [
-  { value: '', label: t('admin.users.reengagement.allActivity') },
-  { value: '7', label: t('admin.users.reengagement.inactiveDays', { days: 7 }) },
-  { value: '14', label: t('admin.users.reengagement.inactiveDays', { days: 14 }) },
-  { value: '30', label: t('admin.users.reengagement.inactiveDays', { days: 30 }) },
-  { value: '90', label: t('admin.users.reengagement.inactiveDays', { days: 90 }) },
-  { value: 'never', label: t('admin.users.reengagement.neverUsed') }
-])
-const rechargeFilterOptions = computed(() => [
-  { value: '', label: t('admin.users.reengagement.allRechargeStatuses') },
-  { value: 'yes', label: t('admin.users.reengagement.recharged') },
-  { value: 'no', label: t('admin.users.reengagement.notRecharged') }
-])
 const activeAttributeFilters = reactive<Record<number, string>>({})
 
 // Visible filters tracking (which filters are shown in the UI)
@@ -1220,8 +1158,6 @@ const loadSavedFilters = () => {
       const parsed = JSON.parse(savedValues)
       if (parsed.role) filters.role = parsed.role
       if (parsed.status) filters.status = parsed.status
-      if (['7', '14', '30', '90', 'never'].includes(parsed.activity)) filters.activity = parsed.activity
-      if (['yes', 'no'].includes(parsed.recharge)) filters.recharge = parsed.recharge
       if (parsed.group) filters.group = parsed.group
       if (typeof parsed.apiKeyGroup === 'number') filters.apiKeyGroup = parsed.apiKeyGroup
       if (parsed.attributes) {
@@ -1242,8 +1178,6 @@ const saveFiltersToStorage = () => {
     const values = {
       role: filters.role,
       status: filters.status,
-      activity: filters.activity,
-      recharge: filters.recharge,
       group: filters.group,
       apiKeyGroup: filters.apiKeyGroup,
       attributes: activeAttributeFilters
@@ -1384,31 +1318,9 @@ const pagination = reactive({
   pages: 0
 })
 
-const reengagementAudienceFilters = computed(() => {
-  const attributes: Record<number, string> = {}
-  for (const [attrId, value] of Object.entries(activeAttributeFilters)) {
-    if (value) attributes[Number(attrId)] = value
-  }
-  return {
-    role: filters.role ? filters.role as 'admin' | 'user' : undefined,
-    status: filters.status ? filters.status as 'active' | 'disabled' : undefined,
-    search: searchQuery.value || undefined,
-    group_name: filters.group || undefined,
-    api_key_group_id: filters.apiKeyGroup ?? undefined,
-    attributes: Object.keys(attributes).length > 0 ? attributes : undefined,
-    has_recharged: filters.recharge === 'yes'
-      ? true
-      : filters.recharge === 'no'
-        ? false
-        : undefined
-  }
-})
-
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const showBulkEditModal = ref(false)
-const showReengagementEmailModal = ref(false)
-const reengagementInitialMode = ref<'selected' | 'all'>('selected')
 const showDeleteDialog = ref(false)
 const showApiKeysModal = ref(false)
 const showAttributesModal = ref(false)
@@ -1417,11 +1329,6 @@ const editingUser = ref<AdminUser | null>(null)
 const deletingUser = ref<AdminUser | null>(null)
 const viewingUser = ref<AdminUser | null>(null)
 const platformQuotaUser = ref<AdminUser | null>(null)
-
-const openReengagementEmailModal = (mode: 'selected' | 'all') => {
-  reengagementInitialMode.value = mode
-  showReengagementEmailModal.value = true
-}
 
 const handlePlatformQuota = (user: AdminUser) => {
   platformQuotaUser.value = user
@@ -1679,15 +1586,6 @@ const loadUsers = async () => {
         attributes: Object.keys(attrFilters).length > 0 ? attrFilters : undefined,
         // 始终请求 subscriptions：列隐藏时仍需用于 UserPlatformQuotaModal 的 active-subscription 警示 banner
         include_subscriptions: true,
-        inactive_days: filters.activity && filters.activity !== 'never'
-          ? Number(filters.activity)
-          : undefined,
-        never_used: filters.activity === 'never' ? true : undefined,
-        has_recharged: filters.recharge === 'yes'
-          ? true
-          : filters.recharge === 'no'
-            ? false
-            : undefined,
         sort_by: sortState.sort_by,
         sort_order: sortState.sort_order
       },
@@ -1728,11 +1626,6 @@ const loadUsers = async () => {
 }
 
 const handleBulkLimitsSuccess = async () => {
-  clearSelection()
-  await loadUsers()
-}
-
-const handleReengagementSuccess = async () => {
   clearSelection()
   await loadUsers()
 }

@@ -447,18 +447,6 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	if filters.Role != "" {
 		q = q.Where(dbuser.RoleEQ(filters.Role))
 	}
-	if len(filters.UserIDs) > 0 {
-		q = q.Where(dbuser.IDIn(filters.UserIDs...))
-	}
-	if filters.HasRecharged != nil {
-		q = q.Where(userHasRecharged(*filters.HasRecharged))
-	}
-	if filters.NeverUsed {
-		q = q.Where(userHasNoUsage())
-	} else if filters.InactiveDays > 0 {
-		cutoff := time.Now().UTC().AddDate(0, 0, -filters.InactiveDays)
-		q = q.Where(userHasNoUsageSince(cutoff))
-	}
 	if filters.Search != "" {
 		q = q.Where(
 			dbuser.Or(
@@ -565,38 +553,6 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	}
 
 	return outUsers, paginationResultFromTotal(int64(total), params), nil
-}
-
-func userHasRecharged(hasRecharged bool) predicate.User {
-	if hasRecharged {
-		return dbuser.TotalRechargedGT(0)
-	}
-	return dbuser.TotalRechargedLTE(0)
-}
-
-func userHasNoUsageSince(cutoff time.Time) predicate.User {
-	return func(selector *entsql.Selector) {
-		table := entsql.Table("usage_logs")
-		subquery := entsql.Select().
-			From(table).
-			Where(
-				entsql.And(
-					entsql.ColumnsEQ(table.C("user_id"), selector.C(dbuser.FieldID)),
-					entsql.GTE(table.C("created_at"), cutoff),
-				),
-			)
-		selector.Where(entsql.Not(entsql.Exists(subquery)))
-	}
-}
-
-func userHasNoUsage() predicate.User {
-	return func(selector *entsql.Selector) {
-		table := entsql.Table("usage_logs")
-		subquery := entsql.Select().
-			From(table).
-			Where(entsql.ColumnsEQ(table.C("user_id"), selector.C(dbuser.FieldID)))
-		selector.Where(entsql.Not(entsql.Exists(subquery)))
-	}
 }
 
 func userListOrder(params pagination.PaginationParams) []func(*entsql.Selector) {

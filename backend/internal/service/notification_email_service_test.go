@@ -158,45 +158,6 @@ func TestNotificationEmailAdditionalEventsAreListedAndPreviewable(t *testing.T) 
 	}
 }
 
-func TestNotificationEmailUserReengagementTemplateIsOptionalAndPreviewable(t *testing.T) {
-	ctx := context.Background()
-	repo := newNotificationEmailMemorySettingRepo()
-	require.NoError(t, repo.Set(ctx, SettingKeyAPIBaseURL, "https://official.example.com/v1/"))
-	svc := NewNotificationEmailService(repo, nil)
-
-	infos := svc.ListEventInfos()
-	var info NotificationEmailEventInfo
-	for _, candidate := range infos {
-		if candidate.Event == NotificationEmailEventUserReengagement {
-			info = candidate
-			break
-		}
-	}
-	require.Equal(t, NotificationEmailEventUserReengagement, info.Event)
-	require.Equal(t, "marketing", info.Category)
-	require.True(t, info.Optional)
-	require.Contains(t, info.Placeholders, "rate_multiplier")
-	require.Contains(t, info.Placeholders, "site_url")
-	require.Contains(t, info.Placeholders, "unsubscribe_url")
-
-	preview, err := svc.PreviewTemplate(ctx, NotificationEmailPreviewInput{
-		Event:  NotificationEmailEventUserReengagement,
-		Locale: "zh-CN",
-		Variables: map[string]string{
-			"rate_multiplier": "0.06",
-		},
-	})
-	require.NoError(t, err)
-	require.Contains(t, preview.Subject, "当前倍率 0.06")
-	require.Contains(t, preview.HTML, "期待你回来")
-	require.Contains(t, preview.HTML, "0.06")
-	require.Contains(t, preview.HTML, "立即返回官网")
-	require.Contains(t, preview.HTML, `href="https://official.example.com"`)
-	require.Contains(t, preview.HTML, "官网链接")
-	require.Contains(t, preview.HTML, "unsubscribe")
-	require.NotContains(t, preview.HTML, "{{")
-}
-
 func TestCyberPolicyNoticeTemplateWrapsLongUpstreamMessages(t *testing.T) {
 	ctx := context.Background()
 	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)
@@ -482,21 +443,15 @@ func TestNotificationEmailSendDeduplicatesSubscriptionExpiryReminder(t *testing.
 		},
 	}
 
-	firstResult, err := svc.SendWithResult(ctx, input)
-	require.NoError(t, err)
-	require.True(t, firstResult.Sent)
-	require.False(t, firstResult.Suppressed)
+	require.NoError(t, svc.Send(ctx, input))
 	require.Equal(t, int64(1), smtpServer.messageCount())
 
 	key := notificationEmailDeliveryKey(input.Event, input.SourceType, input.SourceID, input.RecipientEmail, input.ReminderKey)
 	require.LessOrEqual(t, len(key), 100)
-	_, err = repo.GetValue(ctx, key)
+	_, err := repo.GetValue(ctx, key)
 	require.NoError(t, err)
 
-	secondResult, err := svc.SendWithResult(ctx, input)
-	require.NoError(t, err)
-	require.False(t, secondResult.Sent)
-	require.True(t, secondResult.Suppressed)
+	require.NoError(t, svc.Send(ctx, input))
 	require.Equal(t, int64(1), smtpServer.messageCount())
 }
 
