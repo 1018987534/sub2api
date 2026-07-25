@@ -6,7 +6,7 @@
 
 - `xiaohondou.com` 作为默认 C 端主站。
 - `xiaofanqie.org` 复用同一套前后端、数据库、用户、余额和上游账号池。
-- `nideyiyi.com` 和 `api.nideyiyi.com` 作为老域名，以 `308` 重定向到 `xiaohondou.com`。
+- `nideyiyi.com` 和 `api.nideyiyi.com` 作为老域名兼容入口，继续代理到同一后端，不对 API 请求做跨域永久重定向。
 - 不创建品牌表、域名表、用户品牌字段、订单品牌字段或品牌成员权限表。
 - 前端按域名切换 Logo、标题、副标题、客服联系方式和 API 端点地址。
 - 后端只按域名限制用户可看见、可选择和可购买的分组。
@@ -152,7 +152,7 @@ public-html:xiaofanqie.org
 4. 配置新域名的 DNS、TLS 和 Nginx；`xiaohondou.com` 与 `xiaofanqie.org` 代理至同一应用并保留 Host。
 5. 新建 B 端专用分组并给它们配置独立倍率；需要共用的上游账号追加绑定到 B 端分组。
 6. 在 `domain_brand_config` 增加 `xiaofanqie.org` 及其 B 端分组 ID。
-7. 将 `nideyiyi.com` 和 `api.nideyiyi.com` 以 `308` 重定向到 `xiaohondou.com`，保留路径、查询参数和非 GET 请求方法。
+7. 保留 `nideyiyi.com` 和 `api.nideyiyi.com` 的 HTTPS 直通兼容；HTTP 仅以同 Host `308` 升级到 HTTPS。新主站稳定后，只允许对明确的浏览器页面导航使用临时跳转。
 8. 用两个浏览器会话验证页面配置、分组选择、Key 创建和套餐购买。
 
 ## 7. 验收标准
@@ -160,7 +160,7 @@ public-html:xiaofanqie.org
 ### 默认 C 端兼容
 
 - `xiaohondou.com` 的名称、Logo、副标题、客服信息和可用分组与原 C 端一致。
-- `nideyiyi.com` 与 `api.nideyiyi.com` 永久重定向到 `xiaohondou.com`。
+- `nideyiyi.com` 与 `api.nideyiyi.com` 的 API、网关和未知路径均保持原 Host 可用，不返回跨域 `Location`。
 - 注册流程保持远端行为，不自动创建默认 API Key。
 - 现有 API Key、余额、用量、订单和网关调用没有数据迁移或行为变化。
 - 未配置 Host 回退默认 C 端配置。

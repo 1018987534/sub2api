@@ -4,7 +4,7 @@
 
 ## 1. 背景与目标
 
-当前 `xiaohondou.com` 是 C 端主站，`xiaofanqie.org` 是独立分组的第二品牌，两者复用同一套 Sub2API 后端、数据库、Redis、用户体系、余额体系和上游账号池。`nideyiyi.com` 与 `api.nideyiyi.com` 仅作为重定向兼容域名。
+当前 `xiaohondou.com` 是 C 端主站，`xiaofanqie.org` 是独立分组的第二品牌，两者复用同一套 Sub2API 后端、数据库、Redis、用户体系、余额体系和上游账号池。`nideyiyi.com` 与 `api.nideyiyi.com` 作为原 Host 直通的兼容入口，避免现有 API 客户端被跨域永久重定向。
 
 第一版的目标不是立即上线第二个品牌，而是先把系统改造成可扩展的品牌架构，同时保持默认单品牌运行：
 
@@ -113,8 +113,8 @@
 
 - `xiaohondou.com`（主域名）
 - `xiaofanqie.org`（第二品牌域名）
-- `nideyiyi.com`（重定向兼容域名）
-- `api.nideyiyi.com`（重定向兼容 API 域名）
+- `nideyiyi.com`（原 Host 直通兼容域名）
+- `api.nideyiyi.com`（原 Host 直通兼容 API 域名）
 
 ### 4.3 现有表字段
 
@@ -321,6 +321,6 @@ B 端上线前建议选择一种准入方式：
 
 ## 13. 最终建议
 
-第一版采用“默认品牌 + 品牌覆盖配置”的方式，不迁移现有全局 Settings，不拆后端，不改网关数据面，也不提前引入 B 端成员权限。当前轻量实现以 `xiaohondou.com` 作为默认品牌主域名，旧 `nideyiyi.com` 域名仅保留重定向兼容。
+第一版采用“默认品牌 + 品牌覆盖配置”的方式，不迁移现有全局 Settings，不拆后端，不改网关数据面，也不提前引入 B 端成员权限。当前轻量实现以 `xiaohondou.com` 作为默认品牌主域名，旧 `nideyiyi.com` 域名保留原 Host 直通兼容，网站迁移与 API 兼容分开处理。
 
 这个范围能控制改动量，同时避免把多品牌做成仅靠前端判断或域名配置的临时方案。第二品牌上线时主要是新增品牌数据、B 端分组和准入策略，而不是再次重构现有注册、计费和门户链路。

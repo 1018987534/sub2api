@@ -1,6 +1,6 @@
 ---
 name: sub2api-domain-groups
-description: Maintain the Sub2API multi-domain portal customization for 多域名, 域名分组, domain_brand_config, xiaohondou.com, xiaofanqie.org, and legacy nideyiyi.com redirects. Use when changing per-domain Logo/title/subtitle/contact/API endpoint, assigning groups to a domain, filtering portal pricing, debugging Host routing or cross-domain group leaks, merging upstream changes, or deploying this customized feature.
+description: Maintain the Sub2API multi-domain portal customization for 多域名, 域名分组, domain_brand_config, xiaohondou.com, xiaofanqie.org, and legacy nideyiyi.com API compatibility. Use when changing per-domain Logo/title/subtitle/contact/API endpoint, assigning groups to a domain, filtering portal pricing, debugging Host routing or cross-domain group leaks, merging upstream changes, or deploying this customized feature.
 ---
 
 # Sub2API Domain Groups
@@ -16,7 +16,8 @@ This project uses one backend, database, user set, balance, and API gateway for 
 - `/v1`, `/responses`, image/video, and other gateway paths are Host-neutral.
 - Registration follows upstream behavior and does not auto-create a default API key.
 - Domain scoping is a portal pricing/display boundary, not a commercial entitlement boundary.
-- `xiaohondou.com` is the primary C-end domain. `nideyiyi.com` and `api.nideyiyi.com` are legacy redirect-only domains and must not own duplicate group configuration.
+- `xiaohondou.com` is the primary C-end domain. `nideyiyi.com` and `api.nideyiyi.com` are legacy compatibility ingress domains and must not own duplicate group configuration.
+- Legacy HTTPS requests remain on the original Host and proxy to the shared backend. Never permanently redirect API or gateway requests across domains.
 
 ## Stored Config
 
@@ -125,7 +126,8 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - Follow the `sub2api-vps-release` binary deployment skill; do not rebuild Compose on the small VPS.
 - Preserve `Host` in Nginx with `proxy_set_header Host $host`.
 - Read and back up the live vhost before edits, run `nginx -t`, then reload Nginx narrowly.
-- Redirect legacy `nideyiyi.com` hosts with HTTP `308` to `xiaohondou.com` so API methods, bodies, paths, and query strings are preserved.
+- Keep legacy HTTPS hosts as direct compatibility proxies. Use same-Host HTTP `308` only for the HTTP-to-HTTPS upgrade so methods, bodies, paths, and query strings are preserved.
+- Do not use cross-domain `301` or `308` for legacy API hosts. A future website migration may use a temporary redirect only for proven browser document navigations after the new domain passes edge-network observation.
 - DNS must resolve before requesting TLS. If it does not, verify app behavior with an explicit Host header and report DNS as the remaining external blocker.
 - Commit exactly the tested and shipped code, docs, and this skill before declaring the release complete.
 
@@ -138,3 +140,5 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - `contact_info` and `api_base_url` use pointer semantics too: missing inherits global settings; a configured value overrides per Host.
 - Resolving domain config on gateway paths adds database work to the inference hot path. Keep those paths bypassed.
 - Direct SQL edits do not invoke HTML cache invalidation. Prefer the admin endpoint; otherwise restart the app or invalidate/reload deliberately.
+- Cross-domain permanent redirects can be cached by browsers, SDKs, and CDN edges. They can keep API clients on an unreachable destination even after the origin config is rolled back.
+- Cloudflare origin health does not prove every Anycast route is usable. Pin and probe every advertised edge IP from the actual client network before redirecting legacy traffic to a new zone.
