@@ -17,7 +17,8 @@ This project uses one backend, database, user set, balance, and API gateway for 
 - Registration follows upstream behavior and does not auto-create a default API key.
 - Domain scoping is a portal pricing/display boundary, not a commercial entitlement boundary.
 - `xiaohondou.com` is the primary C-end domain. `nideyiyi.com` and `api.nideyiyi.com` are legacy compatibility ingress domains and must not own duplicate group configuration.
-- Legacy HTTPS requests remain on the original Host and proxy to the shared backend. Never permanently redirect API or gateway requests across domains.
+- `nideyiyi.com` redirects only browser document navigations (`GET`/`HEAD`, HTML `Accept`, non-API path) to `xiaohondou.com` with temporary `302`.
+- `api.nideyiyi.com`, API/gateway paths, non-HTML requests, POST requests, SSE, and WebSocket traffic remain on the original Host and proxy to the shared backend. Never permanently redirect API or gateway requests across domains.
 
 ## Stored Config
 
@@ -127,7 +128,8 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - Preserve `Host` in Nginx with `proxy_set_header Host $host`.
 - Read and back up the live vhost before edits, run `nginx -t`, then reload Nginx narrowly.
 - Keep legacy HTTPS hosts as direct compatibility proxies. Use same-Host HTTP `308` only for the HTTP-to-HTTPS upgrade so methods, bodies, paths, and query strings are preserved.
-- Do not use cross-domain `301` or `308` for legacy API hosts. A future website migration may use a temporary redirect only for proven browser document navigations after the new domain passes edge-network observation.
+- Do not use cross-domain `301` or `308` for legacy API hosts. The active website migration uses `302` only when Host is `nideyiyi.com`, method is `GET`/`HEAD`, `Accept` contains `text/html`, and the path is not an API/gateway/health path.
+- Keep `api.nideyiyi.com` redirect-free. Test both advertised Cloudflare edge IPs with HTML, JSON, SSE, POST, and HTTP-to-HTTPS probes after every Nginx change.
 - DNS must resolve before requesting TLS. If it does not, verify app behavior with an explicit Host header and report DNS as the remaining external blocker.
 - Commit exactly the tested and shipped code, docs, and this skill before declaring the release complete.
 
