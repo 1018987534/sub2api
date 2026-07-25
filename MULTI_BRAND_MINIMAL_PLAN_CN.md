@@ -153,7 +153,8 @@ public-html:xiaofanqie.org
 5. 新建 B 端专用分组并给它们配置独立倍率；需要共用的上游账号追加绑定到 B 端分组。
 6. 在 `domain_brand_config` 增加 `xiaofanqie.org` 及其 B 端分组 ID。
 7. 保留两个旧域名的 API HTTPS 直通兼容，HTTP 仅以同 Host `308` 升级到 HTTPS；只对 `nideyiyi.com` 的 GET/HEAD HTML 页面导航使用跨域临时 `302`，`api.nideyiyi.com` 不跳转。
-8. 用两个浏览器会话验证页面配置、分组选择、Key 创建和套餐购买。
+8. 在运行时配置的 `cors.allowed_origins` 中保留 `xiaohondou.com`、`xiaofanqie.org`、`nideyiyi.com` 和 `api.nideyiyi.com`，并开启凭证；升级后显式验证跨域 `OPTIONS` 返回 `204`。
+9. 用两个浏览器会话验证页面配置、分组选择、Key 创建和套餐购买。
 
 ## 7. 验收标准
 
@@ -161,6 +162,7 @@ public-html:xiaofanqie.org
 
 - `xiaohondou.com` 的名称、Logo、副标题、客服信息和可用分组与原 C 端一致。
 - `nideyiyi.com` 的浏览器页面导航临时跳转到新主站；`api.nideyiyi.com` 以及 API、网关、POST、SSE、WebSocket 请求保持原 Host 可用，不返回跨域 `Location`。
+- 旧站和新站来源访问共享 API 的 CORS 预检返回 `204`，`Access-Control-Allow-Origin` 精确回显来源且允许凭证。
 - 注册流程保持远端行为，不自动创建默认 API Key。
 - 现有 API Key、余额、用量、订单和网关调用没有数据迁移或行为变化。
 - 未配置 Host 回退默认 C 端配置。

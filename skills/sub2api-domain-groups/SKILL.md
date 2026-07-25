@@ -19,6 +19,7 @@ This project uses one backend, database, user set, balance, and API gateway for 
 - `xiaohondou.com` is the primary C-end domain. `nideyiyi.com` and `api.nideyiyi.com` are legacy compatibility ingress domains and must not own duplicate group configuration.
 - `nideyiyi.com` redirects only browser document navigations (`GET`/`HEAD`, HTML `Accept`, non-API path) to `xiaohondou.com` with temporary `302`.
 - `api.nideyiyi.com`, API/gateway paths, non-HTML requests, POST requests, SSE, and WebSocket traffic remain on the original Host and proxy to the shared backend. Never permanently redirect API or gateway requests across domains.
+- The shared API uses strict CORS. Keep every browser portal origin in `/www/sub2api/data/config.yaml` under `cors.allowed_origins`; an absent or empty list rejects cross-origin preflights with `403`.
 
 ## Stored Config
 
@@ -118,7 +119,14 @@ Production probes should preserve the Host header and avoid downloading the full
 curl -fsSI https://DOMAIN/
 curl -fsS https://DOMAIN/api/v1/settings/public
 curl -fsS -H 'Host: DOMAIN' http://127.0.0.1:8080/api/v1/settings/public
+curl -sS -D - -o /dev/null -X OPTIONS \
+  -H 'Origin: https://PORTAL_DOMAIN' \
+  -H 'Access-Control-Request-Method: GET' \
+  -H 'Access-Control-Request-Headers: authorization,content-type' \
+  https://API_DOMAIN/api/v1/auth/me
 ```
+
+Expect the preflight to return `204`, echo the exact portal origin in `Access-Control-Allow-Origin`, and include `Access-Control-Allow-Credentials: true`.
 
 Use an authenticated user session to verify available groups, plans, checkout, API key create/update, and forged cross-domain plan rejection.
 
@@ -127,6 +135,7 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - Follow the `sub2api-vps-release` binary deployment skill; do not rebuild Compose on the small VPS.
 - Preserve `Host` in Nginx with `proxy_set_header Host $host`.
 - Read and back up the live vhost before edits, run `nginx -t`, then reload Nginx narrowly.
+- Preserve the live `cors.allowed_origins` block across upstream upgrades. The production list must include `https://xiaohondou.com`, `https://xiaofanqie.org`, `https://nideyiyi.com`, and `https://api.nideyiyi.com`, with `allow_credentials: true`.
 - Keep legacy HTTPS hosts as direct compatibility proxies. Use same-Host HTTP `308` only for the HTTP-to-HTTPS upgrade so methods, bodies, paths, and query strings are preserved.
 - Do not use cross-domain `301` or `308` for legacy API hosts. The active website migration uses `302` only when Host is `nideyiyi.com`, method is `GET`/`HEAD`, `Accept` contains `text/html`, and the path is not an API/gateway/health path.
 - Keep `api.nideyiyi.com` redirect-free. Test both advertised Cloudflare edge IPs with HTML, JSON, SSE, POST, and HTTP-to-HTTPS probes after every Nginx change.
@@ -143,4 +152,5 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - Resolving domain config on gateway paths adds database work to the inference hot path. Keep those paths bypassed.
 - Direct SQL edits do not invoke HTML cache invalidation. Prefer the admin endpoint; otherwise restart the app or invalidate/reload deliberately.
 - Cross-domain permanent redirects can be cached by browsers, SDKs, and CDN edges. They can keep API clients on an unreachable destination even after the origin config is rolled back.
+- A healthy `/health` or server-side `/v1/models` probe does not prove browser API compatibility. Strict CORS can leave those probes green while browser `OPTIONS` requests fail with `403`; always run an explicit preflight probe after an upgrade or domain change.
 - Cloudflare origin health does not prove every Anycast route is usable. Pin and probe every advertised edge IP from the actual client network before redirecting legacy traffic to a new zone.
