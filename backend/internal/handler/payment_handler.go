@@ -49,6 +49,7 @@ func (h *PaymentHandler) GetPlans(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	plans = h.configService.FilterPlansForDomain(c.Request.Context(), plans)
 	// Enrich plans with group platform for frontend color coding
 	type planWithPlatform struct {
 		ID                 int64    `json:"id"`
@@ -120,6 +121,7 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 
 	// Fetch plans with group info
 	plans, _ := h.configService.ListPlansForSale(ctx)
+	plans = h.configService.FilterPlansForDomain(ctx, plans)
 	groupInfo := h.configService.GetGroupInfoMap(ctx, plans)
 	planList := make([]checkoutPlan, 0, len(plans))
 	for _, p := range plans {

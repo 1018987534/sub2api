@@ -9,6 +9,8 @@ const {
   updateSettings,
   getWebSearchEmulationConfig,
   updateWebSearchEmulationConfig,
+  getDomainBrandConfig,
+  updateDomainBrandConfig,
   getAdminApiKey,
   getOverloadCooldownSettings,
   getRateLimit429CooldownSettings,
@@ -35,6 +37,8 @@ const {
   updateSettings: vi.fn(),
   getWebSearchEmulationConfig: vi.fn(),
   updateWebSearchEmulationConfig: vi.fn(),
+  getDomainBrandConfig: vi.fn().mockResolvedValue({ domains: [] }),
+  updateDomainBrandConfig: vi.fn().mockImplementation(async (payload) => payload),
   getAdminApiKey: vi.fn(),
   getOverloadCooldownSettings: vi.fn(),
   getRateLimit429CooldownSettings: vi.fn(),
@@ -73,6 +77,8 @@ vi.mock("@/api", () => ({
       updateSettings,
       getWebSearchEmulationConfig,
       updateWebSearchEmulationConfig,
+      getDomainBrandConfig,
+      updateDomainBrandConfig,
       getAdminApiKey,
       getOverloadCooldownSettings,
       getRateLimit429CooldownSettings,
@@ -350,7 +356,6 @@ const baseSettingsResponse = {
   totp_enabled: false,
   totp_encryption_key_configured: false,
   default_balance: 0,
-  default_signup_api_key_group_id: 0,
   default_concurrency: 1,
   default_subscriptions: [],
   site_name: "Sub2API",
@@ -788,38 +793,6 @@ describe("admin SettingsView payment visible method controls", () => {
       expect.objectContaining({
         affiliate_admin_recharge_enabled: true,
       }),
-    );
-  });
-
-  it("loads and submits the configured default signup API key group", async () => {
-    getSettings.mockResolvedValueOnce({
-      ...baseSettingsResponse,
-      default_signup_api_key_group_id: 87,
-    });
-    getGroups.mockResolvedValueOnce([
-      {
-        id: 87,
-        name: "FREE",
-        platform: "openai",
-        status: "active",
-        subscription_type: "standard",
-      },
-    ]);
-
-    const wrapper = mountView();
-    await flushPromises();
-    await openUsersTab(wrapper);
-
-    const groupSelect = wrapper
-      .findAll("select.select-stub")
-      .find((node) => node.text().includes("FREE · openai (#87)"));
-    expect(groupSelect).toBeDefined();
-    expect(groupSelect?.element.value).toBe("87");
-
-    await wrapper.find("form").trigger("submit.prevent");
-    await flushPromises();
-    expect(updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ default_signup_api_key_group_id: 87 }),
     );
   });
 

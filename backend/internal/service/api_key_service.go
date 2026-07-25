@@ -421,6 +421,9 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
 
 	// 验证分组权限（如果指定了分组）
 	if req.GroupID != nil {
+		if !DomainBrandProfileFromContext(ctx).AllowsGroup(*req.GroupID) {
+			return nil, ErrGroupNotAllowed
+		}
 		group, err := s.groupRepo.GetByID(ctx, *req.GroupID)
 		if err != nil {
 			return nil, fmt.Errorf("get group: %w", err)
@@ -724,6 +727,9 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req 
 	}
 
 	if req.GroupID != nil {
+		if !DomainBrandProfileFromContext(ctx).AllowsGroup(*req.GroupID) {
+			return nil, ErrGroupNotAllowed
+		}
 		// 验证分组权限
 		user, err := s.userRepo.GetByID(ctx, userID)
 		if err != nil {
@@ -953,7 +959,11 @@ func (s *APIKeyService) GetAvailableGroups(ctx context.Context, userID int64) ([
 
 	// 过滤出用户有权限的分组
 	availableGroups := make([]Group, 0)
+	domainProfile := DomainBrandProfileFromContext(ctx)
 	for _, group := range allGroups {
+		if !domainProfile.AllowsGroup(group.ID) {
+			continue
+		}
 		if s.canUserBindGroupInternal(user, &group, subscribedGroupIDs) {
 			availableGroups = append(availableGroups, group)
 		}

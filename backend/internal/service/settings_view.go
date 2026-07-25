@@ -149,7 +149,6 @@ type SystemSettings struct {
 
 	DefaultConcurrency           int
 	DefaultBalance               float64
-	DefaultSignupAPIKeyGroupID   int64
 	RiskControlEnabled           bool
 	CyberSessionBlockEnabled     bool
 	CyberSessionBlockTTLSeconds  int

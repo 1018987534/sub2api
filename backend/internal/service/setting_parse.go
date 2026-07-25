@@ -124,7 +124,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOIDCConnectUserInfoUsernamePath:           "",
 		SettingKeyDefaultConcurrency:                        strconv.Itoa(s.cfg.Default.UserConcurrency),
 		SettingKeyDefaultBalance:                            strconv.FormatFloat(s.cfg.Default.UserBalance, 'f', 8, 64),
-		SettingKeyDefaultSignupAPIKeyGroupID:                "0",
 		SettingKeyAffiliateRebateRate:                       strconv.FormatFloat(AffiliateRebateRateDefault, 'f', 8, 64),
 		SettingKeyAffiliateRebateFreezeHours:                strconv.Itoa(AffiliateRebateFreezeHoursDefault),
 		SettingKeyAffiliateRebateDurationDays:               strconv.Itoa(AffiliateRebateDurationDaysDefault),
@@ -355,10 +354,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	if rpm, err := strconv.Atoi(settings[SettingKeyDefaultUserRPMLimit]); err == nil && rpm >= 0 {
 		result.DefaultUserRPMLimit = rpm
 	}
-	if groupID, err := strconv.ParseInt(settings[SettingKeyDefaultSignupAPIKeyGroupID], 10, 64); err == nil && groupID > 0 {
-		result.DefaultSignupAPIKeyGroupID = groupID
-	}
-
 	// 解析浮点数类型
 	if balance, err := strconv.ParseFloat(settings[SettingKeyDefaultBalance], 64); err == nil {
 		result.DefaultBalance = balance

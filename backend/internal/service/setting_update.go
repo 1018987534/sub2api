@@ -52,9 +52,6 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Contex
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
-	if err := s.validateDefaultSignupAPIKeyGroup(ctx, settings.DefaultSignupAPIKeyGroupID); err != nil {
-		return nil, err
-	}
 	if err := s.validateDefaultSubscriptionGroups(ctx, settings.DefaultSubscriptions); err != nil {
 		return nil, err
 	}
@@ -295,7 +292,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// 默认配置
 	updates[SettingKeyDefaultConcurrency] = strconv.Itoa(settings.DefaultConcurrency)
 	updates[SettingKeyDefaultBalance] = strconv.FormatFloat(settings.DefaultBalance, 'f', 8, 64)
-	updates[SettingKeyDefaultSignupAPIKeyGroupID] = strconv.FormatInt(settings.DefaultSignupAPIKeyGroupID, 10)
 	settings.AffiliateRebateRate = clampAffiliateRebateRate(settings.AffiliateRebateRate)
 	updates[SettingKeyAffiliateRebateRate] = strconv.FormatFloat(settings.AffiliateRebateRate, 'f', 8, 64)
 	if settings.AffiliateRebateFreezeHours < 0 {
@@ -607,33 +603,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 
 func (s *SettingService) defaultRewriteMessageCacheControl() bool {
 	return false
-}
-
-func (s *SettingService) validateDefaultSignupAPIKeyGroup(ctx context.Context, groupID int64) error {
-	if groupID == 0 {
-		return nil
-	}
-	if groupID < 0 || s.defaultSubGroupReader == nil {
-		return ErrDefaultSignupAPIKeyGroupInvalid.WithMetadata(map[string]string{
-			"group_id": strconv.FormatInt(groupID, 10),
-		})
-	}
-
-	group, err := s.defaultSubGroupReader.GetByID(ctx, groupID)
-	if err != nil {
-		if errors.Is(err, ErrGroupNotFound) {
-			return ErrDefaultSignupAPIKeyGroupInvalid.WithMetadata(map[string]string{
-				"group_id": strconv.FormatInt(groupID, 10),
-			})
-		}
-		return fmt.Errorf("get default signup api key group %d: %w", groupID, err)
-	}
-	if group.Status != StatusActive {
-		return ErrDefaultSignupAPIKeyGroupInvalid.WithMetadata(map[string]string{
-			"group_id": strconv.FormatInt(groupID, 10),
-		})
-	}
-	return nil
 }
 
 func (s *SettingService) validateDefaultSubscriptionGroups(ctx context.Context, items []DefaultSubscriptionSetting) error {
