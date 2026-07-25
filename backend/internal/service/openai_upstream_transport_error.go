@@ -127,6 +127,9 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 		s.rateLimitService.HandleTempUnschedulableTransportFailure(ctx, account, err)
 	}
 
+	// Transport attempt reached the network path; count as Ollama Cloud activity.
+	scheduleOllamaCloudUsageActivity(s.deferredService, account)
+
 	if account.GetTempUnschedulableMode() != TempUnschedulableModeConsecutiveFailures && classifyOpenAITransportError(err).Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
