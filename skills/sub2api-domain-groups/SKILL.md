@@ -35,7 +35,7 @@ The `settings` table key is `domain_brand_config`. The value shape is:
     },
     {
       "domain": "xiaofanqie.org",
-      "site_name": "xiaofanqie.org",
+      "site_name": "小番茄",
       "site_logo": "",
       "contact_info": "B2B support contact",
       "api_base_url": "https://xiaofanqie.org/v1",
@@ -68,6 +68,22 @@ Host normalization lowercases the value and removes a port, trailing dot, and IP
 - Admin API: `GET/PUT /api/v1/admin/settings/domain-brand-config`
 - Admin UI: `frontend/src/views/admin/settings/DomainBrandConfigPanel.vue`
 - Design references: `MULTI_BRAND_MINIMAL_PLAN_CN.md`, `MULTI_BRAND_ARCHITECTURE_CN.md`
+
+## Admin Save Contract
+
+`域名品牌与分组` is an independently submitted settings panel. Its `保存域名配置`
+action calls `PUT /api/v1/admin/settings/domain-brand-config`; the regular System
+Settings save calls `/api/v1/admin/settings` and does not submit this panel's
+values.
+
+After editing a domain brand:
+
+1. Use the panel's own `保存域名配置` action.
+2. Confirm the domain-brand `PUT` request succeeded.
+3. Probe `/api/v1/settings/public` with the target Host and verify the returned
+   title, subtitle, contact, API endpoint, and Logo semantics.
+4. Reload the target-domain page and verify both the document title and visible
+   brand heading.
 
 ## Adding A Group
 
@@ -151,6 +167,7 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - `contact_info` and `api_base_url` use pointer semantics too: missing inherits global settings; a configured value overrides per Host.
 - Resolving domain config on gateway paths adds database work to the inference hot path. Keep those paths bypassed.
 - Direct SQL edits do not invoke HTML cache invalidation. Prefer the admin endpoint; otherwise restart the app or invalidate/reload deliberately.
+- Values typed into the domain-brand panel remain local form state until its own `保存域名配置` action succeeds. Saving the surrounding System Settings form does not persist them.
 - Cross-domain permanent redirects can be cached by browsers, SDKs, and CDN edges. They can keep API clients on an unreachable destination even after the origin config is rolled back.
 - A healthy `/health` or server-side `/v1/models` probe does not prove browser API compatibility. Strict CORS can leave those probes green while browser `OPTIONS` requests fail with `403`; always run an explicit preflight probe after an upgrade or domain change.
 - Cloudflare origin health does not prove every Anycast route is usable. Pin and probe every advertised edge IP from the actual client network before redirecting legacy traffic to a new zone.
