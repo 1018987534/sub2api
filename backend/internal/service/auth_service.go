@@ -132,6 +132,13 @@ func (s *AuthService) EntClient() *dbent.Client {
 	return s.entClient
 }
 
+func (s *AuthService) registrationSiteName(ctx context.Context) string {
+	if s == nil || s.settingService == nil {
+		return "Sub2API"
+	}
+	return s.settingService.GetRegistrationSiteName(ctx)
+}
+
 // Register 用户注册，返回token和用户
 func (s *AuthService) Register(ctx context.Context, email, password string) (string, *User, error) {
 	return s.RegisterWithVerification(ctx, email, password, "", "", "", "")
@@ -215,13 +222,14 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 
 	// 创建用户
 	user := &User{
-		Email:        email,
-		PasswordHash: hashedPassword,
-		Role:         RoleUser,
-		Balance:      grantPlan.Balance,
-		Concurrency:  grantPlan.Concurrency,
-		RPMLimit:     defaultRPMLimit,
-		Status:       StatusActive,
+		Email:                email,
+		PasswordHash:         hashedPassword,
+		Role:                 RoleUser,
+		Balance:              grantPlan.Balance,
+		Concurrency:          grantPlan.Concurrency,
+		RPMLimit:             defaultRPMLimit,
+		Status:               StatusActive,
+		RegistrationSiteName: s.registrationSiteName(ctx),
 	}
 
 	if err := s.userRepo.CreateWithEmailAliasGuard(ctx, user); err != nil {
@@ -518,15 +526,16 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 			}
 
 			newUser := &User{
-				Email:        email,
-				Username:     username,
-				PasswordHash: hashedPassword,
-				Role:         RoleUser,
-				Balance:      grantPlan.Balance,
-				Concurrency:  grantPlan.Concurrency,
-				RPMLimit:     defaultRPMLimit,
-				Status:       StatusActive,
-				SignupSource: signupSource,
+				Email:                email,
+				Username:             username,
+				PasswordHash:         hashedPassword,
+				Role:                 RoleUser,
+				Balance:              grantPlan.Balance,
+				Concurrency:          grantPlan.Concurrency,
+				RPMLimit:             defaultRPMLimit,
+				Status:               StatusActive,
+				SignupSource:         signupSource,
+				RegistrationSiteName: s.registrationSiteName(ctx),
 			}
 
 			if err := s.userRepo.Create(ctx, newUser); err != nil {
@@ -667,15 +676,16 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 			}
 
 			newUser := &User{
-				Email:        email,
-				Username:     username,
-				PasswordHash: hashedPassword,
-				Role:         RoleUser,
-				Balance:      grantPlan.Balance,
-				Concurrency:  grantPlan.Concurrency,
-				RPMLimit:     defaultRPMLimit,
-				Status:       StatusActive,
-				SignupSource: signupSource,
+				Email:                email,
+				Username:             username,
+				PasswordHash:         hashedPassword,
+				Role:                 RoleUser,
+				Balance:              grantPlan.Balance,
+				Concurrency:          grantPlan.Concurrency,
+				RPMLimit:             defaultRPMLimit,
+				Status:               StatusActive,
+				SignupSource:         signupSource,
+				RegistrationSiteName: s.registrationSiteName(ctx),
 			}
 
 			if s.entClient != nil && invitationRedeemCode != nil {

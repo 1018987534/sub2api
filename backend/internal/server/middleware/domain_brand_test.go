@@ -12,6 +12,8 @@ func TestNeedsDomainBrandProfile(t *testing.T) {
 		{path: "/api/v1/settings/public", want: true},
 		{path: "/api/v1/keys", want: true},
 		{path: "/api/v1/keys/123", want: true},
+		{path: "/api/v1/auth/register", want: true},
+		{path: "/api/v1/auth/oauth/callback", want: true},
 		{path: "/api/v1/api-keys", want: false},
 		{path: "/api/v1/groups/available", want: true},
 		{path: "/api/v1/payment/plans", want: true},

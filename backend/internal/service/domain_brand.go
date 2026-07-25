@@ -62,6 +62,24 @@ func DomainBrandProfileFromContext(ctx context.Context) DomainBrandProfile {
 	return profile
 }
 
+// GetRegistrationSiteName returns the effective site title for a new user.
+// The value is persisted as a snapshot so later brand renames do not rewrite
+// the user's original registration source.
+func (s *SettingService) GetRegistrationSiteName(ctx context.Context) string {
+	if s == nil {
+		return "Sub2API"
+	}
+	siteName := strings.TrimSpace(s.GetSiteName(ctx))
+	profile := DomainBrandProfileFromContext(ctx)
+	if profile.Configured && profile.SiteName != nil {
+		siteName = strings.TrimSpace(*profile.SiteName)
+	}
+	if siteName == "" {
+		return "Sub2API"
+	}
+	return siteName
+}
+
 // NormalizeDomainHost makes Request.Host and configured hostnames comparable.
 func NormalizeDomainHost(raw string) string {
 	host := strings.TrimSpace(strings.ToLower(raw))

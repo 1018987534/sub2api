@@ -13,6 +13,7 @@ This project uses one backend, database, user set, balance, and API gateway for 
 - Configured hosts use `allowed_group_ids` even when the list is empty.
 - A group ID may belong to only one configured domain.
 - Users, balances, API keys, orders, upstream accounts, and administrators are shared.
+- Self-service registrations persist an immutable `registration_site_name` snapshot from the effective portal title. It is an attribution label only; it does not change authentication, entitlements, balances, or group permissions.
 - `/v1`, `/responses`, image/video, and other gateway paths are Host-neutral.
 - Registration follows upstream behavior and does not auto-create a default API key.
 - Domain scoping is a portal pricing/display boundary, not a commercial entitlement boundary.
@@ -54,6 +55,21 @@ Public field semantics:
 
 Host normalization lowercases the value and removes a port, trailing dot, and IPv6 brackets.
 
+## Registration Source
+
+`users.registration_site_name` records the effective `site_name` when an end
+user is first created through email or OAuth registration. A configured domain
+uses its `site_name`; an omitted domain title inherits the global title. The
+field is intentionally not changed by profile edits or later brand renames.
+
+- Migration `191_add_user_registration_site_name.sql` backfills existing users
+  from the then-current global `site_name` so the administration list has no
+  blank historical source labels.
+- Domain-brand context applies to `/api/v1/auth/*` as well as portal display,
+  group, and payment routes; do not remove it from auth registration paths.
+- Admin-created users are not self-service registrations and may have an empty
+  source label.
+
 ## Code Map
 
 - Config, validation, context: `backend/internal/service/domain_brand.go`
@@ -67,6 +83,8 @@ Host normalization lowercases the value and removes a port, trailing dot, and IP
 - Host-sharded HTML/ETag cache: `backend/internal/web/html_cache.go`, `backend/internal/web/embed_on.go`
 - Admin API: `GET/PUT /api/v1/admin/settings/domain-brand-config`
 - Admin UI: `frontend/src/views/admin/settings/DomainBrandConfigPanel.vue`
+- Registration snapshot: `backend/internal/service/auth_service.go` and `backend/internal/service/domain_brand.go`
+- Admin user label: `frontend/src/views/admin/UsersView.vue`
 - Design references: `MULTI_BRAND_MINIMAL_PLAN_CN.md`, `MULTI_BRAND_ARCHITECTURE_CN.md`
 
 ## Admin Save Contract
@@ -171,3 +189,4 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - Cross-domain permanent redirects can be cached by browsers, SDKs, and CDN edges. They can keep API clients on an unreachable destination even after the origin config is rolled back.
 - A healthy `/health` or server-side `/v1/models` probe does not prove browser API compatibility. Strict CORS can leave those probes green while browser `OPTIONS` requests fail with `403`; always run an explicit preflight probe after an upgrade or domain change.
 - Cloudflare origin health does not prove every Anycast route is usable. Pin and probe every advertised edge IP from the actual client network before redirecting legacy traffic to a new zone.
+- Do not infer a user's registration brand from the current Host at list time. It must be written during user creation as `registration_site_name`, otherwise historical attribution changes when an administrator renames a brand.

@@ -147,6 +147,22 @@ func TestSettingService_PublicSettingsOverlayInheritsOmittedFields(t *testing.T)
 	require.Equal(t, "https://xiaohondou.com/v1", settings.APIBaseURL)
 }
 
+func TestSettingService_GetRegistrationSiteNameSnapshotsEffectiveBrand(t *testing.T) {
+	repo := &settingRepoStub{values: map[string]string{
+		SettingKeySiteName: "小红豆",
+	}}
+	svc := NewSettingService(repo, &config.Config{})
+
+	primary := svc.GetRegistrationSiteName(context.Background())
+	require.Equal(t, "小红豆", primary)
+
+	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
+		Configured: true,
+		SiteName:   stringPointer("小番茄"),
+	})
+	require.Equal(t, "小番茄", svc.GetRegistrationSiteName(ctx))
+}
+
 func TestPaymentConfigService_FilterPlansForDomain(t *testing.T) {
 	plans := []*dbent.SubscriptionPlan{{ID: 1, GroupID: 5}, {ID: 2, GroupID: 79}}
 	service := &PaymentConfigService{}

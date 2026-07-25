@@ -87,6 +87,9 @@ func (User) Fields() []ent.Field {
 				}
 			}).
 			Default("email"),
+		field.String("registration_site_name").
+			SchemaType(map[string]string{dialect.Postgres: "text"}).
+			Default(""),
 		field.Time("last_login_at").
 			Optional().
 			Nillable().

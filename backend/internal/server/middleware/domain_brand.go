@@ -31,6 +31,7 @@ func DomainBrandContext(settingService *service.SettingService) gin.HandlerFunc 
 
 func needsDomainBrandProfile(requestPath string) bool {
 	portalAPIPrefixes := []string{
+		"/api/v1/auth",
 		"/api/v1/keys",
 		"/api/v1/groups/available",
 		"/api/v1/payment",

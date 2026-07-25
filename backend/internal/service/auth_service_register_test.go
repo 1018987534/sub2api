@@ -496,6 +496,25 @@ func TestAuthService_Register_Success(t *testing.T) {
 	require.True(t, user.CheckPassword("password"))
 }
 
+func TestAuthService_Register_SnapshotsDomainBrandSiteName(t *testing.T) {
+	repo := &userRepoStub{nextID: 6}
+	service := newAuthService(repo, map[string]string{
+		SettingKeyRegistrationEnabled: "true",
+		SettingKeySiteName:            "小红豆",
+	}, nil, nil)
+	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
+		Configured: true,
+		SiteName:   stringPointer("小番茄"),
+	})
+
+	_, user, err := service.Register(ctx, "tomato@test.com", "password")
+	require.NoError(t, err)
+	require.NotNil(t, user)
+	require.Equal(t, "小番茄", user.RegistrationSiteName)
+	require.Len(t, repo.created, 1)
+	require.Equal(t, "小番茄", repo.created[0].RegistrationSiteName)
+}
+
 func TestAuthService_ValidateToken_ExpiredReturnsClaimsWithError(t *testing.T) {
 	repo := &userRepoStub{}
 	service := newAuthService(repo, nil, nil, nil)
