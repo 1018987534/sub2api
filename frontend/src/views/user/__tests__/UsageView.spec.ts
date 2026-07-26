@@ -95,6 +95,8 @@ vi.mock('vue-i18n', async () => {
 
 const simpleStub = { template: '<div><slot /></div>' }
 const chartStub = { template: '<div />' }
+const formatLocalDate = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 
 const usageLog = {
   id: 1,
@@ -195,10 +197,14 @@ describe('user UsageView', () => {
     mountUsageView()
     await flushPromises()
 
+    const today = formatLocalDate(new Date())
     expect(query).toHaveBeenCalled()
     expect(getStats).toHaveBeenCalled()
     expect(getDashboardModels).toHaveBeenCalled()
     expect(getDashboardSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
+      start_date: today,
+      end_date: today,
+      granularity: 'hour',
       include_trend: true,
       include_model_stats: false,
       include_group_stats: true,
