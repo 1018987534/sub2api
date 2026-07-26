@@ -101,7 +101,16 @@ func (s *FrontendServer) Middleware() gin.HandlerFunc {
 		}
 
 		// For index.html or SPA routes, serve with injected settings
-		if cleanPath == "index.html" || !s.fileExists(cleanPath) {
+		if cleanPath == "index.html" {
+			s.serveIndexHTML(c)
+			return
+		}
+		if !s.fileExists(cleanPath) {
+			if isStaticAssetRequest(cleanPath) {
+				c.Status(http.StatusNotFound)
+				c.Abort()
+				return
+			}
 			s.serveIndexHTML(c)
 			return
 		}
@@ -125,6 +134,11 @@ func (s *FrontendServer) fileExists(path string) bool {
 	}
 	_ = file.Close()
 	return true
+}
+
+func isStaticAssetRequest(cleanPath string) bool {
+	cleanPath = strings.TrimPrefix(cleanPath, "/")
+	return strings.HasPrefix(cleanPath, "assets/") || filepath.Ext(cleanPath) != ""
 }
 
 // tryServeOverride checks if a local override file exists and serves it.
@@ -340,6 +354,11 @@ func ServeEmbeddedFrontend() gin.HandlerFunc {
 			}
 			applyStaticAssetCacheHeaders(c.Writer.Header(), cleanPath)
 			fileServer.ServeHTTP(c.Writer, c.Request)
+			c.Abort()
+			return
+		}
+		if isStaticAssetRequest(cleanPath) {
+			c.Status(http.StatusNotFound)
 			c.Abort()
 			return
 		}

@@ -676,6 +676,36 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Equal(t, http.StatusOK, assetWriter.Code)
 		assert.Equal(t, staticAssetsCacheControl, assetWriter.Header().Get("Cache-Control"))
 	})
+
+	t.Run("missing_asset_does_not_poison_host_html_cache", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"site_name": "Small Tomato"},
+		}
+
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+
+		assetWriter := httptest.NewRecorder()
+		assetRequest := httptest.NewRequest(http.MethodGet, "/assets/ImageStudio-stale123.js", nil)
+		assetRequest.Host = "brand.example"
+		router.ServeHTTP(assetWriter, assetRequest)
+
+		assert.Equal(t, http.StatusNotFound, assetWriter.Code)
+		assert.Equal(t, 0, provider.called)
+		assert.Nil(t, server.cache.Get("brand.example"))
+
+		pageWriter := httptest.NewRecorder()
+		pageRequest := httptest.NewRequest(http.MethodGet, "/image-studio", nil)
+		pageRequest.Host = "brand.example"
+		router.ServeHTTP(pageWriter, pageRequest)
+
+		assert.Equal(t, http.StatusOK, pageWriter.Code)
+		assert.Equal(t, 1, provider.called)
+		assert.Contains(t, pageWriter.Body.String(), `"site_name":"Small Tomato"`)
+	})
 }
 
 func TestEmbeddedFrontendBypassesBareVideoAPIRoutes(t *testing.T) {
@@ -775,6 +805,20 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
 			})
 		}
+	})
+
+	t.Run("returns_404_for_missing_static_asset", func(t *testing.T) {
+		middleware := ServeEmbeddedFrontend()
+
+		router := gin.New()
+		router.Use(middleware)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/assets/ImageStudio-stale123.js", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.NotContains(t, w.Body.String(), "<!doctype html>")
 	})
 
 	t.Run("skips_api_routes", func(t *testing.T) {

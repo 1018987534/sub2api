@@ -185,6 +185,7 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - `contact_info` and `api_base_url` use pointer semantics too: missing inherits global settings; a configured value overrides per Host.
 - Resolving domain config on gateway paths adds database work to the inference hot path. Keep those paths bypassed.
 - Direct SQL edits do not invoke HTML cache invalidation. Prefer the admin endpoint; otherwise restart the app or invalidate/reload deliberately.
+- Missing fingerprinted frontend assets must return `404`; never serve `index.html` for a stale `assets/*.js` request. A browser holding an old lazy-loaded chunk can request it after deployment, and an SPA fallback would render and cache HTML from an asset-bypassed request context, poisoning that Host's injected brand until cache invalidation or restart.
 - Values typed into the domain-brand panel remain local form state until its own `保存域名配置` action succeeds. Saving the surrounding System Settings form does not persist them.
 - Cross-domain permanent redirects can be cached by browsers, SDKs, and CDN edges. They can keep API clients on an unreachable destination even after the origin config is rolled back.
 - A healthy `/health` or server-side `/v1/models` probe does not prove browser API compatibility. Strict CORS can leave those probes green while browser `OPTIONS` requests fail with `403`; always run an explicit preflight probe after an upgrade or domain change.
