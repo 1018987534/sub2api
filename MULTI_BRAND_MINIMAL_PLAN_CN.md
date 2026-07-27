@@ -57,7 +57,7 @@
 
 - Host 统一转为小写并去掉端口后匹配。
 - `allowed_group_ids` 必须全部是存在且启用的分组。
-- 当前未配置 Host 时，回退全局配置，保证本地环境和其他兼容入口不受影响。
+- 未知且未配置的 Host 回退全局配置；`nideyiyi.com` 与 `api.nideyiyi.com` 的门户接口继承 `xiaohondou.com` 的品牌与分组范围，网关路径仍保持 Host 中立。
 - 一个分组 ID 只能归属一个已配置域名。
 - `site_logo` 缺省表示继承全局 Logo，显式空字符串表示使用前端内置默认 Logo。
 - `contact_info` 和 `api_base_url` 缺省表示继承全局设置，配置非空值时按 Host 覆盖。
@@ -165,7 +165,7 @@ public-html:xiaofanqie.org
 - 旧站和新站来源访问共享 API 的 CORS 预检返回 `204`，`Access-Control-Allow-Origin` 精确回显来源且允许凭证。
 - 注册流程保持远端行为，不自动创建默认 API Key。
 - 现有 API Key、余额、用量、订单和网关调用没有数据迁移或行为变化。
-- 未配置 Host 回退默认 C 端配置。
+- 两个已知旧域名的门户接口回退默认 C 端配置；其他未知 Host 保留全局兼容回退。
 
 ### 新域名验证
 

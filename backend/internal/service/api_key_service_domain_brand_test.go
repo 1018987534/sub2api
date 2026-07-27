@@ -85,3 +85,28 @@ func TestAPIKeyService_DomainBrandScopesAvailableAndMutatedGroups(t *testing.T) 
 	require.ErrorIs(t, err, ErrGroupNotAllowed)
 	require.Zero(t, groupRepo.getCalls, "domain rejection must happen before loading the forbidden group")
 }
+
+func TestAPIKeyService_LegacyPortalHostRejectsSecondBrandGroup(t *testing.T) {
+	settingSvc := NewSettingService(&domainBrandSettingRepoStub{values: map[string]string{
+		SettingKeyDomainBrandConfig: `{"domains":[{"domain":"xiaohondou.com","allowed_group_ids":[5]},{"domain":"xiaofanqie.org","allowed_group_ids":[92]}]}`,
+	}}, &config.Config{})
+	profile, err := settingSvc.ResolveDomainBrandProfile(context.Background(), "api.nideyiyi.com")
+	require.NoError(t, err)
+	require.True(t, profile.Configured)
+
+	userRepo := &domainAPIKeyUserRepoStub{user: &User{ID: 10, Status: StatusActive}}
+	groupRepo := &domainAPIKeyGroupRepoStub{groups: []Group{
+		{ID: 5, Name: "C", Status: StatusActive},
+		{ID: 92, Name: "B", Status: StatusActive},
+	}}
+	apiKeyRepo := &domainAPIKeyRepoStub{apiKey: &APIKey{ID: 100, UserID: 10}}
+	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, &domainAPIKeySubRepoStub{}, nil, nil, &config.Config{})
+	ctx := WithDomainBrandProfile(context.Background(), profile)
+	forbiddenGroupID := int64(92)
+
+	_, err = svc.Create(ctx, 10, CreateAPIKeyRequest{Name: "cross-domain", GroupID: &forbiddenGroupID})
+	require.ErrorIs(t, err, ErrGroupNotAllowed)
+	_, err = svc.Update(ctx, 100, 10, UpdateAPIKeyRequest{GroupID: &forbiddenGroupID})
+	require.ErrorIs(t, err, ErrGroupNotAllowed)
+	require.Zero(t, groupRepo.getCalls, "legacy portal rejection must happen before loading the forbidden group")
+}

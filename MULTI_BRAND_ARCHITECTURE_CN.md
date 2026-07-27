@@ -4,7 +4,7 @@
 
 ## 1. 背景与目标
 
-当前 `xiaohondou.com` 是 C 端主站，`xiaofanqie.org` 是独立分组的第二品牌，两者复用同一套 Sub2API 后端、数据库、Redis、用户体系、余额体系和上游账号池。`nideyiyi.com` 只迁移浏览器页面导航，`api.nideyiyi.com` 与所有旧 API 请求保留原 Host 直通，避免现有客户端被跨域永久重定向。
+当前 `xiaohondou.com` 是 C 端主站，`xiaofanqie.org` 是独立分组的第二品牌，两者复用同一套 Sub2API 后端、数据库、Redis、用户体系、余额体系和上游账号池。`nideyiyi.com` 只迁移浏览器页面导航，`api.nideyiyi.com` 与所有旧 API 请求保留原 Host 直通，避免现有客户端被跨域永久重定向；两个旧域名的门户接口继承 `xiaohondou.com` 的分组范围，推理网关路径继续保持 Host 中立。
 
 第一版的目标不是立即上线第二个品牌，而是先把系统改造成可扩展的品牌架构，同时保持默认单品牌运行：
 

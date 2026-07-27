@@ -12,8 +12,16 @@ import (
 
 var ErrDomainBrandConfigInvalid = infraerrors.BadRequest("DOMAIN_BRAND_CONFIG_INVALID", "invalid domain brand configuration")
 
+const primaryPortalDomain = "xiaohondou.com"
+
+var legacyPortalDomainAliases = map[string]string{
+	"nideyiyi.com":     primaryPortalDomain,
+	"api.nideyiyi.com": primaryPortalDomain,
+}
+
 // DomainBrandConfig keeps the small amount of per-domain portal configuration.
-// Domains not listed here deliberately retain all global settings and groups.
+// Unknown domains retain global settings and groups; known legacy portal hosts
+// inherit the primary profile without duplicating its group configuration.
 type DomainBrandConfig struct {
 	Domains []DomainBrandProfile `json:"domains"`
 }
@@ -124,6 +132,16 @@ func (s *SettingService) ResolveDomainBrandProfile(ctx context.Context, host str
 		if profile.Domain == normalizedHost {
 			profile.Configured = true
 			return profile, nil
+		}
+	}
+	// Legacy domains remain direct API ingress hosts, but their portal routes
+	// inherit the primary brand scope. Gateway routes never call this resolver.
+	if canonicalHost, ok := legacyPortalDomainAliases[normalizedHost]; ok {
+		for _, profile := range config.Domains {
+			if profile.Domain == canonicalHost {
+				profile.Configured = true
+				return profile, nil
+			}
 		}
 	}
 	return DomainBrandProfile{}, nil

@@ -9,7 +9,8 @@ This project uses one backend, database, user set, balance, and API gateway for 
 
 ## Invariants
 
-- Unconfigured hosts inherit global Settings and retain the historical full group list.
+- Unknown unconfigured hosts inherit global Settings and retain the historical full group list.
+- Legacy portal hosts `nideyiyi.com` and `api.nideyiyi.com` inherit the configured `xiaohondou.com` portal profile; gateway paths remain Host-neutral.
 - Configured hosts use `allowed_group_ids` even when the list is empty.
 - A group ID may belong to only one configured domain.
 - Users, balances, API keys, orders, upstream accounts, and administrators are shared.
@@ -20,6 +21,7 @@ This project uses one backend, database, user set, balance, and API gateway for 
 - `xiaohondou.com` is the primary C-end domain. `nideyiyi.com` and `api.nideyiyi.com` are legacy compatibility ingress domains and must not own duplicate group configuration.
 - `nideyiyi.com` redirects only browser document navigations (`GET`/`HEAD`, HTML `Accept`, non-API path) to `xiaohondou.com` with temporary `302`.
 - `api.nideyiyi.com`, API/gateway paths, non-HTML requests, POST requests, SSE, and WebSocket traffic remain on the original Host and proxy to the shared backend. Never permanently redirect API or gateway requests across domains.
+- Keeping the original Host does not mean leaving portal APIs unscoped: `/api/v1/keys`, `/api/v1/groups/available`, and payment routes on legacy hosts use the primary C-end allowlist.
 - The shared API uses strict CORS. Keep every browser portal origin in `/www/sub2api/data/config.yaml` under `cors.allowed_origins`; an absent or empty list rejects cross-origin preflights with `403`.
 
 ## Stored Config
@@ -184,6 +186,7 @@ Use an authenticated user session to verify available groups, plans, checkout, A
 - `site_logo` needs pointer semantics so missing and explicit empty values remain distinct.
 - `contact_info` and `api_base_url` use pointer semantics too: missing inherits global settings; a configured value overrides per Host.
 - Resolving domain config on gateway paths adds database work to the inference hot path. Keep those paths bypassed.
+- Treating a legacy compatibility Host as an unknown unrestricted Host exposes cross-brand groups through its portal UI. Resolve known legacy portal hosts to the primary C-end profile while leaving gateway routes bypassed.
 - Direct SQL edits do not invoke HTML cache invalidation. Prefer the admin endpoint; otherwise restart the app or invalidate/reload deliberately.
 - Missing fingerprinted frontend assets must return `404`; never serve `index.html` for a stale `assets/*.js` request. A browser holding an old lazy-loaded chunk can request it after deployment, and an SPA fallback would render and cache HTML from an asset-bypassed request context, poisoning that Host's injected brand until cache invalidation or restart.
 - Values typed into the domain-brand panel remain local form state until its own `保存域名配置` action succeeds. Saving the surrounding System Settings form does not persist them.

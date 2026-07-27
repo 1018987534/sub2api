@@ -87,6 +87,15 @@ func TestSettingService_UpdateAndResolveDomainBrandConfig(t *testing.T) {
 	require.Equal(t, "https://xiaofanqie.org/v1", *profile.APIBaseURL)
 	require.False(t, profile.AllowsGroup(5))
 
+	for _, legacyHost := range []string{"nideyiyi.com", "api.nideyiyi.com:443"} {
+		legacyProfile, resolveErr := svc.ResolveDomainBrandProfile(context.Background(), legacyHost)
+		require.NoError(t, resolveErr)
+		require.True(t, legacyProfile.Configured)
+		require.Equal(t, "xiaohondou.com", legacyProfile.Domain)
+		require.True(t, legacyProfile.AllowsGroup(5))
+		require.False(t, legacyProfile.AllowsGroup(92))
+	}
+
 	fallback, err := svc.ResolveDomainBrandProfile(context.Background(), "unknown.example")
 	require.NoError(t, err)
 	require.False(t, fallback.Configured)
