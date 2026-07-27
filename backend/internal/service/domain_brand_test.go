@@ -28,6 +28,14 @@ func (r *domainBrandSettingRepoStub) GetMultiple(_ context.Context, keys []strin
 	return out, nil
 }
 
+func (r *domainBrandSettingRepoStub) GetAll(_ context.Context) (map[string]string, error) {
+	out := make(map[string]string, len(r.values))
+	for key, value := range r.values {
+		out[key] = value
+	}
+	return out, nil
+}
+
 func (r *domainBrandSettingRepoStub) Set(_ context.Context, key, value string) error {
 	if r.values == nil {
 		r.values = map[string]string{}
@@ -201,6 +209,33 @@ func TestSettingService_UpdateSettingsAcceptsDomainBrandSenderName(t *testing.T)
 	)
 	require.NoError(t, err)
 	require.Equal(t, 1, repo.setMultipleCalls)
+}
+
+func TestSettingService_UpdateSettingsPersistsDomainBrandConfigAndPreservesOmittedSettings(t *testing.T) {
+	repo := &domainBrandSettingRepoStub{values: map[string]string{
+		SettingKeySiteName: "existing site",
+	}}
+	svc := NewSettingService(repo, &config.Config{})
+	svc.SetDefaultSubscriptionGroupReader(&domainBrandGroupReaderStub{groups: map[int64]*Group{}})
+
+	err := svc.UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfigOmitting(
+		context.Background(),
+		&SystemSettings{SiteName: "zero-value from partial payload", DefaultConcurrency: 1},
+		&AuthSourceDefaultSettings{},
+		&DomainBrandConfig{Domains: []DomainBrandProfile{{
+			Domain:       "xiaofanqie.org",
+			SMTPFromName: stringPointer("小番茄"),
+		}}},
+		OmittedSettingKeys{SettingKeySiteName: {}},
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.setMultipleCalls)
+	require.Equal(t, "existing site", repo.values[SettingKeySiteName])
+
+	var saved DomainBrandConfig
+	require.NoError(t, json.Unmarshal([]byte(repo.values[SettingKeyDomainBrandConfig]), &saved))
+	require.Equal(t, "xiaofanqie.org", saved.Domains[0].Domain)
+	require.Equal(t, "小番茄", *saved.Domains[0].SMTPFromName)
 }
 
 func TestSettingService_PublicSettingsOverlayPreservesExplicitEmptyLogo(t *testing.T) {
