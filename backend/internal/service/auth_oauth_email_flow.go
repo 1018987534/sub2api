@@ -45,7 +45,7 @@ func (s *AuthService) SendPendingOAuthVerifyCode(ctx context.Context, email stri
 
 	siteName := "Sub2API"
 	if s.settingService != nil {
-		siteName = s.settingService.GetSiteName(ctx)
+		siteName = s.settingService.GetRegistrationSiteName(ctx)
 	}
 	if err := s.emailService.SendVerifyCode(ctx, email, siteName, firstEmailLocale(locale)); err != nil {
 		return nil, err

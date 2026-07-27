@@ -60,6 +60,7 @@ func (s *ChannelMonitorService) ListUserView(ctx context.Context) ([]*UserMonito
 	if err != nil {
 		return nil, fmt.Errorf("list enabled monitors: %w", err)
 	}
+	monitors = filterChannelMonitorsForDomain(ctx, monitors)
 	if len(monitors) == 0 {
 		return []*UserMonitorView{}, nil
 	}
@@ -130,6 +131,9 @@ func pickLatest(rows []*ChannelMonitorLatest, model string) *ChannelMonitorLates
 // GetUserDetail 用户只读视图：单个监控详情（每个模型 7d/15d/30d 可用率与平均延迟）。
 // 不暴露 api_key。
 func (s *ChannelMonitorService) GetUserDetail(ctx context.Context, id int64) (*UserMonitorDetail, error) {
+	if !DomainBrandProfileFromContext(ctx).AllowsChannelMonitor(id) {
+		return nil, ErrChannelMonitorNotFound
+	}
 	m, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -155,6 +159,20 @@ func (s *ChannelMonitorService) GetUserDetail(ctx context.Context, id int64) (*U
 		GroupName: m.GroupName,
 		Models:    models,
 	}, nil
+}
+
+func filterChannelMonitorsForDomain(ctx context.Context, monitors []*ChannelMonitor) []*ChannelMonitor {
+	profile := DomainBrandProfileFromContext(ctx)
+	if !profile.Configured {
+		return monitors
+	}
+	filtered := make([]*ChannelMonitor, 0, len(monitors))
+	for _, monitor := range monitors {
+		if monitor != nil && profile.AllowsChannelMonitor(monitor.ID) {
+			filtered = append(filtered, monitor)
+		}
+	}
+	return filtered
 }
 
 // collectAvailabilityWindows 一次性查询 7/15/30 天三个窗口，按模型组织。

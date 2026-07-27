@@ -340,16 +340,23 @@ func TestNotificationEmailFallbackClassification(t *testing.T) {
 
 func TestEmailQueueTasksPreserveLocaleHints(t *testing.T) {
 	queue := &EmailQueueService{taskChan: make(chan EmailTask, 2)}
-	require.NoError(t, queue.EnqueueVerifyCode("user@example.com", "Sub2API", "zh-CN"))
-	require.NoError(t, queue.EnqueuePasswordReset("user@example.com", "Sub2API", "https://example.com/reset", "en-US"))
+	fromEmail := "brand@example.com"
+	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
+		Configured:    true,
+		SMTPFromEmail: &fromEmail,
+	})
+	require.NoError(t, queue.EnqueueVerifyCode(ctx, "user@example.com", "Sub2API", "zh-CN"))
+	require.NoError(t, queue.EnqueuePasswordReset(ctx, "user@example.com", "Sub2API", "https://example.com/reset", "en-US"))
 
 	verifyTask := <-queue.taskChan
 	require.Equal(t, TaskTypeVerifyCode, verifyTask.TaskType)
 	require.Equal(t, "zh-CN", verifyTask.Locale)
+	require.Equal(t, "brand@example.com", *verifyTask.BrandProfile.SMTPFromEmail)
 
 	resetTask := <-queue.taskChan
 	require.Equal(t, TaskTypePasswordReset, resetTask.TaskType)
 	require.Equal(t, "en-US", resetTask.Locale)
+	require.Equal(t, "brand@example.com", *resetTask.BrandProfile.SMTPFromEmail)
 }
 
 func TestOpsScheduledReportDeliverySourceIDIncludesReportIdentity(t *testing.T) {

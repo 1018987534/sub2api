@@ -132,7 +132,7 @@ func (s *AuthService) SendEmailIdentityBindCode(ctx context.Context, userID int6
 
 	siteName := "Sub2API"
 	if s.settingService != nil {
-		siteName = s.settingService.GetSiteName(ctx)
+		siteName = s.settingService.GetRegistrationSiteName(ctx)
 	}
 	return s.emailService.SendVerifyCode(ctx, normalizedEmail, siteName, firstEmailLocale(locale))
 }

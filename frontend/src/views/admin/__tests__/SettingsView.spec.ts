@@ -23,6 +23,7 @@ const {
   getOllamaCloudUsageSettings,
   updateOllamaCloudUsageSettings,
   getGroups,
+  listChannelMonitors,
   listProxies,
   getProviders,
   updateProvider,
@@ -58,6 +59,13 @@ const {
   }),
   updateOllamaCloudUsageSettings: vi.fn().mockImplementation(async (payload) => payload),
   getGroups: vi.fn(),
+  listChannelMonitors: vi.fn().mockResolvedValue({
+    items: [],
+    total: 0,
+    page: 1,
+    page_size: 100,
+    pages: 0,
+  }),
   listProxies: vi.fn(),
   getProviders: vi.fn(),
   updateProvider: vi.fn(),
@@ -96,6 +104,9 @@ vi.mock("@/api", () => ({
     },
     groups: {
       getAll: getGroups,
+    },
+    channelMonitor: {
+      list: listChannelMonitors,
     },
     proxies: {
       list: listProxies,

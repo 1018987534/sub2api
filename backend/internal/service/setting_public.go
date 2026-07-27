@@ -260,9 +260,15 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 	googleEnabled := s.emailOAuthPublicEnabled(settings, "google")
 	weChatEnabled, weChatOpenEnabled, weChatMPEnabled, weChatMobileEnabled := s.weChatOAuthCapabilitiesFromSettings(settings)
 
-	// Password reset requires email verification to be enabled
-	emailVerifyEnabled := settings[SettingKeyEmailVerifyEnabled] == "true"
-	passwordResetEnabled := emailVerifyEnabled && settings[SettingKeyPasswordResetEnabled] == "true"
+	// Registration may override verification per brand. Password reset keeps its
+	// existing global email-verification dependency.
+	globalEmailVerifyEnabled := settings[SettingKeyEmailVerifyEnabled] == "true"
+	registrationEmailVerifyEnabled := globalEmailVerifyEnabled
+	registrationProfile := DomainBrandProfileFromContext(ctx)
+	if registrationProfile.Configured && registrationProfile.RegistrationEmailVerifyEnabled != nil {
+		registrationEmailVerifyEnabled = *registrationProfile.RegistrationEmailVerifyEnabled
+	}
+	passwordResetEnabled := globalEmailVerifyEnabled && settings[SettingKeyPasswordResetEnabled] == "true"
 	registrationEmailSuffixWhitelist := ParseRegistrationEmailSuffixWhitelist(
 		settings[SettingKeyRegistrationEmailSuffixWhitelist],
 	)
@@ -283,7 +289,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 
 	publicSettings := &PublicSettings{
 		RegistrationEnabled:              settings[SettingKeyRegistrationEnabled] == "true",
-		EmailVerifyEnabled:               emailVerifyEnabled,
+		EmailVerifyEnabled:               registrationEmailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:     settings[SettingKeyForceEmailOnThirdPartySignup] == "true",
 		RegistrationEmailSuffixWhitelist: registrationEmailSuffixWhitelist,
 		PromoCodeEnabled:                 settings[SettingKeyPromoCodeEnabled] != "false", // 默认启用

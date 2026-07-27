@@ -180,7 +180,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	}
 
 	// 检查是否需要邮件验证
-	if s.settingService != nil && s.settingService.IsEmailVerifyEnabled(ctx) {
+	if s.settingService != nil && s.settingService.IsRegistrationEmailVerifyEnabled(ctx) {
 		// 如果邮件验证已开启但邮件服务未配置，拒绝注册
 		// 这是一个配置错误，不应该允许绕过验证
 		if s.emailService == nil {
@@ -322,7 +322,7 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string, locale .
 	// 获取网站名称
 	siteName := "Sub2API"
 	if s.settingService != nil {
-		siteName = s.settingService.GetSiteName(ctx)
+		siteName = s.settingService.GetRegistrationSiteName(ctx)
 	}
 
 	return s.emailService.SendVerifyCode(ctx, email, siteName, firstEmailLocale(locale))
@@ -365,12 +365,12 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string, loc
 	// 获取网站名称
 	siteName := "Sub2API"
 	if s.settingService != nil {
-		siteName = s.settingService.GetSiteName(ctx)
+		siteName = s.settingService.GetRegistrationSiteName(ctx)
 	}
 
 	// 异步发送
 	logger.LegacyPrintf("service.auth", "[Auth] Enqueueing verify code for: %s", email)
-	if err := s.emailQueueService.EnqueueVerifyCode(email, siteName, firstEmailLocale(locale)); err != nil {
+	if err := s.emailQueueService.EnqueueVerifyCode(ctx, email, siteName, firstEmailLocale(locale)); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue: %v", err)
 		return nil, fmt.Errorf("enqueue verify code: %w", err)
 	}
@@ -440,12 +440,12 @@ func (s *AuthService) IsRegistrationEnabled(ctx context.Context) bool {
 	return s.settingService.IsRegistrationEnabled(ctx)
 }
 
-// IsEmailVerifyEnabled 检查是否开启邮件验证
+// IsEmailVerifyEnabled returns the effective registration verification policy.
 func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 	if s.settingService == nil {
 		return false
 	}
-	return s.settingService.IsEmailVerifyEnabled(ctx)
+	return s.settingService.IsRegistrationEmailVerifyEnabled(ctx)
 }
 
 // Login 用户登录，返回JWT token
@@ -1346,7 +1346,7 @@ func (s *AuthService) preparePasswordReset(ctx context.Context, email, frontendB
 	// Get site name
 	siteName := "Sub2API"
 	if s.settingService != nil {
-		siteName = s.settingService.GetSiteName(ctx)
+		siteName = s.settingService.GetRegistrationSiteName(ctx)
 	}
 
 	// Build reset URL base
@@ -1394,7 +1394,7 @@ func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, fron
 		return nil // Silent success to prevent enumeration
 	}
 
-	if err := s.emailQueueService.EnqueuePasswordReset(email, siteName, resetURL, firstEmailLocale(locale)); err != nil {
+	if err := s.emailQueueService.EnqueuePasswordReset(ctx, email, siteName, resetURL, firstEmailLocale(locale)); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue password reset email for %s: %v", email, err)
 		return nil // Silent success to prevent enumeration
 	}

@@ -17,11 +17,12 @@ const (
 
 // EmailTask 邮件发送任务
 type EmailTask struct {
-	Email    string
-	SiteName string
-	TaskType string // "verify_code" or "password_reset"
-	ResetURL string // Only used for password_reset task type
-	Locale   string // Optional Accept-Language locale hint
+	Email        string
+	SiteName     string
+	TaskType     string // "verify_code" or "password_reset"
+	ResetURL     string // Only used for password_reset task type
+	Locale       string // Optional Accept-Language locale hint
+	BrandProfile DomainBrandProfile
 }
 
 // EmailQueueService 异步邮件队列服务
@@ -78,7 +79,8 @@ func (s *EmailQueueService) worker(id int) {
 
 // processTask 处理任务
 func (s *EmailQueueService) processTask(workerID int, task EmailTask) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	baseCtx := WithDomainBrandProfile(context.Background(), task.BrandProfile)
+	ctx, cancel := context.WithTimeout(baseCtx, 30*time.Second)
 	defer cancel()
 
 	switch task.TaskType {
@@ -100,12 +102,13 @@ func (s *EmailQueueService) processTask(workerID int, task EmailTask) {
 }
 
 // EnqueueVerifyCode 将验证码发送任务加入队列
-func (s *EmailQueueService) EnqueueVerifyCode(email, siteName string, locale ...string) error {
+func (s *EmailQueueService) EnqueueVerifyCode(ctx context.Context, email, siteName string, locale ...string) error {
 	task := EmailTask{
-		Email:    email,
-		SiteName: siteName,
-		TaskType: TaskTypeVerifyCode,
-		Locale:   firstEmailLocale(locale),
+		Email:        email,
+		SiteName:     siteName,
+		TaskType:     TaskTypeVerifyCode,
+		Locale:       firstEmailLocale(locale),
+		BrandProfile: DomainBrandProfileFromContext(ctx),
 	}
 
 	select {
@@ -118,13 +121,14 @@ func (s *EmailQueueService) EnqueueVerifyCode(email, siteName string, locale ...
 }
 
 // EnqueuePasswordReset 将密码重置邮件任务加入队列
-func (s *EmailQueueService) EnqueuePasswordReset(email, siteName, resetURL string, locale ...string) error {
+func (s *EmailQueueService) EnqueuePasswordReset(ctx context.Context, email, siteName, resetURL string, locale ...string) error {
 	task := EmailTask{
-		Email:    email,
-		SiteName: siteName,
-		TaskType: TaskTypePasswordReset,
-		ResetURL: resetURL,
-		Locale:   firstEmailLocale(locale),
+		Email:        email,
+		SiteName:     siteName,
+		TaskType:     TaskTypePasswordReset,
+		ResetURL:     resetURL,
+		Locale:       firstEmailLocale(locale),
+		BrandProfile: DomainBrandProfileFromContext(ctx),
 	}
 
 	select {

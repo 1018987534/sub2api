@@ -32,6 +32,17 @@ func (s *SettingService) IsEmailVerifyEnabled(ctx context.Context) bool {
 	return value == "true"
 }
 
+// IsRegistrationEmailVerifyEnabled applies the optional per-domain registration
+// policy without changing password reset, TOTP, or other global email features.
+func (s *SettingService) IsRegistrationEmailVerifyEnabled(ctx context.Context) bool {
+	enabled := s.IsEmailVerifyEnabled(ctx)
+	profile := DomainBrandProfileFromContext(ctx)
+	if profile.Configured && profile.RegistrationEmailVerifyEnabled != nil {
+		return *profile.RegistrationEmailVerifyEnabled
+	}
+	return enabled
+}
+
 // GetRegistrationEmailSuffixWhitelist returns normalized registration email suffix whitelist.
 func (s *SettingService) GetRegistrationEmailSuffixWhitelist(ctx context.Context) []string {
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyRegistrationEmailSuffixWhitelist)

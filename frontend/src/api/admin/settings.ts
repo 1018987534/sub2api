@@ -1389,7 +1389,10 @@ export interface DomainBrandProfile {
   site_subtitle?: string | null;
   contact_info?: string | null;
   api_base_url?: string | null;
+  smtp_from_email?: string | null;
+  registration_email_verify_enabled?: boolean | null;
   allowed_group_ids: number[];
+  channel_monitor_ids?: number[] | null;
 }
 
 export interface DomainBrandConfig {
