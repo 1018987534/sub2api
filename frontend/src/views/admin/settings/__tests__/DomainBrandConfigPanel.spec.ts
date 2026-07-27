@@ -46,7 +46,7 @@ describe("DomainBrandConfigPanel", () => {
           site_subtitle: "B2B API Gateway",
           contact_info: "support@xiaofanqie.org",
           api_base_url: "https://xiaofanqie.org/v1",
-          smtp_from_email: "sender@xiaofanqie.org",
+          smtp_from_name: "小番茄",
           registration_email_verify_enabled: false,
           allowed_group_ids: [],
           channel_monitor_ids: [12],
@@ -64,17 +64,17 @@ describe("DomainBrandConfigPanel", () => {
       'input[placeholder="留空则沿用全局客服联系方式"]',
     );
     const apiBaseURLInput = wrapper.get('input[placeholder="https://example.com/v1"]');
-    const senderInput = wrapper.get('input[type="email"]');
+    const senderInput = wrapper.get('input[placeholder="例如：小番茄；留空则沿用全局发件人名称"]');
     expect((contactInput.element as HTMLInputElement).value).toBe("support@xiaofanqie.org");
     expect((apiBaseURLInput.element as HTMLInputElement).value).toBe(
       "https://xiaofanqie.org/v1",
     );
-    expect((senderInput.element as HTMLInputElement).value).toBe("sender@xiaofanqie.org");
+    expect((senderInput.element as HTMLInputElement).value).toBe("小番茄");
     expect((wrapper.findAll("select")[0].element as HTMLSelectElement).value).toBe("disabled");
 
     await contactInput.setValue(" business@xiaofanqie.org ");
     await apiBaseURLInput.setValue(" https://api.xiaofanqie.org/v1 ");
-    await senderInput.setValue(" mail@xiaofanqie.org ");
+    await senderInput.setValue(" 番茄邮件 ");
     await wrapper.findAll("select")[0].setValue("enabled");
     const exposed = wrapper.vm as unknown as {
       buildConfigForSave: () => DomainBrandConfig;
@@ -90,7 +90,7 @@ describe("DomainBrandConfigPanel", () => {
           site_subtitle: "B2B API Gateway",
           contact_info: "business@xiaofanqie.org",
           api_base_url: "https://api.xiaofanqie.org/v1",
-          smtp_from_email: "mail@xiaofanqie.org",
+          smtp_from_name: "番茄邮件",
           registration_email_verify_enabled: true,
           allowed_group_ids: [],
           channel_monitor_ids: [12],
@@ -102,18 +102,16 @@ describe("DomainBrandConfigPanel", () => {
     expect(wrapper.text()).not.toContain("保存域名配置");
   });
 
-  it("rejects a brand name entered in the sender email field", async () => {
+  it("accepts a Chinese sender name", async () => {
     const wrapper = mount(DomainBrandConfigPanel);
     await flushPromises();
 
-    await wrapper.get('input[type="email"]').setValue("小番茄");
+    await wrapper.get('input[placeholder="例如：小番茄；留空则沿用全局发件人名称"]').setValue("小番茄");
     const exposed = wrapper.vm as unknown as {
       buildConfigForSave: () => DomainBrandConfig;
     };
 
-    expect(() => exposed.buildConfigForSave()).toThrow(
-      "域名配置 1：发件人邮箱格式不正确，请填写完整邮箱地址。",
-    );
+    expect(exposed.buildConfigForSave().domains[0].smtp_from_name).toBe("小番茄");
     expect(updateDomainBrandConfig).not.toHaveBeenCalled();
   });
 

@@ -171,9 +171,9 @@ func (s *EmailService) GetSMTPConfig(ctx context.Context) (*SMTPConfig, error) {
 		UseTLS:   useTLS,
 	}
 	profile := DomainBrandProfileFromContext(ctx)
-	if profile.Configured && profile.SMTPFromEmail != nil {
-		if fromEmail := strings.TrimSpace(*profile.SMTPFromEmail); fromEmail != "" {
-			config.From = fromEmail
+	if profile.Configured && profile.SMTPFromName != nil {
+		if fromName := strings.TrimSpace(*profile.SMTPFromName); fromName != "" {
+			config.FromName = fromName
 		}
 	}
 	return config, nil

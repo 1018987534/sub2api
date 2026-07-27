@@ -219,7 +219,7 @@ func TestSettingHandler_UpdateSettings_PersistsDomainBrandConfig(t *testing.T) {
 		"domain_brand_config": map[string]any{
 			"domains": []map[string]any{{
 				"domain":                            "XIAOFANQIE.ORG.",
-				"smtp_from_email":                   "mail@xiaofanqie.org",
+				"smtp_from_name":                    "小番茄",
 				"registration_email_verify_enabled": false,
 				"allowed_group_ids":                 []int64{},
 				"channel_monitor_ids":               []int64{5},
@@ -240,7 +240,7 @@ func TestSettingHandler_UpdateSettings_PersistsDomainBrandConfig(t *testing.T) {
 	var saved service.DomainBrandConfig
 	require.NoError(t, json.Unmarshal([]byte(repo.values[service.SettingKeyDomainBrandConfig]), &saved))
 	require.Equal(t, "xiaofanqie.org", saved.Domains[0].Domain)
-	require.Equal(t, "mail@xiaofanqie.org", *saved.Domains[0].SMTPFromEmail)
+	require.Equal(t, "小番茄", *saved.Domains[0].SMTPFromName)
 	require.False(t, *saved.Domains[0].RegistrationEmailVerifyEnabled)
 }
 

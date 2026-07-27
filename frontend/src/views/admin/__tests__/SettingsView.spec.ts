@@ -634,7 +634,7 @@ describe("admin SettingsView payment visible method controls", () => {
       domains: [
         {
           domain: "xiaofanqie.org",
-          smtp_from_email: "mail@xiaofanqie.org",
+          smtp_from_name: "小番茄",
           registration_email_verify_enabled: false,
           allowed_group_ids: [],
           channel_monitor_ids: [5],
@@ -717,7 +717,7 @@ describe("admin SettingsView payment visible method controls", () => {
           domains: [
             expect.objectContaining({
               domain: "xiaofanqie.org",
-              smtp_from_email: "mail@xiaofanqie.org",
+              smtp_from_name: "小番茄",
               registration_email_verify_enabled: false,
               channel_monitor_ids: [5],
             }),

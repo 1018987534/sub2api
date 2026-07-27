@@ -49,15 +49,15 @@
               <input v-model="profile.api_base_url" class="input" placeholder="https://example.com/v1" />
             </label>
             <label class="block">
-              <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">发件人邮箱</span>
+              <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">发件人名称</span>
               <input
-                v-model="profile.smtp_from_email"
-                type="email"
+                v-model="profile.smtp_from_name"
+                type="text"
                 class="input"
-                placeholder="name@example.com；留空则沿用全局发件人邮箱"
+                placeholder="例如：小番茄；留空则沿用全局发件人名称"
               />
               <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                请填写完整邮箱地址，不要填写品牌名称。
+                邮箱地址继续沿用全局 SMTP 发件人邮箱。
               </span>
             </label>
             <label class="block">
@@ -154,12 +154,12 @@ import type { AdminGroup } from "@/types";
 import type { DomainBrandConfig, DomainBrandProfile } from "@/api/admin/settings";
 import type { ChannelMonitor } from "@/api/admin/channelMonitor";
 
-type EditableDomainBrandProfile = Omit<DomainBrandProfile, "site_logo" | "smtp_from_email" | "registration_email_verify_enabled" | "channel_monitor_ids"> & {
+type EditableDomainBrandProfile = Omit<DomainBrandProfile, "site_logo" | "smtp_from_name" | "registration_email_verify_enabled" | "channel_monitor_ids"> & {
   site_name: string | null;
   site_subtitle: string | null;
   contact_info: string | null;
   api_base_url: string | null;
-  smtp_from_email: string | null;
+  smtp_from_name: string | null;
   registration_email_verify_mode: "inherit" | "enabled" | "disabled";
   channel_monitor_ids: number[];
   channel_monitor_mode: "all" | "selected";
@@ -179,7 +179,7 @@ function toEditable(profile: DomainBrandProfile): EditableDomainBrandProfile {
     site_subtitle: profile.site_subtitle ?? null,
     contact_info: profile.contact_info ?? null,
     api_base_url: profile.api_base_url ?? null,
-    smtp_from_email: profile.smtp_from_email ?? null,
+    smtp_from_name: profile.smtp_from_name ?? null,
     registration_email_verify_mode:
       profile.registration_email_verify_enabled == null
         ? "inherit"
@@ -200,7 +200,7 @@ function addDomain(): void {
     site_subtitle: null,
     contact_info: null,
     api_base_url: null,
-    smtp_from_email: null,
+    smtp_from_name: null,
     registration_email_verify_mode: "inherit",
     logo_mode: "inherit",
     allowed_group_ids: [],
@@ -234,7 +234,7 @@ function toRequest(): DomainBrandConfig {
       site_subtitle: profile.site_subtitle?.trim() ? profile.site_subtitle.trim() : null,
       contact_info: profile.contact_info?.trim() ? profile.contact_info.trim() : null,
       api_base_url: profile.api_base_url?.trim() ? profile.api_base_url.trim() : null,
-      smtp_from_email: profile.smtp_from_email?.trim() ? profile.smtp_from_email.trim() : null,
+      smtp_from_name: profile.smtp_from_name?.trim() ? profile.smtp_from_name.trim() : null,
       registration_email_verify_enabled:
         profile.registration_email_verify_mode === "inherit"
           ? null
@@ -245,10 +245,6 @@ function toRequest(): DomainBrandConfig {
         : null,
     })),
   };
-}
-
-function isValidSenderEmail(value: string): boolean {
-  return /^[^\s<>@]+@[^\s<>@]+$/.test(value);
 }
 
 function buildConfigForSave(): DomainBrandConfig {
@@ -271,9 +267,6 @@ function buildConfigForSave(): DomainBrandConfig {
       throw new Error(`${label}：域名 ${profile.domain} 与其他配置重复。`);
     }
     seenDomains.add(domainKey);
-    if (profile.smtp_from_email && !isValidSenderEmail(profile.smtp_from_email)) {
-      throw new Error(`${label}：发件人邮箱格式不正确，请填写完整邮箱地址。`);
-    }
   });
   return config;
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/mail"
 	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -37,7 +36,7 @@ type DomainBrandProfile struct {
 	SiteSubtitle                   *string `json:"site_subtitle,omitempty"`
 	ContactInfo                    *string `json:"contact_info,omitempty"`
 	APIBaseURL                     *string `json:"api_base_url,omitempty"`
-	SMTPFromEmail                  *string `json:"smtp_from_email,omitempty"`
+	SMTPFromName                   *string `json:"smtp_from_name,omitempty"`
 	RegistrationEmailVerifyEnabled *bool   `json:"registration_email_verify_enabled,omitempty"`
 	AllowedGroupIDs                []int64 `json:"allowed_group_ids"`
 	ChannelMonitorIDs              []int64 `json:"channel_monitor_ids"`
@@ -225,16 +224,12 @@ func (s *SettingService) validateDomainBrandConfig(ctx context.Context, config *
 		}
 		domains[profile.Domain] = struct{}{}
 
-		if profile.SMTPFromEmail != nil {
-			fromEmail := strings.TrimSpace(*profile.SMTPFromEmail)
-			if fromEmail == "" {
-				profile.SMTPFromEmail = nil
+		if profile.SMTPFromName != nil {
+			fromName := strings.TrimSpace(*profile.SMTPFromName)
+			if fromName == "" {
+				profile.SMTPFromName = nil
 			} else {
-				address, err := mail.ParseAddress(fromEmail)
-				if err != nil || address.Address != fromEmail {
-					return nil, fmt.Errorf("%w: invalid sender email for %s", ErrDomainBrandConfigInvalid, profile.Domain)
-				}
-				profile.SMTPFromEmail = &fromEmail
+				profile.SMTPFromName = &fromName
 			}
 		}
 
