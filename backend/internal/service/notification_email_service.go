@@ -578,6 +578,12 @@ func (s *NotificationEmailService) runtimeVariables(ctx context.Context, event, 
 }
 
 func (s *NotificationEmailService) siteName(ctx context.Context) string {
+	profile := DomainBrandProfileFromContext(ctx)
+	if profile.Configured && profile.SiteName != nil {
+		if name := strings.TrimSpace(*profile.SiteName); name != "" {
+			return name
+		}
+	}
 	if s == nil || s.settingRepo == nil {
 		return defaultSiteName
 	}

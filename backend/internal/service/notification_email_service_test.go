@@ -122,6 +122,25 @@ func TestNotificationEmailAuthTemplatesAreListedAndPreviewable(t *testing.T) {
 	require.Contains(t, resetPreview.HTML, "https://example.com/reset?token=abc")
 }
 
+func TestNotificationEmailAuthTemplateUsesDomainBrandSiteName(t *testing.T) {
+	repo := newNotificationEmailMemorySettingRepo()
+	require.NoError(t, repo.Set(context.Background(), SettingKeySiteName, "小红豆"))
+	svc := NewNotificationEmailService(repo, nil)
+	brandName := "小番茄"
+	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
+		Configured: true,
+		SiteName:   &brandName,
+	})
+
+	preview, err := svc.PreviewTemplate(ctx, NotificationEmailPreviewInput{
+		Event:  NotificationEmailEventAuthVerifyCode,
+		Locale: "zh-CN",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "[小番茄] 邮箱验证码", preview.Subject)
+	require.NotContains(t, preview.Subject, "小红豆")
+}
+
 func TestNotificationEmailAdditionalEventsAreListedAndPreviewable(t *testing.T) {
 	ctx := context.Background()
 	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)
