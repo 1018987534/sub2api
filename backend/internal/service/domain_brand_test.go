@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -13,7 +14,8 @@ import (
 
 type domainBrandSettingRepoStub struct {
 	SettingRepository
-	values map[string]string
+	values           map[string]string
+	setMultipleCalls int
 }
 
 func (r *domainBrandSettingRepoStub) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
@@ -31,6 +33,17 @@ func (r *domainBrandSettingRepoStub) Set(_ context.Context, key, value string) e
 		r.values = map[string]string{}
 	}
 	r.values[key] = value
+	return nil
+}
+
+func (r *domainBrandSettingRepoStub) SetMultiple(_ context.Context, values map[string]string) error {
+	r.setMultipleCalls++
+	if r.values == nil {
+		r.values = map[string]string{}
+	}
+	for key, value := range values {
+		r.values[key] = value
+	}
 	return nil
 }
 
@@ -142,6 +155,51 @@ func TestSettingService_RejectsInvalidDomainBrandSenderEmail(t *testing.T) {
 		{Domain: "a.example", SMTPFromEmail: stringPointer("Display <sender@example.com>")},
 	}})
 	require.ErrorIs(t, err, ErrDomainBrandConfigInvalid)
+}
+
+func TestSettingService_UpdateSettingsPersistsDomainBrandConfigInSameWrite(t *testing.T) {
+	repo := &domainBrandSettingRepoStub{values: map[string]string{}}
+	svc := NewSettingService(repo, &config.Config{})
+	svc.SetDefaultSubscriptionGroupReader(&domainBrandGroupReaderStub{groups: map[int64]*Group{}})
+
+	err := svc.UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfig(
+		context.Background(),
+		&SystemSettings{DefaultConcurrency: 1},
+		&AuthSourceDefaultSettings{},
+		&DomainBrandConfig{Domains: []DomainBrandProfile{{
+			Domain:                         "XIAOFANQIE.ORG.",
+			SMTPFromEmail:                  stringPointer("mail@xiaofanqie.org"),
+			RegistrationEmailVerifyEnabled: boolPointer(false),
+			AllowedGroupIDs:                []int64{},
+			ChannelMonitorIDs:              []int64{5},
+		}}},
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.setMultipleCalls)
+
+	var saved DomainBrandConfig
+	require.NoError(t, json.Unmarshal([]byte(repo.values[SettingKeyDomainBrandConfig]), &saved))
+	require.Equal(t, "xiaofanqie.org", saved.Domains[0].Domain)
+	require.Equal(t, "mail@xiaofanqie.org", *saved.Domains[0].SMTPFromEmail)
+	require.False(t, *saved.Domains[0].RegistrationEmailVerifyEnabled)
+}
+
+func TestSettingService_UpdateSettingsRejectsInvalidDomainBrandBeforeWrite(t *testing.T) {
+	repo := &domainBrandSettingRepoStub{values: map[string]string{}}
+	svc := NewSettingService(repo, &config.Config{})
+	svc.SetDefaultSubscriptionGroupReader(&domainBrandGroupReaderStub{groups: map[int64]*Group{}})
+
+	err := svc.UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfig(
+		context.Background(),
+		&SystemSettings{DefaultConcurrency: 1},
+		&AuthSourceDefaultSettings{},
+		&DomainBrandConfig{Domains: []DomainBrandProfile{{
+			Domain:        "xiaofanqie.org",
+			SMTPFromEmail: stringPointer("小番茄"),
+		}}},
+	)
+	require.ErrorIs(t, err, ErrDomainBrandConfigInvalid)
+	require.Zero(t, repo.setMultipleCalls)
 }
 
 func TestSettingService_PublicSettingsOverlayPreservesExplicitEmptyLogo(t *testing.T) {

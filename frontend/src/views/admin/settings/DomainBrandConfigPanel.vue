@@ -8,6 +8,7 @@
 
     <div class="space-y-5 p-6">
       <p v-if="loading" class="text-sm text-gray-500 dark:text-gray-400">正在加载域名配置...</p>
+      <p v-else-if="loadError" class="text-sm text-red-600">{{ loadError }}</p>
 
       <template v-else>
         <article
@@ -49,7 +50,15 @@
             </label>
             <label class="block">
               <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">发件人邮箱</span>
-              <input v-model="profile.smtp_from_email" type="email" class="input" placeholder="留空则沿用全局发件人邮箱" />
+              <input
+                v-model="profile.smtp_from_email"
+                type="email"
+                class="input"
+                placeholder="name@example.com；留空则沿用全局发件人邮箱"
+              />
+              <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                请填写完整邮箱地址，不要填写品牌名称。
+              </span>
             </label>
             <label class="block">
               <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">注册邮箱验证</span>
@@ -100,6 +109,7 @@
                     type="checkbox"
                     :value="monitor.id"
                     :disabled="isMonitorUsedByAnotherProfile(index, monitor.id)"
+                    @change="profile.channel_monitor_ids_explicit = true"
                   />
                   <span>{{ monitor.name }} · {{ monitor.group_name || monitor.provider }} (#{{ monitor.id }})</span>
                 </label>
@@ -110,10 +120,9 @@
 
         <div class="flex flex-wrap items-center gap-3">
           <button type="button" class="btn btn-secondary" @click="addDomain">添加域名</button>
-          <button type="button" class="btn btn-primary" :disabled="saving" @click="save">
-            {{ saving ? "保存中..." : "保存域名配置" }}
-          </button>
-          <span v-if="message" :class="messageError ? 'text-sm text-red-600' : 'text-sm text-emerald-600'">{{ message }}</span>
+          <span class="text-sm text-gray-500 dark:text-gray-400">
+            域名品牌配置会随页面底部的“保存设置”统一提交。
+          </span>
         </div>
       </template>
     </div>
@@ -135,13 +144,12 @@ type EditableDomainBrandProfile = Omit<DomainBrandProfile, "site_logo" | "smtp_f
   smtp_from_email: string | null;
   registration_email_verify_mode: "inherit" | "enabled" | "disabled";
   channel_monitor_ids: number[];
+  channel_monitor_ids_explicit: boolean;
   logo_mode: "inherit" | "default";
 };
 
 const loading = ref(true);
-const saving = ref(false);
-const message = ref("");
-const messageError = ref(false);
+const loadError = ref("");
 const activeGroups = ref<AdminGroup[]>([]);
 const channelMonitors = ref<ChannelMonitor[]>([]);
 const profiles = ref<EditableDomainBrandProfile[]>([]);
@@ -163,6 +171,7 @@ function toEditable(profile: DomainBrandProfile): EditableDomainBrandProfile {
     logo_mode: profile.site_logo === "" ? "default" : "inherit",
     allowed_group_ids: [...(profile.allowed_group_ids || [])],
     channel_monitor_ids: [...(profile.channel_monitor_ids || [])],
+    channel_monitor_ids_explicit: profile.channel_monitor_ids != null,
   };
 }
 
@@ -178,6 +187,7 @@ function addDomain(): void {
     logo_mode: "inherit",
     allowed_group_ids: [],
     channel_monitor_ids: [],
+    channel_monitor_ids_explicit: true,
   });
 }
 
@@ -212,9 +222,46 @@ function toRequest(): DomainBrandConfig {
           ? null
           : profile.registration_email_verify_mode === "enabled",
       allowed_group_ids: profile.allowed_group_ids.map(Number),
-      channel_monitor_ids: profile.channel_monitor_ids.map(Number),
+      channel_monitor_ids: profile.channel_monitor_ids_explicit
+        ? profile.channel_monitor_ids.map(Number)
+        : null,
     })),
   };
+}
+
+function isValidSenderEmail(value: string): boolean {
+  return /^[^\s<>@]+@[^\s<>@]+$/.test(value);
+}
+
+function buildConfigForSave(): DomainBrandConfig {
+  if (loading.value) {
+    throw new Error("域名品牌配置仍在加载，请稍后再保存。");
+  }
+  if (loadError.value) {
+    throw new Error("域名品牌配置加载失败，请刷新页面后重试。");
+  }
+
+  const config = toRequest();
+  const seenDomains = new Set<string>();
+  config.domains.forEach((profile, index) => {
+    const label = `域名配置 ${index + 1}`;
+    if (!profile.domain) {
+      throw new Error(`${label}：域名不能为空。`);
+    }
+    const domainKey = profile.domain.toLowerCase().replace(/\.$/, "");
+    if (seenDomains.has(domainKey)) {
+      throw new Error(`${label}：域名 ${profile.domain} 与其他配置重复。`);
+    }
+    seenDomains.add(domainKey);
+    if (profile.smtp_from_email && !isValidSenderEmail(profile.smtp_from_email)) {
+      throw new Error(`${label}：发件人邮箱格式不正确，请填写完整邮箱地址。`);
+    }
+  });
+  return config;
+}
+
+function applySavedConfig(config: DomainBrandConfig): void {
+  profiles.value = (config.domains || []).map(toEditable);
 }
 
 async function loadChannelMonitors(): Promise<ChannelMonitor[]> {
@@ -236,6 +283,7 @@ async function loadChannelMonitors(): Promise<ChannelMonitor[]> {
 
 async function load(): Promise<void> {
   loading.value = true;
+  loadError.value = "";
   try {
     const [config, groups, monitors] = await Promise.all([
       adminAPI.settings.getDomainBrandConfig(),
@@ -246,28 +294,13 @@ async function load(): Promise<void> {
     activeGroups.value = groups.filter((group) => group.status === "active");
     channelMonitors.value = monitors;
   } catch (error) {
-    message.value = error instanceof Error ? error.message : "加载域名配置失败";
-    messageError.value = true;
+    loadError.value = error instanceof Error ? error.message : "加载域名配置失败";
   } finally {
     loading.value = false;
   }
 }
 
-async function save(): Promise<void> {
-  saving.value = true;
-  message.value = "";
-  try {
-    const saved = await adminAPI.settings.updateDomainBrandConfig(toRequest());
-    profiles.value = (saved.domains || []).map(toEditable);
-    message.value = "已保存；前台页面会在下一次请求时按域名更新。";
-    messageError.value = false;
-  } catch (error) {
-    message.value = error instanceof Error ? error.message : "保存域名配置失败";
-    messageError.value = true;
-  } finally {
-    saving.value = false;
-  }
-}
+defineExpose({ buildConfigForSave, applySavedConfig });
 
 onMounted(load);
 </script>

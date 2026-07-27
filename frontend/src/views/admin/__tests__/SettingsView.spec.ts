@@ -592,6 +592,8 @@ describe("admin SettingsView payment visible method controls", () => {
     updateSettings.mockReset();
     getWebSearchEmulationConfig.mockReset();
     updateWebSearchEmulationConfig.mockReset();
+    getDomainBrandConfig.mockReset();
+    updateDomainBrandConfig.mockReset();
     getAdminApiKey.mockReset();
     getOverloadCooldownSettings.mockReset();
     getRateLimit429CooldownSettings.mockReset();
@@ -628,6 +630,18 @@ describe("admin SettingsView payment visible method controls", () => {
       enabled: false,
       providers: [],
     });
+    getDomainBrandConfig.mockResolvedValue({
+      domains: [
+        {
+          domain: "xiaofanqie.org",
+          smtp_from_email: "mail@xiaofanqie.org",
+          registration_email_verify_enabled: false,
+          allowed_group_ids: [],
+          channel_monitor_ids: [5],
+        },
+      ],
+    });
+    updateDomainBrandConfig.mockImplementation(async (payload) => payload);
     getAdminApiKey.mockResolvedValue({
       exists: false,
       masked_key: "",
@@ -688,6 +702,30 @@ describe("admin SettingsView payment visible method controls", () => {
 
     expect(wrapper.text()).not.toContain("可见方式");
     expect(wrapper.text()).not.toContain("支付来源");
+  });
+
+  it("submits domain brand configuration with the unified settings request", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        domain_brand_config: {
+          domains: [
+            expect.objectContaining({
+              domain: "xiaofanqie.org",
+              smtp_from_email: "mail@xiaofanqie.org",
+              registration_email_verify_enabled: false,
+              channel_monitor_ids: [5],
+            }),
+          ],
+        },
+      }),
+    );
+    expect(updateDomainBrandConfig).not.toHaveBeenCalled();
   });
 
   it("loads, edits, validates, and saves forwarded client-IP headers", async () => {

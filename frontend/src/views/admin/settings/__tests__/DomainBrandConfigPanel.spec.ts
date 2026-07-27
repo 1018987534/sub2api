@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 
 import DomainBrandConfigPanel from "../DomainBrandConfigPanel.vue";
+import type { DomainBrandConfig } from "@/api/admin/settings";
 
 const { getDomainBrandConfig, updateDomainBrandConfig, getGroups, listChannelMonitors } = vi.hoisted(() => ({
   getDomainBrandConfig: vi.fn(),
@@ -55,7 +56,7 @@ describe("DomainBrandConfigPanel", () => {
     updateDomainBrandConfig.mockImplementation(async (payload) => payload);
   });
 
-  it("loads and saves per-domain contact and API endpoint overrides", async () => {
+  it("builds per-domain overrides for the unified settings save", async () => {
     const wrapper = mount(DomainBrandConfigPanel);
     await flushPromises();
 
@@ -75,10 +76,12 @@ describe("DomainBrandConfigPanel", () => {
     await apiBaseURLInput.setValue(" https://api.xiaofanqie.org/v1 ");
     await senderInput.setValue(" mail@xiaofanqie.org ");
     await wrapper.findAll("select")[0].setValue("enabled");
-    await wrapper.get("button.btn-primary").trigger("click");
-    await flushPromises();
+    const exposed = wrapper.vm as unknown as {
+      buildConfigForSave: () => DomainBrandConfig;
+    };
+    const config = exposed.buildConfigForSave();
 
-    expect(updateDomainBrandConfig).toHaveBeenCalledWith({
+    expect(config).toEqual({
       domains: [
         {
           domain: "xiaofanqie.org",
@@ -94,5 +97,42 @@ describe("DomainBrandConfigPanel", () => {
         },
       ],
     });
+    expect(updateDomainBrandConfig).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("随页面底部的“保存设置”统一提交");
+    expect(wrapper.text()).not.toContain("保存域名配置");
+  });
+
+  it("rejects a brand name entered in the sender email field", async () => {
+    const wrapper = mount(DomainBrandConfigPanel);
+    await flushPromises();
+
+    await wrapper.get('input[type="email"]').setValue("小番茄");
+    const exposed = wrapper.vm as unknown as {
+      buildConfigForSave: () => DomainBrandConfig;
+    };
+
+    expect(() => exposed.buildConfigForSave()).toThrow(
+      "域名配置 1：发件人邮箱格式不正确，请填写完整邮箱地址。",
+    );
+    expect(updateDomainBrandConfig).not.toHaveBeenCalled();
+  });
+
+  it("preserves legacy unrestricted channel monitor visibility until edited", async () => {
+    getDomainBrandConfig.mockResolvedValueOnce({
+      domains: [
+        {
+          domain: "legacy.example",
+          allowed_group_ids: [],
+          channel_monitor_ids: null,
+        },
+      ],
+    });
+    const wrapper = mount(DomainBrandConfigPanel);
+    await flushPromises();
+
+    const exposed = wrapper.vm as unknown as {
+      buildConfigForSave: () => DomainBrandConfig;
+    };
+    expect(exposed.buildConfigForSave().domains[0].channel_monitor_ids).toBeNull();
   });
 });

@@ -31,6 +31,13 @@ func (s *SettingService) UpdateSettings(ctx context.Context, settings *SystemSet
 
 // UpdateSettingsWithAuthSourceDefaults persists system settings and auth-source defaults in a single write.
 func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings) error {
+	return s.UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfig(ctx, settings, authDefaults, nil)
+}
+
+// UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfig persists the main
+// settings form, auth-source defaults, and optional per-domain brand settings
+// in one repository write.
+func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfig(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings, domainBrandConfig *DomainBrandConfig) error {
 	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
@@ -42,6 +49,17 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Contex
 	}
 	for key, value := range authSourceUpdates {
 		updates[key] = value
+	}
+	if domainBrandConfig != nil {
+		normalized, err := s.validateDomainBrandConfig(ctx, domainBrandConfig)
+		if err != nil {
+			return err
+		}
+		raw, err := json.Marshal(normalized)
+		if err != nil {
+			return fmt.Errorf("marshal domain brand configuration: %w", err)
+		}
+		updates[SettingKeyDomainBrandConfig] = string(raw)
 	}
 
 	err = s.settingRepo.SetMultiple(ctx, updates)

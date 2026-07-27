@@ -750,6 +750,7 @@ export interface UpdateSettingsRequest {
   backend_mode_enabled?: boolean;
   custom_menu_items?: CustomMenuItem[];
   custom_endpoints?: CustomEndpoint[];
+  domain_brand_config?: DomainBrandConfig;
   smtp_host?: string;
   smtp_port?: number;
   smtp_username?: string;
