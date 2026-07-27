@@ -98,7 +98,26 @@
             </fieldset>
             <fieldset>
               <legend class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">展示渠道监控</legend>
-              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label class="mb-3 block">
+                <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  展示方式
+                </span>
+                <select
+                  v-model="profile.channel_monitor_mode"
+                  class="input"
+                  :data-testid="`channel-monitor-mode-${index}`"
+                >
+                  <option value="all">全部展示（兼容旧配置）</option>
+                  <option value="selected">仅展示下方勾选项</option>
+                </select>
+              </label>
+              <p
+                v-if="profile.channel_monitor_mode === 'all'"
+                class="text-sm text-amber-700 dark:text-amber-300"
+              >
+                当前品牌会展示全部渠道监控。
+              </p>
+              <div v-else class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <label
                   v-for="monitor in channelMonitors"
                   :key="monitor.id"
@@ -109,7 +128,6 @@
                     type="checkbox"
                     :value="monitor.id"
                     :disabled="isMonitorUsedByAnotherProfile(index, monitor.id)"
-                    @change="profile.channel_monitor_ids_explicit = true"
                   />
                   <span>{{ monitor.name }} · {{ monitor.group_name || monitor.provider }} (#{{ monitor.id }})</span>
                 </label>
@@ -144,7 +162,7 @@ type EditableDomainBrandProfile = Omit<DomainBrandProfile, "site_logo" | "smtp_f
   smtp_from_email: string | null;
   registration_email_verify_mode: "inherit" | "enabled" | "disabled";
   channel_monitor_ids: number[];
-  channel_monitor_ids_explicit: boolean;
+  channel_monitor_mode: "all" | "selected";
   logo_mode: "inherit" | "default";
 };
 
@@ -171,7 +189,7 @@ function toEditable(profile: DomainBrandProfile): EditableDomainBrandProfile {
     logo_mode: profile.site_logo === "" ? "default" : "inherit",
     allowed_group_ids: [...(profile.allowed_group_ids || [])],
     channel_monitor_ids: [...(profile.channel_monitor_ids || [])],
-    channel_monitor_ids_explicit: profile.channel_monitor_ids != null,
+    channel_monitor_mode: profile.channel_monitor_ids == null ? "all" : "selected",
   };
 }
 
@@ -187,7 +205,7 @@ function addDomain(): void {
     logo_mode: "inherit",
     allowed_group_ids: [],
     channel_monitor_ids: [],
-    channel_monitor_ids_explicit: true,
+    channel_monitor_mode: "selected",
   });
 }
 
@@ -222,7 +240,7 @@ function toRequest(): DomainBrandConfig {
           ? null
           : profile.registration_email_verify_mode === "enabled",
       allowed_group_ids: profile.allowed_group_ids.map(Number),
-      channel_monitor_ids: profile.channel_monitor_ids_explicit
+      channel_monitor_ids: profile.channel_monitor_mode === "selected"
         ? profile.channel_monitor_ids.map(Number)
         : null,
     })),

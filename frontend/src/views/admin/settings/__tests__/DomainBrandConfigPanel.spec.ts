@@ -133,6 +133,12 @@ describe("DomainBrandConfigPanel", () => {
     const exposed = wrapper.vm as unknown as {
       buildConfigForSave: () => DomainBrandConfig;
     };
+    const modeSelect = wrapper.get('[data-testid="channel-monitor-mode-0"]');
+    expect((modeSelect.element as HTMLSelectElement).value).toBe("all");
+    expect(wrapper.text()).toContain("当前品牌会展示全部渠道监控");
     expect(exposed.buildConfigForSave().domains[0].channel_monitor_ids).toBeNull();
+
+    await modeSelect.setValue("selected");
+    expect(exposed.buildConfigForSave().domains[0].channel_monitor_ids).toEqual([]);
   });
 });
