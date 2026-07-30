@@ -1,0 +1,5 @@
+services:
+  sub2api:
+    volumes:
+      - ${SUB2API_DATA_PATH:-./data}:/app/data
+      - ${SUB2API_BINARY_PATH:?SUB2API_BINARY_PATH is required}:/app/sub2api:ro
