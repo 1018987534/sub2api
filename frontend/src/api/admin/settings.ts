@@ -379,6 +379,7 @@ export interface SystemSettings {
   login_agreement_documents: LoginAgreementDocument[];
   // Default settings
   default_balance: number;
+  default_signup_api_key_group_id: number;
   affiliate_rebate_rate: number;
   affiliate_rebate_freeze_hours: number;
   affiliate_rebate_duration_days: number;
@@ -693,6 +694,7 @@ export interface UpdateSettingsRequest {
   login_agreement_updated_at?: string;
   login_agreement_documents?: LoginAgreementDocument[];
   default_balance?: number;
+  default_signup_api_key_group_id?: number;
   affiliate_rebate_rate?: number;
   affiliate_rebate_freeze_hours?: number;
   affiliate_rebate_duration_days?: number;
@@ -1429,35 +1431,6 @@ export interface WebSearchTestResult {
   query: string;
 }
 
-export interface DomainBrandProfile {
-  domain: string;
-  site_name?: string | null;
-  site_logo?: string | null;
-  site_subtitle?: string | null;
-  allowed_group_ids: number[];
-}
-
-export interface DomainBrandConfig {
-  domains: DomainBrandProfile[];
-}
-
-export async function getDomainBrandConfig(): Promise<DomainBrandConfig> {
-  const { data } = await apiClient.get<DomainBrandConfig>(
-    "/admin/settings/domain-brand-config",
-  );
-  return data;
-}
-
-export async function updateDomainBrandConfig(
-  config: DomainBrandConfig,
-): Promise<DomainBrandConfig> {
-  const { data } = await apiClient.put<DomainBrandConfig>(
-    "/admin/settings/domain-brand-config",
-    config,
-  );
-  return data;
-}
-
 export async function getWebSearchEmulationConfig(): Promise<WebSearchEmulationConfig> {
   const { data } = await apiClient.get<WebSearchEmulationConfig>(
     "/admin/settings/web-search-emulation",
@@ -1523,8 +1496,6 @@ export const settingsAPI = {
   updateWebSearchEmulationConfig,
   testWebSearchEmulation,
   resetWebSearchUsage,
-  getDomainBrandConfig,
-  updateDomainBrandConfig,
 };
 
 export default settingsAPI;

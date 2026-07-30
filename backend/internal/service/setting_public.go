@@ -284,7 +284,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		balanceLowNotifyThreshold = v
 	}
 
-	publicSettings := &PublicSettings{
+	return &PublicSettings{
 		RegistrationEnabled:              settings[SettingKeyRegistrationEnabled] == "true",
 		EmailVerifyEnabled:               emailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:     settings[SettingKeyForceEmailOnThirdPartySignup] == "true",
@@ -346,22 +346,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		RiskControlEnabled: settings[SettingKeyRiskControlEnabled] == "true",
 
 		AllowUserViewErrorRequests: settings[SettingKeyAllowUserViewErrorRequests] == "true",
-	}
-
-	profile := DomainBrandProfileFromContext(ctx)
-	if profile.Configured {
-		if profile.SiteName != nil {
-			publicSettings.SiteName = *profile.SiteName
-		}
-		if profile.SiteLogo != nil {
-			publicSettings.SiteLogo = *profile.SiteLogo
-		}
-		if profile.SiteSubtitle != nil {
-			publicSettings.SiteSubtitle = *profile.SiteSubtitle
-		}
-	}
-
-	return publicSettings, nil
+	}, nil
 }
 
 // channelMonitorIntervalMin / channelMonitorIntervalMax bound the default interval

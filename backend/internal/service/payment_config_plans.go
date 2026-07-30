@@ -132,23 +132,6 @@ func (s *PaymentConfigService) ListPlansForSale(ctx context.Context) ([]*dbent.S
 	return s.entClient.SubscriptionPlan.Query().Where(subscriptionplan.ForSaleEQ(true)).Order(subscriptionplan.BySortOrder()).All(ctx)
 }
 
-// FilterPlansForDomain applies the optional portal group allowlist after the
-// normal for-sale query. Unconfigured domains intentionally preserve the
-// historical full list.
-func (s *PaymentConfigService) FilterPlansForDomain(ctx context.Context, plans []*dbent.SubscriptionPlan) []*dbent.SubscriptionPlan {
-	profile := DomainBrandProfileFromContext(ctx)
-	if !profile.Configured {
-		return plans
-	}
-	filtered := make([]*dbent.SubscriptionPlan, 0, len(plans))
-	for _, plan := range plans {
-		if plan != nil && profile.AllowsGroup(plan.GroupID) {
-			filtered = append(filtered, plan)
-		}
-	}
-	return filtered
-}
-
 func (s *PaymentConfigService) CreatePlan(ctx context.Context, req CreatePlanRequest) (*dbent.SubscriptionPlan, error) {
 	if err := validatePlanRequired(req.Name, req.GroupID, req.Price, req.ValidityDays, req.ValidityUnit, req.OriginalPrice); err != nil {
 		return nil, err

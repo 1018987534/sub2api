@@ -228,6 +228,53 @@ func (s *defaultSubGroupReaderStub) GetByID(ctx context.Context, id int64) (*Gro
 	return nil, ErrGroupNotFound
 }
 
+func TestSettingService_DefaultSignupAPIKeyGroup(t *testing.T) {
+	t.Run("missing value preserves legacy auto selection", func(t *testing.T) {
+		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{}}, &config.Config{})
+
+		settings, err := svc.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.Zero(t, settings.DefaultSignupAPIKeyGroupID)
+	})
+
+	t.Run("configured value is parsed", func(t *testing.T) {
+		svc := NewSettingService(&settingGetAllRepoStub{values: map[string]string{
+			SettingKeyDefaultSignupAPIKeyGroupID: "87",
+		}}, &config.Config{})
+
+		settings, err := svc.GetAllSettings(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, int64(87), settings.DefaultSignupAPIKeyGroupID)
+	})
+
+	t.Run("active group is persisted", func(t *testing.T) {
+		repo := &settingUpdateRepoStub{}
+		groupReader := &defaultSubGroupReaderStub{byID: map[int64]*Group{
+			87: {ID: 87, Status: StatusActive},
+		}}
+		svc := NewSettingService(repo, &config.Config{})
+		svc.SetDefaultSubscriptionGroupReader(groupReader)
+
+		err := svc.UpdateSettings(context.Background(), &SystemSettings{DefaultSignupAPIKeyGroupID: 87})
+		require.NoError(t, err)
+		require.Equal(t, "87", repo.updates[SettingKeyDefaultSignupAPIKeyGroupID])
+	})
+
+	t.Run("inactive group is rejected", func(t *testing.T) {
+		repo := &settingUpdateRepoStub{}
+		groupReader := &defaultSubGroupReaderStub{byID: map[int64]*Group{
+			87: {ID: 87, Status: StatusDisabled},
+		}}
+		svc := NewSettingService(repo, &config.Config{})
+		svc.SetDefaultSubscriptionGroupReader(groupReader)
+
+		err := svc.UpdateSettings(context.Background(), &SystemSettings{DefaultSignupAPIKeyGroupID: 87})
+		require.Error(t, err)
+		require.Equal(t, "DEFAULT_SIGNUP_API_KEY_GROUP_INVALID", infraerrors.Reason(err))
+		require.Nil(t, repo.updates)
+	})
+}
+
 func TestSettingService_UpdateSettings_DefaultSubscriptions_ValidGroup(t *testing.T) {
 	repo := &settingUpdateRepoStub{}
 	groupReader := &defaultSubGroupReaderStub{

@@ -14,7 +14,9 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	entapikey "github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
+	entgroup "github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -50,6 +52,8 @@ const maxTokenLength = 8192
 
 // refreshTokenPrefix is the prefix for refresh tokens to distinguish them from access tokens.
 const refreshTokenPrefix = "rt_"
+
+const defaultSignupAPIKeyName = "默认 API Key"
 
 // JWTClaims JWT载荷数据
 type JWTClaims struct {
@@ -909,6 +913,78 @@ func (s *AuthService) postAuthUserBootstrap(ctx context.Context, user *User, sig
 	if touchLogin {
 		s.touchUserLogin(ctx, user.ID)
 	}
+
+	s.provisionDefaultSignupAPIKey(ctx, user.ID)
+}
+
+func (s *AuthService) provisionDefaultSignupAPIKey(ctx context.Context, userID int64) {
+	if s == nil || s.entClient == nil || userID <= 0 {
+		return
+	}
+
+	existingKeys, err := s.entClient.APIKey.Query().
+		Where(entapikey.UserIDEQ(userID), entapikey.DeletedAtIsNil()).
+		Count(ctx)
+	if err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to inspect default api key state: user_id=%d err=%v", userID, err)
+		return
+	}
+	if existingKeys > 0 {
+		return
+	}
+
+	groupID := int64(0)
+	if s.settingService != nil {
+		groupID, err = s.settingService.GetDefaultSignupAPIKeyGroupID(ctx)
+		if err != nil {
+			logger.LegacyPrintf("service.auth", "[Auth] Failed to load default signup api key group: user_id=%d err=%v", userID, err)
+			return
+		}
+	}
+
+	groupQuery := s.entClient.Group.Query().
+		Where(entgroup.StatusEQ(StatusActive), entgroup.DeletedAtIsNil())
+	if groupID > 0 {
+		groupQuery = groupQuery.Where(entgroup.IDEQ(groupID))
+	} else {
+		groupQuery = groupQuery.Where(
+			entgroup.NameEQ("GPT"),
+			entgroup.PlatformEQ(PlatformOpenAI),
+		)
+	}
+	defaultGroup, err := groupQuery.Order(dbent.Asc(entgroup.FieldID)).First(ctx)
+	if err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to find active default api key group: user_id=%d configured_group_id=%d err=%v", userID, groupID, err)
+		return
+	}
+
+	apiKeyValue, err := s.generateSignupAPIKey()
+	if err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to generate default api key: user_id=%d err=%v", userID, err)
+		return
+	}
+
+	if _, err := s.entClient.APIKey.Create().
+		SetUserID(userID).
+		SetKey(apiKeyValue).
+		SetName(defaultSignupAPIKeyName).
+		SetStatus(StatusAPIKeyActive).
+		SetGroupID(defaultGroup.ID).
+		Save(ctx); err != nil {
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to create default api key: user_id=%d group_id=%d err=%v", userID, defaultGroup.ID, err)
+	}
+}
+
+func (s *AuthService) generateSignupAPIKey() (string, error) {
+	raw, err := randomHexString(32)
+	if err != nil {
+		return "", err
+	}
+	prefix := "sk-"
+	if s != nil && s.cfg != nil && s.cfg.Default.APIKeyPrefix != "" {
+		prefix = s.cfg.Default.APIKeyPrefix
+	}
+	return prefix + raw, nil
 }
 
 func (s *AuthService) updateUserSignupSource(ctx context.Context, userID int64, signupSource string) {

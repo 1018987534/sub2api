@@ -6,8 +6,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
-const SettingKeyDomainBrandConfig = "domain_brand_config"
-
 // Status constants
 const (
 	StatusActive   = domain.StatusActive
@@ -283,10 +281,11 @@ const (
 	SettingKeyCustomEndpoints             = "custom_endpoints"              // 自定义端点列表（JSON 数组）
 
 	// 默认配置
-	SettingKeyDefaultConcurrency   = "default_concurrency"    // 新用户默认并发量
-	SettingKeyDefaultBalance       = "default_balance"        // 新用户默认余额
-	SettingKeyDefaultSubscriptions = "default_subscriptions"  // 新用户默认订阅列表（JSON）
-	SettingKeyDefaultUserRPMLimit  = "default_user_rpm_limit" // 新用户默认 RPM 限制（0 = 不限制）
+	SettingKeyDefaultConcurrency         = "default_concurrency"             // 新用户默认并发量
+	SettingKeyDefaultBalance             = "default_balance"                 // 新用户默认余额
+	SettingKeyDefaultSignupAPIKeyGroupID = "default_signup_api_key_group_id" // 注册时自动创建的 API Key 分组（0 = 兼容旧版 GPT 自动选择）
+	SettingKeyDefaultSubscriptions       = "default_subscriptions"           // 新用户默认订阅列表（JSON）
+	SettingKeyDefaultUserRPMLimit        = "default_user_rpm_limit"          // 新用户默认 RPM 限制（0 = 不限制）
 
 	// 第三方认证来源默认授予配置
 	SettingKeyAuthSourceDefaultEmailBalance             = "auth_source_default_email_balance"

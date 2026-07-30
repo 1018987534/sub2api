@@ -652,11 +652,11 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		// Request for existing static file
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/logo.svg", nil)
+		req := httptest.NewRequest(http.MethodGet, "/logo.png", nil)
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Header().Get("Content-Type"), "image/svg+xml")
+		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
 		assert.Empty(t, w.Header().Get("Cache-Control"))
 
 		entries, err := fs.ReadDir(server.distFS, "assets")
@@ -767,11 +767,11 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 		router.Use(middleware)
 
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/logo.svg", nil)
+		req := httptest.NewRequest(http.MethodGet, "/logo.png", nil)
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Header().Get("Content-Type"), "image/svg+xml")
+		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
 	})
 
 	t.Run("serves_index_html_for_root", func(t *testing.T) {
@@ -866,7 +866,7 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 func TestHTMLCache(t *testing.T) {
 	t.Run("new_cache_returns_nil", func(t *testing.T) {
 		cache := NewHTMLCache()
-		assert.Nil(t, cache.Get("example.com"))
+		assert.Nil(t, cache.Get())
 	})
 
 	t.Run("set_and_get", func(t *testing.T) {
@@ -875,9 +875,9 @@ func TestHTMLCache(t *testing.T) {
 
 		html := []byte("<html><body>test</body></html>")
 		settings := []byte(`{"key":"value"}`)
-		cache.Set("example.com", html, settings)
+		cache.Set(html, settings)
 
-		result := cache.Get("example.com")
+		result := cache.Get()
 		require.NotNil(t, result)
 		assert.Equal(t, html, result.Content)
 		assert.NotEmpty(t, result.ETag)
@@ -889,13 +889,13 @@ func TestHTMLCache(t *testing.T) {
 
 		html := []byte("<html><body>test</body></html>")
 		settings := []byte(`{"key":"value"}`)
-		cache.Set("example.com", html, settings)
+		cache.Set(html, settings)
 
-		require.NotNil(t, cache.Get("example.com"))
+		require.NotNil(t, cache.Get())
 
 		cache.Invalidate()
 
-		assert.Nil(t, cache.Get("example.com"))
+		assert.Nil(t, cache.Get())
 	})
 
 	t.Run("etag_changes_with_settings", func(t *testing.T) {
@@ -904,12 +904,12 @@ func TestHTMLCache(t *testing.T) {
 
 		html := []byte("<html><body>test</body></html>")
 
-		cache.Set("example.com", html, []byte(`{"v":1}`))
-		etag1 := cache.Get("example.com").ETag
+		cache.Set(html, []byte(`{"v":1}`))
+		etag1 := cache.Get().ETag
 
 		cache.Invalidate()
-		cache.Set("example.com", html, []byte(`{"v":2}`))
-		etag2 := cache.Get("example.com").ETag
+		cache.Set(html, []byte(`{"v":2}`))
+		etag2 := cache.Get().ETag
 
 		assert.NotEqual(t, etag1, etag2)
 	})
@@ -918,25 +918,14 @@ func TestHTMLCache(t *testing.T) {
 		cache := NewHTMLCache()
 		cache.SetBaseHTML([]byte("<html></html>"))
 
-		cache.Set("example.com", []byte("<html></html>"), []byte(`{}`))
-		result := cache.Get("example.com")
+		cache.Set([]byte("<html></html>"), []byte(`{}`))
+		result := cache.Get()
 
 		// ETag should be quoted
 		assert.True(t, strings.HasPrefix(result.ETag, `"`))
 		assert.True(t, strings.HasSuffix(result.ETag, `"`))
 		// Should contain dash separator
 		assert.Contains(t, result.ETag[1:len(result.ETag)-1], "-")
-	})
-
-	t.Run("isolates_entries_by_host", func(t *testing.T) {
-		cache := NewHTMLCache()
-		cache.SetBaseHTML([]byte("<html></html>"))
-		cache.Set("a.example", []byte("brand-a"), []byte(`{"site_name":"A"}`))
-		cache.Set("b.example", []byte("brand-b"), []byte(`{"site_name":"B"}`))
-
-		require.Equal(t, []byte("brand-a"), cache.Get("a.example").Content)
-		require.Equal(t, []byte("brand-b"), cache.Get("b.example").Content)
-		require.NotEqual(t, cache.Get("a.example").ETag, cache.Get("b.example").ETag)
 	})
 }
 
