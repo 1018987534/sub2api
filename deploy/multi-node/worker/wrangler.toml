@@ -1,6 +1,6 @@
 name = "sub2api-responses-dispatcher"
 main = "responses-dispatcher.mjs"
-compatibility_date = "2026-07-31"
+compatibility_date = "2026-07-30"
 workers_dev = false
 account_id = "3e1de9bb31a7b222215fcec006ccd468"
 
