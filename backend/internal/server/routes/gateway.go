@@ -360,6 +360,45 @@ func RegisterGatewayRoutes(
 
 }
 
+// RegisterResponsesGatewayRoutes registers the narrow public surface used by a
+// gateway instance. It keeps the existing authentication, scheduling, billing,
+// usage-recording and streaming handlers, while avoiding registration of the
+// panel, payment, Gemini, image, and other non-Responses routes.
+func RegisterResponsesGatewayRoutes(
+	r *gin.Engine,
+	h *handler.Handlers,
+	apiKeyAuth middleware.APIKeyAuthMiddleware,
+	opsService *service.OpsService,
+	settingService *service.SettingService,
+	compositeResolver *service.CompositeRouteResolver,
+	cfg *config.Config,
+) {
+	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
+	clientRequestID := middleware.ClientRequestID()
+	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
+	endpointNorm := handler.InboundEndpointMiddleware()
+	compositeTarget := compositeTargetPlatformMiddleware(compositeResolver)
+	requireGroup := middleware.RequireGroupAssignment(settingService, middleware.AnthropicErrorWriter)
+
+	responsesHandler := func(c *gin.Context) {
+		if getGroupPlatform(c) == service.PlatformOpenAI || getGroupPlatform(c) == service.PlatformGrok {
+			h.OpenAIGateway.Responses(c)
+			return
+		}
+		h.Gateway.Responses(c)
+	}
+	chain := []gin.HandlerFunc{bodyLimit, clientRequestID, opsErrorLogger, endpointNorm,
+		gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroup}
+	for _, path := range []string{"/v1/responses", "/responses", "/backend-api/codex/responses"} {
+		r.POST(path, append(chain, responsesHandler)...)
+		r.POST(path+"/*subpath", append(chain, responsesHandler)...)
+	}
+	ws := func(c *gin.Context) { h.OpenAIGateway.ResponsesWebSocket(c) }
+	for _, path := range []string{"/v1/responses", "/responses", "/backend-api/codex/responses"} {
+		r.GET(path, append(chain, ws)...)
+	}
+}
+
 // getGroupPlatform extracts the group platform from the API Key stored in context.
 func getGroupPlatform(c *gin.Context) string {
 	apiKey, ok := middleware.GetAPIKeyFromContext(c)

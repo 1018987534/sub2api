@@ -16,6 +16,7 @@ import (
 	"time"
 
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
+	"github.com/Wei-Shaw/sub2api/internal/appstate"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -73,9 +74,16 @@ func main() {
 		}
 		return
 	}
+	bootstrapRole := config.NormalizeInstanceRole(os.Getenv("INSTANCE_ROLE"))
+	if bootstrapRole != config.InstanceRoleControl && bootstrapRole != config.InstanceRoleGateway {
+		log.Fatalf("Invalid INSTANCE_ROLE %q: expected %q or %q", bootstrapRole, config.InstanceRoleControl, config.InstanceRoleGateway)
+	}
 
 	// Check if setup is needed
 	if setup.NeedsSetup() {
+		if bootstrapRole == config.InstanceRoleGateway {
+			log.Fatal("Gateway role requires an existing data/config.yaml and shared database; setup mode is disabled")
+		}
 		// Check if auto-setup is enabled (for Docker deployment)
 		if setup.AutoSetupEnabled() {
 			log.Println("Auto setup mode enabled...")
@@ -142,6 +150,7 @@ func runMainServer() {
 	if cfg.RunMode == config.RunModeSimple {
 		log.Println("⚠️  WARNING: Running in SIMPLE mode - billing and quota checks are DISABLED")
 	}
+	log.Printf("Instance role=%s id=%s", cfg.InstanceRole, cfg.InstanceID)
 
 	buildInfo := handler.BuildInfo{
 		Version:   Version,
@@ -177,10 +186,22 @@ func runMainServer() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
+	appstate.BeginDrain()
 	log.Println("Shutting down server...")
+	if cfg.DrainDelaySeconds > 0 {
+		log.Printf("Draining new requests for %ds before HTTP shutdown", cfg.DrainDelaySeconds)
+		time.Sleep(time.Duration(cfg.DrainDelaySeconds) * time.Second)
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownTimeout := time.Duration(cfg.ShutdownTimeoutSeconds) * time.Second
+	if shutdownTimeout <= 0 {
+		shutdownTimeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
+	if err := appstate.WaitForZero(ctx); err != nil {
+		log.Printf("Drain timed out with %d active requests: %v", appstate.ActiveRequests(), err)
+	}
 
 	if err := app.Server.Shutdown(ctx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)

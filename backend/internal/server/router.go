@@ -2,10 +2,14 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"log"
+	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/appstate"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -35,6 +39,7 @@ func SetupRouter(
 	settingService *service.SettingService,
 	compositeResolver *service.CompositeRouteResolver,
 	cfg *config.Config,
+	db *sql.DB,
 	redisClient *redis.Client,
 ) *gin.Engine {
 	middleware2.SetIngressRejectRecorder(opsService)
@@ -57,6 +62,19 @@ func SetupRouter(
 
 	// 应用中间件
 	r.Use(middleware2.RequestLogger())
+	r.Use(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/health") {
+			c.Next()
+			return
+		}
+		if !appstate.TryBeginRequest() {
+			c.Header("Retry-After", "5")
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "instance_draining"})
+			return
+		}
+		defer appstate.EndRequest()
+		c.Next()
+	})
 	// Resolve optional portal branding/group scope before all public settings and
 	// user-facing handlers consume the request context.
 	r.Use(middleware2.DomainBrandContext(settingService))
@@ -74,7 +92,7 @@ func SetupRouter(
 	r.Use(middleware2.ServerTiming(cfg.Server.EnableServerTiming))
 
 	// Serve embedded frontend with settings injection if available
-	if web.HasEmbeddedFrontend() {
+	if (cfg == nil || !cfg.IsGateway()) && web.HasEmbeddedFrontend() {
 		frontendServer, err := web.NewFrontendServer(settingService) //nolint:staticcheck // SA4023: the !embed stub always errors; embed builds can return nil
 		if err != nil {                                              //nolint:staticcheck // SA4023: see above
 			log.Printf("Warning: Failed to create frontend server with settings injection: %v, using legacy mode", err)
@@ -93,7 +111,7 @@ func SetupRouter(
 	}
 
 	// 注册路由
-	registerRoutes(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, redisClient)
+	registerRoutes(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, db, redisClient)
 
 	return r
 }
@@ -114,10 +132,18 @@ func registerRoutes(
 	settingService *service.SettingService,
 	compositeResolver *service.CompositeRouteResolver,
 	cfg *config.Config,
+	db *sql.DB,
 	redisClient *redis.Client,
 ) {
 	// 通用路由（健康检查、状态等）
-	routes.RegisterCommonRoutes(r)
+	routes.RegisterCommonRoutes(r, cfg, db, redisClient)
+	if cfg != nil && cfg.IsGateway() {
+		// A gateway origin is intentionally not a second control-plane API. The
+		// edge may send only Responses traffic here; all browser/admin routes stay
+		// on the control origin.
+		routes.RegisterResponsesGatewayRoutes(r, h, apiKeyAuth, opsService, settingService, compositeResolver, cfg)
+		return
+	}
 
 	// API v1
 	v1 := r.Group("/api/v1")

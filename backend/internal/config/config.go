@@ -21,6 +21,12 @@ import (
 const (
 	RunModeStandard = "standard"
 	RunModeSimple   = "simple"
+
+	// InstanceRole controls which HTTP surface and background jobs an instance
+	// exposes in a multi-node deployment. It is deliberately independent from
+	// RunMode: RunModeSimple changes billing semantics and is not a node role.
+	InstanceRoleControl = "control"
+	InstanceRoleGateway = "gateway"
 )
 
 // 使用量记录队列溢出策略
@@ -93,6 +99,10 @@ type Config struct {
 	Concurrency             ConcurrencyConfig             `mapstructure:"concurrency"`
 	TokenRefresh            TokenRefreshConfig            `mapstructure:"token_refresh"`
 	RunMode                 string                        `mapstructure:"run_mode" yaml:"run_mode"`
+	InstanceRole            string                        `mapstructure:"instance_role" yaml:"instance_role"`
+	InstanceID              string                        `mapstructure:"instance_id" yaml:"instance_id"`
+	DrainDelaySeconds       int                           `mapstructure:"drain_delay_seconds" yaml:"drain_delay_seconds"`
+	ShutdownTimeoutSeconds  int                           `mapstructure:"shutdown_timeout_seconds" yaml:"shutdown_timeout_seconds"`
 	Timezone                string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
 	Gemini                  GeminiConfig                  `mapstructure:"gemini"`
 	Update                  UpdateConfig                  `mapstructure:"update"`
@@ -1636,6 +1646,25 @@ func NormalizeRunMode(value string) string {
 	}
 }
 
+// NormalizeInstanceRole returns the safe default for an omitted role. An
+// unknown explicit value is rejected during config loading so a gateway cannot
+// accidentally start with the control-plane surface enabled.
+func NormalizeInstanceRole(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return InstanceRoleControl
+	}
+	return normalized
+}
+
+func (c *Config) IsGateway() bool {
+	return c != nil && NormalizeInstanceRole(c.InstanceRole) == InstanceRoleGateway
+}
+
+func (c *Config) IsControl() bool {
+	return !c.IsGateway()
+}
+
 // Load 读取并校验完整配置（要求 jwt.secret 已显式提供）。
 func Load() (*Config, error) {
 	return load(false)
@@ -1699,6 +1728,11 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
+	cfg.InstanceRole = NormalizeInstanceRole(cfg.InstanceRole)
+	if cfg.InstanceRole != InstanceRoleControl && cfg.InstanceRole != InstanceRoleGateway {
+		return nil, fmt.Errorf("invalid instance_role %q: expected %q or %q", cfg.InstanceRole, InstanceRoleControl, InstanceRoleGateway)
+	}
+	cfg.InstanceID = strings.TrimSpace(cfg.InstanceID)
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
 		cfg.Server.Mode = "debug"
@@ -1844,6 +1878,10 @@ func configureConfigSource(setConfigFile, addConfigPath func(string)) {
 
 func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
+	viper.SetDefault("instance_role", InstanceRoleControl)
+	viper.SetDefault("instance_id", "")
+	viper.SetDefault("drain_delay_seconds", 0)
+	viper.SetDefault("shutdown_timeout_seconds", 5)
 
 	// Server
 	viper.SetDefault("server.host", "0.0.0.0")

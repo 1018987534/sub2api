@@ -1,0 +1,9 @@
+[Interface]
+Address = 10.20.0.1/30
+ListenPort = 51820
+PrivateKey = CONTROL_PRIVATE_KEY
+
+[Peer]
+PublicKey = GATEWAY_PUBLIC_KEY
+AllowedIPs = 10.20.0.2/32
+PersistentKeepalive = 25

@@ -58,6 +58,38 @@ func newGatewayRoutesTestRouterWithConfig(cfg *config.Config, platform ...string
 	return router
 }
 
+func TestResponsesGatewayRoutesExposeOnlyResponsesSurface(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	cfg := &config.Config{Gateway: config.GatewayConfig{MaxBodySize: 1024 * 1024}}
+	RegisterResponsesGatewayRoutes(
+		router,
+		&handler.Handlers{
+			Gateway:       &handler.GatewayHandler{},
+			OpenAIGateway: &handler.OpenAIGatewayHandler{},
+		},
+		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) { c.Next() }),
+		nil,
+		nil,
+		nil,
+		cfg,
+	)
+
+	registered := make(map[string]bool)
+	for _, route := range router.Routes() {
+		registered[route.Method+" "+route.Path] = true
+	}
+	for _, path := range []string{"/v1/responses", "/responses", "/backend-api/codex/responses"} {
+		require.True(t, registered[http.MethodPost+" "+path])
+		require.True(t, registered[http.MethodGet+" "+path])
+		require.True(t, registered[http.MethodPost+" "+path+"/*subpath"])
+	}
+	for _, path := range []string{"/v1/chat/completions", "/v1/models", "/api/v1/admin/users", "/images/generations"} {
+		require.False(t, registered[http.MethodPost+" "+path])
+		require.False(t, registered[http.MethodGet+" "+path])
+	}
+}
+
 func TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
 

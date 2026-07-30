@@ -75,6 +75,31 @@ func TestEnsureBootstrapSecretsLoadExistingJWTSecret(t *testing.T) {
 	require.Equal(t, "existing-jwt-secret-32bytes-long!!!!", cfg.JWT.Secret)
 }
 
+func TestLoadBootstrapSecretsRequiresExistingSecretWithoutCreating(t *testing.T) {
+	client := newSecuritySecretTestClient(t)
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "configured-jwt-secret-32bytes-long!!"}}
+
+	err := loadBootstrapSecrets(context.Background(), client, cfg)
+	require.ErrorContains(t, err, "gateway requires persisted jwt secret")
+	count, countErr := client.SecuritySecret.Query().Count(context.Background())
+	require.NoError(t, countErr)
+	require.Zero(t, count)
+}
+
+func TestLoadBootstrapSecretsUsesPersistedSecret(t *testing.T) {
+	client := newSecuritySecretTestClient(t)
+	const persisted = "existing-jwt-secret-32bytes-long!!!!"
+	_, err := client.SecuritySecret.Create().SetKey(securitySecretKeyJWT).SetValue(persisted).Save(context.Background())
+	require.NoError(t, err)
+
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "different-configured-secret-32bytes!!"}}
+	require.NoError(t, loadBootstrapSecrets(context.Background(), client, cfg))
+	require.Equal(t, persisted, cfg.JWT.Secret)
+	count, err := client.SecuritySecret.Query().Count(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
+}
+
 func TestEnsureBootstrapSecretsRejectInvalidStoredSecret(t *testing.T) {
 	client := newSecuritySecretTestClient(t)
 	_, err := client.SecuritySecret.Create().SetKey(securitySecretKeyJWT).SetValue("too-short").Save(context.Background())

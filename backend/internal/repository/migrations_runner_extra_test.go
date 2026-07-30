@@ -36,6 +36,40 @@ func TestApplyMigrations_DelegatesToApplyMigrationsFS(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestValidateMigrationsFSIsReadOnlyAndRequiresCurrentSchema(t *testing.T) {
+	fsys := fstest.MapFS{
+		"001_first.sql": {Data: []byte("CREATE TABLE first_table (id BIGINT);")},
+		"002_empty.sql": {Data: []byte("  \n")},
+	}
+	sum := sha256.Sum256([]byte("CREATE TABLE first_table (id BIGINT);"))
+	checksum := hex.EncodeToString(sum[:])
+
+	t.Run("current", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		mock.ExpectQuery("SELECT checksum FROM schema_migrations").
+			WithArgs("001_first.sql").
+			WillReturnRows(sqlmock.NewRows([]string{"checksum"}).AddRow(checksum))
+
+		require.NoError(t, validateMigrationsFS(context.Background(), db, fsys))
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("behind", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		defer func() { _ = db.Close() }()
+		mock.ExpectQuery("SELECT checksum FROM schema_migrations").
+			WithArgs("001_first.sql").
+			WillReturnRows(sqlmock.NewRows([]string{"checksum"}))
+
+		err = validateMigrationsFS(context.Background(), db, fsys)
+		require.ErrorContains(t, err, "database schema is behind")
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
 func TestLatestMigrationBaseline(t *testing.T) {
 	t.Run("empty_fs_returns_baseline", func(t *testing.T) {
 		version, description, hash, err := latestMigrationBaseline(fstest.MapFS{})

@@ -103,6 +103,48 @@ func ApplyMigrations(ctx context.Context, db *sql.DB) error {
 	return applyMigrationsFS(ctx, db, migrations.FS)
 }
 
+// ValidateMigrations verifies that the database already contains every
+// migration embedded in this binary. Gateway instances use this read-only path
+// so only the control instance is allowed to advance shared schema state.
+func ValidateMigrations(ctx context.Context, db *sql.DB) error {
+	if db == nil {
+		return errors.New("nil sql db")
+	}
+	return validateMigrationsFS(ctx, db, migrations.FS)
+}
+
+func validateMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
+	files, err := fs.Glob(fsys, "*.sql")
+	if err != nil {
+		return fmt.Errorf("list migrations: %w", err)
+	}
+	sort.Strings(files)
+	for _, name := range files {
+		contentBytes, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", name, err)
+		}
+		content := strings.TrimSpace(string(contentBytes))
+		if content == "" {
+			continue
+		}
+		sum := sha256.Sum256([]byte(content))
+		checksum := hex.EncodeToString(sum[:])
+
+		var existing string
+		if err := db.QueryRowContext(ctx, "SELECT checksum FROM schema_migrations WHERE filename = $1", name).Scan(&existing); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("database schema is behind: migration %s has not been applied by the control instance", name)
+			}
+			return fmt.Errorf("validate migration %s: %w", name, err)
+		}
+		if existing != checksum && !isMigrationChecksumCompatible(name, existing, checksum) {
+			return fmt.Errorf("migration %s checksum mismatch (db=%s file=%s)", name, existing, checksum)
+		}
+	}
+	return nil
+}
+
 // applyMigrationsFS 是迁移执行的核心实现。
 // 它从指定的文件系统读取 SQL 迁移文件并按顺序应用。
 //

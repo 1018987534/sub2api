@@ -1,0 +1,9 @@
+[Interface]
+Address = 10.20.0.2/30
+PrivateKey = GATEWAY_PRIVATE_KEY
+
+[Peer]
+PublicKey = CONTROL_PUBLIC_KEY
+Endpoint = 95.169.18.157:51820
+AllowedIPs = 10.20.0.1/32
+PersistentKeepalive = 25

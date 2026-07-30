@@ -57,7 +57,9 @@ func ProvideBatchImageWorkerRuntime(
 		StaleAfter: NewBatchImageWorkerOptionsFromConfig(cfg).StaleActiveAfter,
 		Limit:      NewBatchImageWorkerOptionsFromConfig(cfg).RecoverLimit,
 	}
-	runtime.Start()
+	if controlPlaneEnabled(cfg) {
+		runtime.Start()
+	}
 	return runtime
 }
 

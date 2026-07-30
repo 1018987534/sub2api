@@ -334,6 +334,32 @@ func TestNormalizeRunMode(t *testing.T) {
 	}
 }
 
+func TestNormalizeInstanceRole(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"", InstanceRoleControl},
+		{"CONTROL", InstanceRoleControl},
+		{" gateway ", InstanceRoleGateway},
+	}
+	for _, tt := range tests {
+		if got := NormalizeInstanceRole(tt.input); got != tt.expected {
+			t.Errorf("NormalizeInstanceRole(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestLoadRejectsUnknownInstanceRole(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("INSTANCE_ROLE", "worker")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "invalid instance_role") {
+		t.Fatalf("Load() error = %v, want invalid instance_role", err)
+	}
+}
+
 func TestLoadDefaultSchedulingConfig(t *testing.T) {
 	resetViperWithJWTSecret(t)
 

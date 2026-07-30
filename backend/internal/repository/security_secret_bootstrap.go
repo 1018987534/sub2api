@@ -57,6 +57,28 @@ func ensureBootstrapSecrets(ctx context.Context, client *ent.Client, cfg *config
 	return nil
 }
 
+func loadBootstrapSecrets(ctx context.Context, client *ent.Client, cfg *config.Config) error {
+	if client == nil {
+		return fmt.Errorf("nil ent client")
+	}
+	if cfg == nil {
+		return fmt.Errorf("nil config")
+	}
+	stored, err := client.SecuritySecret.Query().Where(securitysecret.KeyEQ(securitySecretKeyJWT)).Only(ctx)
+	if err != nil {
+		return fmt.Errorf("gateway requires persisted jwt secret: %w", err)
+	}
+	storedValue := strings.TrimSpace(stored.Value)
+	if len([]byte(storedValue)) < 32 {
+		return fmt.Errorf("stored secret %q must be at least 32 bytes", securitySecretKeyJWT)
+	}
+	if configured := strings.TrimSpace(cfg.JWT.Secret); configured != "" && configured != storedValue {
+		log.Println("Warning: configured JWT secret mismatches persisted value; using persisted secret for cross-instance consistency.")
+	}
+	cfg.JWT.Secret = storedValue
+	return nil
+}
+
 func getOrCreateGeneratedSecuritySecret(ctx context.Context, client *ent.Client, key string, byteLength int) (string, bool, error) {
 	existing, err := client.SecuritySecret.Query().Where(securitysecret.KeyEQ(key)).Only(ctx)
 	if err == nil {
