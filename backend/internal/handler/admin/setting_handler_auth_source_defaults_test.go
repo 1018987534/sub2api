@@ -206,44 +206,6 @@ func TestSettingHandler_UpdateSettings_PreservesOmittedAuthSourceDefaults(t *tes
 	require.Equal(t, true, data["force_email_on_third_party_signup"])
 }
 
-func TestSettingHandler_UpdateSettings_PersistsDomainBrandConfig(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	repo := &settingHandlerRepoStub{values: map[string]string{
-		service.SettingKeyPromoCodeEnabled: "true",
-	}}
-	svc := service.NewSettingService(repo, &config.Config{Default: config.DefaultConfig{UserConcurrency: 5}})
-	handler := NewSettingHandler(svc, nil, nil, nil, nil, nil, nil)
-
-	body := map[string]any{
-		"promo_code_enabled": true,
-		"domain_brand_config": map[string]any{
-			"domains": []map[string]any{{
-				"domain":                            "XIAOFANQIE.ORG.",
-				"smtp_from_name":                    "小番茄",
-				"registration_email_verify_enabled": false,
-				"allowed_group_ids":                 []int64{},
-				"channel_monitor_ids":               []int64{5},
-			}},
-		},
-	}
-	rawBody, err := json.Marshal(body)
-	require.NoError(t, err)
-
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings", bytes.NewReader(rawBody))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	handler.UpdateSettings(c)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var saved service.DomainBrandConfig
-	require.NoError(t, json.Unmarshal([]byte(repo.values[service.SettingKeyDomainBrandConfig]), &saved))
-	require.Equal(t, "xiaofanqie.org", saved.Domains[0].Domain)
-	require.Equal(t, "小番茄", *saved.Domains[0].SMTPFromName)
-	require.False(t, *saved.Domains[0].RegistrationEmailVerifyEnabled)
-}
-
 func TestSettingHandler_UpdateSettings_PersistsPaymentVisibleMethodsAndAdvancedScheduler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	repo := &settingHandlerRepoStub{

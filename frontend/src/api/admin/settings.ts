@@ -760,7 +760,6 @@ export interface UpdateSettingsRequest {
   backend_mode_enabled?: boolean;
   custom_menu_items?: CustomMenuItem[];
   custom_endpoints?: CustomEndpoint[];
-  domain_brand_config?: DomainBrandConfig;
   smtp_host?: string;
   smtp_port?: number;
   smtp_username?: string;
@@ -1437,7 +1436,7 @@ export interface DomainBrandProfile {
   site_subtitle?: string | null;
   contact_info?: string | null;
   api_base_url?: string | null;
-  smtp_from_name?: string | null;
+  smtp_from_email?: string | null;
   registration_email_verify_enabled?: boolean | null;
   allowed_group_ids: number[];
   channel_monitor_ids?: number[] | null;

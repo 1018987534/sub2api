@@ -53,27 +53,13 @@ func (s *SettingService) UpdateSettingsOmitting(ctx context.Context, settings *S
 
 // UpdateSettingsWithAuthSourceDefaults persists system settings and auth-source defaults in a single write.
 func (s *SettingService) UpdateSettingsWithAuthSourceDefaults(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings) error {
-	return s.UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfigOmitting(ctx, settings, authDefaults, nil, nil)
-}
-
-// UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfig persists the main
-// settings form, auth-source defaults, and optional per-domain brand settings
-// in one repository write.
-func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfig(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings, domainBrandConfig *DomainBrandConfig) error {
-	return s.UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfigOmitting(ctx, settings, authDefaults, domainBrandConfig, nil)
+	return s.UpdateSettingsWithAuthSourceDefaultsOmitting(ctx, settings, authDefaults, nil)
 }
 
 // UpdateSettingsWithAuthSourceDefaultsOmitting persists system settings and
 // auth-source defaults in a single write, leaving the keys in omitted at their
 // stored value.
 func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsOmitting(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings, omitted OmittedSettingKeys) error {
-	return s.UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfigOmitting(ctx, settings, authDefaults, nil, omitted)
-}
-
-// UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfigOmitting persists
-// system settings, auth-source defaults, and optional per-domain brand settings
-// in one write while preserving omitted top-level settings.
-func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfigOmitting(ctx context.Context, settings *SystemSettings, authDefaults *AuthSourceDefaultSettings, domainBrandConfig *DomainBrandConfig, omitted OmittedSettingKeys) error {
 	updates, err := s.buildSystemSettingsUpdates(ctx, settings)
 	if err != nil {
 		return err
@@ -85,17 +71,6 @@ func (s *SettingService) UpdateSettingsWithAuthSourceDefaultsAndDomainBrandConfi
 	}
 	for key, value := range authSourceUpdates {
 		updates[key] = value
-	}
-	if domainBrandConfig != nil {
-		normalized, err := s.validateDomainBrandConfig(ctx, domainBrandConfig)
-		if err != nil {
-			return err
-		}
-		raw, err := json.Marshal(normalized)
-		if err != nil {
-			return fmt.Errorf("marshal domain brand configuration: %w", err)
-		}
-		updates[SettingKeyDomainBrandConfig] = string(raw)
 	}
 	omitted.dropFrom(updates)
 

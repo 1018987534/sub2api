@@ -122,25 +122,6 @@ func TestNotificationEmailAuthTemplatesAreListedAndPreviewable(t *testing.T) {
 	require.Contains(t, resetPreview.HTML, "https://example.com/reset?token=abc")
 }
 
-func TestNotificationEmailAuthTemplateUsesDomainBrandSiteName(t *testing.T) {
-	repo := newNotificationEmailMemorySettingRepo()
-	require.NoError(t, repo.Set(context.Background(), SettingKeySiteName, "小红豆"))
-	svc := NewNotificationEmailService(repo, nil)
-	brandName := "小番茄"
-	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
-		Configured: true,
-		SiteName:   &brandName,
-	})
-
-	preview, err := svc.PreviewTemplate(ctx, NotificationEmailPreviewInput{
-		Event:  NotificationEmailEventAuthVerifyCode,
-		Locale: "zh-CN",
-	})
-	require.NoError(t, err)
-	require.Equal(t, "[小番茄] 邮箱验证码", preview.Subject)
-	require.NotContains(t, preview.Subject, "小红豆")
-}
-
 func TestNotificationEmailAdditionalEventsAreListedAndPreviewable(t *testing.T) {
 	ctx := context.Background()
 	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)
@@ -359,10 +340,10 @@ func TestNotificationEmailFallbackClassification(t *testing.T) {
 
 func TestEmailQueueTasksPreserveLocaleHints(t *testing.T) {
 	queue := &EmailQueueService{taskChan: make(chan EmailTask, 2)}
-	fromName := "小番茄"
+	fromEmail := "brand@example.com"
 	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
-		Configured:   true,
-		SMTPFromName: &fromName,
+		Configured:    true,
+		SMTPFromEmail: &fromEmail,
 	})
 	require.NoError(t, queue.EnqueueVerifyCode(ctx, "user@example.com", "Sub2API", "zh-CN"))
 	require.NoError(t, queue.EnqueuePasswordReset(ctx, "user@example.com", "Sub2API", "https://example.com/reset", "en-US"))
@@ -370,12 +351,12 @@ func TestEmailQueueTasksPreserveLocaleHints(t *testing.T) {
 	verifyTask := <-queue.taskChan
 	require.Equal(t, TaskTypeVerifyCode, verifyTask.TaskType)
 	require.Equal(t, "zh-CN", verifyTask.Locale)
-	require.Equal(t, "小番茄", *verifyTask.BrandProfile.SMTPFromName)
+	require.Equal(t, "brand@example.com", *verifyTask.BrandProfile.SMTPFromEmail)
 
 	resetTask := <-queue.taskChan
 	require.Equal(t, TaskTypePasswordReset, resetTask.TaskType)
 	require.Equal(t, "en-US", resetTask.Locale)
-	require.Equal(t, "小番茄", *resetTask.BrandProfile.SMTPFromName)
+	require.Equal(t, "brand@example.com", *resetTask.BrandProfile.SMTPFromEmail)
 }
 
 func TestOpsScheduledReportDeliverySourceIDIncludesReportIdentity(t *testing.T) {

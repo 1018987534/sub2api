@@ -8,7 +8,6 @@
 
     <div class="space-y-5 p-6">
       <p v-if="loading" class="text-sm text-gray-500 dark:text-gray-400">正在加载域名配置...</p>
-      <p v-else-if="loadError" class="text-sm text-red-600">{{ loadError }}</p>
 
       <template v-else>
         <article
@@ -49,16 +48,8 @@
               <input v-model="profile.api_base_url" class="input" placeholder="https://example.com/v1" />
             </label>
             <label class="block">
-              <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">发件人名称</span>
-              <input
-                v-model="profile.smtp_from_name"
-                type="text"
-                class="input"
-                placeholder="例如：小番茄；留空则沿用全局发件人名称"
-              />
-              <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-                邮箱地址继续沿用全局 SMTP 发件人邮箱。
-              </span>
+              <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">发件人邮箱</span>
+              <input v-model="profile.smtp_from_email" type="email" class="input" placeholder="留空则沿用全局发件人邮箱" />
             </label>
             <label class="block">
               <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">注册邮箱验证</span>
@@ -98,26 +89,7 @@
             </fieldset>
             <fieldset>
               <legend class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">展示渠道监控</legend>
-              <label class="mb-3 block">
-                <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  展示方式
-                </span>
-                <select
-                  v-model="profile.channel_monitor_mode"
-                  class="input"
-                  :data-testid="`channel-monitor-mode-${index}`"
-                >
-                  <option value="all">全部展示（兼容旧配置）</option>
-                  <option value="selected">仅展示下方勾选项</option>
-                </select>
-              </label>
-              <p
-                v-if="profile.channel_monitor_mode === 'all'"
-                class="text-sm text-amber-700 dark:text-amber-300"
-              >
-                当前品牌会展示全部渠道监控。
-              </p>
-              <div v-else class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <label
                   v-for="monitor in channelMonitors"
                   :key="monitor.id"
@@ -138,9 +110,10 @@
 
         <div class="flex flex-wrap items-center gap-3">
           <button type="button" class="btn btn-secondary" @click="addDomain">添加域名</button>
-          <span class="text-sm text-gray-500 dark:text-gray-400">
-            域名品牌配置会随页面底部的“保存设置”统一提交。
-          </span>
+          <button type="button" class="btn btn-primary" :disabled="saving" @click="save">
+            {{ saving ? "保存中..." : "保存域名配置" }}
+          </button>
+          <span v-if="message" :class="messageError ? 'text-sm text-red-600' : 'text-sm text-emerald-600'">{{ message }}</span>
         </div>
       </template>
     </div>
@@ -154,20 +127,21 @@ import type { AdminGroup } from "@/types";
 import type { DomainBrandConfig, DomainBrandProfile } from "@/api/admin/settings";
 import type { ChannelMonitor } from "@/api/admin/channelMonitor";
 
-type EditableDomainBrandProfile = Omit<DomainBrandProfile, "site_logo" | "smtp_from_name" | "registration_email_verify_enabled" | "channel_monitor_ids"> & {
+type EditableDomainBrandProfile = Omit<DomainBrandProfile, "site_logo" | "smtp_from_email" | "registration_email_verify_enabled" | "channel_monitor_ids"> & {
   site_name: string | null;
   site_subtitle: string | null;
   contact_info: string | null;
   api_base_url: string | null;
-  smtp_from_name: string | null;
+  smtp_from_email: string | null;
   registration_email_verify_mode: "inherit" | "enabled" | "disabled";
   channel_monitor_ids: number[];
-  channel_monitor_mode: "all" | "selected";
   logo_mode: "inherit" | "default";
 };
 
 const loading = ref(true);
-const loadError = ref("");
+const saving = ref(false);
+const message = ref("");
+const messageError = ref(false);
 const activeGroups = ref<AdminGroup[]>([]);
 const channelMonitors = ref<ChannelMonitor[]>([]);
 const profiles = ref<EditableDomainBrandProfile[]>([]);
@@ -179,7 +153,7 @@ function toEditable(profile: DomainBrandProfile): EditableDomainBrandProfile {
     site_subtitle: profile.site_subtitle ?? null,
     contact_info: profile.contact_info ?? null,
     api_base_url: profile.api_base_url ?? null,
-    smtp_from_name: profile.smtp_from_name ?? null,
+    smtp_from_email: profile.smtp_from_email ?? null,
     registration_email_verify_mode:
       profile.registration_email_verify_enabled == null
         ? "inherit"
@@ -189,7 +163,6 @@ function toEditable(profile: DomainBrandProfile): EditableDomainBrandProfile {
     logo_mode: profile.site_logo === "" ? "default" : "inherit",
     allowed_group_ids: [...(profile.allowed_group_ids || [])],
     channel_monitor_ids: [...(profile.channel_monitor_ids || [])],
-    channel_monitor_mode: profile.channel_monitor_ids == null ? "all" : "selected",
   };
 }
 
@@ -200,12 +173,11 @@ function addDomain(): void {
     site_subtitle: null,
     contact_info: null,
     api_base_url: null,
-    smtp_from_name: null,
+    smtp_from_email: null,
     registration_email_verify_mode: "inherit",
     logo_mode: "inherit",
     allowed_group_ids: [],
     channel_monitor_ids: [],
-    channel_monitor_mode: "selected",
   });
 }
 
@@ -234,45 +206,15 @@ function toRequest(): DomainBrandConfig {
       site_subtitle: profile.site_subtitle?.trim() ? profile.site_subtitle.trim() : null,
       contact_info: profile.contact_info?.trim() ? profile.contact_info.trim() : null,
       api_base_url: profile.api_base_url?.trim() ? profile.api_base_url.trim() : null,
-      smtp_from_name: profile.smtp_from_name?.trim() ? profile.smtp_from_name.trim() : null,
+      smtp_from_email: profile.smtp_from_email?.trim() ? profile.smtp_from_email.trim() : null,
       registration_email_verify_enabled:
         profile.registration_email_verify_mode === "inherit"
           ? null
           : profile.registration_email_verify_mode === "enabled",
       allowed_group_ids: profile.allowed_group_ids.map(Number),
-      channel_monitor_ids: profile.channel_monitor_mode === "selected"
-        ? profile.channel_monitor_ids.map(Number)
-        : null,
+      channel_monitor_ids: profile.channel_monitor_ids.map(Number),
     })),
   };
-}
-
-function buildConfigForSave(): DomainBrandConfig {
-  if (loading.value) {
-    throw new Error("域名品牌配置仍在加载，请稍后再保存。");
-  }
-  if (loadError.value) {
-    throw new Error("域名品牌配置加载失败，请刷新页面后重试。");
-  }
-
-  const config = toRequest();
-  const seenDomains = new Set<string>();
-  config.domains.forEach((profile, index) => {
-    const label = `域名配置 ${index + 1}`;
-    if (!profile.domain) {
-      throw new Error(`${label}：域名不能为空。`);
-    }
-    const domainKey = profile.domain.toLowerCase().replace(/\.$/, "");
-    if (seenDomains.has(domainKey)) {
-      throw new Error(`${label}：域名 ${profile.domain} 与其他配置重复。`);
-    }
-    seenDomains.add(domainKey);
-  });
-  return config;
-}
-
-function applySavedConfig(config: DomainBrandConfig): void {
-  profiles.value = (config.domains || []).map(toEditable);
 }
 
 async function loadChannelMonitors(): Promise<ChannelMonitor[]> {
@@ -294,7 +236,6 @@ async function loadChannelMonitors(): Promise<ChannelMonitor[]> {
 
 async function load(): Promise<void> {
   loading.value = true;
-  loadError.value = "";
   try {
     const [config, groups, monitors] = await Promise.all([
       adminAPI.settings.getDomainBrandConfig(),
@@ -305,13 +246,28 @@ async function load(): Promise<void> {
     activeGroups.value = groups.filter((group) => group.status === "active");
     channelMonitors.value = monitors;
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : "加载域名配置失败";
+    message.value = error instanceof Error ? error.message : "加载域名配置失败";
+    messageError.value = true;
   } finally {
     loading.value = false;
   }
 }
 
-defineExpose({ buildConfigForSave, applySavedConfig });
+async function save(): Promise<void> {
+  saving.value = true;
+  message.value = "";
+  try {
+    const saved = await adminAPI.settings.updateDomainBrandConfig(toRequest());
+    profiles.value = (saved.domains || []).map(toEditable);
+    message.value = "已保存；前台页面会在下一次请求时按域名更新。";
+    messageError.value = false;
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : "保存域名配置失败";
+    messageError.value = true;
+  } finally {
+    saving.value = false;
+  }
+}
 
 onMounted(load);
 </script>

@@ -6197,7 +6197,7 @@
             </div>
           </div>
 
-          <DomainBrandConfigPanel ref="domainBrandConfigPanelRef" />
+          <DomainBrandConfigPanel />
 	        </div>
 	        <!-- /Tab: General -->
 
@@ -8080,7 +8080,6 @@ import {
 import type {
   AuthSourceDefaultsState,
   AuthSourceType,
-  DomainBrandConfig,
   SystemSettings,
   UpdateSettingsRequest,
   DefaultSubscriptionSetting,
@@ -8240,11 +8239,6 @@ const { copyToClipboard } = useClipboard();
 const loading = ref(true);
 const loadFailed = ref(false);
 const saving = ref(false);
-type DomainBrandConfigPanelHandle = {
-  buildConfigForSave: () => DomainBrandConfig;
-  applySavedConfig: (config: DomainBrandConfig) => void;
-};
-const domainBrandConfigPanelRef = ref<DomainBrandConfigPanelHandle | null>(null);
 const testingSmtp = ref(false);
 const sendingTestEmail = ref(false);
 const smtpPasswordManuallyEdited = ref(false);
@@ -10196,10 +10190,6 @@ function findDuplicateDefaultSubscription(
 async function saveSettings() {
   saving.value = true;
   try {
-    const domainBrandConfig = domainBrandConfigPanelRef.value?.buildConfigForSave();
-    if (!domainBrandConfig) {
-      throw new Error("域名品牌配置尚未加载，请刷新页面后重试。");
-    }
     const normalizedTableDefaultPageSize = Math.floor(
       Number(form.table_default_page_size),
     );
@@ -10396,7 +10386,6 @@ async function saveSettings() {
       table_page_size_options: form.table_page_size_options,
       custom_menu_items: form.custom_menu_items,
       custom_endpoints: form.custom_endpoints,
-      domain_brand_config: domainBrandConfig,
       frontend_url: form.frontend_url,
       smtp_host: form.smtp_host,
       smtp_port: form.smtp_port,
@@ -10669,7 +10658,6 @@ async function saveSettings() {
     const updated = await settingsStepUp.run(() =>
       adminAPI.settings.updateSettings(payload),
     );
-    domainBrandConfigPanelRef.value?.applySavedConfig(domainBrandConfig);
     for (const [key, value] of Object.entries(updated)) {
       if (key === "openai_fast_policy_settings") continue;
       if (value !== null && value !== undefined) {
