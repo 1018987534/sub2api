@@ -29,9 +29,23 @@ function shouldFailOver(response) {
   return response.status >= 500 && response.status <= 599;
 }
 
+function canRetry(request) {
+  return request.method === "GET" || request.method === "HEAD";
+}
+
 export default {
   async fetch(request, env) {
     const [primaryOrigin, secondaryOrigin] = selectOrigins(env);
+
+    // Creating a Response is not idempotent. Once a POST is sent to an origin,
+    // never replay it at the edge: the first origin may already have reached the
+    // model upstream even if its connection fails before returning headers.
+    if (!canRetry(request)) {
+      return fetch(originRequest(request, primaryOrigin), {
+        redirect: "manual",
+      });
+    }
+
     const retryRequest = request.clone();
 
     try {
