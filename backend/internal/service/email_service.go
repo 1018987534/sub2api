@@ -161,7 +161,7 @@ func (s *EmailService) GetSMTPConfig(ctx context.Context) (*SMTPConfig, error) {
 
 	useTLS := settings[SettingKeySMTPUseTLS] == "true"
 
-	config := &SMTPConfig{
+	return &SMTPConfig{
 		Host:     host,
 		Port:     port,
 		Username: strings.TrimSpace(settings[SettingKeySMTPUsername]),
@@ -169,14 +169,7 @@ func (s *EmailService) GetSMTPConfig(ctx context.Context) (*SMTPConfig, error) {
 		From:     strings.TrimSpace(settings[SettingKeySMTPFrom]),
 		FromName: strings.TrimSpace(settings[SettingKeySMTPFromName]),
 		UseTLS:   useTLS,
-	}
-	profile := DomainBrandProfileFromContext(ctx)
-	if profile.Configured && profile.SMTPFromEmail != nil {
-		if fromEmail := strings.TrimSpace(*profile.SMTPFromEmail); fromEmail != "" {
-			config.From = fromEmail
-		}
-	}
-	return config, nil
+	}, nil
 }
 
 // SendEmail 发送邮件（使用数据库中保存的配置）

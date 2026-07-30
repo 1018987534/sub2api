@@ -1,37 +1,6 @@
 package service
 
-import (
-	"context"
-	"testing"
-
-	"github.com/stretchr/testify/require"
-)
-
-func TestFilterChannelMonitorsForDomain(t *testing.T) {
-	monitors := []*ChannelMonitor{{ID: 10}, {ID: 11}, {ID: 12}}
-
-	require.Len(t, filterChannelMonitorsForDomain(context.Background(), monitors), 3)
-	legacyCtx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{Configured: true})
-	require.Len(t, filterChannelMonitorsForDomain(legacyCtx, monitors), 3)
-	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
-		Configured:        true,
-		ChannelMonitorIDs: []int64{11},
-	})
-	filtered := filterChannelMonitorsForDomain(ctx, monitors)
-	require.Len(t, filtered, 1)
-	require.Equal(t, int64(11), filtered[0].ID)
-}
-
-func TestGetUserDetailRejectsMonitorOutsideDomainBrand(t *testing.T) {
-	service := &ChannelMonitorService{}
-	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
-		Configured:        true,
-		ChannelMonitorIDs: []int64{11},
-	})
-
-	_, err := service.GetUserDetail(ctx, 12)
-	require.ErrorIs(t, err, ErrChannelMonitorNotFound)
-}
+import "testing"
 
 func TestEffectiveMonitorStatusRequiresConfirmedFailures(t *testing.T) {
 	tests := []struct {

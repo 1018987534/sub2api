@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/mail"
 	"strings"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -13,35 +12,22 @@ import (
 
 var ErrDomainBrandConfigInvalid = infraerrors.BadRequest("DOMAIN_BRAND_CONFIG_INVALID", "invalid domain brand configuration")
 
-const primaryPortalDomain = "xiaohondou.com"
-
-var legacyPortalDomainAliases = map[string]string{
-	"nideyiyi.com":     primaryPortalDomain,
-	"api.nideyiyi.com": primaryPortalDomain,
-}
-
 // DomainBrandConfig keeps the small amount of per-domain portal configuration.
-// Unknown domains retain global settings and groups; known legacy portal hosts
-// inherit the primary profile without duplicating its group configuration.
+// Domains not listed here deliberately retain all global settings and groups.
 type DomainBrandConfig struct {
 	Domains []DomainBrandProfile `json:"domains"`
 }
 
-// DomainBrandProfile is stored in domain_brand_config. Pointer public fields
+// DomainBrandProfile is stored in domain_brand_config. Pointer display fields
 // distinguish an omitted value (inherit the global setting) from an explicitly
 // empty value (for example, use the packaged default logo).
 type DomainBrandProfile struct {
-	Domain                         string  `json:"domain"`
-	SiteName                       *string `json:"site_name,omitempty"`
-	SiteLogo                       *string `json:"site_logo,omitempty"`
-	SiteSubtitle                   *string `json:"site_subtitle,omitempty"`
-	ContactInfo                    *string `json:"contact_info,omitempty"`
-	APIBaseURL                     *string `json:"api_base_url,omitempty"`
-	SMTPFromEmail                  *string `json:"smtp_from_email,omitempty"`
-	RegistrationEmailVerifyEnabled *bool   `json:"registration_email_verify_enabled,omitempty"`
-	AllowedGroupIDs                []int64 `json:"allowed_group_ids"`
-	ChannelMonitorIDs              []int64 `json:"channel_monitor_ids"`
-	Configured                     bool    `json:"-"`
+	Domain          string  `json:"domain"`
+	SiteName        *string `json:"site_name,omitempty"`
+	SiteLogo        *string `json:"site_logo,omitempty"`
+	SiteSubtitle    *string `json:"site_subtitle,omitempty"`
+	AllowedGroupIDs []int64 `json:"allowed_group_ids"`
+	Configured      bool    `json:"-"`
 }
 
 // AllowsGroup returns whether a portal operation may use groupID. An
@@ -52,20 +38,6 @@ func (p DomainBrandProfile) AllowsGroup(groupID int64) bool {
 	}
 	for _, allowedID := range p.AllowedGroupIDs {
 		if allowedID == groupID {
-			return true
-		}
-	}
-	return false
-}
-
-// AllowsChannelMonitor returns whether the user-facing monitor belongs to the
-// current brand. Unknown hosts remain unrestricted for backward compatibility.
-func (p DomainBrandProfile) AllowsChannelMonitor(monitorID int64) bool {
-	if !p.Configured || p.ChannelMonitorIDs == nil {
-		return true
-	}
-	for _, allowedID := range p.ChannelMonitorIDs {
-		if allowedID == monitorID {
 			return true
 		}
 	}
@@ -86,24 +58,6 @@ func DomainBrandProfileFromContext(ctx context.Context) DomainBrandProfile {
 	}
 	profile, _ := ctx.Value(domainBrandContextKey{}).(DomainBrandProfile)
 	return profile
-}
-
-// GetRegistrationSiteName returns the effective site title for a new user.
-// The value is persisted as a snapshot so later brand renames do not rewrite
-// the user's original registration source.
-func (s *SettingService) GetRegistrationSiteName(ctx context.Context) string {
-	if s == nil {
-		return "Sub2API"
-	}
-	siteName := strings.TrimSpace(s.GetSiteName(ctx))
-	profile := DomainBrandProfileFromContext(ctx)
-	if profile.Configured && profile.SiteName != nil {
-		siteName = strings.TrimSpace(*profile.SiteName)
-	}
-	if siteName == "" {
-		return "Sub2API"
-	}
-	return siteName
 }
 
 // NormalizeDomainHost makes Request.Host and configured hostnames comparable.
@@ -150,16 +104,6 @@ func (s *SettingService) ResolveDomainBrandProfile(ctx context.Context, host str
 		if profile.Domain == normalizedHost {
 			profile.Configured = true
 			return profile, nil
-		}
-	}
-	// Legacy domains remain direct API ingress hosts, but their portal routes
-	// inherit the primary brand scope. Gateway routes never call this resolver.
-	if canonicalHost, ok := legacyPortalDomainAliases[normalizedHost]; ok {
-		for _, profile := range config.Domains {
-			if profile.Domain == canonicalHost {
-				profile.Configured = true
-				return profile, nil
-			}
 		}
 	}
 	return DomainBrandProfile{}, nil
@@ -211,7 +155,6 @@ func (s *SettingService) validateDomainBrandConfig(ctx context.Context, config *
 	normalized := &DomainBrandConfig{Domains: make([]DomainBrandProfile, 0, len(config.Domains))}
 	domains := make(map[string]struct{}, len(config.Domains))
 	groupOwners := make(map[int64]string)
-	monitorOwners := make(map[int64]string)
 
 	for _, input := range config.Domains {
 		profile := input
@@ -224,19 +167,6 @@ func (s *SettingService) validateDomainBrandConfig(ctx context.Context, config *
 			return nil, fmt.Errorf("%w: duplicate domain %q", ErrDomainBrandConfigInvalid, profile.Domain)
 		}
 		domains[profile.Domain] = struct{}{}
-
-		if profile.SMTPFromEmail != nil {
-			fromEmail := strings.TrimSpace(*profile.SMTPFromEmail)
-			if fromEmail == "" {
-				profile.SMTPFromEmail = nil
-			} else {
-				address, err := mail.ParseAddress(fromEmail)
-				if err != nil || address.Address != fromEmail {
-					return nil, fmt.Errorf("%w: invalid sender email for %s", ErrDomainBrandConfigInvalid, profile.Domain)
-				}
-				profile.SMTPFromEmail = &fromEmail
-			}
-		}
 
 		seenGroupIDs := make(map[int64]struct{}, len(profile.AllowedGroupIDs))
 		profile.AllowedGroupIDs = make([]int64, 0, len(input.AllowedGroupIDs))
@@ -256,25 +186,6 @@ func (s *SettingService) validateDomainBrandConfig(ctx context.Context, config *
 			}
 			groupOwners[groupID] = profile.Domain
 			profile.AllowedGroupIDs = append(profile.AllowedGroupIDs, groupID)
-		}
-
-		if input.ChannelMonitorIDs != nil {
-			seenMonitorIDs := make(map[int64]struct{}, len(profile.ChannelMonitorIDs))
-			profile.ChannelMonitorIDs = make([]int64, 0, len(input.ChannelMonitorIDs))
-			for _, monitorID := range input.ChannelMonitorIDs {
-				if monitorID <= 0 {
-					return nil, fmt.Errorf("%w: channel monitor id must be positive", ErrDomainBrandConfigInvalid)
-				}
-				if _, exists := seenMonitorIDs[monitorID]; exists {
-					return nil, fmt.Errorf("%w: duplicate channel monitor %d for %s", ErrDomainBrandConfigInvalid, monitorID, profile.Domain)
-				}
-				seenMonitorIDs[monitorID] = struct{}{}
-				if owner, exists := monitorOwners[monitorID]; exists {
-					return nil, fmt.Errorf("%w: channel monitor %d belongs to both %s and %s", ErrDomainBrandConfigInvalid, monitorID, owner, profile.Domain)
-				}
-				monitorOwners[monitorID] = profile.Domain
-				profile.ChannelMonitorIDs = append(profile.ChannelMonitorIDs, monitorID)
-			}
 		}
 		normalized.Domains = append(normalized.Domains, profile)
 	}

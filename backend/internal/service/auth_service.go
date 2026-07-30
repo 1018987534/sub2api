@@ -132,13 +132,6 @@ func (s *AuthService) EntClient() *dbent.Client {
 	return s.entClient
 }
 
-func (s *AuthService) registrationSiteName(ctx context.Context) string {
-	if s == nil || s.settingService == nil {
-		return "Sub2API"
-	}
-	return s.settingService.GetRegistrationSiteName(ctx)
-}
-
 // Register 用户注册，返回token和用户
 func (s *AuthService) Register(ctx context.Context, email, password string) (string, *User, error) {
 	return s.RegisterWithVerification(ctx, email, password, "", "", "", "")
@@ -180,7 +173,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	}
 
 	// 检查是否需要邮件验证
-	if s.settingService != nil && s.settingService.IsRegistrationEmailVerifyEnabled(ctx) {
+	if s.settingService != nil && s.settingService.IsEmailVerifyEnabled(ctx) {
 		// 如果邮件验证已开启但邮件服务未配置，拒绝注册
 		// 这是一个配置错误，不应该允许绕过验证
 		if s.emailService == nil {
@@ -222,14 +215,13 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 
 	// 创建用户
 	user := &User{
-		Email:                email,
-		PasswordHash:         hashedPassword,
-		Role:                 RoleUser,
-		Balance:              grantPlan.Balance,
-		Concurrency:          grantPlan.Concurrency,
-		RPMLimit:             defaultRPMLimit,
-		Status:               StatusActive,
-		RegistrationSiteName: s.registrationSiteName(ctx),
+		Email:        email,
+		PasswordHash: hashedPassword,
+		Role:         RoleUser,
+		Balance:      grantPlan.Balance,
+		Concurrency:  grantPlan.Concurrency,
+		RPMLimit:     defaultRPMLimit,
+		Status:       StatusActive,
 	}
 
 	if err := s.userRepo.CreateWithEmailAliasGuard(ctx, user); err != nil {
@@ -322,7 +314,7 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string, locale .
 	// 获取网站名称
 	siteName := "Sub2API"
 	if s.settingService != nil {
-		siteName = s.settingService.GetRegistrationSiteName(ctx)
+		siteName = s.settingService.GetSiteName(ctx)
 	}
 
 	return s.emailService.SendVerifyCode(ctx, email, siteName, firstEmailLocale(locale))
@@ -365,12 +357,12 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string, loc
 	// 获取网站名称
 	siteName := "Sub2API"
 	if s.settingService != nil {
-		siteName = s.settingService.GetRegistrationSiteName(ctx)
+		siteName = s.settingService.GetSiteName(ctx)
 	}
 
 	// 异步发送
 	logger.LegacyPrintf("service.auth", "[Auth] Enqueueing verify code for: %s", email)
-	if err := s.emailQueueService.EnqueueVerifyCode(ctx, email, siteName, firstEmailLocale(locale)); err != nil {
+	if err := s.emailQueueService.EnqueueVerifyCode(email, siteName, firstEmailLocale(locale)); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue: %v", err)
 		return nil, fmt.Errorf("enqueue verify code: %w", err)
 	}
@@ -440,12 +432,12 @@ func (s *AuthService) IsRegistrationEnabled(ctx context.Context) bool {
 	return s.settingService.IsRegistrationEnabled(ctx)
 }
 
-// IsEmailVerifyEnabled returns the effective registration verification policy.
+// IsEmailVerifyEnabled 检查是否开启邮件验证
 func (s *AuthService) IsEmailVerifyEnabled(ctx context.Context) bool {
 	if s.settingService == nil {
 		return false
 	}
-	return s.settingService.IsRegistrationEmailVerifyEnabled(ctx)
+	return s.settingService.IsEmailVerifyEnabled(ctx)
 }
 
 // Login 用户登录，返回JWT token
@@ -526,16 +518,15 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 			}
 
 			newUser := &User{
-				Email:                email,
-				Username:             username,
-				PasswordHash:         hashedPassword,
-				Role:                 RoleUser,
-				Balance:              grantPlan.Balance,
-				Concurrency:          grantPlan.Concurrency,
-				RPMLimit:             defaultRPMLimit,
-				Status:               StatusActive,
-				SignupSource:         signupSource,
-				RegistrationSiteName: s.registrationSiteName(ctx),
+				Email:        email,
+				Username:     username,
+				PasswordHash: hashedPassword,
+				Role:         RoleUser,
+				Balance:      grantPlan.Balance,
+				Concurrency:  grantPlan.Concurrency,
+				RPMLimit:     defaultRPMLimit,
+				Status:       StatusActive,
+				SignupSource: signupSource,
 			}
 
 			if err := s.userRepo.Create(ctx, newUser); err != nil {
@@ -676,16 +667,15 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 			}
 
 			newUser := &User{
-				Email:                email,
-				Username:             username,
-				PasswordHash:         hashedPassword,
-				Role:                 RoleUser,
-				Balance:              grantPlan.Balance,
-				Concurrency:          grantPlan.Concurrency,
-				RPMLimit:             defaultRPMLimit,
-				Status:               StatusActive,
-				SignupSource:         signupSource,
-				RegistrationSiteName: s.registrationSiteName(ctx),
+				Email:        email,
+				Username:     username,
+				PasswordHash: hashedPassword,
+				Role:         RoleUser,
+				Balance:      grantPlan.Balance,
+				Concurrency:  grantPlan.Concurrency,
+				RPMLimit:     defaultRPMLimit,
+				Status:       StatusActive,
+				SignupSource: signupSource,
 			}
 
 			if s.entClient != nil && invitationRedeemCode != nil {
@@ -1346,7 +1336,7 @@ func (s *AuthService) preparePasswordReset(ctx context.Context, email, frontendB
 	// Get site name
 	siteName := "Sub2API"
 	if s.settingService != nil {
-		siteName = s.settingService.GetRegistrationSiteName(ctx)
+		siteName = s.settingService.GetSiteName(ctx)
 	}
 
 	// Build reset URL base
@@ -1394,7 +1384,7 @@ func (s *AuthService) RequestPasswordResetAsync(ctx context.Context, email, fron
 		return nil // Silent success to prevent enumeration
 	}
 
-	if err := s.emailQueueService.EnqueuePasswordReset(ctx, email, siteName, resetURL, firstEmailLocale(locale)); err != nil {
+	if err := s.emailQueueService.EnqueuePasswordReset(email, siteName, resetURL, firstEmailLocale(locale)); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to enqueue password reset email for %s: %v", email, err)
 		return nil // Silent success to prevent enumeration
 	}

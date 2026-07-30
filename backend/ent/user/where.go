@@ -135,11 +135,6 @@ func SignupSource(v string) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldSignupSource, v))
 }
 
-// RegistrationSiteName applies equality check predicate on the "registration_site_name" field. It's identical to RegistrationSiteNameEQ.
-func RegistrationSiteName(v string) predicate.User {
-	return predicate.User(sql.FieldEQ(FieldRegistrationSiteName, v))
-}
-
 // LastLoginAt applies equality check predicate on the "last_login_at" field. It's identical to LastLoginAtEQ.
 func LastLoginAt(v time.Time) predicate.User {
 	return predicate.User(sql.FieldEQ(FieldLastLoginAt, v))
@@ -1018,71 +1013,6 @@ func SignupSourceEqualFold(v string) predicate.User {
 // SignupSourceContainsFold applies the ContainsFold predicate on the "signup_source" field.
 func SignupSourceContainsFold(v string) predicate.User {
 	return predicate.User(sql.FieldContainsFold(FieldSignupSource, v))
-}
-
-// RegistrationSiteNameEQ applies the EQ predicate on the "registration_site_name" field.
-func RegistrationSiteNameEQ(v string) predicate.User {
-	return predicate.User(sql.FieldEQ(FieldRegistrationSiteName, v))
-}
-
-// RegistrationSiteNameNEQ applies the NEQ predicate on the "registration_site_name" field.
-func RegistrationSiteNameNEQ(v string) predicate.User {
-	return predicate.User(sql.FieldNEQ(FieldRegistrationSiteName, v))
-}
-
-// RegistrationSiteNameIn applies the In predicate on the "registration_site_name" field.
-func RegistrationSiteNameIn(vs ...string) predicate.User {
-	return predicate.User(sql.FieldIn(FieldRegistrationSiteName, vs...))
-}
-
-// RegistrationSiteNameNotIn applies the NotIn predicate on the "registration_site_name" field.
-func RegistrationSiteNameNotIn(vs ...string) predicate.User {
-	return predicate.User(sql.FieldNotIn(FieldRegistrationSiteName, vs...))
-}
-
-// RegistrationSiteNameGT applies the GT predicate on the "registration_site_name" field.
-func RegistrationSiteNameGT(v string) predicate.User {
-	return predicate.User(sql.FieldGT(FieldRegistrationSiteName, v))
-}
-
-// RegistrationSiteNameGTE applies the GTE predicate on the "registration_site_name" field.
-func RegistrationSiteNameGTE(v string) predicate.User {
-	return predicate.User(sql.FieldGTE(FieldRegistrationSiteName, v))
-}
-
-// RegistrationSiteNameLT applies the LT predicate on the "registration_site_name" field.
-func RegistrationSiteNameLT(v string) predicate.User {
-	return predicate.User(sql.FieldLT(FieldRegistrationSiteName, v))
-}
-
-// RegistrationSiteNameLTE applies the LTE predicate on the "registration_site_name" field.
-func RegistrationSiteNameLTE(v string) predicate.User {
-	return predicate.User(sql.FieldLTE(FieldRegistrationSiteName, v))
-}
-
-// RegistrationSiteNameContains applies the Contains predicate on the "registration_site_name" field.
-func RegistrationSiteNameContains(v string) predicate.User {
-	return predicate.User(sql.FieldContains(FieldRegistrationSiteName, v))
-}
-
-// RegistrationSiteNameHasPrefix applies the HasPrefix predicate on the "registration_site_name" field.
-func RegistrationSiteNameHasPrefix(v string) predicate.User {
-	return predicate.User(sql.FieldHasPrefix(FieldRegistrationSiteName, v))
-}
-
-// RegistrationSiteNameHasSuffix applies the HasSuffix predicate on the "registration_site_name" field.
-func RegistrationSiteNameHasSuffix(v string) predicate.User {
-	return predicate.User(sql.FieldHasSuffix(FieldRegistrationSiteName, v))
-}
-
-// RegistrationSiteNameEqualFold applies the EqualFold predicate on the "registration_site_name" field.
-func RegistrationSiteNameEqualFold(v string) predicate.User {
-	return predicate.User(sql.FieldEqualFold(FieldRegistrationSiteName, v))
-}
-
-// RegistrationSiteNameContainsFold applies the ContainsFold predicate on the "registration_site_name" field.
-func RegistrationSiteNameContainsFold(v string) predicate.User {
-	return predicate.User(sql.FieldContainsFold(FieldRegistrationSiteName, v))
 }
 
 // LastLoginAtEQ applies the EQ predicate on the "last_login_at" field.

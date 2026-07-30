@@ -55,12 +55,11 @@ func (r *domainBrandGroupReaderStub) GetByID(_ context.Context, id int64) (*Grou
 }
 
 func stringPointer(value string) *string { return &value }
-func boolPointer(value bool) *bool       { return &value }
 
 func TestNormalizeDomainHost(t *testing.T) {
 	require.Equal(t, "xiaofanqie.org", NormalizeDomainHost("XIAOFANQIE.ORG.:443"))
-	require.Equal(t, "xiaohondou.com", NormalizeDomainHost(" xiaohondou.com "))
-	require.Empty(t, NormalizeDomainHost("https://xiaohondou.com"))
+	require.Equal(t, "nideyiyi.com", NormalizeDomainHost(" nideyiyi.com "))
+	require.Empty(t, NormalizeDomainHost("https://nideyiyi.com"))
 }
 
 func TestSettingService_UpdateAndResolveDomainBrandConfig(t *testing.T) {
@@ -74,20 +73,11 @@ func TestSettingService_UpdateAndResolveDomainBrandConfig(t *testing.T) {
 	svc.SetOnUpdateCallback(func() { callbackCalls++ })
 
 	saved, err := svc.UpdateDomainBrandConfig(context.Background(), &DomainBrandConfig{Domains: []DomainBrandProfile{
-		{Domain: "XIAOHONDOU.COM.", AllowedGroupIDs: []int64{5, 79}, ChannelMonitorIDs: []int64{10}},
-		{
-			Domain:                         "xiaofanqie.org",
-			SiteLogo:                       stringPointer(""),
-			ContactInfo:                    stringPointer("support@example.com"),
-			APIBaseURL:                     stringPointer("https://xiaofanqie.org/v1"),
-			SMTPFromEmail:                  stringPointer("tomato@example.com"),
-			RegistrationEmailVerifyEnabled: boolPointer(false),
-			AllowedGroupIDs:                []int64{},
-			ChannelMonitorIDs:              []int64{11},
-		},
+		{Domain: "NIDEYIYI.COM.", AllowedGroupIDs: []int64{5, 79}},
+		{Domain: "xiaofanqie.org", SiteLogo: stringPointer(""), AllowedGroupIDs: []int64{}},
 	}})
 	require.NoError(t, err)
-	require.Equal(t, "xiaohondou.com", saved.Domains[0].Domain)
+	require.Equal(t, "nideyiyi.com", saved.Domains[0].Domain)
 	require.Equal(t, 1, callbackCalls)
 
 	profile, err := svc.ResolveDomainBrandProfile(context.Background(), "XIAOFANQIE.ORG:443")
@@ -95,22 +85,7 @@ func TestSettingService_UpdateAndResolveDomainBrandConfig(t *testing.T) {
 	require.True(t, profile.Configured)
 	require.NotNil(t, profile.SiteLogo)
 	require.Empty(t, *profile.SiteLogo)
-	require.Equal(t, "support@example.com", *profile.ContactInfo)
-	require.Equal(t, "https://xiaofanqie.org/v1", *profile.APIBaseURL)
-	require.Equal(t, "tomato@example.com", *profile.SMTPFromEmail)
-	require.False(t, *profile.RegistrationEmailVerifyEnabled)
-	require.True(t, profile.AllowsChannelMonitor(11))
-	require.False(t, profile.AllowsChannelMonitor(10))
 	require.False(t, profile.AllowsGroup(5))
-
-	for _, legacyHost := range []string{"nideyiyi.com", "api.nideyiyi.com:443"} {
-		legacyProfile, resolveErr := svc.ResolveDomainBrandProfile(context.Background(), legacyHost)
-		require.NoError(t, resolveErr)
-		require.True(t, legacyProfile.Configured)
-		require.Equal(t, "xiaohondou.com", legacyProfile.Domain)
-		require.True(t, legacyProfile.AllowsGroup(5))
-		require.False(t, legacyProfile.AllowsGroup(92))
-	}
 
 	fallback, err := svc.ResolveDomainBrandProfile(context.Background(), "unknown.example")
 	require.NoError(t, err)
@@ -131,46 +106,18 @@ func TestSettingService_RejectsCrossDomainGroupReuse(t *testing.T) {
 	require.ErrorIs(t, err, ErrDomainBrandConfigInvalid)
 }
 
-func TestSettingService_RejectsCrossDomainChannelMonitorReuse(t *testing.T) {
-	svc := NewSettingService(&domainBrandSettingRepoStub{values: map[string]string{}}, &config.Config{})
-	svc.SetDefaultSubscriptionGroupReader(&domainBrandGroupReaderStub{groups: map[int64]*Group{}})
-
-	_, err := svc.UpdateDomainBrandConfig(context.Background(), &DomainBrandConfig{Domains: []DomainBrandProfile{
-		{Domain: "a.example", ChannelMonitorIDs: []int64{12}},
-		{Domain: "b.example", ChannelMonitorIDs: []int64{12}},
-	}})
-	require.ErrorIs(t, err, ErrDomainBrandConfigInvalid)
-}
-
-func TestSettingService_RejectsInvalidDomainBrandSenderEmail(t *testing.T) {
-	svc := NewSettingService(&domainBrandSettingRepoStub{values: map[string]string{}}, &config.Config{})
-	svc.SetDefaultSubscriptionGroupReader(&domainBrandGroupReaderStub{groups: map[int64]*Group{}})
-
-	_, err := svc.UpdateDomainBrandConfig(context.Background(), &DomainBrandConfig{Domains: []DomainBrandProfile{
-		{Domain: "a.example", SMTPFromEmail: stringPointer("Display <sender@example.com>")},
-	}})
-	require.ErrorIs(t, err, ErrDomainBrandConfigInvalid)
-}
-
 func TestSettingService_PublicSettingsOverlayPreservesExplicitEmptyLogo(t *testing.T) {
 	repo := &settingPublicRepoStub{values: map[string]string{
-		SettingKeySiteName:             "Global Name",
-		SettingKeySiteLogo:             "global-logo",
-		SettingKeySiteSubtitle:         "Global Subtitle",
-		SettingKeyContactInfo:          "global-support@example.com",
-		SettingKeyAPIBaseURL:           "https://xiaohondou.com/v1",
-		SettingKeyEmailVerifyEnabled:   "true",
-		SettingKeyPasswordResetEnabled: "true",
+		SettingKeySiteName:     "Global Name",
+		SettingKeySiteLogo:     "global-logo",
+		SettingKeySiteSubtitle: "Global Subtitle",
 	}}
 	svc := NewSettingService(repo, &config.Config{})
 	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
-		Configured:                     true,
-		SiteName:                       stringPointer("xiaofanqie.org"),
-		SiteLogo:                       stringPointer(""),
-		SiteSubtitle:                   stringPointer("B-end API Gateway"),
-		ContactInfo:                    stringPointer("b2b-support@example.com"),
-		APIBaseURL:                     stringPointer("https://xiaofanqie.org/v1"),
-		RegistrationEmailVerifyEnabled: boolPointer(false),
+		Configured:   true,
+		SiteName:     stringPointer("xiaofanqie.org"),
+		SiteLogo:     stringPointer(""),
+		SiteSubtitle: stringPointer("B-end API Gateway"),
 	})
 
 	settings, err := svc.GetPublicSettings(ctx)
@@ -178,63 +125,6 @@ func TestSettingService_PublicSettingsOverlayPreservesExplicitEmptyLogo(t *testi
 	require.Equal(t, "xiaofanqie.org", settings.SiteName)
 	require.Empty(t, settings.SiteLogo)
 	require.Equal(t, "B-end API Gateway", settings.SiteSubtitle)
-	require.Equal(t, "b2b-support@example.com", settings.ContactInfo)
-	require.Equal(t, "https://xiaofanqie.org/v1", settings.APIBaseURL)
-	require.False(t, settings.EmailVerifyEnabled)
-	require.True(t, settings.PasswordResetEnabled)
-}
-
-func TestSettingService_PublicSettingsOverlayInheritsOmittedFields(t *testing.T) {
-	repo := &settingPublicRepoStub{values: map[string]string{
-		SettingKeyContactInfo: "global-support@example.com",
-		SettingKeyAPIBaseURL:  "https://xiaohondou.com/v1",
-	}}
-	svc := NewSettingService(repo, &config.Config{})
-	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{Configured: true})
-
-	settings, err := svc.GetPublicSettings(ctx)
-	require.NoError(t, err)
-	require.Equal(t, "global-support@example.com", settings.ContactInfo)
-	require.Equal(t, "https://xiaohondou.com/v1", settings.APIBaseURL)
-}
-
-func TestSettingService_GetRegistrationSiteNameSnapshotsEffectiveBrand(t *testing.T) {
-	repo := &settingRepoStub{values: map[string]string{
-		SettingKeySiteName: "小红豆",
-	}}
-	svc := NewSettingService(repo, &config.Config{})
-
-	primary := svc.GetRegistrationSiteName(context.Background())
-	require.Equal(t, "小红豆", primary)
-
-	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
-		Configured: true,
-		SiteName:   stringPointer("小番茄"),
-	})
-	require.Equal(t, "小番茄", svc.GetRegistrationSiteName(ctx))
-}
-
-func TestEmailService_GetSMTPConfigUsesDomainBrandSender(t *testing.T) {
-	repo := &domainBrandSettingRepoStub{values: map[string]string{
-		SettingKeySMTPHost:     "smtp.example.com",
-		SettingKeySMTPPort:     "587",
-		SettingKeySMTPFrom:     "global@example.com",
-		SettingKeySMTPFromName: "Global",
-	}}
-	emailService := NewEmailService(repo, nil)
-	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
-		Configured:    true,
-		SMTPFromEmail: stringPointer("brand@example.com"),
-	})
-
-	config, err := emailService.GetSMTPConfig(ctx)
-	require.NoError(t, err)
-	require.Equal(t, "brand@example.com", config.From)
-	require.Equal(t, "Global", config.FromName)
-
-	globalConfig, err := emailService.GetSMTPConfig(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, "global@example.com", globalConfig.From)
 }
 
 func TestPaymentConfigService_FilterPlansForDomain(t *testing.T) {

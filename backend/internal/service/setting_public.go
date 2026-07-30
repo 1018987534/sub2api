@@ -263,15 +263,9 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 	googleEnabled := s.emailOAuthPublicEnabled(settings, "google")
 	weChatEnabled, weChatOpenEnabled, weChatMPEnabled, weChatMobileEnabled := s.weChatOAuthCapabilitiesFromSettings(settings)
 
-	// Registration may override verification per brand. Password reset keeps its
-	// existing global email-verification dependency.
-	globalEmailVerifyEnabled := settings[SettingKeyEmailVerifyEnabled] == "true"
-	registrationEmailVerifyEnabled := globalEmailVerifyEnabled
-	registrationProfile := DomainBrandProfileFromContext(ctx)
-	if registrationProfile.Configured && registrationProfile.RegistrationEmailVerifyEnabled != nil {
-		registrationEmailVerifyEnabled = *registrationProfile.RegistrationEmailVerifyEnabled
-	}
-	passwordResetEnabled := globalEmailVerifyEnabled && settings[SettingKeyPasswordResetEnabled] == "true"
+	// Password reset requires email verification to be enabled
+	emailVerifyEnabled := settings[SettingKeyEmailVerifyEnabled] == "true"
+	passwordResetEnabled := emailVerifyEnabled && settings[SettingKeyPasswordResetEnabled] == "true"
 	registrationEmailSuffixWhitelist := ParseRegistrationEmailSuffixWhitelist(
 		settings[SettingKeyRegistrationEmailSuffixWhitelist],
 	)
@@ -292,7 +286,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 
 	publicSettings := &PublicSettings{
 		RegistrationEnabled:              settings[SettingKeyRegistrationEnabled] == "true",
-		EmailVerifyEnabled:               registrationEmailVerifyEnabled,
+		EmailVerifyEnabled:               emailVerifyEnabled,
 		ForceEmailOnThirdPartySignup:     settings[SettingKeyForceEmailOnThirdPartySignup] == "true",
 		RegistrationEmailSuffixWhitelist: registrationEmailSuffixWhitelist,
 		PromoCodeEnabled:                 settings[SettingKeyPromoCodeEnabled] != "false", // 默认启用
@@ -364,12 +358,6 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		}
 		if profile.SiteSubtitle != nil {
 			publicSettings.SiteSubtitle = *profile.SiteSubtitle
-		}
-		if profile.ContactInfo != nil {
-			publicSettings.ContactInfo = *profile.ContactInfo
-		}
-		if profile.APIBaseURL != nil {
-			publicSettings.APIBaseURL = *profile.APIBaseURL
 		}
 	}
 

@@ -72,8 +72,7 @@ const createAdminUser = (overrides: Partial<AdminUser> = {}): AdminUser => ({
   notes: '',
   last_active_at: '2026-04-16T02:00:00Z',
   last_used_at: '2026-04-17T02:00:00Z',
-		current_concurrency: 0,
-		registration_site_name: '',
+  current_concurrency: 0,
   ...overrides
 })
 
@@ -97,9 +96,8 @@ const DataTableStub = {
       <template v-for="col in columns" :key="col.key">
         <slot :name="'header-' + col.key" :column="col" />
       </template>
-	  <div v-for="row in data" :key="row.id">
-	    <slot name="cell-email" :value="row.email" :row="row" />
-	    <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
+      <div v-for="row in data" :key="row.id">
+        <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
       </div>
     </div>
   `
@@ -149,7 +147,7 @@ describe('admin UsersView', () => {
     vi.useRealTimers()
   })
 
-	it('shows active, used, and created activity columns in order and requests last_used_at sort', async () => {
+  it('shows active, used, and created activity columns in order and requests last_used_at sort', async () => {
     const wrapper = mount(UsersView, {
       global: {
         stubs: {
@@ -178,7 +176,7 @@ describe('admin UsersView', () => {
           Teleport: true
         }
       }
-	})
+    })
 
     await flushPromises()
 
@@ -199,47 +197,6 @@ describe('admin UsersView', () => {
       }),
       expect.any(Object)
     )
-  })
-
-  it('shows the registration site beside the user email when available', async () => {
-    listUsers.mockResolvedValue({
-      items: [createAdminUser({ registration_site_name: '小番茄' })],
-      total: 1,
-      page: 1,
-      page_size: 20,
-      pages: 1
-    })
-
-    const wrapper = mount(UsersView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: { template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>' },
-          DataTable: DataTableStub,
-          Pagination: true,
-          ConfirmDialog: true,
-          EmptyState: true,
-          GroupBadge: true,
-          Select: true,
-          UserAttributesConfigModal: true,
-          UserConcurrencyCell: true,
-          UserCreateModal: true,
-          UserEditModal: true,
-          BulkEditUserModal: BulkEditUserModalStub,
-          UserPlatformQuotaModal: true,
-          UserApiKeysModal: true,
-          UserAllowedGroupsModal: true,
-          UserBalanceModal: true,
-          UserBalanceHistoryModal: true,
-          GroupReplaceModal: true,
-          Icon: true,
-          Teleport: true
-        }
-      }
-    })
-
-    await flushPromises()
-    expect(wrapper.get('[data-test="registration-site-name"]').text()).toBe('小番茄')
   })
 
   it('clears usage current-page sort when switching to last_used_at server sort', async () => {

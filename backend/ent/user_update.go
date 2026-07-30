@@ -281,20 +281,6 @@ func (_u *UserUpdate) SetNillableSignupSource(v *string) *UserUpdate {
 	return _u
 }
 
-// SetRegistrationSiteName sets the "registration_site_name" field.
-func (_u *UserUpdate) SetRegistrationSiteName(v string) *UserUpdate {
-	_u.mutation.SetRegistrationSiteName(v)
-	return _u
-}
-
-// SetNillableRegistrationSiteName sets the "registration_site_name" field if the given value is not nil.
-func (_u *UserUpdate) SetNillableRegistrationSiteName(v *string) *UserUpdate {
-	if v != nil {
-		_u.SetRegistrationSiteName(*v)
-	}
-	return _u
-}
-
 // SetLastLoginAt sets the "last_login_at" field.
 func (_u *UserUpdate) SetLastLoginAt(v time.Time) *UserUpdate {
 	_u.mutation.SetLastLoginAt(v)
@@ -1070,9 +1056,6 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.SignupSource(); ok {
 		_spec.SetField(user.FieldSignupSource, field.TypeString, value)
-	}
-	if value, ok := _u.mutation.RegistrationSiteName(); ok {
-		_spec.SetField(user.FieldRegistrationSiteName, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.LastLoginAt(); ok {
 		_spec.SetField(user.FieldLastLoginAt, field.TypeTime, value)
@@ -1974,20 +1957,6 @@ func (_u *UserUpdateOne) SetNillableSignupSource(v *string) *UserUpdateOne {
 	return _u
 }
 
-// SetRegistrationSiteName sets the "registration_site_name" field.
-func (_u *UserUpdateOne) SetRegistrationSiteName(v string) *UserUpdateOne {
-	_u.mutation.SetRegistrationSiteName(v)
-	return _u
-}
-
-// SetNillableRegistrationSiteName sets the "registration_site_name" field if the given value is not nil.
-func (_u *UserUpdateOne) SetNillableRegistrationSiteName(v *string) *UserUpdateOne {
-	if v != nil {
-		_u.SetRegistrationSiteName(*v)
-	}
-	return _u
-}
-
 // SetLastLoginAt sets the "last_login_at" field.
 func (_u *UserUpdateOne) SetLastLoginAt(v time.Time) *UserUpdateOne {
 	_u.mutation.SetLastLoginAt(v)
@@ -2793,9 +2762,6 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if value, ok := _u.mutation.SignupSource(); ok {
 		_spec.SetField(user.FieldSignupSource, field.TypeString, value)
-	}
-	if value, ok := _u.mutation.RegistrationSiteName(); ok {
-		_spec.SetField(user.FieldRegistrationSiteName, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.LastLoginAt(); ok {
 		_spec.SetField(user.FieldLastLoginAt, field.TypeTime, value)

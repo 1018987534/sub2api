@@ -88,16 +88,12 @@ func TestAuthService_VerifyTurnstileForRegister_RequireWhenVerifyCodeMissing(t *
 func TestAuthService_VerifyTurnstileForRegister_NoSkipWhenEmailVerifyDisabled(t *testing.T) {
 	verifier := &turnstileVerifierSpy{}
 	service := newAuthServiceForRegisterTurnstileTest(map[string]string{
-		SettingKeyEmailVerifyEnabled: "true",
+		SettingKeyEmailVerifyEnabled: "false",
 		SettingKeyTurnstileEnabled:   "true",
 		SettingKeyTurnstileSecretKey: "secret",
 	}, verifier)
 
-	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
-		Configured:                     true,
-		RegistrationEmailVerifyEnabled: boolPointer(false),
-	})
-	err := service.VerifyTurnstileForRegister(ctx, "turnstile-token", "127.0.0.1", "123456")
+	err := service.VerifyTurnstileForRegister(context.Background(), "turnstile-token", "127.0.0.1", "123456")
 	require.NoError(t, err)
 	require.Equal(t, 1, verifier.called)
 	require.Equal(t, "turnstile-token", verifier.lastToken)

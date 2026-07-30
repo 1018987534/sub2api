@@ -279,8 +279,8 @@
           @sort="handleSort"
           @update:selected-keys="handleSelectedKeysUpdate"
         >
-	          <template #cell-email="{ value, row }">
-	            <div class="flex items-center gap-2">
+          <template #cell-email="{ value }">
+            <div class="flex items-center gap-2">
               <div
                 class="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/30"
               >
@@ -288,19 +288,9 @@
                   {{ value.charAt(0).toUpperCase() }}
                 </span>
               </div>
-	              <div class="flex min-w-0 items-center gap-1.5">
-	                <span class="truncate font-medium text-gray-900 dark:text-white">{{ value }}</span>
-	                <span
-	                  v-if="row.registration_site_name"
-	                  data-test="registration-site-name"
-	                  :title="row.registration_site_name"
-	                  class="shrink-0 rounded border border-primary-200 bg-primary-50 px-1.5 py-0.5 text-xs font-medium text-primary-700 dark:border-primary-800/70 dark:bg-primary-900/20 dark:text-primary-300"
-	                >
-	                  {{ row.registration_site_name }}
-	                </span>
-	              </div>
-	            </div>
-	          </template>
+              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+            </div>
+          </template>
 
           <template #cell-username="{ value }">
             <span class="text-sm text-gray-700 dark:text-gray-300">{{ value || '-' }}</span>

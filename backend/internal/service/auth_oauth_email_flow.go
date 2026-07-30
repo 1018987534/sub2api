@@ -45,7 +45,7 @@ func (s *AuthService) SendPendingOAuthVerifyCode(ctx context.Context, email stri
 
 	siteName := "Sub2API"
 	if s.settingService != nil {
-		siteName = s.settingService.GetRegistrationSiteName(ctx)
+		siteName = s.settingService.GetSiteName(ctx)
 	}
 	if err := s.emailService.SendVerifyCode(ctx, email, siteName, firstEmailLocale(locale)); err != nil {
 		return nil, err
@@ -151,14 +151,13 @@ func (s *AuthService) RegisterOAuthEmailAccount(
 	grantPlan := s.resolveSignupGrantPlan(ctx, signupSource)
 
 	user := &User{
-		Email:                email,
-		PasswordHash:         hashedPassword,
-		Role:                 RoleUser,
-		Balance:              grantPlan.Balance,
-		Concurrency:          grantPlan.Concurrency,
-		Status:               StatusActive,
-		SignupSource:         signupSource,
-		RegistrationSiteName: s.registrationSiteName(ctx),
+		Email:        email,
+		PasswordHash: hashedPassword,
+		Role:         RoleUser,
+		Balance:      grantPlan.Balance,
+		Concurrency:  grantPlan.Concurrency,
+		Status:       StatusActive,
+		SignupSource: signupSource,
 	}
 
 	if err := s.userRepo.CreateWithEmailAliasGuard(ctx, user); err != nil {
@@ -234,15 +233,14 @@ func (s *AuthService) RegisterVerifiedOAuthEmailAccount(
 		defaultRPMLimit = s.settingService.GetDefaultUserRPMLimit(ctx)
 	}
 	user := &User{
-		Email:                email,
-		PasswordHash:         hashedPassword,
-		Role:                 RoleUser,
-		Balance:              grantPlan.Balance,
-		Concurrency:          grantPlan.Concurrency,
-		RPMLimit:             defaultRPMLimit,
-		Status:               StatusActive,
-		SignupSource:         signupSource,
-		RegistrationSiteName: s.registrationSiteName(ctx),
+		Email:        email,
+		PasswordHash: hashedPassword,
+		Role:         RoleUser,
+		Balance:      grantPlan.Balance,
+		Concurrency:  grantPlan.Concurrency,
+		RPMLimit:     defaultRPMLimit,
+		Status:       StatusActive,
+		SignupSource: signupSource,
 	}
 
 	if err := s.userRepo.CreateWithEmailAliasGuard(ctx, user); err != nil {

@@ -8,7 +8,6 @@ const {
   listGroups,
   getAllGroups,
   getModelsListCandidates,
-  getLiveCapability,
   getUsageSummary,
   getCapacitySummary,
   listAccounts,
@@ -20,7 +19,6 @@ const {
   listGroups: vi.fn(),
   getAllGroups: vi.fn(),
   getModelsListCandidates: vi.fn(),
-  getLiveCapability: vi.fn(),
   getUsageSummary: vi.fn(),
   getCapacitySummary: vi.fn(),
   listAccounts: vi.fn(),
@@ -51,7 +49,6 @@ vi.mock('@/api/admin', () => ({
       list: listGroups,
       getAll: getAllGroups,
       getModelsListCandidates,
-      getLiveCapability,
       getUsageSummary,
       getCapacitySummary,
       create: vi.fn(),
@@ -228,7 +225,6 @@ describe('admin GroupsView column settings', () => {
     listGroups.mockReset()
     getAllGroups.mockReset()
     getModelsListCandidates.mockReset()
-    getLiveCapability.mockReset()
     getUsageSummary.mockReset()
     getCapacitySummary.mockReset()
     listAccounts.mockReset()
@@ -246,7 +242,6 @@ describe('admin GroupsView column settings', () => {
     })
     getAllGroups.mockResolvedValue([])
     getModelsListCandidates.mockResolvedValue([])
-    getLiveCapability.mockResolvedValue({ supported: false })
     getUsageSummary.mockResolvedValue([])
     getCapacitySummary.mockResolvedValue([])
     listAccounts.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })

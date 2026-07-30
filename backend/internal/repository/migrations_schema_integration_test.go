@@ -168,7 +168,6 @@ func TestMigrationsRunner_AuthIdentityAndPaymentSchemaStayAligned(t *testing.T) 
 	requireColumn(t, tx, "auth_identity_migration_reports", "report_type", "character varying", 80, false)
 	requireColumn(t, tx, "users", "signup_source", "character varying", 20, false)
 	requireColumnDefaultContains(t, tx, "users", "signup_source", "email")
-	requireColumn(t, tx, "users", "registration_site_name", "text", 0, false)
 	requireConstraintDefinitionContains(
 		t,
 		tx,

@@ -1273,12 +1273,6 @@ func (s *UserService) sendNotifyVerifyEmail(ctx context.Context, emailService *E
 			siteName = name
 		}
 	}
-	profile := DomainBrandProfileFromContext(ctx)
-	if profile.Configured && profile.SiteName != nil {
-		if name := strings.TrimSpace(*profile.SiteName); name != "" {
-			siteName = name
-		}
-	}
 	if emailService.notificationEmailService != nil {
 		if err := emailService.notificationEmailService.Send(ctx, NotificationEmailSendInput{
 			Event:          NotificationEmailEventNotificationEmailVerifyCode,

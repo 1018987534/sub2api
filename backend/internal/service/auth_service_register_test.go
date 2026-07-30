@@ -328,23 +328,6 @@ func TestAuthService_Register_EmailVerifyEnabledButServiceNotConfigured(t *testi
 	require.ErrorIs(t, err, ErrServiceUnavailable)
 }
 
-func TestAuthService_Register_DomainBrandCanDisableRegistrationEmailVerification(t *testing.T) {
-	repo := &userRepoStub{nextID: 9}
-	service := newAuthService(repo, map[string]string{
-		SettingKeyRegistrationEnabled: "true",
-		SettingKeyEmailVerifyEnabled:  "true",
-	}, nil, nil)
-	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
-		Configured:                     true,
-		RegistrationEmailVerifyEnabled: boolPointer(false),
-	})
-
-	_, user, err := service.RegisterWithVerification(ctx, "brand-user@test.com", "password", "", "", "", "")
-	require.NoError(t, err)
-	require.NotNil(t, user)
-	require.Equal(t, int64(9), user.ID)
-}
-
 func TestAuthService_Register_EmailVerifyRequired(t *testing.T) {
 	repo := &userRepoStub{}
 	cache := &emailCacheStub{} // 配置 emailService
@@ -511,25 +494,6 @@ func TestAuthService_Register_Success(t *testing.T) {
 	require.Equal(t, 2, user.Concurrency)
 	require.Len(t, repo.created, 1)
 	require.True(t, user.CheckPassword("password"))
-}
-
-func TestAuthService_Register_SnapshotsDomainBrandSiteName(t *testing.T) {
-	repo := &userRepoStub{nextID: 6}
-	service := newAuthService(repo, map[string]string{
-		SettingKeyRegistrationEnabled: "true",
-		SettingKeySiteName:            "小红豆",
-	}, nil, nil)
-	ctx := WithDomainBrandProfile(context.Background(), DomainBrandProfile{
-		Configured: true,
-		SiteName:   stringPointer("小番茄"),
-	})
-
-	_, user, err := service.Register(ctx, "tomato@test.com", "password")
-	require.NoError(t, err)
-	require.NotNil(t, user)
-	require.Equal(t, "小番茄", user.RegistrationSiteName)
-	require.Len(t, repo.created, 1)
-	require.Equal(t, "小番茄", repo.created[0].RegistrationSiteName)
 }
 
 func TestAuthService_ValidateToken_ExpiredReturnsClaimsWithError(t *testing.T) {
