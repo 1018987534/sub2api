@@ -13,6 +13,19 @@
 
 当前线上拓扑是：
 
+```mermaid
+flowchart LR
+    C["客户端"] --> CF["Cloudflare Worker / CDN"]
+
+    CF -->|"网页、后台、其他 API 100%"| NEW["新 VPS control"]
+    CF -->|"Responses 90%"| NEW
+    CF -->|"Responses 10%"| OLD["旧 VPS Responses gateway"]
+
+    NEW -->|"直接请求和接收响应"| AI["模型上游"]
+    OLD -->|"直接请求和接收响应"| AI
+    OLD <-->|"WireGuard：鉴权、调度、计费、用量状态"| DB["新 VPS PostgreSQL / Redis"]
+```
+
 ```text
 新 VPS 95.169.18.157
   = control 主节点
