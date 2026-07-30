@@ -8,6 +8,11 @@
 > 分流启用日期：2026-07-31。旧数据库和旧完整应用回滚容器仍保留，但不得和新主同时运行。
 >
 > 最后核验日期：2026-07-31（Asia/Shanghai）。
+>
+> 2026-07-31 故障修正：多节点首版加入的全局两阶段 drain 会在容器重启时让
+> control 连续返回 `503`，与当前“单容器快速重启、允许短暂中断”的发布方式不匹配。
+> 仓库已恢复固定 5 秒优雅关停，并删除全局 `instance_draining` 拒绝逻辑；生产发布
+> 仍须单独确认，确认前不要再次重启线上应用。
 
 ## 0. 先说结论
 
@@ -303,8 +308,6 @@ backend/internal/repository/usage_log_repo_dashboard.go
 ```text
 INSTANCE_ROLE=control|gateway
 INSTANCE_ID=new-control|old-gateway
-DRAIN_DELAY_SECONDS=...
-SHUTDOWN_TIMEOUT_SECONDS=...
 ```
 
 规则：
@@ -343,33 +346,44 @@ SHUTDOWN_TIMEOUT_SECONDS=...
 
 | 文件/模块 | 改造前 | 当前改动 |
 |---|---|---|
-| `backend/internal/config/config.go` | 没有实例角色 | 增加角色、实例 ID 和 drain 配置 |
-| `backend/cmd/server/main.go` | setup 在完整应用初始化前执行，关机超时固定 5 秒 | gateway 跳过 setup；统一按角色启动；drain 后关机 |
+| `backend/internal/config/config.go` | 没有实例角色 | 增加角色和实例 ID |
+| `backend/cmd/server/main.go` | setup 在完整应用初始化前执行，关机超时固定 5 秒 | gateway 跳过 setup；保留固定 5 秒快速关停 |
 | `backend/internal/server/router.go` | 无条件注册所有路由 | control 注册完整路由，gateway只注册最小 Responses/health |
 | `backend/internal/server/routes/common.go` | 只有兼容 `/health` | 新增 `/health/live`、`/health/ready` |
 | `backend/internal/server/routes/gateway.go` | 全部网关路由混在一个注册函数 | 提取 Responses 最小注册函数 |
 | `backend/internal/service/wire.go` | 多个 Provider 构造时直接 `Start()` | 按角色统一 lifecycle，避免旧节点跑备份/聚合 |
 | `backend/cmd/server/wire.go`、`wire_gen.go` | 单一完整依赖图 | 注入 role/readiness/lifecycle，重新生成 Wire |
-| `backend/internal/service/usage_record_worker_pool.go` | 有界用量 worker 已存在 | gateway保留，并在 drain 时等待提交任务 |
-| `deploy/docker-compose.standalone.yml` | app-only Compose 已存在 | 增加 role、ready healthcheck、drain 和本地 data 路径参数 |
-| `deploy/docker-compose.local.yml` | 完整 app+Postgres+Redis | 增加 control role、ready healthcheck 和 drain 配置 |
+| `backend/internal/service/usage_record_worker_pool.go` | 有界用量 worker 已存在 | gateway继续保留请求完成后的计费和用量提交 |
+| `deploy/docker-compose.standalone.yml` | app-only Compose 已存在 | 增加 role、ready healthcheck 和本地 data 路径参数 |
+| `deploy/docker-compose.local.yml` | 完整 app+Postgres+Redis | 增加 control role 和 ready healthcheck |
 | `deploy/multi-node/` | 当前不存在 | 新增两节点 env、WireGuard、Nginx 和 control 数据端口 override 模板 |
 
 第一阶段不增加 `usage_logs.instance_id`，不迁移客户端 Base URL，不改变计费口径。
 
-### 5.5 健康和摘流
+### 5.5 健康和顺序重启
 
 ```text
 /health/live
   只证明进程和 HTTP Server 存活。
 
 /health/ready
-  检查角色、PostgreSQL、Redis和drain状态。
+  检查角色、PostgreSQL和 Redis。
 ```
 
 schema兼容在进程启动阶段校验：control 可执行缺失 migration；gateway 只读校验，落后或 checksum 不一致时进程拒绝启动。版本、调度快照新鲜度后续作为增强项，不在当前 ready JSON 中虚报。
 
-旧 gateway 的 DB/Redis 隧道断开时必须返回 `503`，边缘停止分配新请求。发布顺序是：先 unready/权重 0，再等待 SSE/WS 和用量 worker，最后退出。
+旧 gateway 的 DB/Redis 隧道断开时必须由 `/health/ready` 返回 `503`。日常二进制发布不做
+POST 自动转投，也不启用长时间 drain，固定按以下顺序执行：
+
+1. 确认两台节点当前均为 ready。
+2. 先替换并重启旧 gateway；只允许它承接的 Responses 出现实际进程切换造成的短暂中断。
+3. 等旧 gateway 恢复 ready，并确认真实 Responses 返回 `200`。
+4. 再替换并重启新主 control；前端、管理 API 和 control 承接的 Responses 只允许短暂中断。
+5. 等 control 恢复 ready，复核页面数据、两节点请求和共享用量记录。
+
+不能并行重启两台节点，也不能在一个节点尚未恢复时继续重启另一个节点。
+发布脚本必须显式使用 `docker restart -t 10`，覆盖现有容器可能残留的长
+`StopTimeout`；应用自身仍在 5 秒内完成优雅关停。
 
 ## 6. 新主 VPS 的实际部署
 
@@ -458,8 +472,6 @@ Redis认证
 INSTANCE_ROLE=gateway
 INSTANCE_ID=old-gateway
 AUTO_SETUP=false
-DRAIN_DELAY_SECONDS=20
-SHUTDOWN_TIMEOUT_SECONDS=600
 RUN_MODE=standard
 
 DATABASE_HOST=10.20.0.1
@@ -607,7 +619,7 @@ dump SHA256：cd94a22d13573774db9810050a5f0ca284167ff7f1dc15194659e64d0706852f
 旧完整应用：已停止并重命名保留
 旧 gateway：healthy，数据库和 Redis 检查均为 ok
 边缘权重：control 90%，gateway 10%
-两台应用版本：0.1.168 / 02367eb3c
+两台应用版本：0.1.168 / 96e047a55
 ```
 
 ### 9.1 迁移前冻结
@@ -783,7 +795,7 @@ Cloudflare 90/10 无 Key 分布探测
 - control 注册完整应用路由。
 - gateway 不启动备份、聚合、扫描和支付过期任务。
 - `ready` 能反映 DB/Redis 隧道故障。
-- draining 返回 `503`，并等待 SSE/WS和用量 worker。
+- 收到关停信号后不进入全局拒绝状态，最长 5 秒完成快速关停。
 
 ### 11.2 双实例集成测试
 
@@ -858,7 +870,7 @@ SSE 中途断流率
 数据库连接池等待、查询 p95
 Redis PING/命令 p95
 usage worker waiting/completed/failed/dropped/sync fallback
-ready 状态和 drain 状态
+ready 状态和依赖状态
 ```
 
 新主和旧 gateway 日志都增加固定 `instance_id`，但不得记录 Authorization、API Key、Token、请求正文或模型输出。
@@ -947,7 +959,8 @@ wrangler deploy --config deploy/multi-node/worker/wrangler.toml
 - [x] 旧 VPS `38.47.117.85` 当前版本、容器、数据库、Redis、网络和资源只读刷新完成。
 - [x] 已决定改为“新主 control + 旧 gateway 子节点”的拓扑。
 - [x] 已确认前端统计从共享 `usage_logs` 聚合，第一阶段无需前端改动。
-- [x] 已增加 `control/gateway` 角色、实例 ID、ready/live 和两阶段 drain。
+- [x] 已增加 `control/gateway` 角色、实例 ID 和 ready/live。
+- [x] 已移除会让单容器重启持续返回 `503` 的两阶段 drain。
 - [x] gateway 已收窄到 Responses/health 路由，静态前端和控制面路由不注册。
 - [x] gateway 已停止备份、聚合、扫描、定时测试、支付过期和批量任务等控制面 worker。
 - [x] gateway 已改为只读校验数据库 migration；control 保留 migration 执行权。
@@ -963,7 +976,7 @@ wrangler deploy --config deploy/multi-node/worker/wrangler.toml
 
 ### 14.2 第一批代码任务
 
-1. [x] 增加实例角色、路由最小集、ready/live和 drain。
+1. [x] 增加实例角色、路由最小集和 ready/live。
 2. [x] 收敛构造即启动的后台任务，明确 control/gateway启动清单。
 3. [x] 保留 gateway 的调度、计费、用量、SSE/WS和缓存失效能力。
 4. [x] 新增 gateway Compose、Nginx和 WireGuard 模板。
@@ -978,7 +991,7 @@ wrangler deploy --config deploy/multi-node/worker/wrangler.toml
 4. [x] 旧 VPS 安装 WireGuard 客户端和 gateway app-only 运行环境。
 5. [x] 旧 gateway 通过隧道访问新主数据层并完成路由/ready 验收。
 6. [x] 边缘进入 `90% 新主 / 10% 旧 gateway` 第一档正式灰度。
-7. [x] 经用户确认后，重启新主应用并切换到 `02367eb3c` 二进制。
+7. [x] 经用户确认后，两台应用已切换到 `96e047a55` 二进制。
 8. [ ] 完成 24 小时观察和专用 Key 端到端验收。
 
 ### 14.4 正式完成定义

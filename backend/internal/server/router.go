@@ -4,12 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"log"
-	"net/http"
-	"strings"
 	"sync/atomic"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/appstate"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -62,19 +59,6 @@ func SetupRouter(
 
 	// 应用中间件
 	r.Use(middleware2.RequestLogger())
-	r.Use(func(c *gin.Context) {
-		if strings.HasPrefix(c.Request.URL.Path, "/health") {
-			c.Next()
-			return
-		}
-		if !appstate.TryBeginRequest() {
-			c.Header("Retry-After", "5")
-			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "instance_draining"})
-			return
-		}
-		defer appstate.EndRequest()
-		c.Next()
-	})
 	// 将客户端 IP + UA 注入 request context，供 token 签发/会话绑定/审计日志统一读取。
 	// 解析模式按请求快照：兼容开关开启时信任原始转发头，关闭时使用 server.trusted_proxies。
 	r.Use(middleware2.SessionBindingContext(cfg))

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	_ "github.com/Wei-Shaw/sub2api/ent/runtime"
-	"github.com/Wei-Shaw/sub2api/internal/appstate"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -186,22 +185,10 @@ func runMainServer() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	appstate.BeginDrain()
 	log.Println("Shutting down server...")
-	if cfg.DrainDelaySeconds > 0 {
-		log.Printf("Draining new requests for %ds before HTTP shutdown", cfg.DrainDelaySeconds)
-		time.Sleep(time.Duration(cfg.DrainDelaySeconds) * time.Second)
-	}
 
-	shutdownTimeout := time.Duration(cfg.ShutdownTimeoutSeconds) * time.Second
-	if shutdownTimeout <= 0 {
-		shutdownTimeout = 5 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := appstate.WaitForZero(ctx); err != nil {
-		log.Printf("Drain timed out with %d active requests: %v", appstate.ActiveRequests(), err)
-	}
 
 	if err := app.Server.Shutdown(ctx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)

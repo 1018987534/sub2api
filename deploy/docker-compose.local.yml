@@ -55,8 +55,6 @@ services:
       - RUN_MODE=${RUN_MODE:-standard}
       - INSTANCE_ROLE=${INSTANCE_ROLE:-control}
       - INSTANCE_ID=${INSTANCE_ID:-control}
-      - DRAIN_DELAY_SECONDS=${DRAIN_DELAY_SECONDS:-0}
-      - SHUTDOWN_TIMEOUT_SECONDS=${SHUTDOWN_TIMEOUT_SECONDS:-5}
       - UPDATE_GITHUB_TOKEN=${UPDATE_GITHUB_TOKEN:-}
 
       # =======================================================================
@@ -193,7 +191,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    stop_grace_period: ${STOP_GRACE_PERIOD:-30s}
 
   # ===========================================================================
   # PostgreSQL Database

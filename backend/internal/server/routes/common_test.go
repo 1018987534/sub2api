@@ -33,6 +33,10 @@ func TestCommonHealthRoutesReportRoleAndDependencies(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		require.Contains(t, w.Body.String(), `"role":"gateway"`)
 		require.Contains(t, w.Body.String(), `"instance_id":"gateway-old"`)
+		if path == "/health/ready" {
+			require.NotContains(t, w.Body.String(), `"lifecycle"`)
+			require.NotContains(t, w.Body.String(), `"active_requests"`)
+		}
 	}
 	require.NoError(t, mock.ExpectationsWereMet())
 }

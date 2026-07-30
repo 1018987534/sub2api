@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/appstate"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -38,12 +37,6 @@ func RegisterCommonRoutes(r *gin.Engine, cfg *config.Config, db *sql.DB, redisCl
 		defer cancel()
 		checks := gin.H{"database": "ok", "redis": "ok"}
 		ready := true
-		if appstate.IsDraining() {
-			checks["lifecycle"] = "draining"
-			ready = false
-		} else {
-			checks["lifecycle"] = "accepting"
-		}
 		if db == nil || db.PingContext(ctx) != nil {
 			checks["database"] = "unavailable"
 			ready = false
@@ -58,7 +51,7 @@ func RegisterCommonRoutes(r *gin.Engine, cfg *config.Config, db *sql.DB, redisCl
 			statusCode = http.StatusServiceUnavailable
 			status = "not_ready"
 		}
-		c.JSON(statusCode, gin.H{"status": status, "role": role, "instance_id": instanceID, "active_requests": appstate.ActiveRequests(), "checks": checks})
+		c.JSON(statusCode, gin.H{"status": status, "role": role, "instance_id": instanceID, "checks": checks})
 	})
 	if cfg != nil && cfg.IsGateway() {
 		return

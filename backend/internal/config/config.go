@@ -101,8 +101,6 @@ type Config struct {
 	RunMode                 string                        `mapstructure:"run_mode" yaml:"run_mode"`
 	InstanceRole            string                        `mapstructure:"instance_role" yaml:"instance_role"`
 	InstanceID              string                        `mapstructure:"instance_id" yaml:"instance_id"`
-	DrainDelaySeconds       int                           `mapstructure:"drain_delay_seconds" yaml:"drain_delay_seconds"`
-	ShutdownTimeoutSeconds  int                           `mapstructure:"shutdown_timeout_seconds" yaml:"shutdown_timeout_seconds"`
 	Timezone                string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
 	Gemini                  GeminiConfig                  `mapstructure:"gemini"`
 	Update                  UpdateConfig                  `mapstructure:"update"`
@@ -1880,8 +1878,6 @@ func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
 	viper.SetDefault("instance_role", InstanceRoleControl)
 	viper.SetDefault("instance_id", "")
-	viper.SetDefault("drain_delay_seconds", 0)
-	viper.SetDefault("shutdown_timeout_seconds", 5)
 
 	// Server
 	viper.SetDefault("server.host", "0.0.0.0")
