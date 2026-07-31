@@ -76,6 +76,7 @@ func TestUsageLogRepositoryCreateSyncRequestTypeAndLegacyFields(t *testing.T) {
 			sqlmock.AnyArg(), // first_token_ms
 			sqlmock.AnyArg(), // user_agent
 			sqlmock.AnyArg(), // ip_address
+			sqlmock.AnyArg(), // instance_id
 			log.ImageCount,
 			sqlmock.AnyArg(), // image_size
 			sqlmock.AnyArg(), // image_input_size
@@ -166,6 +167,7 @@ func TestUsageLogRepositoryCreate_PersistsServiceTier(t *testing.T) {
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
+			sqlmock.AnyArg(), // instance_id
 			log.ImageCount,
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(), // image_input_size
@@ -273,11 +275,11 @@ func TestPrepareUsageLogInsert_PersistsImageSizeMetadata(t *testing.T) {
 		CreatedAt:          time.Date(2025, 1, 6, 12, 0, 0, 0, time.UTC),
 	})
 
-	require.Equal(t, sql.NullString{String: imageSize, Valid: true}, prepared.args[36])
-	require.Equal(t, sql.NullString{String: inputSize, Valid: true}, prepared.args[37])
-	require.Equal(t, sql.NullString{String: outputSize, Valid: true}, prepared.args[38])
-	require.Equal(t, sql.NullString{String: source, Valid: true}, prepared.args[39])
-	breakdownJSON, ok := prepared.args[40].(string)
+	require.Equal(t, sql.NullString{String: imageSize, Valid: true}, prepared.args[37])
+	require.Equal(t, sql.NullString{String: inputSize, Valid: true}, prepared.args[38])
+	require.Equal(t, sql.NullString{String: outputSize, Valid: true}, prepared.args[39])
+	require.Equal(t, sql.NullString{String: source, Valid: true}, prepared.args[40])
+	breakdownJSON, ok := prepared.args[41].(string)
 	require.True(t, ok)
 	require.JSONEq(t, `{"1K":1,"4K":1}`, breakdownJSON)
 }
@@ -330,6 +332,20 @@ func TestAppendUsageLogBillingModeWhereConditionWithAlias(t *testing.T) {
 
 	require.Equal(t, []string{"(ul.billing_mode = $1 OR ((ul.billing_mode IS NULL OR ul.billing_mode = '') AND COALESCE(ul.image_count, 0) > 0))"}, conditions)
 	require.Equal(t, []any{string(service.BillingModeImage)}, args)
+}
+
+func TestAppendUsageLogInstanceWhereCondition(t *testing.T) {
+	conditions, args := appendUsageLogInstanceWhereCondition([]string{"created_at >= $1"}, []any{"start"}, " gateway-west ")
+	require.Equal(t, []string{"created_at >= $1", "instance_id = $2"}, conditions)
+	require.Equal(t, []any{"start", "gateway-west"}, args)
+
+	aliasedConditions, aliasedArgs := appendUsageLogInstanceWhereConditionWithAlias(nil, nil, "control-primary", "ul")
+	require.Equal(t, []string{"ul.instance_id = $1"}, aliasedConditions)
+	require.Equal(t, []any{"control-primary"}, aliasedArgs)
+
+	emptyConditions, emptyArgs := appendUsageLogInstanceWhereCondition(nil, nil, "  ")
+	require.Empty(t, emptyConditions)
+	require.Empty(t, emptyArgs)
 }
 
 func TestAppendUsageLogBillingModeQueryFilter(t *testing.T) {
@@ -825,6 +841,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},
 			sql.NullString{},
 			sql.NullString{},
+			sql.NullString{}, // instance_id
 			2,
 			sql.NullString{Valid: true, String: "4K"},
 			sql.NullString{Valid: true, String: "1024x1024"},
@@ -900,6 +917,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},
 			sql.NullString{},
 			sql.NullString{},
+			sql.NullString{}, // instance_id
 			0,
 			sql.NullString{},
 			sql.NullString{}, // image_input_size
@@ -958,6 +976,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},
 			sql.NullString{},
 			sql.NullString{},
+			sql.NullString{}, // instance_id
 			0,
 			sql.NullString{},
 			sql.NullString{}, // image_input_size
@@ -1016,6 +1035,7 @@ func TestScanUsageLogRequestTypeAndLegacyFallback(t *testing.T) {
 			sql.NullInt64{},
 			sql.NullString{},
 			sql.NullString{},
+			sql.NullString{}, // instance_id
 			0,
 			sql.NullString{},
 			sql.NullString{}, // image_input_size

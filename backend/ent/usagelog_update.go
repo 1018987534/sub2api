@@ -712,6 +712,26 @@ func (_u *UsageLogUpdate) ClearIPAddress() *UsageLogUpdate {
 	return _u
 }
 
+// SetInstanceID sets the "instance_id" field.
+func (_u *UsageLogUpdate) SetInstanceID(v string) *UsageLogUpdate {
+	_u.mutation.SetInstanceID(v)
+	return _u
+}
+
+// SetNillableInstanceID sets the "instance_id" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableInstanceID(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetInstanceID(*v)
+	}
+	return _u
+}
+
+// ClearInstanceID clears the value of the "instance_id" field.
+func (_u *UsageLogUpdate) ClearInstanceID() *UsageLogUpdate {
+	_u.mutation.ClearInstanceID()
+	return _u
+}
+
 // SetImageCount sets the "image_count" field.
 func (_u *UsageLogUpdate) SetImageCount(v int) *UsageLogUpdate {
 	_u.mutation.ResetImageCount()
@@ -1041,6 +1061,11 @@ func (_u *UsageLogUpdate) check() error {
 			return &ValidationError{Name: "ip_address", err: fmt.Errorf(`ent: validator failed for field "UsageLog.ip_address": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.InstanceID(); ok {
+		if err := usagelog.InstanceIDValidator(v); err != nil {
+			return &ValidationError{Name: "instance_id", err: fmt.Errorf(`ent: validator failed for field "UsageLog.instance_id": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.ImageSize(); ok {
 		if err := usagelog.ImageSizeValidator(v); err != nil {
 			return &ValidationError{Name: "image_size", err: fmt.Errorf(`ent: validator failed for field "UsageLog.image_size": %w`, err)}
@@ -1263,6 +1288,12 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.IPAddressCleared() {
 		_spec.ClearField(usagelog.FieldIPAddress, field.TypeString)
+	}
+	if value, ok := _u.mutation.InstanceID(); ok {
+		_spec.SetField(usagelog.FieldInstanceID, field.TypeString, value)
+	}
+	if _u.mutation.InstanceIDCleared() {
+		_spec.ClearField(usagelog.FieldInstanceID, field.TypeString)
 	}
 	if value, ok := _u.mutation.ImageCount(); ok {
 		_spec.SetField(usagelog.FieldImageCount, field.TypeInt, value)
@@ -2169,6 +2200,26 @@ func (_u *UsageLogUpdateOne) ClearIPAddress() *UsageLogUpdateOne {
 	return _u
 }
 
+// SetInstanceID sets the "instance_id" field.
+func (_u *UsageLogUpdateOne) SetInstanceID(v string) *UsageLogUpdateOne {
+	_u.mutation.SetInstanceID(v)
+	return _u
+}
+
+// SetNillableInstanceID sets the "instance_id" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableInstanceID(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetInstanceID(*v)
+	}
+	return _u
+}
+
+// ClearInstanceID clears the value of the "instance_id" field.
+func (_u *UsageLogUpdateOne) ClearInstanceID() *UsageLogUpdateOne {
+	_u.mutation.ClearInstanceID()
+	return _u
+}
+
 // SetImageCount sets the "image_count" field.
 func (_u *UsageLogUpdateOne) SetImageCount(v int) *UsageLogUpdateOne {
 	_u.mutation.ResetImageCount()
@@ -2511,6 +2562,11 @@ func (_u *UsageLogUpdateOne) check() error {
 			return &ValidationError{Name: "ip_address", err: fmt.Errorf(`ent: validator failed for field "UsageLog.ip_address": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.InstanceID(); ok {
+		if err := usagelog.InstanceIDValidator(v); err != nil {
+			return &ValidationError{Name: "instance_id", err: fmt.Errorf(`ent: validator failed for field "UsageLog.instance_id": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.ImageSize(); ok {
 		if err := usagelog.ImageSizeValidator(v); err != nil {
 			return &ValidationError{Name: "image_size", err: fmt.Errorf(`ent: validator failed for field "UsageLog.image_size": %w`, err)}
@@ -2750,6 +2806,12 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if _u.mutation.IPAddressCleared() {
 		_spec.ClearField(usagelog.FieldIPAddress, field.TypeString)
+	}
+	if value, ok := _u.mutation.InstanceID(); ok {
+		_spec.SetField(usagelog.FieldInstanceID, field.TypeString, value)
+	}
+	if _u.mutation.InstanceIDCleared() {
+		_spec.ClearField(usagelog.FieldInstanceID, field.TypeString)
 	}
 	if value, ok := _u.mutation.ImageCount(); ok {
 		_spec.SetField(usagelog.FieldImageCount, field.TypeInt, value)

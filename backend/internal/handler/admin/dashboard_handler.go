@@ -200,6 +200,7 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 	var requestType *int16
 	var stream *bool
 	var billingType *int8
+	instanceID := strings.TrimSpace(c.Query("instance_id"))
 
 	if userIDStr := c.Query("user_id"); userIDStr != "" {
 		if id, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
@@ -250,7 +251,7 @@ func (h *DashboardHandler) GetUsageTrend(c *gin.Context) {
 		}
 	}
 
-	trend, hit, err := h.getUsageTrendCached(c.Request.Context(), startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType)
+	trend, hit, err := h.getUsageTrendCached(c.Request.Context(), startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, instanceID, requestType, stream, billingType)
 	if err != nil {
 		response.Error(c, 500, "Failed to get usage trend")
 		return
@@ -273,10 +274,12 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 
 	// Parse optional filter params
 	var userID, apiKeyID, accountID, groupID int64
+	var model string
 	modelSource := usagestats.ModelSourceRequested
 	var requestType *int16
 	var stream *bool
 	var billingType *int8
+	instanceID := strings.TrimSpace(c.Query("instance_id"))
 
 	if userIDStr := c.Query("user_id"); userIDStr != "" {
 		if id, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
@@ -297,6 +300,9 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 		if id, err := strconv.ParseInt(groupIDStr, 10, 64); err == nil {
 			groupID = id
 		}
+	}
+	if modelStr := c.Query("model"); modelStr != "" {
+		model = modelStr
 	}
 	if rawModelSource := strings.TrimSpace(c.Query("model_source")); rawModelSource != "" {
 		if !usagestats.IsValidModelSource(rawModelSource) {
@@ -331,7 +337,7 @@ func (h *DashboardHandler) GetModelStats(c *gin.Context) {
 		}
 	}
 
-	stats, hit, err := h.getModelStatsCached(c.Request.Context(), startTime, endTime, userID, apiKeyID, accountID, groupID, modelSource, requestType, stream, billingType)
+	stats, hit, err := h.getModelStatsCached(c.Request.Context(), startTime, endTime, userID, apiKeyID, accountID, groupID, model, modelSource, instanceID, requestType, stream, billingType)
 	if err != nil {
 		response.Error(c, 500, "Failed to get model statistics")
 		return
@@ -352,9 +358,11 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 	startTime, endTime := parseTimeRange(c)
 
 	var userID, apiKeyID, accountID, groupID int64
+	var model string
 	var requestType *int16
 	var stream *bool
 	var billingType *int8
+	instanceID := strings.TrimSpace(c.Query("instance_id"))
 
 	if userIDStr := c.Query("user_id"); userIDStr != "" {
 		if id, err := strconv.ParseInt(userIDStr, 10, 64); err == nil {
@@ -375,6 +383,9 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 		if id, err := strconv.ParseInt(groupIDStr, 10, 64); err == nil {
 			groupID = id
 		}
+	}
+	if modelStr := c.Query("model"); modelStr != "" {
+		model = modelStr
 	}
 	if requestTypeStr := strings.TrimSpace(c.Query("request_type")); requestTypeStr != "" {
 		parsed, err := service.ParseUsageRequestType(requestTypeStr)
@@ -402,7 +413,7 @@ func (h *DashboardHandler) GetGroupStats(c *gin.Context) {
 		}
 	}
 
-	stats, hit, err := h.getGroupStatsCached(c.Request.Context(), startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType)
+	stats, hit, err := h.getGroupStatsCached(c.Request.Context(), startTime, endTime, userID, apiKeyID, accountID, groupID, model, instanceID, requestType, stream, billingType)
 	if err != nil {
 		response.Error(c, 500, "Failed to get group statistics")
 		return
@@ -640,6 +651,7 @@ func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 	dim.ModelType = rawModelSource
 	dim.Endpoint = c.Query("endpoint")
 	dim.EndpointType = c.DefaultQuery("endpoint_type", "inbound")
+	dim.InstanceID = strings.TrimSpace(c.Query("instance_id"))
 
 	// Additional filter conditions
 	if v := c.Query("user_id"); v != "" {

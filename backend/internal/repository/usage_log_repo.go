@@ -8,11 +8,13 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	gocache "github.com/patrickmn/go-cache"
 )
 
 const rawUsageLogModelColumn = "model"
+const maxUsageLogInstanceIDLen = 64
 
 // rawUsageLogModelColumn preserves the exact stored usage_logs.model semantics for direct filters.
 // Historical rows may contain upstream/billing model values, while newer rows store requested_model.
@@ -102,6 +104,44 @@ func appendUsageLogBillingModeQueryFilter(query string, args []any, billingMode 
 	return query + " AND " + conditions[0], args
 }
 
+func normalizeUsageLogInstanceID(value string) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	runes := []rune(trimmed)
+	if len(runes) > maxUsageLogInstanceIDLen {
+		trimmed = string(runes[:maxUsageLogInstanceIDLen])
+	}
+	return &trimmed
+}
+
+func appendUsageLogInstanceWhereCondition(conditions []string, args []any, instanceID string) ([]string, []any) {
+	return appendUsageLogInstanceWhereConditionWithAlias(conditions, args, instanceID, "")
+}
+
+func appendUsageLogInstanceWhereConditionWithAlias(conditions []string, args []any, instanceID string, alias string) ([]string, []any) {
+	normalized := normalizeUsageLogInstanceID(instanceID)
+	if normalized == nil {
+		return conditions, args
+	}
+	column := "instance_id"
+	if alias != "" {
+		column = alias + "." + column
+	}
+	conditions = append(conditions, fmt.Sprintf("%s = $%d", column, len(args)+1))
+	args = append(args, *normalized)
+	return conditions, args
+}
+
+func appendUsageLogInstanceQueryFilter(query string, args []any, instanceID string, alias string) (string, []any) {
+	conditions, args := appendUsageLogInstanceWhereConditionWithAlias(nil, args, instanceID, alias)
+	if len(conditions) == 0 {
+		return query, args
+	}
+	return query + " AND " + conditions[0], args
+}
+
 func appendUsageLogModelWhereCondition(conditions []string, args []any, model string, source string) ([]string, []any) {
 	if strings.TrimSpace(source) == "" {
 		return appendRawUsageLogModelWhereCondition(conditions, args, model)
@@ -148,15 +188,27 @@ type usageLogRepository struct {
 	bestEffortBatchOnce sync.Once
 	bestEffortBatchCh   chan usageLogBestEffortRequest
 	bestEffortRecent    *gocache.Cache
+	instanceID          string
 }
 
-func NewUsageLogRepository(client *dbent.Client, sqlDB *sql.DB) service.UsageLogRepository {
-	return newUsageLogRepositoryWithSQL(client, sqlDB)
+func NewUsageLogRepository(client *dbent.Client, sqlDB *sql.DB, cfg *config.Config) service.UsageLogRepository {
+	instanceID := ""
+	if cfg != nil {
+		instanceID = cfg.InstanceID
+	}
+	return newUsageLogRepositoryWithSQLAndInstanceID(client, sqlDB, instanceID)
 }
 
 func newUsageLogRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *usageLogRepository {
+	return newUsageLogRepositoryWithSQLAndInstanceID(client, sqlq, "")
+}
+
+func newUsageLogRepositoryWithSQLAndInstanceID(client *dbent.Client, sqlq sqlExecutor, instanceID string) *usageLogRepository {
 	// 使用 scanSingleRow 替代 QueryRowContext，保证 ent.Tx 作为 sqlExecutor 可用。
 	repo := &usageLogRepository{client: client, sql: sqlq}
+	if normalized := normalizeUsageLogInstanceID(instanceID); normalized != nil {
+		repo.instanceID = *normalized
+	}
 	if db, ok := sqlq.(*sql.DB); ok {
 		repo.db = db
 	}

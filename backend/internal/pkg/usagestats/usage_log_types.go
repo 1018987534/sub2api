@@ -183,6 +183,7 @@ type UserBreakdownDimension struct {
 	ModelType    string // "requested", "upstream", or "mapping"
 	Endpoint     string // filter by endpoint value (non-empty to enable)
 	EndpointType string // "inbound", "upstream", or "path"
+	InstanceID   string // filter by usage_logs.instance_id (non-empty to enable)
 	// Additional filter conditions
 	UserID      int64  // filter by user_id (>0 to enable)
 	APIKeyID    int64  // filter by api_key_id (>0 to enable)
@@ -278,6 +279,7 @@ type UsageLogFilters struct {
 	Stream            *bool
 	BillingType       *int8
 	BillingMode       string
+	InstanceID        string
 	StartTime         *time.Time
 	EndTime           *time.Time
 	// ExactTotal requests exact COUNT(*) for pagination. Default false for fast large-table paging.

@@ -84,6 +84,7 @@ export interface AdminUsageQueryParams extends UsageQueryParams {
   user_id?: number
   exact_total?: boolean
   billing_mode?: string
+  instance_id?: string | null
   sort_by?: string
   sort_order?: 'asc' | 'desc'
   // 错误请求 tab 专属筛选(仅传给错误列表接口;共用同一 filters 对象)
@@ -128,8 +129,20 @@ export async function getStats(params: {
   end_date?: string
   timezone?: string
   nocache?: number
+  instance_id?: string | null
 }): Promise<AdminUsageStatsResponse> {
   const { data } = await apiClient.get<AdminUsageStatsResponse>('/admin/usage/stats', {
+    params
+  })
+  return data
+}
+
+export async function listInstances(params?: {
+  start_date?: string
+  end_date?: string
+  timezone?: string
+}): Promise<string[]> {
+  const { data } = await apiClient.get<string[]>('/admin/usage/instances', {
     params
   })
   return data
@@ -207,6 +220,7 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
 export const adminUsageAPI = {
   list,
   getStats,
+  listInstances,
   searchUsers,
   searchApiKeys,
   listCleanupTasks,

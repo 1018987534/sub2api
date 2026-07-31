@@ -225,6 +225,11 @@ func IPAddress(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldIPAddress, v))
 }
 
+// InstanceID applies equality check predicate on the "instance_id" field. It's identical to InstanceIDEQ.
+func InstanceID(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldInstanceID, v))
+}
+
 // ImageCount applies equality check predicate on the "image_count" field. It's identical to ImageCountEQ.
 func ImageCount(v int) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldImageCount, v))
@@ -1828,6 +1833,81 @@ func IPAddressEqualFold(v string) predicate.UsageLog {
 // IPAddressContainsFold applies the ContainsFold predicate on the "ip_address" field.
 func IPAddressContainsFold(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldContainsFold(FieldIPAddress, v))
+}
+
+// InstanceIDEQ applies the EQ predicate on the "instance_id" field.
+func InstanceIDEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEQ(FieldInstanceID, v))
+}
+
+// InstanceIDNEQ applies the NEQ predicate on the "instance_id" field.
+func InstanceIDNEQ(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNEQ(FieldInstanceID, v))
+}
+
+// InstanceIDIn applies the In predicate on the "instance_id" field.
+func InstanceIDIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIn(FieldInstanceID, vs...))
+}
+
+// InstanceIDNotIn applies the NotIn predicate on the "instance_id" field.
+func InstanceIDNotIn(vs ...string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotIn(FieldInstanceID, vs...))
+}
+
+// InstanceIDGT applies the GT predicate on the "instance_id" field.
+func InstanceIDGT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGT(FieldInstanceID, v))
+}
+
+// InstanceIDGTE applies the GTE predicate on the "instance_id" field.
+func InstanceIDGTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldGTE(FieldInstanceID, v))
+}
+
+// InstanceIDLT applies the LT predicate on the "instance_id" field.
+func InstanceIDLT(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLT(FieldInstanceID, v))
+}
+
+// InstanceIDLTE applies the LTE predicate on the "instance_id" field.
+func InstanceIDLTE(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldLTE(FieldInstanceID, v))
+}
+
+// InstanceIDContains applies the Contains predicate on the "instance_id" field.
+func InstanceIDContains(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContains(FieldInstanceID, v))
+}
+
+// InstanceIDHasPrefix applies the HasPrefix predicate on the "instance_id" field.
+func InstanceIDHasPrefix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasPrefix(FieldInstanceID, v))
+}
+
+// InstanceIDHasSuffix applies the HasSuffix predicate on the "instance_id" field.
+func InstanceIDHasSuffix(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldHasSuffix(FieldInstanceID, v))
+}
+
+// InstanceIDIsNil applies the IsNil predicate on the "instance_id" field.
+func InstanceIDIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldInstanceID))
+}
+
+// InstanceIDNotNil applies the NotNil predicate on the "instance_id" field.
+func InstanceIDNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldInstanceID))
+}
+
+// InstanceIDEqualFold applies the EqualFold predicate on the "instance_id" field.
+func InstanceIDEqualFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldEqualFold(FieldInstanceID, v))
+}
+
+// InstanceIDContainsFold applies the ContainsFold predicate on the "instance_id" field.
+func InstanceIDContainsFold(v string) predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldContainsFold(FieldInstanceID, v))
 }
 
 // ImageCountEQ applies the EQ predicate on the "image_count" field.

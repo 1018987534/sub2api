@@ -461,3 +461,19 @@ func (s *UsageService) GetStatsWithFilters(ctx context.Context, filters usagesta
 	}
 	return stats, nil
 }
+
+// ListInstanceIDs returns distinct usage-log writer instance IDs for admin filters.
+func (s *UsageService) ListInstanceIDs(ctx context.Context, startTime, endTime *time.Time) ([]string, error) {
+	type instanceIDReader interface {
+		ListInstanceIDs(ctx context.Context, startTime, endTime *time.Time) ([]string, error)
+	}
+	reader, ok := s.usageRepo.(instanceIDReader)
+	if !ok {
+		return []string{}, nil
+	}
+	instances, err := reader.ListInstanceIDs(ctx, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("list usage instance ids: %w", err)
+	}
+	return instances, nil
+}

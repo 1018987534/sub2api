@@ -112,6 +112,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 	model := c.Query("model")
 	requestID := strings.TrimSpace(c.Query("request_id"))
 	billingMode := strings.TrimSpace(c.Query("billing_mode"))
+	instanceID := strings.TrimSpace(c.Query("instance_id"))
 
 	var requestType *int16
 	var stream *bool
@@ -184,6 +185,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		Stream:            stream,
 		BillingType:       billingType,
 		BillingMode:       billingMode,
+		InstanceID:        instanceID,
 		StartTime:         startTime,
 		EndTime:           endTime,
 		ExactTotal:        exactTotal,
@@ -245,6 +247,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 
 	model := c.Query("model")
 	billingMode := strings.TrimSpace(c.Query("billing_mode"))
+	instanceID := strings.TrimSpace(c.Query("instance_id"))
 
 	var requestType *int16
 	var stream *bool
@@ -325,6 +328,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		Stream:            stream,
 		BillingType:       billingType,
 		BillingMode:       billingMode,
+		InstanceID:        instanceID,
 		StartTime:         &startTime,
 		EndTime:           &endTime,
 	}
@@ -350,6 +354,37 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	}
 
 	response.Success(c, stats)
+}
+
+// ListInstances handles listing usage writer instance IDs for admin filters.
+// GET /api/v1/admin/usage/instances
+func (h *UsageHandler) ListInstances(c *gin.Context) {
+	var startTime, endTime *time.Time
+	userTZ := c.Query("timezone")
+	if startDateStr := strings.TrimSpace(c.Query("start_date")); startDateStr != "" {
+		t, err := timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
+		if err != nil {
+			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
+			return
+		}
+		startTime = &t
+	}
+	if endDateStr := strings.TrimSpace(c.Query("end_date")); endDateStr != "" {
+		t, err := timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
+		if err != nil {
+			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
+			return
+		}
+		t = t.AddDate(0, 0, 1)
+		endTime = &t
+	}
+
+	instances, err := h.usageService.ListInstanceIDs(c.Request.Context(), startTime, endTime)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, instances)
 }
 
 // SearchUsers handles searching users by email keyword

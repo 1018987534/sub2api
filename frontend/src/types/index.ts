@@ -1626,6 +1626,7 @@ export interface UsageLogAccountSummary {
 export interface AdminUsageLog extends UsageLog {
   upstream_model?: string | null
   model_mapping_chain?: string | null
+  instance_id?: string | null
 
   // 账号计费倍率（仅管理员可见）
   account_rate_multiplier?: number | null
@@ -2014,6 +2015,7 @@ export interface UsageQueryParams {
   stream?: boolean
   billing_type?: number | null
   billing_mode?: string | null
+  instance_id?: string | null
   start_date?: string
   end_date?: string
   timezone?: string

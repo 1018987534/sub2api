@@ -26,6 +26,7 @@ type dashboardTrendCacheKey struct {
 	AccountID   int64  `json:"account_id"`
 	GroupID     int64  `json:"group_id"`
 	Model       string `json:"model"`
+	InstanceID  string `json:"instance_id"`
 	RequestType *int16 `json:"request_type"`
 	Stream      *bool  `json:"stream"`
 	BillingType *int8  `json:"billing_type"`
@@ -38,7 +39,9 @@ type dashboardModelGroupCacheKey struct {
 	APIKeyID    int64  `json:"api_key_id"`
 	AccountID   int64  `json:"account_id"`
 	GroupID     int64  `json:"group_id"`
+	Model       string `json:"model,omitempty"`
 	ModelSource string `json:"model_source,omitempty"`
+	InstanceID  string `json:"instance_id,omitempty"`
 	RequestType *int16 `json:"request_type"`
 	Stream      *bool  `json:"stream"`
 	BillingType *int8  `json:"billing_type"`
@@ -81,6 +84,7 @@ func (h *DashboardHandler) getUsageTrendCached(
 	granularity string,
 	userID, apiKeyID, accountID, groupID int64,
 	model string,
+	instanceID string,
 	requestType *int16,
 	stream *bool,
 	billingType *int8,
@@ -94,12 +98,24 @@ func (h *DashboardHandler) getUsageTrendCached(
 		AccountID:   accountID,
 		GroupID:     groupID,
 		Model:       model,
+		InstanceID:  instanceID,
 		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,
 	})
 	entry, hit, err := dashboardTrendCache.GetOrLoad(key, func() (any, error) {
-		return h.dashboardService.GetUsageTrendWithFilters(ctx, startTime, endTime, granularity, userID, apiKeyID, accountID, groupID, model, requestType, stream, billingType)
+		return h.dashboardService.GetUsageTrendWithUsageFilters(ctx, startTime, endTime, granularity, usagestats.UsageLogFilters{
+			UserID:            userID,
+			APIKeyID:          apiKeyID,
+			AccountID:         accountID,
+			GroupID:           groupID,
+			Model:             model,
+			ModelFilterSource: usagestats.ModelSourceRequested,
+			InstanceID:        instanceID,
+			RequestType:       requestType,
+			Stream:            stream,
+			BillingType:       billingType,
+		})
 	})
 	if err != nil {
 		return nil, hit, err
@@ -112,7 +128,9 @@ func (h *DashboardHandler) getModelStatsCached(
 	ctx context.Context,
 	startTime, endTime time.Time,
 	userID, apiKeyID, accountID, groupID int64,
+	model string,
 	modelSource string,
+	instanceID string,
 	requestType *int16,
 	stream *bool,
 	billingType *int8,
@@ -124,13 +142,26 @@ func (h *DashboardHandler) getModelStatsCached(
 		APIKeyID:    apiKeyID,
 		AccountID:   accountID,
 		GroupID:     groupID,
+		Model:       model,
 		ModelSource: usagestats.NormalizeModelSource(modelSource),
+		InstanceID:  instanceID,
 		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,
 	})
 	entry, hit, err := dashboardModelStatsCache.GetOrLoad(key, func() (any, error) {
-		return h.dashboardService.GetModelStatsWithFiltersBySource(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType, modelSource)
+		return h.dashboardService.GetModelStatsWithUsageFiltersBySource(ctx, startTime, endTime, usagestats.UsageLogFilters{
+			UserID:            userID,
+			APIKeyID:          apiKeyID,
+			AccountID:         accountID,
+			GroupID:           groupID,
+			Model:             model,
+			ModelFilterSource: usagestats.ModelSourceRequested,
+			InstanceID:        instanceID,
+			RequestType:       requestType,
+			Stream:            stream,
+			BillingType:       billingType,
+		}, modelSource)
 	})
 	if err != nil {
 		return nil, hit, err
@@ -143,6 +174,8 @@ func (h *DashboardHandler) getGroupStatsCached(
 	ctx context.Context,
 	startTime, endTime time.Time,
 	userID, apiKeyID, accountID, groupID int64,
+	model string,
+	instanceID string,
 	requestType *int16,
 	stream *bool,
 	billingType *int8,
@@ -154,12 +187,25 @@ func (h *DashboardHandler) getGroupStatsCached(
 		APIKeyID:    apiKeyID,
 		AccountID:   accountID,
 		GroupID:     groupID,
+		Model:       model,
+		InstanceID:  instanceID,
 		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,
 	})
 	entry, hit, err := dashboardGroupStatsCache.GetOrLoad(key, func() (any, error) {
-		return h.dashboardService.GetGroupStatsWithFilters(ctx, startTime, endTime, userID, apiKeyID, accountID, groupID, requestType, stream, billingType)
+		return h.dashboardService.GetGroupStatsWithUsageFilters(ctx, startTime, endTime, usagestats.UsageLogFilters{
+			UserID:            userID,
+			APIKeyID:          apiKeyID,
+			AccountID:         accountID,
+			GroupID:           groupID,
+			Model:             model,
+			ModelFilterSource: usagestats.ModelSourceRequested,
+			InstanceID:        instanceID,
+			RequestType:       requestType,
+			Stream:            stream,
+			BillingType:       billingType,
+		})
 	})
 	if err != nil {
 		return nil, hit, err

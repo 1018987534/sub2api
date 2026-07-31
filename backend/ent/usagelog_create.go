@@ -463,6 +463,20 @@ func (_c *UsageLogCreate) SetNillableIPAddress(v *string) *UsageLogCreate {
 	return _c
 }
 
+// SetInstanceID sets the "instance_id" field.
+func (_c *UsageLogCreate) SetInstanceID(v string) *UsageLogCreate {
+	_c.mutation.SetInstanceID(v)
+	return _c
+}
+
+// SetNillableInstanceID sets the "instance_id" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableInstanceID(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetInstanceID(*v)
+	}
+	return _c
+}
+
 // SetImageCount sets the "image_count" field.
 func (_c *UsageLogCreate) SetImageCount(v int) *UsageLogCreate {
 	_c.mutation.SetImageCount(v)
@@ -861,6 +875,11 @@ func (_c *UsageLogCreate) check() error {
 			return &ValidationError{Name: "ip_address", err: fmt.Errorf(`ent: validator failed for field "UsageLog.ip_address": %w`, err)}
 		}
 	}
+	if v, ok := _c.mutation.InstanceID(); ok {
+		if err := usagelog.InstanceIDValidator(v); err != nil {
+			return &ValidationError{Name: "instance_id", err: fmt.Errorf(`ent: validator failed for field "UsageLog.instance_id": %w`, err)}
+		}
+	}
 	if _, ok := _c.mutation.ImageCount(); !ok {
 		return &ValidationError{Name: "image_count", err: errors.New(`ent: missing required field "UsageLog.image_count"`)}
 	}
@@ -1049,6 +1068,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.IPAddress(); ok {
 		_spec.SetField(usagelog.FieldIPAddress, field.TypeString, value)
 		_node.IPAddress = &value
+	}
+	if value, ok := _c.mutation.InstanceID(); ok {
+		_spec.SetField(usagelog.FieldInstanceID, field.TypeString, value)
+		_node.InstanceID = &value
 	}
 	if value, ok := _c.mutation.ImageCount(); ok {
 		_spec.SetField(usagelog.FieldImageCount, field.TypeInt, value)
@@ -1822,6 +1845,24 @@ func (u *UsageLogUpsert) UpdateIPAddress() *UsageLogUpsert {
 // ClearIPAddress clears the value of the "ip_address" field.
 func (u *UsageLogUpsert) ClearIPAddress() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldIPAddress)
+	return u
+}
+
+// SetInstanceID sets the "instance_id" field.
+func (u *UsageLogUpsert) SetInstanceID(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldInstanceID, v)
+	return u
+}
+
+// UpdateInstanceID sets the "instance_id" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateInstanceID() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldInstanceID)
+	return u
+}
+
+// ClearInstanceID clears the value of the "instance_id" field.
+func (u *UsageLogUpsert) ClearInstanceID() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldInstanceID)
 	return u
 }
 
@@ -2740,6 +2781,27 @@ func (u *UsageLogUpsertOne) UpdateIPAddress() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearIPAddress() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearIPAddress()
+	})
+}
+
+// SetInstanceID sets the "instance_id" field.
+func (u *UsageLogUpsertOne) SetInstanceID(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetInstanceID(v)
+	})
+}
+
+// UpdateInstanceID sets the "instance_id" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateInstanceID() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateInstanceID()
+	})
+}
+
+// ClearInstanceID clears the value of the "instance_id" field.
+func (u *UsageLogUpsertOne) ClearInstanceID() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearInstanceID()
 	})
 }
 
@@ -3854,6 +3916,27 @@ func (u *UsageLogUpsertBulk) UpdateIPAddress() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearIPAddress() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearIPAddress()
+	})
+}
+
+// SetInstanceID sets the "instance_id" field.
+func (u *UsageLogUpsertBulk) SetInstanceID(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetInstanceID(v)
+	})
+}
+
+// UpdateInstanceID sets the "instance_id" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateInstanceID() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateInstanceID()
+	})
+}
+
+// ClearInstanceID clears the value of the "instance_id" field.
+func (u *UsageLogUpsertBulk) ClearInstanceID() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearInstanceID()
 	})
 }
 

@@ -170,6 +170,9 @@ type UsageLog struct {
 	FirstTokenMs *int
 	UserAgent    *string
 	IPAddress    *string
+	// InstanceID identifies the application node that wrote the usage record.
+	// It is sourced from INSTANCE_ID and is admin-only metadata.
+	InstanceID *string
 	// SessionID is the explicit client-provided request correlation identifier
 	// (e.g. the session_id / X-Session-Id headers). Nil when the client sent no
 	// valid session header. It is never derived from prompt_cache_key or content.

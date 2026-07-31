@@ -121,6 +121,12 @@
           </div>
         </div>
 
+        <!-- Instance Filter (usage/ranking only) -->
+        <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
+          <label class="input-label">{{ t('admin.usage.instance') }}</label>
+          <Select v-model="filters.instance_id" :options="instanceSelectOptions" @change="emitChange" />
+        </div>
+
         <!-- Request Type Filter (usage only) -->
         <div v-if="mode !== 'errors'" class="w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label">{{ t('usage.type') }}</label>
@@ -211,12 +217,14 @@ interface Props {
   mode?: 'usage' | 'errors' | 'ranking'
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
+  instanceOptions?: string[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
   showActions: true,
   mode: 'usage',
-  flat: false
+  flat: false,
+  instanceOptions: () => []
 })
 const emit = defineEmits([
   'update:modelValue',
@@ -257,6 +265,10 @@ let accountSearchTimeout: ReturnType<typeof setTimeout> | null = null
 const modelOptions = computed<SelectOption[]>(() => [
   { value: null, label: t('admin.usage.allModels') },
   ...(props.modelOptions ?? []).map((m) => ({ value: m, label: m })),
+])
+const instanceSelectOptions = computed<SelectOption[]>(() => [
+  { value: null, label: t('admin.usage.allInstances') },
+  ...(props.instanceOptions ?? []).map((instance) => ({ value: instance, label: instance })),
 ])
 const groupOptions = ref<SelectOption[]>([{ value: null, label: t('admin.usage.allGroups') }])
 

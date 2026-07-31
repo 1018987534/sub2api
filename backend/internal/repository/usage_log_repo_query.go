@@ -19,7 +19,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, session_id, created_at"
+const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, instance_id, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, session_id, created_at"
 
 func (r *usageLogRepository) GetByID(ctx context.Context, id int64) (log *service.UsageLog, err error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE id = $1"
@@ -127,6 +127,7 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		args = append(args, int16(*filters.BillingType))
 	}
 	conditions, args = appendUsageLogBillingModeWhereCondition(conditions, args, filters.BillingMode)
+	conditions, args = appendUsageLogInstanceWhereCondition(conditions, args, filters.InstanceID)
 	if filters.StartTime != nil {
 		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)+1))
 		args = append(args, *filters.StartTime)
@@ -155,6 +156,56 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		return nil, nil, err
 	}
 	return logs, page, nil
+}
+
+func (r *usageLogRepository) ListInstanceIDs(ctx context.Context, startTime, endTime *time.Time) (instances []string, err error) {
+	conditions := []string{"instance_id IS NOT NULL", "TRIM(instance_id) <> ''"}
+	args := make([]any, 0, 2)
+	if startTime != nil {
+		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)+1))
+		args = append(args, *startTime)
+	}
+	if endTime != nil {
+		conditions = append(conditions, fmt.Sprintf("created_at < $%d", len(args)+1))
+		args = append(args, *endTime)
+	}
+
+	query := fmt.Sprintf(`
+		SELECT instance_id
+		FROM (
+			SELECT DISTINCT instance_id
+			FROM usage_logs
+			%s
+			LIMIT 100
+		) s
+		ORDER BY instance_id
+	`, buildWhere(conditions))
+
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+			instances = nil
+		}
+	}()
+
+	instances = make([]string, 0)
+	for rows.Next() {
+		var value string
+		if err = rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			instances = append(instances, trimmed)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return instances, nil
 }
 
 func shouldUseFastUsageLogTotal(filters UsageLogFilters) bool {
@@ -465,6 +516,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		firstTokenMs              sql.NullInt64
 		userAgent                 sql.NullString
 		ipAddress                 sql.NullString
+		instanceID                sql.NullString
 		imageCount                int
 		imageSize                 sql.NullString
 		imageInputSize            sql.NullString
@@ -526,6 +578,7 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		&firstTokenMs,
 		&userAgent,
 		&ipAddress,
+		&instanceID,
 		&imageCount,
 		&imageSize,
 		&imageInputSize,
@@ -615,6 +668,9 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 	}
 	if ipAddress.Valid {
 		log.IPAddress = &ipAddress.String
+	}
+	if instanceID.Valid {
+		log.InstanceID = &instanceID.String
 	}
 	if imageSize.Valid {
 		log.ImageSize = &imageSize.String

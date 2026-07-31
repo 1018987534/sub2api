@@ -42,6 +42,7 @@ type dashboardSnapshotV2Filters struct {
 	AccountID   int64
 	GroupID     int64
 	Model       string
+	InstanceID  string
 	RequestType *int16
 	Stream      *bool
 	BillingType *int8
@@ -56,6 +57,7 @@ type dashboardSnapshotV2CacheKey struct {
 	AccountID         int64  `json:"account_id"`
 	GroupID           int64  `json:"group_id"`
 	Model             string `json:"model"`
+	InstanceID        string `json:"instance_id"`
 	RequestType       *int16 `json:"request_type"`
 	Stream            *bool  `json:"stream"`
 	BillingType       *int8  `json:"billing_type"`
@@ -101,6 +103,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		AccountID:         filters.AccountID,
 		GroupID:           filters.GroupID,
 		Model:             filters.Model,
+		InstanceID:        filters.InstanceID,
 		RequestType:       filters.RequestType,
 		Stream:            filters.Stream,
 		BillingType:       filters.BillingType,
@@ -181,6 +184,7 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 			filters.AccountID,
 			filters.GroupID,
 			filters.Model,
+			filters.InstanceID,
 			filters.RequestType,
 			filters.Stream,
 			filters.BillingType,
@@ -200,7 +204,9 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 			filters.APIKeyID,
 			filters.AccountID,
 			filters.GroupID,
+			filters.Model,
 			usagestats.ModelSourceRequested,
+			filters.InstanceID,
 			filters.RequestType,
 			filters.Stream,
 			filters.BillingType,
@@ -220,6 +226,8 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 			filters.APIKeyID,
 			filters.AccountID,
 			filters.GroupID,
+			filters.Model,
+			filters.InstanceID,
 			filters.RequestType,
 			filters.Stream,
 			filters.BillingType,
@@ -243,7 +251,8 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 
 func parseDashboardSnapshotV2Filters(c *gin.Context) (*dashboardSnapshotV2Filters, error) {
 	filters := &dashboardSnapshotV2Filters{
-		Model: strings.TrimSpace(c.Query("model")),
+		Model:      strings.TrimSpace(c.Query("model")),
+		InstanceID: strings.TrimSpace(c.Query("instance_id")),
 	}
 
 	if userIDStr := strings.TrimSpace(c.Query("user_id")); userIDStr != "" {

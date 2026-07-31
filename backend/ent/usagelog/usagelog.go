@@ -82,6 +82,8 @@ const (
 	FieldUserAgent = "user_agent"
 	// FieldIPAddress holds the string denoting the ip_address field in the database.
 	FieldIPAddress = "ip_address"
+	// FieldInstanceID holds the string denoting the instance_id field in the database.
+	FieldInstanceID = "instance_id"
 	// FieldImageCount holds the string denoting the image_count field in the database.
 	FieldImageCount = "image_count"
 	// FieldImageSize holds the string denoting the image_size field in the database.
@@ -190,6 +192,7 @@ var Columns = []string{
 	FieldFirstTokenMs,
 	FieldUserAgent,
 	FieldIPAddress,
+	FieldInstanceID,
 	FieldImageCount,
 	FieldImageSize,
 	FieldImageInputSize,
@@ -264,6 +267,8 @@ var (
 	UserAgentValidator func(string) error
 	// IPAddressValidator is a validator for the "ip_address" field. It is called by the builders before save.
 	IPAddressValidator func(string) error
+	// InstanceIDValidator is a validator for the "instance_id" field. It is called by the builders before save.
+	InstanceIDValidator func(string) error
 	// DefaultImageCount holds the default value on creation for the "image_count" field.
 	DefaultImageCount int
 	// ImageSizeValidator is a validator for the "image_size" field. It is called by the builders before save.
@@ -460,6 +465,11 @@ func ByUserAgent(opts ...sql.OrderTermOption) OrderOption {
 // ByIPAddress orders the results by the ip_address field.
 func ByIPAddress(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldIPAddress, opts...).ToFunc()
+}
+
+// ByInstanceID orders the results by the instance_id field.
+func ByInstanceID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldInstanceID, opts...).ToFunc()
 }
 
 // ByImageCount orders the results by the image_count field.
