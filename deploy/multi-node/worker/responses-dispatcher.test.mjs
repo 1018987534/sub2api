@@ -125,6 +125,7 @@ test("fetches runtime weights and keeps the last good value on refresh failure",
       options.headers["X-Gateway-Routing-Token"],
       "runtime-secret",
     );
+    assert.equal(options.redirect, "manual");
     return Response.json({
       data: {
         nodes: [

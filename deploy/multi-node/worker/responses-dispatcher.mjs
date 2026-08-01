@@ -126,7 +126,7 @@ async function fetchRoutingNodes(env) {
             env.ROUTING_CONFIG_TOKEN ?? "",
           ),
         },
-        redirect: "error",
+        redirect: "manual",
         signal: AbortSignal.timeout(ROUTING_CONFIG_TIMEOUT_MS),
       });
       if (!response.ok) {
