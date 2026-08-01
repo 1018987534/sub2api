@@ -837,7 +837,7 @@ ORIGIN_GATEWAY2 = https://gateway2-origin.xiaohondou.com -> 38.47.113.166
 ```text
 管理员系统设置（目标权重）
   -> settings.gateway_routing_settings
-  -> control GET /api/v1/gateway-routing/runtime（专用令牌鉴权，生效权重）
+  -> 主站 GET /api/v1/gateway-routing/runtime（专用令牌鉴权，生效权重）
   -> Worker ROUTING_CONFIG_URL + ROUTING_CONFIG_TOKEN（15 秒短缓存）
   -> 新建 Responses 请求按生效权重选一个 origin
 ```
