@@ -837,7 +837,7 @@ ORIGIN_GATEWAY2 = https://gateway2-origin.xiaohondou.com -> 38.47.113.166
 ```text
 管理员系统设置（目标权重）
   -> settings.gateway_routing_settings
-  -> 主站 GET /api/v1/gateway-routing/runtime（专用令牌鉴权，生效权重）
+  -> control GET /api/v1/gateway-routing/runtime（专用令牌鉴权，生效权重）
   -> Worker ROUTING_CONFIG_URL + ROUTING_CONFIG_TOKEN（15 秒短缓存）
   -> 新建 Responses 请求按生效权重选一个 origin
 ```
@@ -860,7 +860,8 @@ POST 仍只发送一次，不能用 POST 自动重试代替摘流。
 必须用 Wrangler secret 配置同值的 `ROUTING_CONFIG_TOKEN`。令牌不得写进
 `wrangler.toml`、Git、日志或管理页面。部署前使用请求头
 `X-Gateway-Routing-Token` 直连 control origin 验证，未配置时接口返回 404，令牌错误时
-返回 401。
+返回 401。`control-origin` 只对这个精确 GET location 覆盖为允许任意来源访问，鉴权由
+随机令牌承担；health、Responses 和其他路径继续保持原来源白名单或 404。
 
 动态发布后，普通节点故障应在系统设置中把对应目标权重改为 `0`；只有 control API 和
 上一份 Worker 缓存同时不可用时，才把静态兜底变量改为 `0` 并重新部署 Worker。全量
