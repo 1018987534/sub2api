@@ -1,4 +1,8 @@
 services:
+  sub2api:
+    volumes:
+      - ${SUB2API_DATA_PATH:-./data}:/app/data
+      - ${SUB2API_BINARY_PATH:?SUB2API_BINARY_PATH is required}:/app/sub2api:ro
   postgres:
     ports:
       - "${WIREGUARD_BIND_IP:-10.20.0.1}:5432:5432"

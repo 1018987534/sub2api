@@ -445,6 +445,10 @@ const (
 	// anthropic-beta header.
 	SettingKeyOpenAIFastPolicySettings = "openai_fast_policy_settings"
 
+	// GatewayRoutingSettings stores the control-plane node weights and traffic
+	// protection policy consumed by the edge Responses dispatcher.
+	SettingKeyGatewayRoutingSettings = "gateway_routing_settings"
+
 	// =========================
 	// Claude Code Version Check
 	// =========================

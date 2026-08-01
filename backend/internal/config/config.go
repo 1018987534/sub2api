@@ -68,45 +68,46 @@ const (
 const DefaultUpstreamResponseReadMaxBytes int64 = 128 * 1024 * 1024
 
 type Config struct {
-	Server                  ServerConfig                  `mapstructure:"server"`
-	Log                     LogConfig                     `mapstructure:"log"`
-	CORS                    CORSConfig                    `mapstructure:"cors"`
-	Security                SecurityConfig                `mapstructure:"security"`
-	Billing                 BillingConfig                 `mapstructure:"billing"`
-	Turnstile               TurnstileConfig               `mapstructure:"turnstile"`
-	Database                DatabaseConfig                `mapstructure:"database"`
-	Redis                   RedisConfig                   `mapstructure:"redis"`
-	Ops                     OpsConfig                     `mapstructure:"ops"`
-	JWT                     JWTConfig                     `mapstructure:"jwt"`
-	Totp                    TotpConfig                    `mapstructure:"totp"`
-	WebAuthn                WebAuthnConfig                `mapstructure:"webauthn"`
-	LinuxDo                 LinuxDoConnectConfig          `mapstructure:"linuxdo_connect"`
-	WeChat                  WeChatConnectConfig           `mapstructure:"wechat_connect"`
-	OIDC                    OIDCConnectConfig             `mapstructure:"oidc_connect"`
-	DingTalk                DingTalkConnectConfig         `mapstructure:"dingtalk_connect"`
-	GitHubOAuth             EmailOAuthProviderConfig      `mapstructure:"github_oauth"`
-	GoogleOAuth             EmailOAuthProviderConfig      `mapstructure:"google_oauth"`
-	Default                 DefaultConfig                 `mapstructure:"default"`
-	RateLimit               RateLimitConfig               `mapstructure:"rate_limit"`
-	Pricing                 PricingConfig                 `mapstructure:"pricing"`
-	Gateway                 GatewayConfig                 `mapstructure:"gateway"`
-	APIKeyAuth              APIKeyAuthCacheConfig         `mapstructure:"api_key_auth_cache"`
-	SubscriptionCache       SubscriptionCacheConfig       `mapstructure:"subscription_cache"`
-	SubscriptionMaintenance SubscriptionMaintenanceConfig `mapstructure:"subscription_maintenance"`
-	Dashboard               DashboardCacheConfig          `mapstructure:"dashboard_cache"`
-	DashboardAgg            DashboardAggregationConfig    `mapstructure:"dashboard_aggregation"`
-	UsageCleanup            UsageCleanupConfig            `mapstructure:"usage_cleanup"`
-	Concurrency             ConcurrencyConfig             `mapstructure:"concurrency"`
-	TokenRefresh            TokenRefreshConfig            `mapstructure:"token_refresh"`
-	RunMode                 string                        `mapstructure:"run_mode" yaml:"run_mode"`
-	InstanceRole            string                        `mapstructure:"instance_role" yaml:"instance_role"`
-	InstanceID              string                        `mapstructure:"instance_id" yaml:"instance_id"`
-	Timezone                string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
-	Gemini                  GeminiConfig                  `mapstructure:"gemini"`
-	Update                  UpdateConfig                  `mapstructure:"update"`
-	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
-	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
-	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
+	Server                     ServerConfig                  `mapstructure:"server"`
+	Log                        LogConfig                     `mapstructure:"log"`
+	CORS                       CORSConfig                    `mapstructure:"cors"`
+	Security                   SecurityConfig                `mapstructure:"security"`
+	Billing                    BillingConfig                 `mapstructure:"billing"`
+	Turnstile                  TurnstileConfig               `mapstructure:"turnstile"`
+	Database                   DatabaseConfig                `mapstructure:"database"`
+	Redis                      RedisConfig                   `mapstructure:"redis"`
+	Ops                        OpsConfig                     `mapstructure:"ops"`
+	JWT                        JWTConfig                     `mapstructure:"jwt"`
+	Totp                       TotpConfig                    `mapstructure:"totp"`
+	WebAuthn                   WebAuthnConfig                `mapstructure:"webauthn"`
+	LinuxDo                    LinuxDoConnectConfig          `mapstructure:"linuxdo_connect"`
+	WeChat                     WeChatConnectConfig           `mapstructure:"wechat_connect"`
+	OIDC                       OIDCConnectConfig             `mapstructure:"oidc_connect"`
+	DingTalk                   DingTalkConnectConfig         `mapstructure:"dingtalk_connect"`
+	GitHubOAuth                EmailOAuthProviderConfig      `mapstructure:"github_oauth"`
+	GoogleOAuth                EmailOAuthProviderConfig      `mapstructure:"google_oauth"`
+	Default                    DefaultConfig                 `mapstructure:"default"`
+	RateLimit                  RateLimitConfig               `mapstructure:"rate_limit"`
+	Pricing                    PricingConfig                 `mapstructure:"pricing"`
+	Gateway                    GatewayConfig                 `mapstructure:"gateway"`
+	APIKeyAuth                 APIKeyAuthCacheConfig         `mapstructure:"api_key_auth_cache"`
+	SubscriptionCache          SubscriptionCacheConfig       `mapstructure:"subscription_cache"`
+	SubscriptionMaintenance    SubscriptionMaintenanceConfig `mapstructure:"subscription_maintenance"`
+	Dashboard                  DashboardCacheConfig          `mapstructure:"dashboard_cache"`
+	DashboardAgg               DashboardAggregationConfig    `mapstructure:"dashboard_aggregation"`
+	UsageCleanup               UsageCleanupConfig            `mapstructure:"usage_cleanup"`
+	Concurrency                ConcurrencyConfig             `mapstructure:"concurrency"`
+	TokenRefresh               TokenRefreshConfig            `mapstructure:"token_refresh"`
+	RunMode                    string                        `mapstructure:"run_mode" yaml:"run_mode"`
+	InstanceRole               string                        `mapstructure:"instance_role" yaml:"instance_role"`
+	InstanceID                 string                        `mapstructure:"instance_id" yaml:"instance_id"`
+	GatewayRoutingRuntimeToken string                        `mapstructure:"gateway_routing_runtime_token" yaml:"gateway_routing_runtime_token"`
+	Timezone                   string                        `mapstructure:"timezone"` // e.g. "Asia/Shanghai", "UTC"
+	Gemini                     GeminiConfig                  `mapstructure:"gemini"`
+	Update                     UpdateConfig                  `mapstructure:"update"`
+	Idempotency                IdempotencyConfig             `mapstructure:"idempotency"`
+	BatchImage                 BatchImageConfig              `mapstructure:"batch_image"`
+	ImageStorage               ImageStorageConfig            `mapstructure:"image_storage"`
 }
 
 type LogConfig struct {
@@ -1880,6 +1881,7 @@ func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
 	viper.SetDefault("instance_role", InstanceRoleControl)
 	viper.SetDefault("instance_id", "")
+	viper.SetDefault("gateway_routing_runtime_token", "")
 
 	// Server
 	viper.SetDefault("server.host", "0.0.0.0")
@@ -2568,6 +2570,11 @@ func (c *Config) Validate() error {
 	if len([]byte(jwtSecret)) < 32 {
 		return fmt.Errorf("jwt.secret must be at least 32 bytes")
 	}
+	runtimeToken := strings.TrimSpace(c.GatewayRoutingRuntimeToken)
+	if runtimeToken != "" && len([]byte(runtimeToken)) < 32 {
+		return fmt.Errorf("gateway_routing_runtime_token must be at least 32 bytes when configured")
+	}
+	c.GatewayRoutingRuntimeToken = runtimeToken
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":
 	case "":

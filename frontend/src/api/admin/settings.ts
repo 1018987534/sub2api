@@ -1201,6 +1201,64 @@ export async function updateOverloadCooldownSettings(
   return data;
 }
 
+// ==================== Gateway Routing Settings ====================
+
+export interface GatewayRoutingNodeSettings {
+  id: string;
+  origin: string;
+  target_weight: number;
+}
+
+export interface GatewayRoutingSettings {
+  monitor_url: string;
+  traffic_protection_enabled: boolean;
+  traffic_threshold_percent: number;
+  nodes: GatewayRoutingNodeSettings[];
+}
+
+export interface GatewayRoutingNodeRuntime extends GatewayRoutingNodeSettings {
+  effective_weight: number;
+  auto_disabled: boolean;
+  status: "active" | "manual_disabled" | "auto_disabled" | "unlimited" | "monitor_stale";
+  traffic_limit_bytes: number;
+  traffic_used_bytes: number;
+  traffic_usage_percent: number | null;
+  traffic_limit_type?: string;
+  unlimited: boolean;
+  monitor_stale: boolean;
+  monitor_sample_at?: string;
+}
+
+export interface GatewayRoutingRuntime {
+  generated_at: string;
+  monitor_checked_at: string;
+  monitor_stale: boolean;
+  monitor_error?: string;
+  nodes: GatewayRoutingNodeRuntime[];
+}
+
+export interface GatewayRoutingAdminResponse {
+  settings: GatewayRoutingSettings;
+  runtime: GatewayRoutingRuntime;
+}
+
+export async function getGatewayRoutingSettings(): Promise<GatewayRoutingAdminResponse> {
+  const { data } = await apiClient.get<GatewayRoutingAdminResponse>(
+    "/admin/settings/gateway-routing",
+  );
+  return data;
+}
+
+export async function updateGatewayRoutingSettings(
+  settings: GatewayRoutingSettings,
+): Promise<GatewayRoutingAdminResponse> {
+  const { data } = await apiClient.put<GatewayRoutingAdminResponse>(
+    "/admin/settings/gateway-routing",
+    settings,
+  );
+  return data;
+}
+
 // ==================== 429 Rate Limit Cooldown Settings ====================
 
 export interface RateLimit429CooldownSettings {
@@ -1482,6 +1540,8 @@ export const settingsAPI = {
   deleteAdminApiKey,
   getOverloadCooldownSettings,
   updateOverloadCooldownSettings,
+  getGatewayRoutingSettings,
+  updateGatewayRoutingSettings,
   getRateLimit429CooldownSettings,
   updateRateLimit429CooldownSettings,
   getPanelRateLimitSettings,

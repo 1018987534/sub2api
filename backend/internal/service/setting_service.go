@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"sync/atomic"
 
@@ -81,6 +82,12 @@ type SettingService struct {
 	// instance owns its own cache, no shared package-level state.
 	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
 	openAIQuotaAutoPauseSettingsSF    singleflight.Group
+
+	// gatewayRoutingRuntimeCache holds the last monitor-backed routing result.
+	// It is deliberately per-service so tests and multiple processes do not share state.
+	gatewayRoutingRuntimeCache atomic.Value // *cachedGatewayRoutingRuntime
+	gatewayRoutingRuntimeSF    singleflight.Group
+	gatewayRoutingHTTPClient   *http.Client
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）

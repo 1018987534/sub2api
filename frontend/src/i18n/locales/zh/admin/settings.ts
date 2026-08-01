@@ -994,6 +994,34 @@ export default {
         saved: '过载冷却设置保存成功',
         saveFailed: '保存过载冷却设置失败'
       },
+      gatewayRouting: {
+        title: '多节点 Responses 分流',
+        description: '直接调整各节点目标权重，并根据监控流量自动计算当前生效权重',
+        refresh: '刷新运行态',
+        trafficProtection: '流量自动保护',
+        trafficProtectionHint: '达到阈值时只把生效权重降为 0，保留管理员设置的目标权重',
+        threshold: '自动摘流阈值',
+        monitorUrl: '监控数据地址',
+        node: '节点',
+        targetWeight: '目标权重',
+        effectiveWeight: '生效权重',
+        traffic: '套餐流量',
+        status: '状态',
+        weightHint: '权重按比例计算，不要求相加等于 100；例如 5、1、3、1 即 50%、10%、30%、10%。',
+        monitorStale: '监控数据不可用或已过期，当前保留上一份有效结果，不执行新的自动摘流。',
+        unlimited: '不限流量',
+        dataStale: '数据过期',
+        statuses: {
+          active: '分流中',
+          unlimited: '分流中 · 不限流量',
+          auto_disabled: '流量保护已摘流',
+          manual_disabled: '目标权重为 0',
+          monitor_stale: '监控数据过期'
+        },
+        saved: '节点分流设置已保存',
+        loadFailed: '加载节点分流设置失败',
+        saveFailed: '保存节点分流设置失败'
+      },
       rateLimit429Cooldown: {
         title: '429 默认回避',
         description: '配置上游返回 429 且没有明确重置时间时的默认账号回避策略',

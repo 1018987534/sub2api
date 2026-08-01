@@ -49,6 +49,23 @@ func TestLoadRedisUsernameFromEnvironment(t *testing.T) {
 	require.Equal(t, "app-user", cfg.Redis.Username)
 }
 
+func TestLoadGatewayRoutingRuntimeTokenFromEnvironment(t *testing.T) {
+	t.Run("accepts a strong token", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("GATEWAY_ROUTING_RUNTIME_TOKEN", strings.Repeat("r", 32))
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, strings.Repeat("r", 32), cfg.GatewayRoutingRuntimeToken)
+	})
+
+	t.Run("rejects a short token", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("GATEWAY_ROUTING_RUNTIME_TOKEN", "short")
+		_, err := Load()
+		require.ErrorContains(t, err, "gateway_routing_runtime_token must be at least 32 bytes")
+	})
+}
+
 func TestLoadHTTPIngressSafetyDefaults(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	cfg, err := Load()

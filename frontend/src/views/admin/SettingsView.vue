@@ -203,6 +203,174 @@
 
         <!-- Tab: Gateway -->
         <div v-show="activeTab === 'gateway'" class="space-y-6">
+          <!-- Multi-node Responses routing -->
+          <div class="card">
+            <div
+              class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+            >
+              <div>
+                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                  {{ t("admin.settings.gatewayRouting.title") }}
+                </h2>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                  {{ t("admin.settings.gatewayRouting.description") }}
+                </p>
+              </div>
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                :disabled="gatewayRoutingLoading"
+                :title="t('admin.settings.gatewayRouting.refresh')"
+                @click="loadGatewayRoutingSettings"
+              >
+                <Icon
+                  name="refresh"
+                  size="sm"
+                  :class="gatewayRoutingLoading ? 'animate-spin' : ''"
+                />
+                <span>{{ t("admin.settings.gatewayRouting.refresh") }}</span>
+              </button>
+            </div>
+
+            <div class="space-y-5 p-6">
+              <div
+                v-if="gatewayRoutingLoading && !gatewayRoutingRuntime"
+                class="flex items-center gap-2 text-gray-500"
+              >
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
+                ></div>
+                {{ t("common.loading") }}
+              </div>
+
+              <template v-else>
+                <div
+                  v-if="gatewayRoutingRuntime?.monitor_stale"
+                  class="flex items-start gap-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300"
+                >
+                  <Icon name="exclamationTriangle" size="sm" class="mt-0.5 shrink-0" />
+                  <span>{{ t("admin.settings.gatewayRouting.monitorStale") }}</span>
+                </div>
+
+                <div class="grid gap-5 md:grid-cols-2">
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <label class="font-medium text-gray-900 dark:text-white">
+                        {{ t("admin.settings.gatewayRouting.trafficProtection") }}
+                      </label>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.gatewayRouting.trafficProtectionHint") }}
+                      </p>
+                    </div>
+                    <Toggle v-model="gatewayRoutingForm.traffic_protection_enabled" />
+                  </div>
+
+                  <div>
+                    <label
+                      class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                    >
+                      {{ t("admin.settings.gatewayRouting.threshold") }}
+                    </label>
+                    <div class="flex items-center gap-2">
+                      <input
+                        v-model.number="gatewayRoutingForm.traffic_threshold_percent"
+                        type="number"
+                        min="1"
+                        max="100"
+                        step="0.1"
+                        class="input w-28"
+                        :disabled="!gatewayRoutingForm.traffic_protection_enabled"
+                      />
+                      <span class="text-sm text-gray-500">%</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{ t("admin.settings.gatewayRouting.monitorUrl") }}
+                  </label>
+                  <input
+                    v-model.trim="gatewayRoutingForm.monitor_url"
+                    type="url"
+                    class="input max-w-xl font-mono text-sm"
+                  />
+                </div>
+
+                <div class="overflow-x-auto rounded border border-gray-200 dark:border-dark-700">
+                  <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
+                    <thead class="bg-gray-50 dark:bg-dark-800">
+                      <tr>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                          {{ t("admin.settings.gatewayRouting.node") }}
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                          {{ t("admin.settings.gatewayRouting.targetWeight") }}
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                          {{ t("admin.settings.gatewayRouting.effectiveWeight") }}
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                          {{ t("admin.settings.gatewayRouting.traffic") }}
+                        </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                          {{ t("admin.settings.gatewayRouting.status") }}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-700 dark:bg-dark-900">
+                      <tr v-for="node in gatewayRoutingForm.nodes" :key="node.id">
+                        <td class="px-4 py-3">
+                          <div class="font-medium text-gray-900 dark:text-white">{{ node.id }}</div>
+                          <div class="max-w-xs truncate font-mono text-xs text-gray-400" :title="node.origin">
+                            {{ node.origin }}
+                          </div>
+                        </td>
+                        <td class="px-4 py-3">
+                          <input
+                            v-model.number="node.target_weight"
+                            type="number"
+                            min="0"
+                            max="10000"
+                            step="1"
+                            class="input w-24"
+                          />
+                        </td>
+                        <td class="px-4 py-3 font-mono text-sm font-semibold text-gray-800 dark:text-gray-100">
+                          {{ gatewayRoutingRuntimeByID[node.id]?.effective_weight ?? "-" }}
+                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
+                          {{ gatewayRoutingTrafficLabel(node.id) }}
+                        </td>
+                        <td class="px-4 py-3">
+                          <span :class="gatewayRoutingStatusClass(node.id)">
+                            {{ gatewayRoutingStatusLabel(node.id) }}
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.gatewayRouting.weightHint") }}
+                  </p>
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    :disabled="gatewayRoutingSaving"
+                    @click="saveGatewayRoutingSettings"
+                  >
+                    {{ gatewayRoutingSaving ? t("common.saving") : t("common.save") }}
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Overload Cooldown (529) Settings -->
           <div class="card">
             <div
@@ -8105,6 +8273,9 @@ import type {
   WebSearchEmulationConfig,
   WebSearchProviderConfig,
   WebSearchTestResult,
+  GatewayRoutingSettings,
+  GatewayRoutingRuntime,
+  GatewayRoutingNodeRuntime,
 } from "@/api/admin/settings";
 import type {
   AdminGroup,
@@ -8287,6 +8458,22 @@ const ollamaCloudUsageForm = reactive({
   interval_minutes: 60,
   debounce_minutes: 1,
 });
+
+const gatewayRoutingLoading = ref(true);
+const gatewayRoutingSaving = ref(false);
+const gatewayRoutingForm = reactive<GatewayRoutingSettings>({
+  monitor_url: "",
+  traffic_protection_enabled: true,
+  traffic_threshold_percent: 90,
+  nodes: [],
+});
+const gatewayRoutingRuntime = ref<GatewayRoutingRuntime | null>(null);
+const gatewayRoutingRuntimeByID = computed<Record<string, GatewayRoutingNodeRuntime>>(
+  () =>
+    Object.fromEntries(
+      (gatewayRoutingRuntime.value?.nodes || []).map((node) => [node.id, node]),
+    ),
+);
 
 // Overload Cooldown (529) 状态
 const overloadCooldownLoading = ref(true);
@@ -10988,6 +11175,102 @@ async function loadOverloadCooldownSettings() {
   }
 }
 
+function applyGatewayRoutingResponse(response: {
+  settings: GatewayRoutingSettings;
+  runtime: GatewayRoutingRuntime;
+}) {
+  gatewayRoutingForm.monitor_url = response.settings.monitor_url;
+  gatewayRoutingForm.traffic_protection_enabled =
+    response.settings.traffic_protection_enabled;
+  gatewayRoutingForm.traffic_threshold_percent =
+    response.settings.traffic_threshold_percent;
+  gatewayRoutingForm.nodes = response.settings.nodes.map((node) => ({ ...node }));
+  gatewayRoutingRuntime.value = response.runtime;
+}
+
+async function loadGatewayRoutingSettings() {
+  gatewayRoutingLoading.value = true;
+  try {
+    applyGatewayRoutingResponse(
+      await adminAPI.settings.getGatewayRoutingSettings(),
+    );
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.gatewayRouting.loadFailed"),
+      ),
+    );
+  } finally {
+    gatewayRoutingLoading.value = false;
+  }
+}
+
+async function saveGatewayRoutingSettings() {
+  gatewayRoutingSaving.value = true;
+  try {
+    applyGatewayRoutingResponse(
+      await adminAPI.settings.updateGatewayRoutingSettings({
+        monitor_url: gatewayRoutingForm.monitor_url,
+        traffic_protection_enabled:
+          gatewayRoutingForm.traffic_protection_enabled,
+        traffic_threshold_percent:
+          gatewayRoutingForm.traffic_threshold_percent,
+        nodes: gatewayRoutingForm.nodes.map((node) => ({ ...node })),
+      }),
+    );
+    appStore.showSuccess(t("admin.settings.gatewayRouting.saved"));
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(
+        error,
+        t("admin.settings.gatewayRouting.saveFailed"),
+      ),
+    );
+  } finally {
+    gatewayRoutingSaving.value = false;
+  }
+}
+
+function formatGatewayRoutingBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  const exponent = Math.min(
+    Math.floor(Math.log(value) / Math.log(1024)),
+    units.length - 1,
+  );
+  return `${(value / 1024 ** exponent).toFixed(exponent >= 3 ? 2 : 1)} ${units[exponent]}`;
+}
+
+function gatewayRoutingTrafficLabel(nodeID: string): string {
+  const node = gatewayRoutingRuntimeByID.value[nodeID];
+  if (!node) return "-";
+  if (node.unlimited) return t("admin.settings.gatewayRouting.unlimited");
+  if (node.monitor_stale || node.traffic_usage_percent == null) {
+    return t("admin.settings.gatewayRouting.dataStale");
+  }
+  return `${formatGatewayRoutingBytes(node.traffic_used_bytes)} / ${formatGatewayRoutingBytes(
+    node.traffic_limit_bytes,
+  )} (${node.traffic_usage_percent.toFixed(2)}%)`;
+}
+
+function gatewayRoutingStatusLabel(nodeID: string): string {
+  const status = gatewayRoutingRuntimeByID.value[nodeID]?.status || "monitor_stale";
+  return t(`admin.settings.gatewayRouting.statuses.${status}`);
+}
+
+function gatewayRoutingStatusClass(nodeID: string): string {
+  const status = gatewayRoutingRuntimeByID.value[nodeID]?.status;
+  const base = "inline-flex whitespace-nowrap rounded px-2 py-1 text-xs font-medium";
+  if (status === "auto_disabled" || status === "manual_disabled") {
+    return `${base} bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300`;
+  }
+  if (status === "monitor_stale") {
+    return `${base} bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300`;
+  }
+  return `${base} bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300`;
+}
+
 async function saveOverloadCooldownSettings() {
   overloadCooldownSaving.value = true;
   try {
@@ -11710,6 +11993,7 @@ onMounted(() => {
   loadAdminApiKey();
   loadUpstreamBillingProbeSettings();
   loadOllamaCloudUsageSettings();
+  loadGatewayRoutingSettings();
   loadOverloadCooldownSettings();
   loadRateLimit429CooldownSettings();
   loadPanelRateLimitSettings();

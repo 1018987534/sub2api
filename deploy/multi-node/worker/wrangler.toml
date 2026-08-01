@@ -3,8 +3,25 @@ main = "responses-dispatcher.mjs"
 compatibility_date = "2026-07-30"
 workers_dev = false
 account_id = "3e1de9bb31a7b222215fcec006ccd468"
+routes = [
+  { pattern = "xiaohondou.com/v1/responses*", zone_name = "xiaohondou.com" },
+  { pattern = "xiaohondou.com/responses*", zone_name = "xiaohondou.com" },
+  { pattern = "xiaohondou.com/backend-api/codex/responses*", zone_name = "xiaohondou.com" },
+  { pattern = "nideyiyi.com/v1/responses*", zone_name = "nideyiyi.com" },
+  { pattern = "nideyiyi.com/responses*", zone_name = "nideyiyi.com" },
+  { pattern = "nideyiyi.com/backend-api/codex/responses*", zone_name = "nideyiyi.com" },
+  { pattern = "api.nideyiyi.com/v1/responses*", zone_name = "nideyiyi.com" },
+  { pattern = "api.nideyiyi.com/responses*", zone_name = "nideyiyi.com" },
+  { pattern = "api.nideyiyi.com/backend-api/codex/responses*", zone_name = "nideyiyi.com" },
+]
 
 [vars]
 CONTROL_ORIGIN = "https://control-origin.xiaohondou.com"
 GATEWAY_ORIGIN = "https://gateway-origin.xiaohondou.com"
 GATEWAY_PERCENT = "10"
+GATEWAY154_ORIGIN = "https://gateway154-origin.xiaohondou.com"
+GATEWAY154_PERCENT = "30"
+GATEWAY2_ORIGIN = "https://gateway2-origin.xiaohondou.com"
+GATEWAY2_PERCENT = "10"
+ROUTING_CONFIG_URL = "https://control-origin.xiaohondou.com/api/v1/gateway-routing/runtime"
+ROUTING_CONFIG_TTL_SECONDS = "15"

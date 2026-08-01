@@ -1000,6 +1000,34 @@ export default {
         saved: 'Overload cooldown settings saved',
         saveFailed: 'Failed to save overload cooldown settings'
       },
+      gatewayRouting: {
+        title: 'Multi-node Responses Routing',
+        description: 'Adjust target node weights and derive effective weights from live traffic monitoring',
+        refresh: 'Refresh runtime',
+        trafficProtection: 'Automatic traffic protection',
+        trafficProtectionHint: 'Set only the effective weight to zero at the threshold while preserving the administrator target',
+        threshold: 'Automatic removal threshold',
+        monitorUrl: 'Monitoring data URL',
+        node: 'Node',
+        targetWeight: 'Target weight',
+        effectiveWeight: 'Effective weight',
+        traffic: 'Plan traffic',
+        status: 'Status',
+        weightHint: 'Weights are ratios and do not need to total 100. For example, 5, 1, 3, 1 means 50%, 10%, 30%, 10%.',
+        monitorStale: 'Monitoring data is unavailable or stale. The last valid result is retained and no new automatic removal is applied.',
+        unlimited: 'Unlimited',
+        dataStale: 'Data stale',
+        statuses: {
+          active: 'Routing',
+          unlimited: 'Routing · unlimited',
+          auto_disabled: 'Removed by traffic protection',
+          manual_disabled: 'Target weight is zero',
+          monitor_stale: 'Monitoring data stale'
+        },
+        saved: 'Node routing settings saved',
+        loadFailed: 'Failed to load node routing settings',
+        saveFailed: 'Failed to save node routing settings'
+      },
       rateLimit429Cooldown: {
         title: '429 Default Cooldown',
         description: 'Configure the default account cooldown when upstream returns 429 without an explicit reset time',
