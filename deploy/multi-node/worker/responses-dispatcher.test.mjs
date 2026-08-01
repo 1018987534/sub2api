@@ -10,13 +10,14 @@ import {
 } from "./responses-dispatcher.mjs";
 
 const env = {
-  CONTROL_ORIGIN: "https://control.example",
-  GATEWAY_ORIGIN: "https://old.example",
-  GATEWAY_PERCENT: "10",
-  GATEWAY154_ORIGIN: "https://yt.example",
-  GATEWAY154_PERCENT: "30",
-  GATEWAY2_ORIGIN: "https://new.example",
-  GATEWAY2_PERCENT: "10",
+  BWG_US_01_ORIGIN: "https://control.example",
+  BWG_US_01_PERCENT: "50",
+  VMISS_US_01_ORIGIN: "https://old.example",
+  VMISS_US_01_PERCENT: "10",
+  YT_US_01_ORIGIN: "https://yt.example",
+  YT_US_01_PERCENT: "30",
+  VMISS_US_02_ORIGIN: "https://new.example",
+  VMISS_US_02_PERCENT: "10",
 };
 
 function originsFor(randomValue, nodes = null) {
@@ -162,4 +163,17 @@ test("fetches runtime weights and keeps the last good value on refresh failure",
 test("falls back to static nodes when no runtime endpoint is configured", async () => {
   resetRoutingConfigCache();
   assert.deepEqual(await fetchRoutingNodes(env), staticRoutingNodes(env));
+});
+
+test("reads the legacy static variable names during migration", () => {
+  const legacyEnv = {
+    CONTROL_ORIGIN: "https://control.example",
+    GATEWAY_ORIGIN: "https://old.example",
+    GATEWAY_PERCENT: "10",
+    GATEWAY154_ORIGIN: "https://yt.example",
+    GATEWAY154_PERCENT: "30",
+    GATEWAY2_ORIGIN: "https://new.example",
+    GATEWAY2_PERCENT: "10",
+  };
+  assert.deepEqual(staticRoutingNodes(legacyEnv), staticRoutingNodes(env));
 });

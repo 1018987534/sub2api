@@ -10,6 +10,8 @@ const {
   getWebSearchEmulationConfig,
   updateWebSearchEmulationConfig,
   getAdminApiKey,
+  getGatewayRoutingSettings,
+  updateGatewayRoutingSettings,
   getOverloadCooldownSettings,
   getRateLimit429CooldownSettings,
   updateRateLimit429CooldownSettings,
@@ -38,6 +40,8 @@ const {
   getWebSearchEmulationConfig: vi.fn(),
   updateWebSearchEmulationConfig: vi.fn(),
   getAdminApiKey: vi.fn(),
+  getGatewayRoutingSettings: vi.fn(),
+  updateGatewayRoutingSettings: vi.fn(),
   getOverloadCooldownSettings: vi.fn(),
   getRateLimit429CooldownSettings: vi.fn(),
   updateRateLimit429CooldownSettings: vi.fn(),
@@ -85,6 +89,8 @@ vi.mock("@/api", () => ({
       getWebSearchEmulationConfig,
       updateWebSearchEmulationConfig,
       getAdminApiKey,
+      getGatewayRoutingSettings,
+      updateGatewayRoutingSettings,
       getOverloadCooldownSettings,
       getRateLimit429CooldownSettings,
       updateRateLimit429CooldownSettings,
@@ -598,6 +604,8 @@ describe("admin SettingsView payment visible method controls", () => {
     getOverloadCooldownSettings.mockReset();
     getRateLimit429CooldownSettings.mockReset();
     updateRateLimit429CooldownSettings.mockReset();
+    getGatewayRoutingSettings.mockReset();
+    updateGatewayRoutingSettings.mockReset();
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
@@ -634,6 +642,49 @@ describe("admin SettingsView payment visible method controls", () => {
       exists: false,
       masked_key: "",
     });
+    getGatewayRoutingSettings.mockResolvedValue({
+      settings: {
+        monitor_url: "https://check.example",
+        traffic_protection_enabled: true,
+        traffic_threshold_percent: 90,
+        nodes: [
+          { id: "bwg-us-01", origin: "https://control.example", target_weight: 50 },
+          { id: "vmiss-us-01", origin: "https://gateway.example", target_weight: 10 },
+          { id: "yt-us-01", origin: "https://yt.example", target_weight: 30 },
+          { id: "vmiss-us-02", origin: "https://gateway-2.example", target_weight: 10 },
+        ],
+      },
+      runtime: {
+        generated_at: "2026-08-01T00:00:00Z",
+        monitor_checked_at: "2026-08-01T00:00:00Z",
+        monitor_stale: false,
+        nodes: [
+          { id: "bwg-us-01", origin: "https://control.example", target_weight: 50, effective_weight: 50, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
+          { id: "vmiss-us-01", origin: "https://gateway.example", target_weight: 10, effective_weight: 10, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
+          { id: "yt-us-01", origin: "https://yt.example", target_weight: 30, effective_weight: 30, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
+          { id: "vmiss-us-02", origin: "https://gateway-2.example", target_weight: 10, effective_weight: 10, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
+        ],
+      },
+    });
+    updateGatewayRoutingSettings.mockImplementation(async (payload) => ({
+      settings: payload,
+      runtime: {
+        generated_at: "2026-08-01T00:00:00Z",
+        monitor_checked_at: "2026-08-01T00:00:00Z",
+        monitor_stale: false,
+        nodes: payload.nodes.map((node: { id: string; origin: string; target_weight: number }) => ({
+          ...node,
+          effective_weight: node.target_weight,
+          auto_disabled: false,
+          status: "active",
+          traffic_limit_bytes: 0,
+          traffic_used_bytes: 0,
+          traffic_usage_percent: null,
+          unlimited: true,
+          monitor_stale: false,
+        })),
+      },
+    }));
     getOverloadCooldownSettings.mockResolvedValue({
       enabled: true,
       cooldown_minutes: 10,
@@ -1698,5 +1749,36 @@ describe("admin SettingsView platform quota matrix", () => {
     const quotas = payload["default_platform_quotas"] as Record<string, Record<string, unknown>>;
     // 不管输入是什么，提交值应为 null（而非 "" 或 NaN）
     expect(quotas["anthropic"]?.["daily"]).toBe(null);
+  });
+
+  it("网关目标比例显示百分号并强制合计为 100%", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const gatewayTable = wrapper
+      .findAll("table")
+      .find((table) => table.text().includes("bwg-us-01"));
+    expect(gatewayTable).toBeDefined();
+    const targetInputs = gatewayTable!.findAll('input[type="number"]');
+    expect(targetInputs).toHaveLength(4);
+    expect(wrapper.text()).toContain("admin.settings.gatewayRouting.targetTotal");
+    expect(wrapper.text()).toContain("100%");
+
+    await targetInputs[0].setValue("49");
+    await flushPromises();
+    expect(wrapper.text()).toContain("99%");
+    expect(wrapper.text()).toContain("admin.settings.gatewayRouting.targetTotalError");
+    const saveButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("common.save") && button.attributes("disabled") !== undefined);
+    expect(saveButton).toBeDefined();
+
+    await targetInputs[0].setValue("50");
+    await flushPromises();
+    expect(saveButton!.attributes("disabled")).toBeUndefined();
+    await saveButton!.trigger("click");
+    await flushPromises();
+    expect(updateGatewayRoutingSettings).toHaveBeenCalled();
   });
 });

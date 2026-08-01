@@ -16,12 +16,13 @@ routes = [
 ]
 
 [vars]
-CONTROL_ORIGIN = "https://control-origin.xiaohondou.com"
-GATEWAY_ORIGIN = "https://gateway-origin.xiaohondou.com"
-GATEWAY_PERCENT = "10"
-GATEWAY154_ORIGIN = "https://gateway154-origin.xiaohondou.com"
-GATEWAY154_PERCENT = "30"
-GATEWAY2_ORIGIN = "https://gateway2-origin.xiaohondou.com"
-GATEWAY2_PERCENT = "10"
+BWG_US_01_ORIGIN = "https://control-origin.xiaohondou.com"
+BWG_US_01_PERCENT = "50"
+VMISS_US_01_ORIGIN = "https://gateway-origin.xiaohondou.com"
+VMISS_US_01_PERCENT = "10"
+YT_US_01_ORIGIN = "https://gateway154-origin.xiaohondou.com"
+YT_US_01_PERCENT = "30"
+VMISS_US_02_ORIGIN = "https://gateway2-origin.xiaohondou.com"
+VMISS_US_02_PERCENT = "10"
 ROUTING_CONFIG_URL = "https://control-origin.xiaohondou.com/api/v1/gateway-routing/runtime"
 ROUTING_CONFIG_TTL_SECONDS = "15"

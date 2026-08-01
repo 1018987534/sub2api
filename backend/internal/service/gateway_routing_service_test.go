@@ -88,7 +88,7 @@ func TestGatewayRoutingSettingsDefaultsAndValidation(t *testing.T) {
 
 	settings, err := service.GetGatewayRoutingSettings(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []int{5, 1, 3, 1}, []int{
+	require.Equal(t, []int{50, 10, 30, 10}, []int{
 		settings.Nodes[0].TargetWeight,
 		settings.Nodes[1].TargetWeight,
 		settings.Nodes[2].TargetWeight,
@@ -104,6 +104,25 @@ func TestGatewayRoutingSettingsDefaultsAndValidation(t *testing.T) {
 	settings = DefaultGatewayRoutingSettings()
 	settings.Nodes[1].ID = settings.Nodes[0].ID
 	require.ErrorContains(t, service.SetGatewayRoutingSettings(context.Background(), settings), "duplicated")
+
+	settings = DefaultGatewayRoutingSettings()
+	settings.Nodes[0].TargetWeight--
+	require.ErrorContains(t, service.SetGatewayRoutingSettings(context.Background(), settings), "must total 100%")
+}
+
+func TestGatewayRoutingSettingsMigratesLegacyRatiosOnRead(t *testing.T) {
+	repo := newGatewayRoutingRepoStub()
+	repo.values[SettingKeyGatewayRoutingSettings] = `{"monitor_url":"https://check.example","traffic_protection_enabled":true,"traffic_threshold_percent":90,"nodes":[{"id":"control","origin":"https://control.example","target_weight":5},{"id":"gateway","origin":"https://gateway.example","target_weight":1},{"id":"gateway-154","origin":"https://gateway-154.example","target_weight":3},{"id":"gateway-2","origin":"https://gateway-2.example","target_weight":1}]}`
+	service := NewSettingService(repo, &config.Config{})
+
+	settings, err := service.GetGatewayRoutingSettings(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []int{50, 10, 30, 10}, []int{
+		settings.Nodes[0].TargetWeight,
+		settings.Nodes[1].TargetWeight,
+		settings.Nodes[2].TargetWeight,
+		settings.Nodes[3].TargetWeight,
+	})
 }
 
 func TestGatewayRoutingRuntimeAutoDisablesAtThresholdAndKeepsUnlimitedNode(t *testing.T) {
@@ -138,8 +157,8 @@ func TestGatewayRoutingRuntimeAutoDisablesAtThresholdAndKeepsUnlimitedNode(t *te
 		TrafficProtectionEnabled: true,
 		TrafficThresholdPercent:  90,
 		Nodes: []GatewayRoutingNodeSettings{
-			{ID: "limited", Origin: "https://limited.example", TargetWeight: 5},
-			{ID: "unlimited", Origin: "https://unlimited.example", TargetWeight: 1},
+			{ID: "limited", Origin: "https://limited.example", TargetWeight: 50},
+			{ID: "unlimited", Origin: "https://unlimited.example", TargetWeight: 50},
 		},
 	}
 	require.NoError(t, service.SetGatewayRoutingSettings(context.Background(), settings))
@@ -151,7 +170,7 @@ func TestGatewayRoutingRuntimeAutoDisablesAtThresholdAndKeepsUnlimitedNode(t *te
 	require.True(t, runtime.Nodes[0].AutoDisabled)
 	require.Equal(t, "auto_disabled", runtime.Nodes[0].Status)
 	require.InDelta(t, 95, *runtime.Nodes[0].TrafficUsagePercent, 0.001)
-	require.Equal(t, 1, runtime.Nodes[1].EffectiveWeight)
+	require.Equal(t, 50, runtime.Nodes[1].EffectiveWeight)
 	require.True(t, runtime.Nodes[1].Unlimited)
 	require.Equal(t, "unlimited", runtime.Nodes[1].Status)
 }
@@ -185,7 +204,7 @@ func TestGatewayRoutingRuntimeKeepsLastGoodResultWhenMonitorFails(t *testing.T) 
 		TrafficProtectionEnabled: true,
 		TrafficThresholdPercent:  90,
 		Nodes: []GatewayRoutingNodeSettings{
-			{ID: "node-1", Origin: "https://node-1.example", TargetWeight: 5},
+			{ID: "node-1", Origin: "https://node-1.example", TargetWeight: 100},
 		},
 	}
 	require.NoError(t, service.SetGatewayRoutingSettings(context.Background(), settings))
@@ -231,7 +250,7 @@ func TestGatewayRoutingRuntimeKeepsAutoDisabledNodeOutWhenRecordTurnsStale(t *te
 		TrafficProtectionEnabled: true,
 		TrafficThresholdPercent:  90,
 		Nodes: []GatewayRoutingNodeSettings{
-			{ID: "node-1", Origin: "https://node-1.example", TargetWeight: 5},
+			{ID: "node-1", Origin: "https://node-1.example", TargetWeight: 100},
 		},
 	}
 	require.NoError(t, service.SetGatewayRoutingSettings(context.Background(), settings))
@@ -241,14 +260,14 @@ func TestGatewayRoutingRuntimeKeepsAutoDisabledNodeOutWhenRecordTurnsStale(t *te
 	require.Equal(t, 0, first.Nodes[0].EffectiveWeight)
 
 	failRecords.Store(true)
-	settings.Nodes[0].TargetWeight = 7
+	settings.Nodes[0].TargetWeight = 100
 	require.NoError(t, service.SetGatewayRoutingSettings(context.Background(), settings))
 	second, err := service.GetGatewayRoutingRuntime(context.Background())
 	require.NoError(t, err)
 	require.True(t, second.MonitorStale)
 	require.True(t, second.Nodes[0].MonitorStale)
 	require.True(t, second.Nodes[0].AutoDisabled)
-	require.Equal(t, 7, second.Nodes[0].TargetWeight)
+	require.Equal(t, 100, second.Nodes[0].TargetWeight)
 	require.Equal(t, 0, second.Nodes[0].EffectiveWeight)
 	require.Equal(t, "auto_disabled", second.Nodes[0].Status)
 }

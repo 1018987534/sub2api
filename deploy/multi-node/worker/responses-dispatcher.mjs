@@ -1,6 +1,6 @@
-const DEFAULT_GATEWAY_PERCENT = 10;
-const DEFAULT_GATEWAY154_PERCENT = 0;
-const DEFAULT_GATEWAY2_PERCENT = 0;
+const DEFAULT_VMISS_US_01_PERCENT = 10;
+const DEFAULT_YT_US_01_PERCENT = 0;
+const DEFAULT_VMISS_US_02_PERCENT = 0;
 const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 15;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
 
@@ -15,6 +15,21 @@ function integer(env, key, fallback, min = 0, max = 100) {
   return Math.min(max, Math.max(min, parsed));
 }
 
+function environmentValue(env, key, legacyKey = "") {
+  const value = String(env[key] ?? "").trim();
+  if (value) return value;
+  return legacyKey ? String(env[legacyKey] ?? "").trim() : "";
+}
+
+function environmentInteger(env, key, fallback, legacyKey = "") {
+  const raw = environmentValue(env, key, legacyKey);
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(100, Math.max(0, parsed));
+}
+
 function appendUnique(origins, origin) {
   if (origin && !origins.includes(origin)) {
     origins.push(origin);
@@ -25,29 +40,32 @@ function staticRoutingNodes(env) {
   const gateways = [
     {
       id: "vmiss-us-01",
-      origin: env.GATEWAY_ORIGIN,
-      effective_weight: integer(
+      origin: environmentValue(env, "VMISS_US_01_ORIGIN", "GATEWAY_ORIGIN"),
+      effective_weight: environmentInteger(
         env,
+        "VMISS_US_01_PERCENT",
+        DEFAULT_VMISS_US_01_PERCENT,
         "GATEWAY_PERCENT",
-        DEFAULT_GATEWAY_PERCENT,
       ),
     },
     {
       id: "yt-us-01",
-      origin: env.GATEWAY154_ORIGIN,
-      effective_weight: integer(
+      origin: environmentValue(env, "YT_US_01_ORIGIN", "GATEWAY154_ORIGIN"),
+      effective_weight: environmentInteger(
         env,
+        "YT_US_01_PERCENT",
+        DEFAULT_YT_US_01_PERCENT,
         "GATEWAY154_PERCENT",
-        DEFAULT_GATEWAY154_PERCENT,
       ),
     },
     {
       id: "vmiss-us-02",
-      origin: env.GATEWAY2_ORIGIN,
-      effective_weight: integer(
+      origin: environmentValue(env, "VMISS_US_02_ORIGIN", "GATEWAY2_ORIGIN"),
+      effective_weight: environmentInteger(
         env,
+        "VMISS_US_02_PERCENT",
+        DEFAULT_VMISS_US_02_PERCENT,
         "GATEWAY2_PERCENT",
-        DEFAULT_GATEWAY2_PERCENT,
       ),
     },
   ].filter((node) => node.origin);
@@ -58,8 +76,11 @@ function staticRoutingNodes(env) {
   return [
     {
       id: "bwg-us-01",
-      origin: env.CONTROL_ORIGIN,
-      effective_weight: Math.max(0, 100 - gatewayWeight),
+      origin: environmentValue(env, "BWG_US_01_ORIGIN", "CONTROL_ORIGIN"),
+      effective_weight:
+        environmentValue(env, "BWG_US_01_PERCENT") === ""
+          ? Math.max(0, 100 - gatewayWeight)
+          : environmentInteger(env, "BWG_US_01_PERCENT", 0),
     },
     ...gateways,
   ].filter((node) => node.origin);
@@ -89,7 +110,7 @@ function normalizeRuntimeNodes(payload) {
     }
     seenOrigins.add(origin);
     const weight = Number.parseInt(node?.effective_weight ?? "", 10);
-    if (!Number.isFinite(weight) || weight < 0 || weight > 10000) {
+    if (!Number.isFinite(weight) || weight < 0 || weight > 100) {
       throw new Error("routing runtime returned an invalid weight");
     }
     return {

@@ -329,17 +329,23 @@
                           </div>
                         </td>
                         <td class="px-4 py-3">
-                          <input
-                            v-model.number="node.target_weight"
-                            type="number"
-                            min="0"
-                            max="10000"
-                            step="1"
-                            class="input w-24"
-                          />
+                          <div class="flex items-center gap-2">
+                            <input
+                              v-model.number="node.target_weight"
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="1"
+                              class="input w-24"
+                            />
+                            <span class="text-sm text-gray-500">%</span>
+                          </div>
                         </td>
                         <td class="px-4 py-3 font-mono text-sm font-semibold text-gray-800 dark:text-gray-100">
-                          {{ gatewayRoutingRuntimeByID[node.id]?.effective_weight ?? "-" }}
+                          <template v-if="gatewayRoutingRuntimeByID[node.id]">
+                            {{ gatewayRoutingRuntimeByID[node.id]?.effective_weight }}%
+                          </template>
+                          <template v-else>-</template>
                         </td>
                         <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
                           {{ gatewayRoutingTrafficLabel(node.id) }}
@@ -354,6 +360,20 @@
                   </table>
                 </div>
 
+                <div
+                  class="flex items-center justify-between border-t border-gray-100 pt-4 text-sm dark:border-dark-700"
+                  :class="gatewayRoutingTargetWeightTotal === 100 ? 'text-gray-500 dark:text-gray-400' : 'text-red-600 dark:text-red-400'"
+                  aria-live="polite"
+                >
+                  <span>
+                    {{ t("admin.settings.gatewayRouting.targetTotal") }}
+                    <span v-if="gatewayRoutingTargetWeightTotal !== 100" class="ml-2">
+                      {{ t("admin.settings.gatewayRouting.targetTotalError", { total: gatewayRoutingTargetWeightTotal }) }}
+                    </span>
+                  </span>
+                  <span class="font-mono font-semibold">{{ gatewayRoutingTargetWeightTotal }}%</span>
+                </div>
+
                 <div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4 dark:border-dark-700">
                   <p class="text-xs text-gray-500 dark:text-gray-400">
                     {{ t("admin.settings.gatewayRouting.weightHint") }}
@@ -361,7 +381,7 @@
                   <button
                     type="button"
                     class="btn btn-primary btn-sm"
-                    :disabled="gatewayRoutingSaving"
+                    :disabled="gatewayRoutingSaving || gatewayRoutingTargetWeightTotal !== 100"
                     @click="saveGatewayRoutingSettings"
                   >
                     {{ gatewayRoutingSaving ? t("common.saving") : t("common.save") }}
@@ -8474,6 +8494,12 @@ const gatewayRoutingRuntimeByID = computed<Record<string, GatewayRoutingNodeRunt
       (gatewayRoutingRuntime.value?.nodes || []).map((node) => [node.id, node]),
     ),
 );
+const gatewayRoutingTargetWeightTotal = computed(() =>
+  gatewayRoutingForm.nodes.reduce((total, node) => {
+    const weight = Number(node.target_weight);
+    return total + (Number.isFinite(weight) ? weight : 0);
+  }, 0),
+);
 
 // Overload Cooldown (529) 状态
 const overloadCooldownLoading = ref(true);
@@ -11207,6 +11233,14 @@ async function loadGatewayRoutingSettings() {
 }
 
 async function saveGatewayRoutingSettings() {
+  if (gatewayRoutingTargetWeightTotal.value !== 100) {
+    appStore.showError(
+      t("admin.settings.gatewayRouting.targetTotalError", {
+        total: gatewayRoutingTargetWeightTotal.value,
+      }),
+    );
+    return;
+  }
   gatewayRoutingSaving.value = true;
   try {
     applyGatewayRoutingResponse(

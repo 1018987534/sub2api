@@ -25,12 +25,12 @@ const (
 	gatewayRoutingMonitorStaleAfter       = 15 * time.Minute
 	gatewayRoutingMonitorResponseLimit    = 4 << 20
 	maxGatewayRoutingNodes                = 16
-	maxGatewayRoutingWeight               = 10000
+	maxGatewayRoutingWeight               = 100
 )
 
 var gatewayRoutingNodeIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
 
-// GatewayRoutingSettings is the administrator-owned target configuration.
+// GatewayRoutingSettings is the administrator-owned target percentage configuration.
 // Traffic protection changes only runtime effective weights and never rewrites it.
 type GatewayRoutingSettings struct {
 	MonitorURL               string                       `json:"monitor_url"`
@@ -105,10 +105,10 @@ func DefaultGatewayRoutingSettings() *GatewayRoutingSettings {
 		TrafficProtectionEnabled: true,
 		TrafficThresholdPercent:  defaultGatewayRoutingThresholdPercent,
 		Nodes: []GatewayRoutingNodeSettings{
-			{ID: "bwg-us-01", Origin: "https://control-origin.xiaohondou.com", TargetWeight: 5},
-			{ID: "vmiss-us-01", Origin: "https://gateway-origin.xiaohondou.com", TargetWeight: 1},
-			{ID: "yt-us-01", Origin: "https://gateway154-origin.xiaohondou.com", TargetWeight: 3},
-			{ID: "vmiss-us-02", Origin: "https://gateway2-origin.xiaohondou.com", TargetWeight: 1},
+			{ID: "bwg-us-01", Origin: "https://control-origin.xiaohondou.com", TargetWeight: 50},
+			{ID: "vmiss-us-01", Origin: "https://gateway-origin.xiaohondou.com", TargetWeight: 10},
+			{ID: "yt-us-01", Origin: "https://gateway154-origin.xiaohondou.com", TargetWeight: 30},
+			{ID: "vmiss-us-02", Origin: "https://gateway2-origin.xiaohondou.com", TargetWeight: 10},
 		},
 	}
 }
@@ -130,6 +130,7 @@ func (s *SettingService) GetGatewayRoutingSettings(ctx context.Context) (*Gatewa
 			return nil, fmt.Errorf("parse gateway routing settings: %w", err)
 		}
 	}
+	normalizeStoredGatewayRoutingWeights(settings)
 	if err := validateGatewayRoutingSettings(settings); err != nil {
 		return nil, fmt.Errorf("stored gateway routing settings are invalid: %w", err)
 	}
@@ -210,7 +211,49 @@ func validateGatewayRoutingSettings(settings *GatewayRoutingSettings) error {
 	if totalWeight == 0 {
 		return errors.New("at least one node target_weight must be greater than zero")
 	}
+	if totalWeight != 100 {
+		return fmt.Errorf("target weights must total 100%% (got %d%%)", totalWeight)
+	}
 	return nil
+}
+
+// normalizeStoredGatewayRoutingWeights migrates the pre-percentage ratio format
+// on read. New writes are rejected unless they already total exactly 100.
+func normalizeStoredGatewayRoutingWeights(settings *GatewayRoutingSettings) {
+	if settings == nil || len(settings.Nodes) == 0 {
+		return
+	}
+
+	total := 0
+	for _, node := range settings.Nodes {
+		if node.TargetWeight < 0 || node.TargetWeight > maxGatewayRoutingWeight {
+			return
+		}
+		total += node.TargetWeight
+	}
+	if total <= 0 || total == 100 {
+		return
+	}
+
+	type remainder struct {
+		index int
+		value int
+	}
+	remainders := make([]remainder, 0, len(settings.Nodes))
+	floorTotal := 0
+	for i := range settings.Nodes {
+		scaled := settings.Nodes[i].TargetWeight * 100
+		settings.Nodes[i].TargetWeight = scaled / total
+		floorTotal += settings.Nodes[i].TargetWeight
+		remainders = append(remainders, remainder{index: i, value: scaled % total})
+	}
+
+	sort.SliceStable(remainders, func(i, j int) bool {
+		return remainders[i].value > remainders[j].value
+	})
+	for i := 0; i < 100-floorTotal && i < len(remainders); i++ {
+		settings.Nodes[remainders[i].index].TargetWeight++
+	}
 }
 
 func validateHTTPSBaseURL(raw, field string) error {

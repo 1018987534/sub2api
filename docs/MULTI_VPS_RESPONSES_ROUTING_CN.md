@@ -104,7 +104,7 @@ gateway VPS <-> WireGuard <-> 新 VPS PostgreSQL/Redis
 | gateway origin | `gateway-origin.xiaohondou.com -> 38.47.117.85`，DNS-only |
 | gateway154 origin | `gateway154-origin.xiaohondou.com -> 154.23.243.26`，DNS-only |
 | gateway2 origin | `gateway2-origin.xiaohondou.com -> 38.47.113.166`，DNS-only |
-| Worker | `sub2api-responses-dispatcher`，活跃版本 `f005d911-7aca-47e1-8f4d-8e6722930c09`；变量 `GATEWAY_PERCENT=10`、`GATEWAY154_PERCENT=30`、`GATEWAY2_PERCENT=10`；control 自动取剩余 50% |
+| Worker | `sub2api-responses-dispatcher`；兜底变量使用 `BWG_US_01_PERCENT=50`、`VMISS_US_01_PERCENT=10`、`YT_US_01_PERCENT=30`、`VMISS_US_02_PERCENT=10`，变量名直接对应节点 |
 | Worker 路径 | `xiaohondou.com`、`nideyiyi.com`、`api.nideyiyi.com` 上的 `/v1/responses*`、`/responses*`、`/backend-api/codex/responses*` |
 | 其他路径 | 不经过 Worker，固定由新主 control 处理 |
 | WireGuard | 新主 `10.20.0.1`，`vmiss-us-01=10.20.0.2/32`，`yt-us-01=10.20.1.2/32`，`vmiss-us-02=10.20.2.2/32` |
@@ -789,8 +789,8 @@ PostgreSQL 是余额、用户、账号、用量和计费的权威数据，必须
 
 ```text
 Worker：sub2api-responses-dispatcher
-版本：f005d911-7aca-47e1-8f4d-8e6722930c09
-配置：GATEWAY_PERCENT=10, GATEWAY154_PERCENT=30, GATEWAY2_PERCENT=10
+版本：8b4ec4d9-cfa8-4032-ba3f-8e0cf15ba539
+配置：BWG_US_01_PERCENT=50, VMISS_US_01_PERCENT=10, YT_US_01_PERCENT=30, VMISS_US_02_PERCENT=10
 源码：deploy/multi-node/worker/responses-dispatcher.mjs
 配置文件：deploy/multi-node/worker/wrangler.toml
 ```
@@ -842,9 +842,9 @@ ORIGIN_GATEWAY2 = https://gateway2-origin.xiaohondou.com -> 38.47.113.166
   -> 新建 Responses 请求按生效权重选一个 origin
 ```
 
-默认目标权重是 `5:1:3:1`，即 `50% / 10% / 30% / 10%`。权重是比例，
-不要求相加等于 100。管理员设置目标权重后，Worker 不需要重新部署即可在约 15 秒内
-采用新配置。
+目标权重现在按百分比保存，四个节点必须相加等于 `100%`：默认值为
+`50% / 10% / 30% / 10%`。历史存量 `5:1:3:1` 会在读取时自动换算为这组百分比；管理员
+设置目标权重后，Worker 不需要重新部署即可在约 15 秒内采用新配置。
 
 流量保护读取 `https://check.nideyiyi.com/api/nodes` 的 `traffic_limit`、
 `traffic_limit_type`，再读取 `/api/records/load?uuid=...&hours=1` 最新样本中的
@@ -853,7 +853,8 @@ ORIGIN_GATEWAY2 = https://gateway2-origin.xiaohondou.com -> 38.47.113.166
 15 分钟时保留上一份有效结果并标记 `monitor_stale`，不执行新的自动摘流。
 
 Worker 获取运行态失败时优先沿用其进程内上一份配置；冷启动且从未成功获取时才使用
-`GATEWAY_PERCENT/GATEWAY154_PERCENT/GATEWAY2_PERCENT` 静态变量。创建 Responses 的
+`BWG_US_01_PERCENT/VMISS_US_01_PERCENT/YT_US_01_PERCENT/VMISS_US_02_PERCENT` 静态变量。
+创建 Responses 的
 POST 仍只发送一次，不能用 POST 自动重试代替摘流。
 
 运行态接口默认关闭：control 必须设置随机的 `GATEWAY_ROUTING_RUNTIME_TOKEN`，Worker
@@ -1075,8 +1076,7 @@ Komari/LuminaPlus 监控入口为 `https://check.nideyiyi.com/`。公开节点�
 当前 Worker 快速摘流方式：
 
 ```bash
-# 方式一：把 wrangler.toml 中故障节点对应的 GATEWAY_PERCENT、
-# GATEWAY154_PERCENT 或 GATEWAY2_PERCENT 改为 0 后重新部署。
+# 方式一：把 wrangler.toml 中故障节点对应的 *_PERCENT 变量改为 0 后重新部署。
 wrangler deploy --config deploy/multi-node/worker/wrangler.toml
 
 # 方式二：紧急删除九条生产 Worker route。
