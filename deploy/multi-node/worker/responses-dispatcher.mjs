@@ -146,7 +146,11 @@ async function fetchRoutingNodes(env) {
         expiresAt: Date.now() + ttlSeconds * 1000,
       };
       return nodes;
-    } catch {
+    } catch (error) {
+      console.error(
+        "routing config refresh failed",
+        error instanceof Error ? error.message : String(error),
+      );
       if (routingConfigCache?.configURL === configURL) {
         return routingConfigCache.nodes;
       }
