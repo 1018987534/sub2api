@@ -411,6 +411,23 @@ func TestOpenAIFreshUpstreamBillingRateRecomputesPeakAtSelectionTime(t *testing.
 	require.Equal(t, 0.4, afterPeak)
 }
 
+func TestOpenAIFreshUpstreamBillingRateUsesConvertedSnapshotRate(t *testing.T) {
+	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	account := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 2, now.Add(-time.Minute), 30*time.Minute)
+	snapshot := account.Extra[UpstreamBillingProbeExtraKey].(map[string]any)
+	data := snapshot["data"].(map[string]any)
+	data["group_rate_multiplier"] = 2.0
+	normalized, synchronizedRate, ok := NormalizeUpstreamBillingProbeData(data, 0.05)
+	require.True(t, ok)
+	require.Equal(t, 0.1, synchronizedRate)
+	snapshot["data"] = normalized
+
+	rate, ok := openAIFreshUpstreamBillingRate(account, now)
+	require.True(t, ok)
+	require.Equal(t, 0.1, rate)
+	require.Equal(t, 2.0, normalized["declared_resolved_rate_multiplier"])
+}
+
 func TestOpenAIUpstreamCostFactorsSparseProbeIsNeutral(t *testing.T) {
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	accounts := make([]*Account, 0, 10)

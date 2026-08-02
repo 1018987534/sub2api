@@ -91,7 +91,7 @@ func TestLockAndMergeAccountProbeExtraUsesCurrentDatabaseSnapshot(t *testing.T) 
 				Credentials: map[string]any{"api_key": "sk-test"},
 				Extra:       tt.inputExtra,
 			}
-			got, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil, nil)
+			got, _, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil, nil)
 			require.NoError(t, err)
 			if tt.wantSnapshot == nil {
 				require.NotContains(t, got, service.UpstreamBillingProbeExtraKey)
@@ -181,7 +181,7 @@ func TestLockAndMergeAccountProbeExtraNeverInfersProbeFromRateSync(t *testing.T)
 				Type:        service.AccountTypeAPIKey,
 				Credentials: map[string]any{"api_key": "sk-test"},
 			}
-			got, err := lockAndMergeAccountProbeExtra(
+			got, _, err := lockAndMergeAccountProbeExtra(
 				context.Background(), client, account, tt.explicitProbeEnabled, tt.explicitRateSync, nil,
 			)
 			require.NoError(t, err)
@@ -223,10 +223,98 @@ func TestLockAndMergeAccountProbeExtraPersistsExplicitRateConversionRatio(t *tes
 	}
 	ratio := 0.05
 
-	got, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil, &ratio)
+	got, _, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil, &ratio)
 
 	require.NoError(t, err)
 	require.Equal(t, ratio, got[service.UpstreamBillingRateConversionRatioExtraKey])
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestLockAndMergeAccountProbeExtraRecomputesSnapshotWhenRatioChanges(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+
+	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
+		WithArgs(int64(33), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil).
+		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "rate_conversion_ratio", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot"}).
+			AddRow(true, false, true, []byte(`true`), []byte(`true`), []byte(`1`), []byte(`{
+				"status":"ok",
+				"data":{
+					"billing_scope":"token",
+					"group_rate_multiplier":2,
+					"resolved_rate_multiplier":2,
+					"peak_rate_enabled":false,
+					"effective_rate_multiplier":2
+				}
+			}`), nil, nil, nil))
+
+	account := &service.Account{
+		ID: 33, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test"},
+	}
+	ratio := 0.05
+
+	got, synchronizedRate, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil, &ratio)
+
+	require.NoError(t, err)
+	require.NotNil(t, synchronizedRate)
+	require.Equal(t, 0.1, *synchronizedRate)
+	snapshot := got[service.UpstreamBillingProbeExtraKey].(map[string]any)
+	data := snapshot["data"].(map[string]any)
+	require.Equal(t, 0.1, data["resolved_rate_multiplier"])
+	require.Equal(t, 2.0, data["declared_resolved_rate_multiplier"])
+	require.Equal(t, 0.05, data["rate_conversion_ratio"])
+	require.Equal(t, 0.1, snapshot["synced_rate_multiplier"])
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestLockAndMergeAccountProbeExtraRestoresDeclarationWhenRateSyncDisabled(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+
+	mock.ExpectQuery(`(?s)`+regexp.QuoteMeta("SELECT")+`.*`+regexp.QuoteMeta("FOR NO KEY UPDATE")).
+		WithArgs(int64(34), service.PlatformOpenAI, service.AccountTypeAPIKey, `{"api_key":"sk-test"}`, nil).
+		WillReturnRows(sqlmock.NewRows([]string{"identity_unchanged", "ollama_group_unchanged", "ollama_proxy_unchanged", "enabled", "rate_sync_enabled", "rate_conversion_ratio", "snapshot", "ollama_session", "ollama_auto", "ollama_snapshot"}).
+			AddRow(true, false, true, []byte(`true`), []byte(`true`), []byte(`0.05`), []byte(`{
+				"status":"ok",
+				"synced_rate_multiplier":0.1,
+				"data":{
+					"billing_scope":"token",
+					"group_rate_multiplier":0.1,
+					"resolved_rate_multiplier":0.1,
+					"peak_rate_enabled":false,
+					"effective_rate_multiplier":0.1,
+					"declared_group_rate_multiplier":2,
+					"declared_resolved_rate_multiplier":2,
+					"declared_effective_rate_multiplier":2,
+					"rate_conversion_ratio":0.05,
+					"rate_conversion_applied":true
+				}
+			}`), nil, nil, nil))
+
+	account := &service.Account{
+		ID: 34, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test"},
+	}
+	disabled := false
+
+	got, synchronizedRate, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, &disabled, nil)
+
+	require.NoError(t, err)
+	require.Nil(t, synchronizedRate)
+	snapshot := got[service.UpstreamBillingProbeExtraKey].(map[string]any)
+	data := snapshot["data"].(map[string]any)
+	require.Equal(t, 2.0, data["group_rate_multiplier"])
+	require.Equal(t, 2.0, data["resolved_rate_multiplier"])
+	require.Equal(t, 2.0, data["effective_rate_multiplier"])
+	require.NotContains(t, data, "rate_conversion_applied")
+	require.NotContains(t, data, "declared_resolved_rate_multiplier")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -253,7 +341,7 @@ func TestLockAndMergeAccountProbeExtraProtectsOllamaManagedFields(t *testing.T) 
 					service.OllamaCloudUsageSnapshotExtraKey:    map[string]any{"status": "forged"},
 				},
 			}
-			got, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil, nil)
+			got, _, err := lockAndMergeAccountProbeExtra(context.Background(), client, account, nil, nil, nil)
 			require.NoError(t, err)
 			if identityUnchanged {
 				require.Equal(t, "local-ciphertext", got[service.OllamaCloudUsageSessionExtraKey])

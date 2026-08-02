@@ -485,11 +485,15 @@ func (r *accountRepository) updateLockedAccount(
 	explicitRateConversionRatio *float64,
 	explicitRateMultiplier *float64,
 ) (*dbent.Account, error) {
-	extra, err := lockAndMergeAccountProbeExtra(ctx, client, account, explicitProbeEnabled, explicitRateSyncEnabled, explicitRateConversionRatio)
+	extra, synchronizedRate, err := lockAndMergeAccountProbeExtra(ctx, client, account, explicitProbeEnabled, explicitRateSyncEnabled, explicitRateConversionRatio)
 	if err != nil {
 		return nil, err
 	}
 	account.Extra = extra
+	if explicitRateMultiplier == nil && synchronizedRate != nil {
+		explicitRateMultiplier = synchronizedRate
+		account.RateMultiplier = synchronizedRate
+	}
 
 	schedulable := account.Schedulable
 	if account.Status == service.StatusError {
@@ -581,10 +585,10 @@ func lockAndMergeAccountProbeExtra(
 	explicitProbeEnabled *bool,
 	explicitRateSyncEnabled *bool,
 	explicitRateConversionRatio *float64,
-) (map[string]any, error) {
+) (map[string]any, *float64, error) {
 	credentials, err := json.Marshal(normalizeJSONMap(account.Credentials))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var proxyID any
 	if account.ProxyID != nil {
@@ -619,14 +623,14 @@ func lockAndMergeAccountProbeExtra(
 		FOR NO KEY UPDATE
 	`, account.ID, account.Platform, account.Type, string(credentials), proxyID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return nil, service.ErrAccountNotFound
+		return nil, nil, service.ErrAccountNotFound
 	}
 
 	var (
@@ -653,10 +657,10 @@ func lockAndMergeAccountProbeExtra(
 		&currentOllamaAutoRefresh,
 		&currentOllamaSnapshot,
 	); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	extra := copyJSONMap(normalizeJSONMap(account.Extra))
@@ -676,7 +680,7 @@ func lockAndMergeAccountProbeExtra(
 	probeEnabledPresent := false
 	if probeAccount {
 		if enabled, ok, err := decodeAccountExtraJSON(currentEnabled); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else if value, isBool := enabled.(bool); ok && isBool {
 			probeEnabled = value
 			probeEnabledPresent = true
@@ -690,7 +694,7 @@ func lockAndMergeAccountProbeExtra(
 	rateSyncEnabledPresent := false
 	if probeAccount {
 		if enabled, ok, err := decodeAccountExtraJSON(currentRateSyncEnabled); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else if value, isBool := enabled.(bool); ok && isBool {
 			rateSyncEnabled = value
 			rateSyncEnabledPresent = true
@@ -717,7 +721,7 @@ func lockAndMergeAccountProbeExtra(
 			extra[service.UpstreamBillingRateSyncEnabledExtraKey] = rateSyncEnabled
 		}
 		if ratio, ok, err := decodeAccountExtraJSON(currentRateConversionRatio); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else if ok {
 			extra[service.UpstreamBillingRateConversionRatioExtraKey] = ratio
 		}
@@ -726,10 +730,12 @@ func lockAndMergeAccountProbeExtra(
 		}
 	}
 	probeExplicitlyDisabled := probeEnabledPresent && !probeEnabled
+	var synchronizedRate *float64
 	if identityUnchanged && !probeExplicitlyDisabled {
 		if snapshot, ok, err := decodeAccountExtraJSON(currentSnapshot); err != nil {
-			return nil, err
+			return nil, nil, err
 		} else if ok {
+			snapshot, synchronizedRate = normalizePersistedUpstreamBillingSnapshot(snapshot, rateSyncEnabled, extra)
 			extra[service.UpstreamBillingProbeExtraKey] = snapshot
 		}
 	}
@@ -740,20 +746,48 @@ func lockAndMergeAccountProbeExtra(
 			service.OllamaCloudUsageAutoRefreshExtraKey: currentOllamaAutoRefresh,
 		} {
 			if value, ok, err := decodeAccountExtraJSON(raw); err != nil {
-				return nil, err
+				return nil, nil, err
 			} else if ok {
 				extra[key] = value
 			}
 		}
 		if ollamaProxyIdentityUnchanged {
 			if snapshot, ok, err := decodeAccountExtraJSON(currentOllamaSnapshot); err != nil {
-				return nil, err
+				return nil, nil, err
 			} else if ok {
 				extra[service.OllamaCloudUsageSnapshotExtraKey] = snapshot
 			}
 		}
 	}
-	return extra, nil
+	return extra, synchronizedRate, nil
+}
+
+func normalizePersistedUpstreamBillingSnapshot(snapshot any, rateSyncEnabled bool, extra map[string]any) (any, *float64) {
+	snapshotMap, ok := snapshot.(map[string]any)
+	if !ok {
+		return snapshot, nil
+	}
+	data, ok := snapshotMap["data"].(map[string]any)
+	if !ok {
+		return snapshot, nil
+	}
+	updatedSnapshot := copyJSONMap(snapshotMap)
+	if !rateSyncEnabled {
+		updatedSnapshot["data"] = service.RestoreDeclaredUpstreamBillingProbeData(data)
+		return updatedSnapshot, nil
+	}
+
+	ratio := 1.0
+	if configured, ok := extra[service.UpstreamBillingRateConversionRatioExtraKey].(float64); ok {
+		ratio = configured
+	}
+	normalized, rate, ok := service.NormalizeUpstreamBillingProbeData(data, ratio)
+	if !ok {
+		return snapshot, nil
+	}
+	updatedSnapshot["data"] = normalized
+	updatedSnapshot["synced_rate_multiplier"] = rate
+	return updatedSnapshot, &rate
 }
 
 func decodeAccountExtraJSON(raw []byte) (any, bool, error) {

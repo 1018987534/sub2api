@@ -990,6 +990,12 @@ export interface UpstreamBillingData {
   peak_rate_multiplier?: number
   applied_peak_multiplier?: number
   effective_rate_multiplier: number
+  declared_group_rate_multiplier?: number
+  declared_user_rate_multiplier?: number
+  declared_resolved_rate_multiplier?: number
+  declared_effective_rate_multiplier?: number
+  rate_conversion_ratio?: number
+  rate_conversion_applied?: boolean
   timezone?: string
   observed_at: string
 }

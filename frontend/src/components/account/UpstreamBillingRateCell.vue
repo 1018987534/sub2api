@@ -12,6 +12,15 @@
       </template>
       <div class="space-y-1">
         <template v-if="hasEffectiveRate && data">
+          <p v-if="conversionSummary" data-testid="upstream-billing-conversion">
+            {{
+              t('admin.accounts.upstreamBilling.conversionSummary', {
+                declared: conversionSummary.declared,
+                ratio: conversionSummary.ratio,
+                converted: conversionSummary.converted
+              })
+            }}
+          </p>
           <p>{{ t('admin.accounts.upstreamBilling.groupRate', { value: data.group_rate_multiplier }) }}</p>
           <p v-if="data.user_rate_multiplier != null">
             {{ t('admin.accounts.upstreamBilling.userRate', { value: data.user_rate_multiplier }) }}
@@ -173,6 +182,19 @@ const currentEffectiveRate = computed(() => {
   if (start == null || end == null || minute == null || start >= end || typeof peak !== 'number' || !Number.isFinite(peak) || peak < 0) return null
   const value = minute >= start && minute < end ? base * peak : base
   return Number.isFinite(value) ? value : null
+})
+const conversionSummary = computed(() => {
+  const billing = data.value
+  if (!billing?.rate_conversion_applied) return null
+  const declared = billing.declared_resolved_rate_multiplier
+  const ratio = billing.rate_conversion_ratio
+  const converted = billing.resolved_rate_multiplier
+  if (
+    typeof declared !== 'number' || !Number.isFinite(declared) || declared < 0 ||
+    typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio <= 0 ||
+    typeof converted !== 'number' || !Number.isFinite(converted) || converted < 0
+  ) return null
+  return { declared, ratio, converted }
 })
 const lastDetectedRate = computed(() => {
   const value = data.value?.effective_rate_multiplier

@@ -425,11 +425,60 @@ func TestUpstreamBillingProbeAppliesAccountRateConversionRatio(t *testing.T) {
 	snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
 
 	require.NoError(t, err)
-	require.Equal(t, 2.0, snapshot.Data["resolved_rate_multiplier"])
+	require.Equal(t, 0.1, snapshot.Data["group_rate_multiplier"])
+	require.Equal(t, 0.1, snapshot.Data["resolved_rate_multiplier"])
+	require.Equal(t, 0.1, snapshot.Data["effective_rate_multiplier"])
+	require.Equal(t, 2.0, snapshot.Data["declared_group_rate_multiplier"])
+	require.Equal(t, 2.0, snapshot.Data["declared_resolved_rate_multiplier"])
+	require.Equal(t, 2.0, snapshot.Data["declared_effective_rate_multiplier"])
+	require.Equal(t, 0.05, snapshot.Data["rate_conversion_ratio"])
+	require.Equal(t, true, snapshot.Data["rate_conversion_applied"])
 	require.NotNil(t, snapshot.SyncedRateMultiplier)
 	require.Equal(t, 0.1, *snapshot.SyncedRateMultiplier)
 	require.NotNil(t, account.RateMultiplier)
 	require.Equal(t, 0.1, *account.RateMultiplier)
+}
+
+func TestNormalizeUpstreamBillingProbeDataReappliesRatioFromDeclarationAndPreservesPeak(t *testing.T) {
+	raw := map[string]any{
+		"billing_scope":             "token",
+		"group_rate_multiplier":     2.0,
+		"user_rate_multiplier":      3.0,
+		"resolved_rate_multiplier":  3.0,
+		"peak_rate_enabled":         true,
+		"peak_start":                "09:00",
+		"peak_end":                  "18:00",
+		"peak_rate_multiplier":      1.5,
+		"applied_peak_multiplier":   1.5,
+		"effective_rate_multiplier": 4.5,
+		"timezone":                  "Asia/Shanghai",
+	}
+
+	converted, rate, ok := NormalizeUpstreamBillingProbeData(raw, 0.05)
+	require.True(t, ok)
+	require.Equal(t, 0.15, rate)
+	require.Equal(t, 0.1, converted["group_rate_multiplier"])
+	require.Equal(t, 0.15, converted["user_rate_multiplier"])
+	require.Equal(t, 0.15, converted["resolved_rate_multiplier"])
+	require.Equal(t, 0.225, converted["effective_rate_multiplier"])
+	require.Equal(t, 1.5, converted["peak_rate_multiplier"])
+
+	reapplied, rate, ok := NormalizeUpstreamBillingProbeData(converted, 0.1)
+	require.True(t, ok)
+	require.Equal(t, 0.3, rate)
+	require.Equal(t, 0.2, reapplied["group_rate_multiplier"])
+	require.Equal(t, 0.3, reapplied["resolved_rate_multiplier"])
+	require.Equal(t, 0.45, reapplied["effective_rate_multiplier"])
+	require.Equal(t, 3.0, reapplied["declared_resolved_rate_multiplier"])
+
+	restored := RestoreDeclaredUpstreamBillingProbeData(reapplied)
+	require.Equal(t, 2.0, restored["group_rate_multiplier"])
+	require.Equal(t, 3.0, restored["user_rate_multiplier"])
+	require.Equal(t, 3.0, restored["resolved_rate_multiplier"])
+	require.Equal(t, 4.5, restored["effective_rate_multiplier"])
+	require.NotContains(t, restored, "rate_conversion_applied")
+	require.NotContains(t, restored, "rate_conversion_ratio")
+	require.NotContains(t, restored, "declared_resolved_rate_multiplier")
 }
 
 func TestUpstreamBillingProbeOnlyDoesNotChangeAccountRate(t *testing.T) {

@@ -37,6 +37,10 @@ const (
 	// base rate before it is written to accounts.rate_multiplier.
 	UpstreamBillingRateConversionRatioExtraKey = "upstream_billing_rate_conversion_ratio"
 
+	upstreamBillingRateConversionAppliedDataKey = "rate_conversion_applied"
+	upstreamBillingRateConversionRatioDataKey   = "rate_conversion_ratio"
+	upstreamBillingDeclaredRatePrefix           = "declared_"
+
 	upstreamBillingProbeDefaultIntervalMinutes = 30
 	upstreamBillingProbeMinIntervalMinutes     = 5
 	upstreamBillingProbeMaxIntervalMinutes     = 24 * 60
@@ -51,6 +55,7 @@ const (
 	// upstreamBillingProbeMaxPerCycle 个名额。
 	upstreamBillingProbeUnsupportedDelayFactor = 8
 	upstreamBillingProbeAccountRateScale       = 10000.0
+	upstreamBillingProbeEffectiveRateScale     = 1_000_000_000_000.0
 	upstreamBillingProbeLeaderLockKey          = "upstream:billing:probe:leader"
 	upstreamBillingProbeLeaderLockTTL          = 2 * time.Minute
 )
@@ -692,7 +697,8 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	previousRate := account.BillingRateMultiplier()
 	if upstreamBillingRateSyncEnabled(account) {
 		conversionRatio := upstreamBillingRateConversionRatio(account)
-		if value, valid := upstreamBillingProbeSyncRateWithConversionRatio(data, conversionRatio); valid {
+		if normalizedData, value, valid := NormalizeUpstreamBillingProbeData(data, conversionRatio); valid {
+			snapshot.Data = normalizedData
 			syncRate = &value
 			snapshot.SyncedRateMultiplier = &value
 		} else {
@@ -903,22 +909,126 @@ func upstreamBillingProbeSyncRate(data map[string]any) (float64, bool) {
 }
 
 func upstreamBillingProbeSyncRateWithConversionRatio(data map[string]any, conversionRatio float64) (float64, bool) {
-	value, ok := resolveAccountExtraNumber(data, "resolved_rate_multiplier")
-	if !ok || math.IsNaN(value) || math.IsInf(value, 0) {
+	value, ok := upstreamBillingDeclaredRate(data, "resolved_rate_multiplier")
+	if !ok || math.IsNaN(value) || math.IsInf(value, 0) || !validUpstreamBillingRateConversionRatio(conversionRatio) {
 		return 0, false
 	}
-	if !validUpstreamBillingRateConversionRatio(conversionRatio) {
+	value = roundUpstreamBillingAccountRate(value * conversionRatio)
+	if value <= 0 || value > upstreamBillingRateSyncMaxMultiplier || math.IsNaN(value) || math.IsInf(value, 0) {
 		return 0, false
 	}
-	value *= conversionRatio
-	if math.IsNaN(value) || math.IsInf(value, 0) {
-		return 0, false
+	return value, true
+}
+
+// NormalizeUpstreamBillingProbeData converts the upstream-declared base rates
+// into the single local rate semantic consumed by account billing, profit
+// control, scheduler cost ordering, account-list sorting, and the admin UI.
+// The declaration is retained under declared_* fields for audit and for safely
+// reapplying a changed ratio without multiplying an already converted value.
+func NormalizeUpstreamBillingProbeData(data map[string]any, conversionRatio float64) (map[string]any, float64, bool) {
+	if data == nil || !validUpstreamBillingRateConversionRatio(conversionRatio) {
+		return data, 0, false
 	}
-	rounded := math.Round(value*upstreamBillingProbeAccountRateScale) / upstreamBillingProbeAccountRateScale
-	if rounded <= 0 || rounded > upstreamBillingRateSyncMaxMultiplier {
-		return 0, false
+
+	declaredResolved, ok := upstreamBillingDeclaredRate(data, "resolved_rate_multiplier")
+	if !ok || math.IsNaN(declaredResolved) || math.IsInf(declaredResolved, 0) {
+		return data, 0, false
 	}
-	return rounded, true
+	declaredGroup, ok := upstreamBillingDeclaredRate(data, "group_rate_multiplier")
+	if !ok || math.IsNaN(declaredGroup) || math.IsInf(declaredGroup, 0) {
+		return data, 0, false
+	}
+	convertedResolved, ok := upstreamBillingProbeSyncRateWithConversionRatio(data, conversionRatio)
+	if !ok {
+		return data, 0, false
+	}
+
+	peakEnabled, ok := data["peak_rate_enabled"].(bool)
+	if !ok {
+		return data, 0, false
+	}
+	appliedPeak := 1.0
+	if peakEnabled {
+		appliedPeak, ok = resolveAccountExtraNumber(data, "applied_peak_multiplier")
+		if !ok || appliedPeak < 0 || math.IsNaN(appliedPeak) || math.IsInf(appliedPeak, 0) {
+			return data, 0, false
+		}
+	}
+	convertedEffective := math.Round(convertedResolved*appliedPeak*upstreamBillingProbeEffectiveRateScale) /
+		upstreamBillingProbeEffectiveRateScale
+	if math.IsNaN(convertedEffective) || math.IsInf(convertedEffective, 0) {
+		return data, 0, false
+	}
+
+	normalized := make(map[string]any, len(data)+6)
+	for key, value := range data {
+		normalized[key] = value
+	}
+	normalized[upstreamBillingDeclaredRatePrefix+"group_rate_multiplier"] = declaredGroup
+	normalized["group_rate_multiplier"] = roundUpstreamBillingAccountRate(declaredGroup * conversionRatio)
+	if declaredUser, exists := upstreamBillingDeclaredRate(data, "user_rate_multiplier"); exists {
+		normalized[upstreamBillingDeclaredRatePrefix+"user_rate_multiplier"] = declaredUser
+		normalized["user_rate_multiplier"] = roundUpstreamBillingAccountRate(declaredUser * conversionRatio)
+	} else {
+		delete(normalized, upstreamBillingDeclaredRatePrefix+"user_rate_multiplier")
+		delete(normalized, "user_rate_multiplier")
+	}
+	declaredEffective, ok := upstreamBillingDeclaredRate(data, "effective_rate_multiplier")
+	if !ok {
+		return data, 0, false
+	}
+	normalized[upstreamBillingDeclaredRatePrefix+"resolved_rate_multiplier"] = declaredResolved
+	normalized[upstreamBillingDeclaredRatePrefix+"effective_rate_multiplier"] = declaredEffective
+	normalized["resolved_rate_multiplier"] = convertedResolved
+	normalized["effective_rate_multiplier"] = convertedEffective
+	normalized[upstreamBillingRateConversionRatioDataKey] = conversionRatio
+	normalized[upstreamBillingRateConversionAppliedDataKey] = true
+	return normalized, convertedResolved, true
+}
+
+// RestoreDeclaredUpstreamBillingProbeData removes the local conversion layer
+// when rate synchronization is disabled, while keeping the upstream probe
+// itself active and truthful.
+func RestoreDeclaredUpstreamBillingProbeData(data map[string]any) map[string]any {
+	if data == nil {
+		return nil
+	}
+	restored := make(map[string]any, len(data))
+	for key, value := range data {
+		restored[key] = value
+	}
+	applied, _ := data[upstreamBillingRateConversionAppliedDataKey].(bool)
+	if !applied {
+		return restored
+	}
+	for _, key := range []string{
+		"group_rate_multiplier",
+		"user_rate_multiplier",
+		"resolved_rate_multiplier",
+		"effective_rate_multiplier",
+	} {
+		declaredKey := upstreamBillingDeclaredRatePrefix + key
+		if declared, ok := resolveAccountExtraNumber(data, declaredKey); ok {
+			restored[key] = declared
+		} else if key == "user_rate_multiplier" {
+			delete(restored, key)
+		}
+		delete(restored, declaredKey)
+	}
+	delete(restored, upstreamBillingRateConversionRatioDataKey)
+	delete(restored, upstreamBillingRateConversionAppliedDataKey)
+	return restored
+}
+
+func upstreamBillingDeclaredRate(data map[string]any, key string) (float64, bool) {
+	if applied, _ := data[upstreamBillingRateConversionAppliedDataKey].(bool); applied {
+		return resolveAccountExtraNumber(data, upstreamBillingDeclaredRatePrefix+key)
+	}
+	return resolveAccountExtraNumber(data, key)
+}
+
+func roundUpstreamBillingAccountRate(value float64) float64 {
+	return math.Round(value*upstreamBillingProbeAccountRateScale) / upstreamBillingProbeAccountRateScale
 }
 
 // upstreamBillingRateConversionRatioFromExtra returns the account-level
