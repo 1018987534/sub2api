@@ -755,6 +755,7 @@ describe('EditAccountModal', () => {
     expect(syncToggle.attributes('aria-checked')).toBe('false')
     expect(probeToggle.attributes('aria-checked')).toBe('false')
     expect(rateInput.element.disabled).toBe(false)
+    expect(wrapper.find('[data-testid="upstream-billing-rate-conversion-ratio"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('admin.accounts.billingRateMultiplierHint')
     expect(wrapper.text()).not.toContain('admin.accounts.upstreamBilling.syncRateManagedHint')
 
@@ -762,6 +763,12 @@ describe('EditAccountModal', () => {
     expect(syncToggle.attributes('aria-checked')).toBe('true')
     expect(probeToggle.attributes('aria-checked')).toBe('true')
     expect(rateInput.element.disabled).toBe(true)
+    const conversionRatioInput = wrapper.get<HTMLInputElement>(
+      '[data-testid="upstream-billing-rate-conversion-ratio"]'
+    )
+    expect(conversionRatioInput.element.value).toBe('1')
+    expect(wrapper.text()).toContain('admin.accounts.upstreamBilling.rateConversionRatioHint')
+    await conversionRatioInput.setValue('0.05')
     expect(wrapper.text()).toContain('admin.accounts.upstreamBilling.syncRateManagedHint')
     expect(wrapper.text()).not.toContain('admin.accounts.billingRateMultiplierHint')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
@@ -769,7 +776,36 @@ describe('EditAccountModal', () => {
     const payload = updateAccountMock.mock.calls[0]?.[1]
     expect(payload?.upstream_billing_probe_enabled).toBe(true)
     expect(payload?.upstream_billing_rate_sync_enabled).toBe(true)
+    expect(payload?.upstream_billing_rate_conversion_ratio).toBe(0.05)
     expect(payload).not.toHaveProperty('rate_multiplier')
+    expect(payload?.extra).not.toHaveProperty('upstream_billing_rate_conversion_ratio')
+  })
+
+  it('loads a saved upstream billing conversion ratio and rejects invalid input', async () => {
+    const account = buildAccount()
+    account.extra = {
+      upstream_billing_probe_enabled: true,
+      upstream_billing_rate_sync_enabled: true,
+      upstream_billing_rate_conversion_ratio: 0.05
+    }
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const conversionRatioInput = wrapper.get<HTMLInputElement>(
+      '[data-testid="upstream-billing-rate-conversion-ratio"]'
+    )
+    expect(conversionRatioInput.element.value).toBe('0.05')
+
+    await conversionRatioInput.setValue('0')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).not.toHaveBeenCalled()
+
+    await conversionRatioInput.setValue('0.05')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.upstream_billing_rate_conversion_ratio).toBe(0.05)
   })
 
   it('disabling probing also disables rate sync and restores manual rate editing', async () => {
@@ -799,6 +835,7 @@ describe('EditAccountModal', () => {
     const payload = updateAccountMock.mock.calls[0]?.[1]
     expect(payload?.upstream_billing_probe_enabled).toBe(false)
     expect(payload?.upstream_billing_rate_sync_enabled).toBe(false)
+    expect(payload).not.toHaveProperty('upstream_billing_rate_conversion_ratio')
     expect(payload?.rate_multiplier).toBe(1)
   })
 
@@ -823,6 +860,7 @@ describe('EditAccountModal', () => {
     const payload = updateAccountMock.mock.calls[0]?.[1]
     expect(payload?.upstream_billing_probe_enabled).toBe(true)
     expect(payload?.upstream_billing_rate_sync_enabled).toBe(false)
+    expect(payload).not.toHaveProperty('upstream_billing_rate_conversion_ratio')
     expect(payload?.rate_multiplier).toBe(1)
   })
 

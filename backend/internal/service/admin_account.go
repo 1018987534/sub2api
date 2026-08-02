@@ -456,6 +456,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	// Probe/session state is system-managed. New accounts always start with automatic refresh disabled.
 	delete(accountExtra, UpstreamBillingProbeEnabledExtraKey)
 	delete(accountExtra, UpstreamBillingRateSyncEnabledExtraKey)
+	delete(accountExtra, UpstreamBillingRateConversionRatioExtraKey)
 	delete(accountExtra, UpstreamBillingProbeExtraKey)
 	delete(accountExtra, OllamaCloudUsageSessionExtraKey)
 	delete(accountExtra, OllamaCloudUsageAutoRefreshExtraKey)
@@ -666,6 +667,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。
 	requestedProbeEnabledUpdate := input.ProbeEnabled
 	requestedRateSyncEnabledUpdate := input.RateSyncEnabled
+	requestedRateConversionRatioUpdate := input.RateConversionRatio
 	if input.Extra != nil {
 		requestedProbeEnabled, hasRequestedProbeEnabled := normalizedExtra[UpstreamBillingProbeEnabledExtraKey]
 		if hasRequestedProbeEnabled {
@@ -680,6 +682,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		delete(normalizedExtra, UpstreamBillingProbeEnabledExtraKey)
 		delete(normalizedExtra, UpstreamBillingRateSyncEnabledExtraKey)
+		delete(normalizedExtra, UpstreamBillingRateConversionRatioExtraKey)
 		delete(normalizedExtra, UpstreamBillingProbeExtraKey)
 		delete(normalizedExtra, OllamaCloudUsageSessionExtraKey)
 		delete(normalizedExtra, OllamaCloudUsageAutoRefreshExtraKey)
@@ -694,6 +697,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			grokBillingExtraKey,
 			UpstreamBillingProbeEnabledExtraKey,
 			UpstreamBillingRateSyncEnabledExtraKey,
+			UpstreamBillingRateConversionRatioExtraKey,
 			UpstreamBillingProbeExtraKey,
 			PeriodicSchedulePauseEnabledExtraKey,
 			PeriodicScheduleRunMinutesExtraKey,
@@ -741,12 +745,18 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		requestedRateSyncEnabledUpdate = &disabled
 	}
 	if (requestedProbeEnabledUpdate != nil && *requestedProbeEnabledUpdate) ||
-		(requestedRateSyncEnabledUpdate != nil && *requestedRateSyncEnabledUpdate) {
+		(requestedRateSyncEnabledUpdate != nil && *requestedRateSyncEnabledUpdate) ||
+		requestedRateConversionRatioUpdate != nil {
 		if !isUpstreamBillingProbeAccount(account) {
 			return nil, ErrUpstreamBillingProbeAccountInvalid
 		}
 	}
-	if account.Extra == nil && (requestedProbeEnabledUpdate != nil || requestedRateSyncEnabledUpdate != nil) {
+	if requestedRateConversionRatioUpdate != nil {
+		if err := ValidateUpstreamBillingRateConversionRatio(*requestedRateConversionRatioUpdate); err != nil {
+			return nil, err
+		}
+	}
+	if account.Extra == nil && (requestedProbeEnabledUpdate != nil || requestedRateSyncEnabledUpdate != nil || requestedRateConversionRatioUpdate != nil) {
 		account.Extra = make(map[string]any)
 	}
 	if requestedProbeEnabledUpdate != nil {
@@ -754,6 +764,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if requestedRateSyncEnabledUpdate != nil {
 		account.Extra[UpstreamBillingRateSyncEnabledExtraKey] = *requestedRateSyncEnabledUpdate
+	}
+	if requestedRateConversionRatioUpdate != nil {
+		account.Extra[UpstreamBillingRateConversionRatioExtraKey] = *requestedRateConversionRatioUpdate
 	}
 	// 影子代理恒继承母账号(由 propagateProxyToShadows 同步),不接受独立编辑——外审 B/P1;
 	// 否则要等母账号下次改 proxy 才被覆盖,期间影子会出现"有时继承、有时独立"的漂移。
@@ -771,6 +784,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if !isUpstreamBillingProbeAccount(account) {
 			delete(account.Extra, UpstreamBillingProbeEnabledExtraKey)
 			delete(account.Extra, UpstreamBillingRateSyncEnabledExtraKey)
+			delete(account.Extra, UpstreamBillingRateConversionRatioExtraKey)
 		}
 	}
 	if account.Extra != nil {
@@ -865,6 +879,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			account,
 			requestedProbeEnabledUpdate,
 			requestedRateSyncEnabledUpdate,
+			requestedRateConversionRatioUpdate,
 			input.RateMultiplier,
 		); err != nil {
 			return nil, err
@@ -875,14 +890,17 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		if err := s.accountRepo.Update(ctx, account); err != nil {
 			return nil, err
 		}
-		if (requestedProbeEnabledUpdate != nil || requestedRateSyncEnabledUpdate != nil) &&
+		if (requestedProbeEnabledUpdate != nil || requestedRateSyncEnabledUpdate != nil || requestedRateConversionRatioUpdate != nil) &&
 			isUpstreamBillingProbeAccount(account) {
-			settings := make(map[string]any, 2)
+			settings := make(map[string]any, 3)
 			if requestedProbeEnabledUpdate != nil {
 				settings[UpstreamBillingProbeEnabledExtraKey] = *requestedProbeEnabledUpdate
 			}
 			if requestedRateSyncEnabledUpdate != nil {
 				settings[UpstreamBillingRateSyncEnabledExtraKey] = *requestedRateSyncEnabledUpdate
+			}
+			if requestedRateConversionRatioUpdate != nil {
+				settings[UpstreamBillingRateConversionRatioExtraKey] = *requestedRateConversionRatioUpdate
 			}
 			if err := s.accountRepo.UpdateExtra(ctx, account.ID, settings); err != nil {
 				return nil, err
@@ -961,6 +979,7 @@ func applyPeriodicSchedulePauseUpdate(account *Account, runMinutes, pauseMinutes
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
 	delete(updates, UpstreamBillingProbeEnabledExtraKey)
 	delete(updates, UpstreamBillingRateSyncEnabledExtraKey)
+	delete(updates, UpstreamBillingRateConversionRatioExtraKey)
 	delete(updates, UpstreamBillingProbeExtraKey)
 	delete(updates, OllamaCloudUsageSessionExtraKey)
 	delete(updates, OllamaCloudUsageAutoRefreshExtraKey)
@@ -986,6 +1005,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// Managed probe/session state may only enter through dedicated typed endpoints.
 	delete(input.Extra, UpstreamBillingProbeEnabledExtraKey)
 	delete(input.Extra, UpstreamBillingRateSyncEnabledExtraKey)
+	delete(input.Extra, UpstreamBillingRateConversionRatioExtraKey)
 	delete(input.Extra, UpstreamBillingProbeExtraKey)
 	delete(input.Extra, OllamaCloudUsageSessionExtraKey)
 	delete(input.Extra, OllamaCloudUsageAutoRefreshExtraKey)

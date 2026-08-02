@@ -398,7 +398,7 @@ func (r *accountRepository) ListCRSAccountIDs(ctx context.Context) (map[string]i
 }
 
 func (r *accountRepository) Update(ctx context.Context, account *service.Account) error {
-	return r.updateAccount(ctx, account, nil, nil, account.RateMultiplier)
+	return r.updateAccount(ctx, account, nil, nil, nil, account.RateMultiplier)
 }
 
 // UpdateWithAccountBillingSettings applies an admin account edit while
@@ -409,9 +409,10 @@ func (r *accountRepository) UpdateWithAccountBillingSettings(
 	account *service.Account,
 	probeEnabled *bool,
 	rateSyncEnabled *bool,
+	rateConversionRatio *float64,
 	rateMultiplier *float64,
 ) error {
-	return r.updateAccount(ctx, account, probeEnabled, rateSyncEnabled, rateMultiplier)
+	return r.updateAccount(ctx, account, probeEnabled, rateSyncEnabled, rateConversionRatio, rateMultiplier)
 }
 
 func (r *accountRepository) updateAccount(
@@ -419,6 +420,7 @@ func (r *accountRepository) updateAccount(
 	account *service.Account,
 	explicitProbeEnabled *bool,
 	explicitRateSyncEnabled *bool,
+	explicitRateConversionRatio *float64,
 	explicitRateMultiplier *float64,
 ) error {
 	if account == nil {
@@ -450,6 +452,7 @@ func (r *accountRepository) updateAccount(
 		account,
 		explicitProbeEnabled,
 		explicitRateSyncEnabled,
+		explicitRateConversionRatio,
 		explicitRateMultiplier,
 	)
 	if err != nil {
@@ -479,9 +482,10 @@ func (r *accountRepository) updateLockedAccount(
 	account *service.Account,
 	explicitProbeEnabled *bool,
 	explicitRateSyncEnabled *bool,
+	explicitRateConversionRatio *float64,
 	explicitRateMultiplier *float64,
 ) (*dbent.Account, error) {
-	extra, err := lockAndMergeAccountProbeExtra(ctx, client, account, explicitProbeEnabled, explicitRateSyncEnabled)
+	extra, err := lockAndMergeAccountProbeExtra(ctx, client, account, explicitProbeEnabled, explicitRateSyncEnabled, explicitRateConversionRatio)
 	if err != nil {
 		return nil, err
 	}
@@ -576,6 +580,7 @@ func lockAndMergeAccountProbeExtra(
 	account *service.Account,
 	explicitProbeEnabled *bool,
 	explicitRateSyncEnabled *bool,
+	explicitRateConversionRatio *float64,
 ) (map[string]any, error) {
 	credentials, err := json.Marshal(normalizeJSONMap(account.Credentials))
 	if err != nil {
@@ -604,6 +609,7 @@ func lockAndMergeAccountProbeExtra(
 			proxy_id IS NOT DISTINCT FROM $5,
 			extra -> 'upstream_billing_probe_enabled',
 			extra -> 'upstream_billing_rate_sync_enabled',
+			extra -> 'upstream_billing_rate_conversion_ratio',
 			extra -> 'upstream_billing_probe',
 			extra -> 'ollama_cloud_usage_session',
 			extra -> 'ollama_cloud_usage_auto_refresh',
@@ -629,6 +635,7 @@ func lockAndMergeAccountProbeExtra(
 		ollamaProxyIdentityUnchanged bool
 		currentEnabled               []byte
 		currentRateSyncEnabled       []byte
+		currentRateConversionRatio   []byte
 		currentSnapshot              []byte
 		currentOllamaSession         []byte
 		currentOllamaAutoRefresh     []byte
@@ -640,6 +647,7 @@ func lockAndMergeAccountProbeExtra(
 		&ollamaProxyIdentityUnchanged,
 		&currentEnabled,
 		&currentRateSyncEnabled,
+		&currentRateConversionRatio,
 		&currentSnapshot,
 		&currentOllamaSession,
 		&currentOllamaAutoRefresh,
@@ -655,6 +663,7 @@ func lockAndMergeAccountProbeExtra(
 	for _, key := range []string{
 		service.UpstreamBillingProbeEnabledExtraKey,
 		service.UpstreamBillingRateSyncEnabledExtraKey,
+		service.UpstreamBillingRateConversionRatioExtraKey,
 		service.UpstreamBillingProbeExtraKey,
 		service.OllamaCloudUsageSessionExtraKey,
 		service.OllamaCloudUsageAutoRefreshExtraKey,
@@ -706,6 +715,14 @@ func lockAndMergeAccountProbeExtra(
 		}
 		if rateSyncEnabledPresent {
 			extra[service.UpstreamBillingRateSyncEnabledExtraKey] = rateSyncEnabled
+		}
+		if ratio, ok, err := decodeAccountExtraJSON(currentRateConversionRatio); err != nil {
+			return nil, err
+		} else if ok {
+			extra[service.UpstreamBillingRateConversionRatioExtraKey] = ratio
+		}
+		if explicitRateConversionRatio != nil {
+			extra[service.UpstreamBillingRateConversionRatioExtraKey] = *explicitRateConversionRatio
 		}
 	}
 	probeExplicitlyDisabled := probeEnabledPresent && !probeEnabled
@@ -2667,6 +2684,14 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 	if err != nil {
 		return err
 	}
+	var expectedRateConversionRatio any
+	if account.Extra != nil {
+		expectedRateConversionRatio = account.Extra[service.UpstreamBillingRateConversionRatioExtraKey]
+	}
+	expectedRateConversionRatioJSON, err := json.Marshal(expectedRateConversionRatio)
+	if err != nil {
+		return err
+	}
 	client := clientFromContext(ctx, r.client)
 	proxyMatches, err := lockAndMatchProbeProxyIdentity(ctx, client, account)
 	if err != nil {
@@ -2684,10 +2709,10 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 		SET
 			extra = COALESCE(extra, '{}'::jsonb) || $1::jsonb,
 			rate_multiplier = CASE
-				WHEN $10::numeric IS NOT NULL
+				WHEN $11::numeric IS NOT NULL
 					AND extra @> '{"upstream_billing_probe_enabled": true}'::jsonb
 					AND extra @> '{"upstream_billing_rate_sync_enabled": true}'::jsonb
-				THEN $10::numeric
+				THEN $11::numeric
 				ELSE rate_multiplier
 			END,
 			updated_at = NOW()
@@ -2699,8 +2724,9 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 			AND COALESCE(extra -> 'upstream_billing_probe', 'null'::jsonb) = $7::jsonb
 			AND COALESCE(extra -> 'upstream_billing_probe_enabled', 'null'::jsonb) = $8::jsonb
 			AND COALESCE(extra -> 'upstream_billing_rate_sync_enabled', 'null'::jsonb) = $9::jsonb
+			AND COALESCE(extra -> 'upstream_billing_rate_conversion_ratio', 'null'::jsonb) = $10::jsonb
 			AND deleted_at IS NULL
-	`, string(payload), account.ID, account.Platform, account.Type, string(credentials), proxyID, string(expectedSnapshotJSON), string(expectedEnabledJSON), string(expectedRateSyncEnabledJSON), rateMultiplier)
+	`, string(payload), account.ID, account.Platform, account.Type, string(credentials), proxyID, string(expectedSnapshotJSON), string(expectedEnabledJSON), string(expectedRateSyncEnabledJSON), string(expectedRateConversionRatioJSON), rateMultiplier)
 	if err != nil {
 		return err
 	}

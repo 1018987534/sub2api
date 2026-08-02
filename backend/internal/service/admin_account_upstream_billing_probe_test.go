@@ -29,6 +29,7 @@ func (r *accountBillingSettingsAdminRepo) UpdateWithAccountBillingSettings(
 	account *Account,
 	probeEnabled *bool,
 	rateSyncEnabled *bool,
+	rateConversionRatio *float64,
 	rateMultiplier *float64,
 ) error {
 	r.mu.Lock()
@@ -49,6 +50,9 @@ func (r *accountBillingSettingsAdminRepo) UpdateWithAccountBillingSettings(
 	}
 	if rateSyncEnabled != nil {
 		updated.Extra[UpstreamBillingRateSyncEnabledExtraKey] = *rateSyncEnabled
+	}
+	if rateConversionRatio != nil {
+		updated.Extra[UpstreamBillingRateConversionRatioExtraKey] = *rateConversionRatio
 	}
 	switch {
 	case rateMultiplier != nil:
@@ -123,15 +127,17 @@ func TestCreateAccountDropsManagedUpstreamBillingProbeState(t *testing.T) {
 		Credentials:          map[string]any{"api_key": "sk-test"},
 		SkipDefaultGroupBind: true,
 		Extra: map[string]any{
-			UpstreamBillingProbeEnabledExtraKey:    true,
-			UpstreamBillingRateSyncEnabledExtraKey: true,
-			UpstreamBillingProbeExtraKey:           map[string]any{"status": "ok"},
+			UpstreamBillingProbeEnabledExtraKey:        true,
+			UpstreamBillingRateSyncEnabledExtraKey:     true,
+			UpstreamBillingRateConversionRatioExtraKey: 0.05,
+			UpstreamBillingProbeExtraKey:               map[string]any{"status": "ok"},
 		},
 	})
 
 	require.NoError(t, err)
 	require.NotContains(t, created.Extra, UpstreamBillingProbeEnabledExtraKey)
 	require.NotContains(t, created.Extra, UpstreamBillingRateSyncEnabledExtraKey)
+	require.NotContains(t, created.Extra, UpstreamBillingRateConversionRatioExtraKey)
 	require.NotContains(t, created.Extra, UpstreamBillingProbeExtraKey)
 }
 
@@ -170,23 +176,81 @@ func TestUpdateAccountPreservesManagedUpstreamBillingProbeStateForUnrelatedEdit(
 			Type:     AccountTypeAPIKey,
 			Status:   StatusActive,
 			Extra: map[string]any{
-				UpstreamBillingProbeEnabledExtraKey:    true,
-				UpstreamBillingRateSyncEnabledExtraKey: true,
-				UpstreamBillingProbeExtraKey:           map[string]any{"status": "ok"},
+				UpstreamBillingProbeEnabledExtraKey:        true,
+				UpstreamBillingRateSyncEnabledExtraKey:     true,
+				UpstreamBillingRateConversionRatioExtraKey: 0.05,
+				UpstreamBillingProbeExtraKey:               map[string]any{"status": "ok"},
 			},
 		},
 	}}
 
 	svc := &adminServiceImpl{accountRepo: repo}
 	updated, err := svc.UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
-		Extra: map[string]any{"custom": "value"},
+		Extra: map[string]any{
+			"custom": "value",
+			UpstreamBillingRateConversionRatioExtraKey: 99,
+		},
 	})
 
 	require.NoError(t, err)
 	require.Equal(t, true, updated.Extra[UpstreamBillingProbeEnabledExtraKey])
 	require.Equal(t, true, updated.Extra[UpstreamBillingRateSyncEnabledExtraKey])
+	require.Equal(t, 0.05, updated.Extra[UpstreamBillingRateConversionRatioExtraKey])
 	require.Contains(t, updated.Extra, UpstreamBillingProbeExtraKey)
 	require.Equal(t, "value", updated.Extra["custom"])
+}
+
+func TestUpdateAccountPersistsDedicatedRateConversionRatio(t *testing.T) {
+	accountID := int64(111)
+	initialRate := 0.2
+	repo := &accountBillingSettingsAdminRepo{
+		upstreamBillingProbeAccountRepo: &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{
+			accountID: {
+				ID:             accountID,
+				Platform:       PlatformOpenAI,
+				Type:           AccountTypeAPIKey,
+				Status:         StatusActive,
+				RateMultiplier: &initialRate,
+				Extra: map[string]any{
+					UpstreamBillingProbeEnabledExtraKey:    true,
+					UpstreamBillingRateSyncEnabledExtraKey: true,
+					UpstreamBillingProbeExtraKey:           map[string]any{"status": "ok"},
+				},
+			},
+		}},
+	}
+	ratio := 0.05
+
+	updated, err := (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
+		RateConversionRatio: &ratio,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, ratio, updated.Extra[UpstreamBillingRateConversionRatioExtraKey])
+	require.Contains(t, updated.Extra, UpstreamBillingProbeExtraKey)
+	require.Equal(t, initialRate, *updated.RateMultiplier)
+}
+
+func TestUpdateAccountRejectsInvalidRateConversionRatio(t *testing.T) {
+	for _, ratio := range []float64{0, -1, 100.0001} {
+		accountID := int64(112)
+		repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{
+			accountID: {
+				ID:       accountID,
+				Platform: PlatformOpenAI,
+				Type:     AccountTypeAPIKey,
+				Status:   StatusActive,
+				Extra:    map[string]any{},
+			},
+		}}
+
+		_, err := (&adminServiceImpl{accountRepo: repo}).UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
+			RateConversionRatio: &ratio,
+		})
+
+		require.Error(t, err)
+		require.NotContains(t, repo.accounts[accountID].Extra, UpstreamBillingRateConversionRatioExtraKey)
+	}
 }
 
 func TestUpdateAccountPreservesGrokBillingSnapshotForUnrelatedEdit(t *testing.T) {

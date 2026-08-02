@@ -33,6 +33,9 @@ const (
 	UpstreamBillingProbeExtraKey           = "upstream_billing_probe"
 	UpstreamBillingProbeEnabledExtraKey    = "upstream_billing_probe_enabled"
 	UpstreamBillingRateSyncEnabledExtraKey = "upstream_billing_rate_sync_enabled"
+	// UpstreamBillingRateConversionRatioExtraKey scales the upstream declared
+	// base rate before it is written to accounts.rate_multiplier.
+	UpstreamBillingRateConversionRatioExtraKey = "upstream_billing_rate_conversion_ratio"
 
 	upstreamBillingProbeDefaultIntervalMinutes = 30
 	upstreamBillingProbeMinIntervalMinutes     = 5
@@ -688,7 +691,8 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	var syncRate *float64
 	previousRate := account.BillingRateMultiplier()
 	if upstreamBillingRateSyncEnabled(account) {
-		if value, valid := upstreamBillingProbeSyncRate(data); valid {
+		conversionRatio := upstreamBillingRateConversionRatio(account)
+		if value, valid := upstreamBillingProbeSyncRateWithConversionRatio(data, conversionRatio); valid {
 			syncRate = &value
 			snapshot.SyncedRateMultiplier = &value
 		} else {
@@ -697,6 +701,7 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 				"source", "upstream_billing_probe",
 				"account_id", account.ID,
 				"declared_resolved_rate_multiplier", declared,
+				"conversion_ratio", conversionRatio,
 				"max_rate_multiplier", upstreamBillingRateSyncMaxMultiplier,
 				"current_rate_multiplier", previousRate,
 			)
@@ -875,6 +880,8 @@ func upstreamBillingRateAt(data map[string]any, now time.Time) (float64, bool) {
 // upstreamBillingProbeSyncRate converts the declared multiplier into the value
 // the automatic write-back may store in accounts.rate_multiplier, at the
 // precision that column supports (DECIMAL(10,4)).
+// Accounts without a configured conversion ratio resolve to 1 and retain the
+// historical 1:1 behavior.
 //
 // It reads resolved_rate_multiplier, not effective_rate_multiplier: the
 // effective value folds in the peak coefficient that happened to apply at the
@@ -892,8 +899,19 @@ func upstreamBillingRateAt(data map[string]any, now time.Time) (float64, bool) {
 // A rejected declaration leaves the current multiplier untouched; the probe
 // still records an OK snapshot carrying the raw declaration for display.
 func upstreamBillingProbeSyncRate(data map[string]any) (float64, bool) {
+	return upstreamBillingProbeSyncRateWithConversionRatio(data, 1)
+}
+
+func upstreamBillingProbeSyncRateWithConversionRatio(data map[string]any, conversionRatio float64) (float64, bool) {
 	value, ok := resolveAccountExtraNumber(data, "resolved_rate_multiplier")
 	if !ok || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, false
+	}
+	if !validUpstreamBillingRateConversionRatio(conversionRatio) {
+		return 0, false
+	}
+	value *= conversionRatio
+	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return 0, false
 	}
 	rounded := math.Round(value*upstreamBillingProbeAccountRateScale) / upstreamBillingProbeAccountRateScale
@@ -901,6 +919,44 @@ func upstreamBillingProbeSyncRate(data map[string]any) (float64, bool) {
 		return 0, false
 	}
 	return rounded, true
+}
+
+// upstreamBillingRateConversionRatioFromExtra returns the account-level
+// conversion ratio, defaulting invalid or missing legacy values to 1.
+func upstreamBillingRateConversionRatioFromExtra(extra map[string]any) float64 {
+	if extra == nil {
+		return 1
+	}
+	ratio, ok := resolveAccountExtraNumber(extra, UpstreamBillingRateConversionRatioExtraKey)
+	if !ok || !validUpstreamBillingRateConversionRatio(ratio) {
+		return 1
+	}
+	return ratio
+}
+
+func upstreamBillingRateConversionRatio(account *Account) float64 {
+	if account == nil {
+		return 1
+	}
+	return upstreamBillingRateConversionRatioFromExtra(account.Extra)
+}
+
+func validUpstreamBillingRateConversionRatio(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value > 0 && value <= upstreamBillingRateSyncMaxMultiplier
+}
+
+// ValidateUpstreamBillingRateConversionRatio validates the admin-facing
+// account setting. The value is deliberately independent from whether rate
+// synchronization is currently enabled, so it can be prepared before
+// enabling sync.
+func ValidateUpstreamBillingRateConversionRatio(value float64) error {
+	if !validUpstreamBillingRateConversionRatio(value) {
+		return infraerrors.BadRequest(
+			"INVALID_UPSTREAM_BILLING_RATE_CONVERSION_RATIO",
+			"upstream billing rate conversion ratio must be finite, greater than 0, and at most 100",
+		)
+	}
+	return nil
 }
 
 func upstreamBillingPeakMultiplierAt(data map[string]any, now time.Time) (float64, bool) {

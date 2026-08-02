@@ -140,6 +140,7 @@ type AccountBillingSettingsRepository interface {
 		account *Account,
 		probeEnabled *bool,
 		rateSyncEnabled *bool,
+		rateConversionRatio *float64,
 		rateMultiplier *float64,
 	) error
 }

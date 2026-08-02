@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"reflect"
 	"strings"
@@ -120,6 +121,12 @@ func (r *upstreamBillingProbeAccountRepo) UpdateUpstreamBillingProbeSnapshot(
 	defer r.mu.Unlock()
 	account := r.accounts[expected.ID]
 	if account == nil || account.Platform != expected.Platform || account.Type != expected.Type || !reflect.DeepEqual(account.Credentials, expected.Credentials) {
+		return ErrUpstreamBillingProbeIdentityChanged
+	}
+	if !reflect.DeepEqual(
+		account.Extra[UpstreamBillingRateConversionRatioExtraKey],
+		expected.Extra[UpstreamBillingRateConversionRatioExtraKey],
+	) {
 		return ErrUpstreamBillingProbeIdentityChanged
 	}
 	if account.Extra == nil {
@@ -379,6 +386,52 @@ func TestUpstreamBillingProbeSyncsResolvedRateForAllAPIKeyPlatforms(t *testing.T
 	}
 }
 
+func TestUpstreamBillingProbeAppliesAccountRateConversionRatio(t *testing.T) {
+	initialRate := 1.0
+	account := &Account{
+		ID:             171,
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeAPIKey,
+		Status:         StatusActive,
+		Concurrency:    1,
+		RateMultiplier: &initialRate,
+		Credentials: map[string]any{
+			"api_key":  "sk-sensitive",
+			"base_url": "https://upstream.example",
+		},
+		Extra: map[string]any{
+			UpstreamBillingProbeEnabledExtraKey:        true,
+			UpstreamBillingRateSyncEnabledExtraKey:     true,
+			UpstreamBillingRateConversionRatioExtraKey: 0.05,
+		},
+	}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"object":"sub2api.key_billing",
+			"schema_version":1,
+			"billing_scope":"token",
+			"group_rate_multiplier":2,
+			"resolved_rate_multiplier":2,
+			"peak_rate_enabled":false,
+			"effective_rate_multiplier":2,
+			"observed_at":"2026-07-13T01:00:00Z"
+		}`)),
+	}}
+	svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
+
+	snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
+
+	require.NoError(t, err)
+	require.Equal(t, 2.0, snapshot.Data["resolved_rate_multiplier"])
+	require.NotNil(t, snapshot.SyncedRateMultiplier)
+	require.Equal(t, 0.1, *snapshot.SyncedRateMultiplier)
+	require.NotNil(t, account.RateMultiplier)
+	require.Equal(t, 0.1, *account.RateMultiplier)
+}
+
 func TestUpstreamBillingProbeOnlyDoesNotChangeAccountRate(t *testing.T) {
 	initialRate := 0.25
 	account := &Account{
@@ -433,6 +486,27 @@ func TestUpstreamBillingProbeSyncRateRangeAndPrecision(t *testing.T) {
 			}
 		})
 	}
+
+	got, ok := upstreamBillingProbeSyncRateWithConversionRatio(map[string]any{"resolved_rate_multiplier": 2.0}, 0.33334)
+	require.True(t, ok)
+	require.Equal(t, 0.6667, got)
+}
+
+func TestUpstreamBillingRateConversionRatioValidationAndLegacyFallback(t *testing.T) {
+	for _, value := range []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1), 100.0001} {
+		require.Error(t, ValidateUpstreamBillingRateConversionRatio(value))
+		require.Equal(t, 1.0, upstreamBillingRateConversionRatioFromExtra(map[string]any{
+			UpstreamBillingRateConversionRatioExtraKey: value,
+		}))
+	}
+	for _, value := range []float64{0.0001, 0.05, 1, 100} {
+		require.NoError(t, ValidateUpstreamBillingRateConversionRatio(value))
+		require.Equal(t, value, upstreamBillingRateConversionRatioFromExtra(map[string]any{
+			UpstreamBillingRateConversionRatioExtraKey: value,
+		}))
+	}
+	require.Equal(t, 1.0, upstreamBillingRateConversionRatioFromExtra(nil))
+	require.Equal(t, 1.0, upstreamBillingRateConversionRatioFromExtra(map[string]any{}))
 }
 
 // 只读取 resolved（时间无关的基准倍率）：effective 含探测那一刻的高峰系数，
@@ -453,11 +527,13 @@ func TestUpstreamBillingProbeSyncRateIgnoresEffectiveRate(t *testing.T) {
 // 快照照常记 ok，不累计 failure_count、不进入退避。
 func TestUpstreamBillingProbeKeepsRateWhenDeclarationOutOfSyncRange(t *testing.T) {
 	for _, tt := range []struct {
-		name     string
-		declared string
+		name            string
+		declared        string
+		conversionRatio float64
 	}{
 		{name: "zero", declared: "0"},
 		{name: "above ceiling", declared: "1000"},
+		{name: "converted result above ceiling", declared: "2", conversionRatio: 100},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			initialRate := 0.25
@@ -476,6 +552,9 @@ func TestUpstreamBillingProbeKeepsRateWhenDeclarationOutOfSyncRange(t *testing.T
 					UpstreamBillingProbeEnabledExtraKey:    true,
 					UpstreamBillingRateSyncEnabledExtraKey: true,
 				},
+			}
+			if tt.conversionRatio > 0 {
+				account.Extra[UpstreamBillingRateConversionRatioExtraKey] = tt.conversionRatio
 			}
 			repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
 			upstream := &httpUpstreamRecorder{resp: &http.Response{
@@ -587,6 +666,38 @@ func TestUpstreamBillingProbeDiscardsResultWhenIdentityChangesInFlight(t *testin
 
 	require.Nil(t, snapshot)
 	require.ErrorIs(t, err, ErrUpstreamBillingProbeIdentityChanged)
+	require.NotContains(t, repo.accounts[account.ID].Extra, UpstreamBillingProbeExtraKey)
+}
+
+func TestUpstreamBillingProbeDiscardsResultWhenConversionRatioChangesInFlight(t *testing.T) {
+	initialRate := 0.25
+	account := &Account{
+		ID:             191,
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeAPIKey,
+		Status:         StatusActive,
+		Concurrency:    1,
+		RateMultiplier: &initialRate,
+		Credentials:    map[string]any{"api_key": "sk-old", "base_url": "https://upstream.example"},
+		Extra: map[string]any{
+			UpstreamBillingProbeEnabledExtraKey:        true,
+			UpstreamBillingRateSyncEnabledExtraKey:     true,
+			UpstreamBillingRateConversionRatioExtraKey: 1.0,
+		},
+	}
+	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{account.ID: account}}
+	upstream := &upstreamBillingProbeHTTPStub{beforeResponse: func() {
+		repo.mu.Lock()
+		defer repo.mu.Unlock()
+		repo.accounts[account.ID].Extra[UpstreamBillingRateConversionRatioExtraKey] = 0.05
+	}}
+	svc := newUpstreamBillingProbeTestService(repo, upstream, &upstreamBillingProbeSettingRepo{})
+
+	snapshot, err := svc.ProbeAccount(context.Background(), account.ID)
+
+	require.Nil(t, snapshot)
+	require.ErrorIs(t, err, ErrUpstreamBillingProbeIdentityChanged)
+	require.Equal(t, initialRate, *repo.accounts[account.ID].RateMultiplier)
 	require.NotContains(t, repo.accounts[account.ID].Extra, UpstreamBillingProbeExtraKey)
 }
 

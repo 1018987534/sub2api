@@ -1091,6 +1091,7 @@ export interface Account {
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
+    upstream_billing_rate_conversion_ratio?: number
     upstream_billing_probe?: UpstreamBillingProbeSnapshot
   } & Record<string, unknown>)
   proxy_id: number | null
@@ -1399,6 +1400,7 @@ export interface UpdateAccountRequest {
   periodic_schedule_pause_minutes?: number
   upstream_billing_probe_enabled?: boolean
   upstream_billing_rate_sync_enabled?: boolean
+  upstream_billing_rate_conversion_ratio?: number
   confirm_mixed_channel_risk?: boolean
 }
 

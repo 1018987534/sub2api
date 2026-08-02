@@ -1621,6 +1621,26 @@
               @update:model-value="handleUpstreamBillingRateSyncChange"
             />
           </div>
+          <div
+            v-if="account?.type === 'apikey' && upstreamBillingRateSyncEnabled"
+            class="mt-3"
+          >
+            <label class="input-label">
+              {{ t('admin.accounts.upstreamBilling.rateConversionRatio') }}
+            </label>
+            <input
+              v-model.number="upstreamBillingRateConversionRatio"
+              type="number"
+              min="0.0001"
+              max="100"
+              step="0.0001"
+              class="input"
+              data-testid="upstream-billing-rate-conversion-ratio"
+            />
+            <p class="input-hint">
+              {{ t('admin.accounts.upstreamBilling.rateConversionRatioHint') }}
+            </p>
+          </div>
         </div>
       </div>
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
@@ -3014,6 +3034,7 @@ const autoPause5hDisabled = ref(false)
 const autoPause7dDisabled = ref(false)
 const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)
+const upstreamBillingRateConversionRatio = ref(1)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
 const antigravityProjectId = ref('')
@@ -3522,9 +3543,14 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 	autoPause7dThreshold.value = typeof extra?.auto_pause_7d_threshold === 'number' ? extra.auto_pause_7d_threshold * 100 : null
 	autoPause5hDisabled.value = extra?.auto_pause_5h_disabled === true
 	autoPause7dDisabled.value = extra?.auto_pause_7d_disabled === true
-	upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
+  upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
   upstreamBillingRateSyncEnabled.value =
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
+  const savedRateConversionRatio = Number(extra?.upstream_billing_rate_conversion_ratio)
+  upstreamBillingRateConversionRatio.value =
+    Number.isFinite(savedRateConversionRatio) && savedRateConversionRatio > 0 && savedRateConversionRatio <= 100
+      ? savedRateConversionRatio
+      : 1
 
   // Load OpenAI passthrough toggle (OpenAI OAuth/SetupToken/API Key)
   openaiPassthroughEnabled.value = false
@@ -4392,6 +4418,12 @@ const handleSubmit = async () => {
       updatePayload.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value
       updatePayload.upstream_billing_rate_sync_enabled = upstreamBillingRateSyncEnabled.value
       if (upstreamBillingRateSyncEnabled.value) {
+        const rateConversionRatio = Number(upstreamBillingRateConversionRatio.value)
+        if (!Number.isFinite(rateConversionRatio) || rateConversionRatio <= 0 || rateConversionRatio > 100) {
+          appStore.showError(t('admin.accounts.upstreamBilling.rateConversionRatioInvalid'))
+          return
+        }
+        updatePayload.upstream_billing_rate_conversion_ratio = rateConversionRatio
         delete updatePayload.rate_multiplier
       }
     }
@@ -4962,6 +4994,7 @@ const handleSubmit = async () => {
       if (props.account.type === 'apikey') {
         delete newExtra.upstream_billing_probe_enabled
         delete newExtra.upstream_billing_rate_sync_enabled
+        delete newExtra.upstream_billing_rate_conversion_ratio
       }
       // Total quota
       if (editQuotaLimit.value != null && editQuotaLimit.value > 0) {
