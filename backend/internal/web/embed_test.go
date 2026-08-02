@@ -652,11 +652,11 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		// Request for existing static file
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/logo.png", nil)
+		req := httptest.NewRequest(http.MethodGet, "/logo.svg", nil)
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
+		assert.Contains(t, w.Header().Get("Content-Type"), "image/svg+xml")
 		assert.Empty(t, w.Header().Get("Cache-Control"))
 
 		entries, err := fs.ReadDir(server.distFS, "assets")
@@ -679,7 +679,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Equal(t, staticAssetsCacheControl, assetWriter.Header().Get("Cache-Control"))
 	})
 
-	t.Run("missing_asset_does_not_poison_host_html_cache", func(t *testing.T) {
+	t.Run("missing_asset_does_not_poison_html_cache", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"site_name": "Small Tomato"},
 		}
@@ -697,7 +697,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusNotFound, assetWriter.Code)
 		assert.Equal(t, 0, provider.called)
-		assert.Nil(t, server.cache.Get("brand.example"))
+		assert.Nil(t, server.cache.Get())
 
 		pageWriter := httptest.NewRecorder()
 		pageRequest := httptest.NewRequest(http.MethodGet, "/image-studio", nil)
@@ -767,11 +767,11 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 		router.Use(middleware)
 
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/logo.png", nil)
+		req := httptest.NewRequest(http.MethodGet, "/logo.svg", nil)
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Header().Get("Content-Type"), "image/png")
+		assert.Contains(t, w.Header().Get("Content-Type"), "image/svg+xml")
 	})
 
 	t.Run("serves_index_html_for_root", func(t *testing.T) {
