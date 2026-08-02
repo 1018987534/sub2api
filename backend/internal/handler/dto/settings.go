@@ -142,6 +142,7 @@ type SystemSettings struct {
 	ContactInfo                 string           `json:"contact_info"`
 	DocURL                      string           `json:"doc_url"`
 	HomeContent                 string           `json:"home_content"`
+	CompactHomeEnabled          bool             `json:"compact_home_enabled"`
 	HideCcsImportButton         bool             `json:"hide_ccs_import_button"`
 	HideUserSubscriptionsMenu   bool             `json:"hide_user_subscriptions_menu"`
 	PurchaseSubscriptionEnabled bool             `json:"purchase_subscription_enabled"`
@@ -346,6 +347,7 @@ type PublicSettings struct {
 	ContactInfo                      string                   `json:"contact_info"`
 	DocURL                           string                   `json:"doc_url"`
 	HomeContent                      string                   `json:"home_content"`
+	CompactHomeEnabled               bool                     `json:"compact_home_enabled"`
 	HideCcsImportButton              bool                     `json:"hide_ccs_import_button"`
 	HideUserSubscriptionsMenu        bool                     `json:"hide_user_subscriptions_menu"`
 	PurchaseSubscriptionEnabled      bool                     `json:"purchase_subscription_enabled"`

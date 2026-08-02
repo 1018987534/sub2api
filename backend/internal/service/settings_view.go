@@ -139,6 +139,7 @@ type SystemSettings struct {
 	ContactInfo                 string
 	DocURL                      string
 	HomeContent                 string
+	CompactHomeEnabled          bool
 	HideCcsImportButton         bool
 	HideUserSubscriptionsMenu   bool
 	PurchaseSubscriptionEnabled bool
@@ -307,6 +308,7 @@ type PublicSettings struct {
 	ContactInfo                      string
 	DocURL                           string
 	HomeContent                      string
+	CompactHomeEnabled               bool
 	HideCcsImportButton              bool
 	HideUserSubscriptionsMenu        bool
 
