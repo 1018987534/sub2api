@@ -150,6 +150,23 @@ func (s *SettingService) GetAffiliateRebatePerInviteeCap(ctx context.Context) fl
 	return cap
 }
 
+// GetAffiliateMinPaidInvitees 返回返利转余额所需的最少成功支付邀请人数。
+// 只有带充值订单来源的返利流水才计数；返回 0 表示不限制。
+func (s *SettingService) GetAffiliateMinPaidInvitees(ctx context.Context) int {
+	raw, err := s.settingRepo.GetValue(ctx, SettingKeyAffiliateMinPaidInvitees)
+	if err != nil {
+		return AffiliateMinPaidInviteesDefault
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || count < 0 {
+		return AffiliateMinPaidInviteesDefault
+	}
+	if count > AffiliateMinPaidInviteesMax {
+		return AffiliateMinPaidInviteesMax
+	}
+	return count
+}
+
 // IsPasswordResetEnabled 检查是否启用密码重置功能
 // 要求：必须同时开启邮件验证
 func (s *SettingService) IsPasswordResetEnabled(ctx context.Context) bool {

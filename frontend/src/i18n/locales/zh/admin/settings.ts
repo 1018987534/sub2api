@@ -54,7 +54,7 @@ export default {
           title: '邀请返利',
           description: '老用户邀请新用户注册，新用户充值后老用户按比例获得返利额度。默认关闭。',
           enabled: '启用邀请返利',
-          enabledHint: '关闭后用户菜单中的邀请页面入口隐藏、注册时忽略邀请码、新充值不再产生返利。已有返利额度仍可转入余额。',
+          enabledHint: '关闭后用户菜单中的邀请页面入口隐藏、注册时忽略邀请码、新充值不再产生返利。已有返利额度达到转余额条件后仍可转入余额。',
           adminRechargeRebate: '管理员充值参与返利',
           adminRechargeRebateHint: '开启后，通过“用户管理 > 充值”增加的余额会产生邀请返利；设置余额和扣款不参与返利。',
           rebateRate: '全局返利比例',
@@ -65,6 +65,8 @@ export default {
           durationDaysDesc: '被邀请用户注册后多少天内的充值产生返利。0 = 永久有效。',
           perInviteeCap: '单人返利上限',
           perInviteeCapDesc: '每个被邀请用户最多产生的返利总额。0 = 无上限。',
+          minPaidInvitees: '转余额最少充值邀请人数',
+          minPaidInviteesDesc: '至少需要这么多个不同的被邀请账号各自成功支付过一笔订单，才能将返利转入余额。0 = 不限制。',
           customUsers: {
             title: '专属用户配置',
             description: '为指定用户设置专属邀请码或专属返利比例。仅展示已设置过专属配置的用户。',

@@ -62,7 +62,7 @@ INSERT INTO user_affiliates (user_id, aff_code, aff_quota, aff_history_quota, cr
 VALUES ($1, $2, $3, $3, NOW(), NOW())`, u.ID, affCode, 12.34)
 	require.NoError(t, err)
 
-	transferred, balance, err := repo.TransferQuotaToBalance(txCtx, u.ID)
+	transferred, balance, err := repo.TransferQuotaToBalance(txCtx, u.ID, 0)
 	require.NoError(t, err)
 	require.InDelta(t, 12.34, transferred, 1e-9)
 	require.InDelta(t, 17.84, balance, 1e-9)
@@ -193,7 +193,7 @@ INSERT INTO user_affiliates (user_id, aff_code, aff_quota, aff_history_quota, cr
 VALUES ($1, $2, 0, 0, NOW(), NOW())`, u.ID, affCode)
 	require.NoError(t, err)
 
-	transferred, balance, err := repo.TransferQuotaToBalance(txCtx, u.ID)
+	transferred, balance, err := repo.TransferQuotaToBalance(txCtx, u.ID, 0)
 	require.ErrorIs(t, err, service.ErrAffiliateQuotaEmpty)
 	require.InDelta(t, 0.0, transferred, 1e-9)
 	require.InDelta(t, 0.0, balance, 1e-9)
@@ -201,6 +201,35 @@ VALUES ($1, $2, 0, 0, NOW(), NOW())`, u.ID, affCode)
 	persistedBalance := querySingleFloat(t, txCtx, client,
 		"SELECT balance::double precision FROM users WHERE id = $1", u.ID)
 	require.InDelta(t, 3.21, persistedBalance, 1e-9)
+}
+
+func TestAffiliateRepository_TransferQuotaToBalance_BlocksBelowPaidInviteeRequirement(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	txCtx := dbent.NewTxContext(ctx, tx)
+	client := tx.Client()
+	repo := NewAffiliateRepository(client, integrationDB)
+
+	u := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("affiliate-paid-gate-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+		Role:         service.RoleUser,
+		Status:       service.StatusActive,
+		Balance:      5,
+		Concurrency:  5,
+	})
+	affCode := fmt.Sprintf("GATE%08d", time.Now().UnixNano()%100_000_000)
+	_, err := client.ExecContext(txCtx, `
+INSERT INTO user_affiliates (user_id, aff_code, aff_quota, aff_history_quota, created_at, updated_at)
+VALUES ($1, $2, 12, 12, NOW(), NOW())`, u.ID, affCode)
+	require.NoError(t, err)
+
+	_, _, err = repo.TransferQuotaToBalance(txCtx, u.ID, 1)
+	require.ErrorIs(t, err, service.ErrAffiliatePaidInviteesLow)
+	require.InDelta(t, 12, querySingleFloat(t, txCtx, client,
+		"SELECT aff_quota::double precision FROM user_affiliates WHERE user_id = $1", u.ID), 1e-9)
+	require.InDelta(t, 5, querySingleFloat(t, txCtx, client,
+		"SELECT balance::double precision FROM users WHERE id = $1", u.ID), 1e-9)
 }
 
 // TestAffiliateRepository_AdminCustomCode covers the success path of admin

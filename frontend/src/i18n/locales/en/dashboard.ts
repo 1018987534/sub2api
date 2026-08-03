@@ -594,7 +594,11 @@ export default {
       button: 'Transfer to Balance',
       transferring: 'Transferring...',
       empty: 'No available rebate quota',
-      success: '{amount} has been transferred to your balance'
+      success: '{amount} has been transferred to your balance',
+      paidInviteesProgress: 'Paid invited accounts: {current} / {required}. Reach the requirement to transfer.',
+      errors: {
+        AFFILIATE_PAID_INVITEES_TOO_LOW: 'At least {required} distinct invited accounts must complete a payment; currently {current}'
+      }
     },
     invitees: {
       title: 'Invited Users',
@@ -610,7 +614,8 @@ export default {
       title: 'How It Works',
       line1: 'Share your affiliate code or invite link with new users.',
       line2: 'When invitees recharge, you receive {rate} of the recharge as rebate quota.',
-      line3: 'Transfer rebate quota to balance at any time.',
+      line3: 'Rebates can be transferred after at least {count} distinct invited accounts complete a payment.',
+      line3NoMinimum: 'Rebate quota can be transferred to your account balance.',
       line4: 'Newly earned rebates may have a waiting period before they can be transferred.'
     }
   },

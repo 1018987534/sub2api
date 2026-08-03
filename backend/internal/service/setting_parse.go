@@ -129,6 +129,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyAffiliateRebateFreezeHours:                strconv.Itoa(AffiliateRebateFreezeHoursDefault),
 		SettingKeyAffiliateRebateDurationDays:               strconv.Itoa(AffiliateRebateDurationDaysDefault),
 		SettingKeyAffiliateRebatePerInviteeCap:              strconv.FormatFloat(AffiliateRebatePerInviteeCapDefault, 'f', 2, 64),
+		SettingKeyAffiliateMinPaidInvitees:                  strconv.Itoa(AffiliateMinPaidInviteesDefault),
 		SettingKeyDefaultUserRPMLimit:                       "0",
 		SettingKeyDefaultSubscriptions:                      "[]",
 		SettingKeyAuthSourceDefaultEmailBalance:             "0",
@@ -392,6 +393,13 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	}
 	if perInviteeCap, err := strconv.ParseFloat(settings[SettingKeyAffiliateRebatePerInviteeCap], 64); err == nil && perInviteeCap >= 0 {
 		result.AffiliateRebatePerInviteeCap = perInviteeCap
+	}
+	result.AffiliateMinPaidInvitees = AffiliateMinPaidInviteesDefault
+	if minPaidInvitees, err := strconv.Atoi(settings[SettingKeyAffiliateMinPaidInvitees]); err == nil && minPaidInvitees >= 0 {
+		if minPaidInvitees > AffiliateMinPaidInviteesMax {
+			minPaidInvitees = AffiliateMinPaidInviteesMax
+		}
+		result.AffiliateMinPaidInvitees = minPaidInvitees
 	}
 	result.AdminRechargeRebateEnabled = settings[SettingKeyAffiliateAdminRechargeEnabled] == "true"
 	result.DefaultSubscriptions = parseDefaultSubscriptions(settings[SettingKeyDefaultSubscriptions])

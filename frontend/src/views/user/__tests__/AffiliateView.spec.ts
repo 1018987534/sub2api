@@ -3,15 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AffiliateView from '../AffiliateView.vue'
 
-const { copyToClipboard, getAffiliateDetail } = vi.hoisted(() => ({
+const { copyToClipboard, getAffiliateDetail, transferAffiliateQuota } = vi.hoisted(() => ({
   copyToClipboard: vi.fn(),
   getAffiliateDetail: vi.fn(),
+  transferAffiliateQuota: vi.fn(),
 }))
 
 vi.mock('@/api/user', () => ({
   default: {
     getAffiliateDetail,
-    transferAffiliateQuota: vi.fn(),
+    transferAffiliateQuota,
   },
 }))
 
@@ -53,6 +54,8 @@ describe('AffiliateView', () => {
       aff_code: affiliateCode,
       inviter_id: null,
       aff_count: 0,
+      paid_invitee_count: 0,
+      min_paid_invitees_for_transfer: 5,
       aff_quota: 0,
       aff_frozen_quota: 0,
       aff_history_quota: 0,
@@ -112,5 +115,36 @@ describe('AffiliateView', () => {
       `${window.location.origin}/register?aff=${encodeURIComponent(affiliateCode)}`,
       'affiliate.linkCopied',
     )
+  })
+
+  it('requires five distinct paid invitees before enabling transfer', async () => {
+    getAffiliateDetail.mockResolvedValue({
+      user_id: 1,
+      aff_code: affiliateCode,
+      inviter_id: null,
+      aff_count: 5,
+      paid_invitee_count: 4,
+      min_paid_invitees_for_transfer: 5,
+      aff_quota: 10,
+      aff_frozen_quota: 0,
+      aff_history_quota: 10,
+      effective_rebate_rate_percent: 10,
+      invitees: [],
+    })
+    const wrapper = mount(AffiliateView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<main><slot /></main>' },
+          Icon: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    const transferButton = wrapper.findAll('button').find(button => button.text() === 'affiliate.transfer.button')
+    expect(transferButton?.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('affiliate.transfer.paidInviteesProgress')
+    await transferButton?.trigger('click')
+    expect(transferAffiliateQuota).not.toHaveBeenCalled()
   })
 })

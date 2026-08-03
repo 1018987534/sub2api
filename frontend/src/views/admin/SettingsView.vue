@@ -6943,6 +6943,23 @@
                 </p>
               </div>
 
+              <div>
+                <label class="input-label">
+                  {{ t('admin.settings.features.affiliate.minPaidInvitees') }}
+                </label>
+                <input
+                  v-model.number="form.affiliate_min_paid_invitees"
+                  type="number"
+                  step="1"
+                  min="0"
+                  max="10000"
+                  class="input"
+                />
+                <p class="mt-1 text-xs text-gray-400">
+                  {{ t('admin.settings.features.affiliate.minPaidInviteesDesc') }}
+                </p>
+              </div>
+
               <!-- 专属用户管理 -->
               <div class="border-t border-gray-100 pt-6 dark:border-dark-700">
                 <div class="mb-3 flex items-center justify-between">
@@ -9106,6 +9123,7 @@ const form = reactive<SettingsForm>({
   affiliate_rebate_freeze_hours: 0,
   affiliate_rebate_duration_days: 0,
   affiliate_rebate_per_invitee_cap: 0,
+  affiliate_min_paid_invitees: 5,
   affiliate_admin_recharge_enabled: false,
   default_concurrency: 1,
   default_subscriptions: [],
@@ -10646,6 +10664,7 @@ async function saveSettings() {
       affiliate_rebate_freeze_hours: Math.max(0, Math.min(720, Number(form.affiliate_rebate_freeze_hours) || 0)),
       affiliate_rebate_duration_days: Math.max(0, Math.min(3650, Math.floor(Number(form.affiliate_rebate_duration_days) || 0))),
       affiliate_rebate_per_invitee_cap: Math.max(0, Number(form.affiliate_rebate_per_invitee_cap) || 0),
+      affiliate_min_paid_invitees: Math.max(0, Math.min(10000, Math.floor(Number(form.affiliate_min_paid_invitees) || 0))),
       affiliate_admin_recharge_enabled: form.affiliate_admin_recharge_enabled,
       default_concurrency: form.default_concurrency,
       default_subscriptions: normalizedDefaultSubscriptions,

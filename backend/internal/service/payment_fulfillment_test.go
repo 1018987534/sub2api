@@ -58,8 +58,14 @@ type paymentFulfillmentAffiliateRepoStub struct {
 		inviterID int64
 		source    AffiliateBindingSource
 	}
-	bindResult bool
-	bindErr    error
+	bindResult              bool
+	bindErr                 error
+	paidInviteeCount        int
+	paidInviteeCountErr     error
+	transferCalled          bool
+	transferMinPaidInvitees int
+	transferAmount          float64
+	transferBalance         float64
 }
 
 func (r *paymentFulfillmentAffiliateRepoStub) EnsureUserAffiliate(_ context.Context, userID int64) (*AffiliateSummary, error) {
@@ -108,16 +114,22 @@ func (r *paymentFulfillmentAffiliateRepoStub) GetAccruedRebateFromInvitee(contex
 	return 0, nil
 }
 
-func (r *paymentFulfillmentAffiliateRepoStub) ThawFrozenQuota(context.Context, int64) (float64, error) {
-	panic("unexpected ThawFrozenQuota call")
+func (r *paymentFulfillmentAffiliateRepoStub) CountPaidInvitees(context.Context, int64) (int, error) {
+	return r.paidInviteeCount, r.paidInviteeCountErr
 }
 
-func (r *paymentFulfillmentAffiliateRepoStub) TransferQuotaToBalance(context.Context, int64) (float64, float64, error) {
-	panic("unexpected TransferQuotaToBalance call")
+func (r *paymentFulfillmentAffiliateRepoStub) ThawFrozenQuota(context.Context, int64) (float64, error) {
+	return 0, nil
+}
+
+func (r *paymentFulfillmentAffiliateRepoStub) TransferQuotaToBalance(_ context.Context, _ int64, minPaidInvitees int) (float64, float64, error) {
+	r.transferCalled = true
+	r.transferMinPaidInvitees = minPaidInvitees
+	return r.transferAmount, r.transferBalance, nil
 }
 
 func (r *paymentFulfillmentAffiliateRepoStub) ListInvitees(context.Context, int64, int) ([]AffiliateInvitee, error) {
-	panic("unexpected ListInvitees call")
+	return []AffiliateInvitee{}, nil
 }
 
 func (r *paymentFulfillmentAffiliateRepoStub) UpdateUserAffCode(context.Context, int64, string) error {

@@ -54,7 +54,7 @@ export default {
           title: 'Affiliate (Invite Rebate)',
           description: 'Existing users invite new ones; the inviter earns a percentage rebate on the invitee’s recharges. Disabled by default.',
           enabled: 'Enable Affiliate',
-          enabledHint: 'When off, the affiliate menu is hidden, the aff parameter is ignored at signup, and new recharges generate no rebate. Existing rebate balances can still be transferred.',
+          enabledHint: 'When off, the affiliate menu is hidden, the aff parameter is ignored at signup, and new recharges generate no rebate. Existing rebates can still be transferred after the transfer requirement is met.',
           adminRechargeRebate: 'Rebate Admin Deposits',
           adminRechargeRebateHint: 'When enabled, balance added through User Management > Deposit generates affiliate rebates. Setting a balance or withdrawing funds does not.',
           rebateRate: 'Global Rebate Rate',
@@ -65,6 +65,8 @@ export default {
           durationDaysDesc: 'Rebate relationship expires after this many days since invitee registration. 0 = permanent.',
           perInviteeCap: 'Per-Invitee Rebate Cap',
           perInviteeCapDesc: 'Maximum total rebate from a single invitee. 0 = no limit.',
+          minPaidInvitees: 'Minimum Paid Invitees for Transfer',
+          minPaidInviteesDesc: 'Require this many distinct invited accounts to each complete a paid order before rebates can be transferred to balance. 0 = no restriction.',
           customUsers: {
             title: 'Per-User Overrides',
             description: 'Set a custom invite code or exclusive rebate rate for specific users. Lists only users that have an override applied.',

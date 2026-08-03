@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ var (
 	ErrAffiliateAlreadyBound    = infraerrors.Conflict("AFFILIATE_ALREADY_BOUND", "affiliate inviter already bound")
 	ErrAffiliateSelfBinding     = infraerrors.BadRequest("AFFILIATE_SELF_BINDING", "a user cannot invite themselves")
 	ErrAffiliateQuotaEmpty      = infraerrors.BadRequest("AFFILIATE_QUOTA_EMPTY", "no affiliate quota available to transfer")
+	ErrAffiliatePaidInviteesLow = infraerrors.BadRequest("AFFILIATE_PAID_INVITEES_TOO_LOW", "not enough invited accounts have completed a payment")
 )
 
 const (
@@ -90,13 +92,15 @@ type AffiliateInvitee struct {
 }
 
 type AffiliateDetail struct {
-	UserID          int64   `json:"user_id"`
-	AffCode         string  `json:"aff_code"`
-	InviterID       *int64  `json:"inviter_id,omitempty"`
-	AffCount        int     `json:"aff_count"`
-	AffQuota        float64 `json:"aff_quota"`
-	AffFrozenQuota  float64 `json:"aff_frozen_quota"`
-	AffHistoryQuota float64 `json:"aff_history_quota"`
+	UserID                     int64   `json:"user_id"`
+	AffCode                    string  `json:"aff_code"`
+	InviterID                  *int64  `json:"inviter_id,omitempty"`
+	AffCount                   int     `json:"aff_count"`
+	PaidInviteeCount           int     `json:"paid_invitee_count"`
+	MinPaidInviteesForTransfer int     `json:"min_paid_invitees_for_transfer"`
+	AffQuota                   float64 `json:"aff_quota"`
+	AffFrozenQuota             float64 `json:"aff_frozen_quota"`
+	AffHistoryQuota            float64 `json:"aff_history_quota"`
 	// EffectiveRebateRatePercent 是当前用户作为邀请人时实际生效的返利比例：
 	// 优先用户自己的专属比例（aff_rebate_rate_percent），否则回退到全局比例。
 	// 用于在用户的 /affiliate 页面直观展示「分享后能拿到多少」。
@@ -110,8 +114,9 @@ type AffiliateRepository interface {
 	BindInviter(ctx context.Context, userID, inviterID int64, source AffiliateBindingSource) (bool, error)
 	AccrueQuota(ctx context.Context, inviterID, inviteeUserID int64, amount float64, freezeHours int, sourceOrderID *int64) (bool, error)
 	GetAccruedRebateFromInvitee(ctx context.Context, inviterID, inviteeUserID int64) (float64, error)
+	CountPaidInvitees(ctx context.Context, inviterID int64) (int, error)
 	ThawFrozenQuota(ctx context.Context, userID int64) (float64, error)
-	TransferQuotaToBalance(ctx context.Context, userID int64) (float64, float64, error)
+	TransferQuotaToBalance(ctx context.Context, userID int64, minPaidInvitees int) (float64, float64, error)
 	ListInvitees(ctx context.Context, inviterID int64, limit int) ([]AffiliateInvitee, error)
 
 	// 管理端：用户级专属配置
@@ -264,11 +269,17 @@ func (s *AffiliateService) GetAffiliateDetail(ctx context.Context, userID int64)
 	if err != nil {
 		return nil, err
 	}
+	paidInviteeCount, err := s.repo.CountPaidInvitees(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 	return &AffiliateDetail{
 		UserID:                     summary.UserID,
 		AffCode:                    summary.AffCode,
 		InviterID:                  summary.InviterID,
 		AffCount:                   summary.AffCount,
+		PaidInviteeCount:           paidInviteeCount,
+		MinPaidInviteesForTransfer: s.minPaidInviteesForTransfer(ctx),
 		AffQuota:                   summary.AffQuota,
 		AffFrozenQuota:             summary.AffFrozenQuota,
 		AffHistoryQuota:            summary.AffHistoryQuota,
@@ -435,7 +446,18 @@ func (s *AffiliateService) TransferAffiliateQuota(ctx context.Context, userID in
 		return 0, 0, infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "affiliate service unavailable")
 	}
 
-	transferred, balance, err := s.repo.TransferQuotaToBalance(ctx, userID)
+	minPaidInvitees := s.minPaidInviteesForTransfer(ctx)
+	if minPaidInvitees > 0 {
+		paidInvitees, err := s.repo.CountPaidInvitees(ctx, userID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if paidInvitees < minPaidInvitees {
+			return 0, 0, NewAffiliatePaidInviteesLowError(paidInvitees, minPaidInvitees)
+		}
+	}
+
+	transferred, balance, err := s.repo.TransferQuotaToBalance(ctx, userID, minPaidInvitees)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -443,6 +465,20 @@ func (s *AffiliateService) TransferAffiliateQuota(ctx context.Context, userID in
 		s.invalidateAffiliateCaches(ctx, userID)
 	}
 	return transferred, balance, nil
+}
+
+func (s *AffiliateService) minPaidInviteesForTransfer(ctx context.Context) int {
+	if s == nil || s.settingService == nil {
+		return AffiliateMinPaidInviteesDefault
+	}
+	return s.settingService.GetAffiliateMinPaidInvitees(ctx)
+}
+
+func NewAffiliatePaidInviteesLowError(current, required int) error {
+	return ErrAffiliatePaidInviteesLow.WithMetadata(map[string]string{
+		"current":  strconv.Itoa(current),
+		"required": strconv.Itoa(required),
+	})
 }
 
 func (s *AffiliateService) listInvitees(ctx context.Context, inviterID int64) ([]AffiliateInvitee, error) {

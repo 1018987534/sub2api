@@ -160,6 +160,7 @@ type UpdateSettingsRequest struct {
 	AffiliateRebateFreezeHours                *int                              `json:"affiliate_rebate_freeze_hours"`
 	AffiliateRebateDurationDays               *int                              `json:"affiliate_rebate_duration_days"`
 	AffiliateRebatePerInviteeCap              *float64                          `json:"affiliate_rebate_per_invitee_cap"`
+	AffiliateMinPaidInvitees                  *int                              `json:"affiliate_min_paid_invitees"`
 	AdminRechargeRebateEnabled                *bool                             `json:"affiliate_admin_recharge_enabled"`
 	DefaultUserRPMLimit                       int                               `json:"default_user_rpm_limit"`
 	DefaultSubscriptions                      []dto.DefaultSubscriptionSetting  `json:"default_subscriptions"`
@@ -553,6 +554,16 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 	}
 	if affiliateRebatePerInviteeCap < 0 {
 		affiliateRebatePerInviteeCap = service.AffiliateRebatePerInviteeCapDefault
+	}
+	affiliateMinPaidInvitees := previousSettings.AffiliateMinPaidInvitees
+	if req.AffiliateMinPaidInvitees != nil {
+		affiliateMinPaidInvitees = *req.AffiliateMinPaidInvitees
+	}
+	if affiliateMinPaidInvitees < 0 {
+		affiliateMinPaidInvitees = service.AffiliateMinPaidInviteesDefault
+	}
+	if affiliateMinPaidInvitees > service.AffiliateMinPaidInviteesMax {
+		affiliateMinPaidInvitees = service.AffiliateMinPaidInviteesMax
 	}
 	adminRechargeRebateEnabled := previousSettings.AdminRechargeRebateEnabled
 	if req.AdminRechargeRebateEnabled != nil {
@@ -1454,6 +1465,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AffiliateRebateFreezeHours:             affiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:            affiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:           affiliateRebatePerInviteeCap,
+		AffiliateMinPaidInvitees:               affiliateMinPaidInvitees,
 		AdminRechargeRebateEnabled:             adminRechargeRebateEnabled,
 		DefaultUserRPMLimit:                    req.DefaultUserRPMLimit,
 		DefaultSubscriptions:                   defaultSubscriptions,
@@ -2020,6 +2032,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		AffiliateRebateFreezeHours:                             updatedSettings.AffiliateRebateFreezeHours,
 		AffiliateRebateDurationDays:                            updatedSettings.AffiliateRebateDurationDays,
 		AffiliateRebatePerInviteeCap:                           updatedSettings.AffiliateRebatePerInviteeCap,
+		AffiliateMinPaidInvitees:                               updatedSettings.AffiliateMinPaidInvitees,
 		AdminRechargeRebateEnabled:                             updatedSettings.AdminRechargeRebateEnabled,
 		DefaultUserRPMLimit:                                    updatedSettings.DefaultUserRPMLimit,
 		DefaultSubscriptions:                                   updatedDefaultSubscriptions,

@@ -365,6 +365,13 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		settings.AffiliateRebatePerInviteeCap = AffiliateRebatePerInviteeCapDefault
 	}
 	updates[SettingKeyAffiliateRebatePerInviteeCap] = strconv.FormatFloat(settings.AffiliateRebatePerInviteeCap, 'f', 8, 64)
+	if settings.AffiliateMinPaidInvitees < 0 {
+		settings.AffiliateMinPaidInvitees = AffiliateMinPaidInviteesDefault
+	}
+	if settings.AffiliateMinPaidInvitees > AffiliateMinPaidInviteesMax {
+		settings.AffiliateMinPaidInvitees = AffiliateMinPaidInviteesMax
+	}
+	updates[SettingKeyAffiliateMinPaidInvitees] = strconv.Itoa(settings.AffiliateMinPaidInvitees)
 	updates[SettingKeyAffiliateAdminRechargeEnabled] = strconv.FormatBool(settings.AdminRechargeRebateEnabled)
 	updates[SettingKeyDefaultUserRPMLimit] = strconv.Itoa(settings.DefaultUserRPMLimit)
 	defaultSubsJSON, err := json.Marshal(settings.DefaultSubscriptions)

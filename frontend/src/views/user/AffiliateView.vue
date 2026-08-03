@@ -77,7 +77,10 @@
             <ul class="mt-2 space-y-1 text-sm text-primary-700 dark:text-primary-300">
               <li>1. {{ t('affiliate.tips.line1') }}</li>
               <li>2. {{ t('affiliate.tips.line2', { rate: `${formattedRebateRate}%` }) }}</li>
-              <li>3. {{ t('affiliate.tips.line3') }}</li>
+              <li v-if="detail.min_paid_invitees_for_transfer > 0">
+                3. {{ t('affiliate.tips.line3', { count: detail.min_paid_invitees_for_transfer }) }}
+              </li>
+              <li v-else>3. {{ t('affiliate.tips.line3NoMinimum') }}</li>
               <li v-if="detail.aff_frozen_quota > 0">4. {{ t('affiliate.tips.line4') }}</li>
             </ul>
           </div>
@@ -91,7 +94,7 @@
             </div>
             <button
               class="btn btn-primary"
-              :disabled="transferring || detail.aff_quota <= 0"
+              :disabled="transferring || detail.aff_quota <= 0 || !paidInviteeRequirementMet"
               @click="transferQuota"
             >
               <Icon v-if="transferring" name="refresh" size="sm" class="animate-spin" />
@@ -99,7 +102,16 @@
               <span>{{ transferring ? t('affiliate.transfer.transferring') : t('affiliate.transfer.button') }}</span>
             </button>
           </div>
-          <p v-if="detail.aff_quota <= 0" class="mt-3 text-sm text-amber-600 dark:text-amber-400">
+          <p
+            v-if="!paidInviteeRequirementMet"
+            class="mt-3 text-sm text-amber-600 dark:text-amber-400"
+          >
+            {{ t('affiliate.transfer.paidInviteesProgress', {
+              current: detail.paid_invitee_count,
+              required: detail.min_paid_invitees_for_transfer,
+            }) }}
+          </p>
+          <p v-else-if="detail.aff_quota <= 0" class="mt-3 text-sm text-amber-600 dark:text-amber-400">
             {{ t('affiliate.transfer.empty') }}
           </p>
         </div>
@@ -150,7 +162,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useClipboard } from '@/composables/useClipboard'
 import { formatCurrency, formatDateTime } from '@/utils/format'
-import { extractApiErrorMessage } from '@/utils/apiError'
+import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -173,6 +185,12 @@ const formattedRebateRate = computed(() => {
   const v = detail.value?.effective_rebate_rate_percent ?? 0
   const rounded = Math.round(v * 100) / 100
   return Number.isInteger(rounded) ? String(rounded) : rounded.toString()
+})
+
+const paidInviteeRequirementMet = computed(() => {
+  if (!detail.value) return false
+  return detail.value.min_paid_invitees_for_transfer <= 0
+    || detail.value.paid_invitee_count >= detail.value.min_paid_invitees_for_transfer
 })
 
 function formatCount(value: number): string {
@@ -205,7 +223,7 @@ async function copyInviteLink(): Promise<void> {
 }
 
 async function transferQuota(): Promise<void> {
-  if (!detail.value || detail.value.aff_quota <= 0 || transferring.value) return
+  if (!detail.value || detail.value.aff_quota <= 0 || !paidInviteeRequirementMet.value || transferring.value) return
   transferring.value = true
   try {
     const resp = await userAPI.transferAffiliateQuota()
@@ -215,7 +233,12 @@ async function transferQuota(): Promise<void> {
       authStore.refreshUser().catch(() => undefined),
     ])
   } catch (error) {
-    appStore.showError(extractApiErrorMessage(error, t('affiliate.transferFailed')))
+    appStore.showError(extractI18nErrorMessage(
+      error,
+      t,
+      'affiliate.transfer.errors',
+      t('affiliate.transferFailed'),
+    ))
   } finally {
     transferring.value = false
   }
