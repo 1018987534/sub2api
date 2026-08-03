@@ -407,7 +407,7 @@ func (r *oauthEmailAffiliateRepoStub) ThawFrozenQuota(context.Context, int64) (f
 	panic("unexpected ThawFrozenQuota call")
 }
 
-func (r *oauthEmailAffiliateRepoStub) TransferQuotaToBalance(context.Context, int64, int) (float64, float64, error) {
+func (r *oauthEmailAffiliateRepoStub) TransferQuotaToBalance(context.Context, int64, int, time.Time) (float64, float64, error) {
 	panic("unexpected TransferQuotaToBalance call")
 }
 

@@ -141,6 +141,7 @@ func TestTransferAffiliateQuotaRequiresDistinctPaidInvitees(t *testing.T) {
 		require.Equal(t, 30.0, balance)
 		require.True(t, repo.transferCalled)
 		require.Equal(t, 7, repo.transferMinPaidInvitees)
+		require.WithinDuration(t, time.Now().Add(-affiliateInviterRecentPaymentWindow), repo.transferRecentPaymentSince, time.Second)
 	})
 }
 

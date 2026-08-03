@@ -13,17 +13,19 @@ import (
 )
 
 var (
-	ErrAffiliateProfileNotFound = infraerrors.NotFound("AFFILIATE_PROFILE_NOT_FOUND", "affiliate profile not found")
-	ErrAffiliateCodeInvalid     = infraerrors.BadRequest("AFFILIATE_CODE_INVALID", "invalid affiliate code")
-	ErrAffiliateCodeTaken       = infraerrors.Conflict("AFFILIATE_CODE_TAKEN", "affiliate code already in use")
-	ErrAffiliateAlreadyBound    = infraerrors.Conflict("AFFILIATE_ALREADY_BOUND", "affiliate inviter already bound")
-	ErrAffiliateSelfBinding     = infraerrors.BadRequest("AFFILIATE_SELF_BINDING", "a user cannot invite themselves")
-	ErrAffiliateQuotaEmpty      = infraerrors.BadRequest("AFFILIATE_QUOTA_EMPTY", "no affiliate quota available to transfer")
-	ErrAffiliatePaidInviteesLow = infraerrors.BadRequest("AFFILIATE_PAID_INVITEES_TOO_LOW", "not enough invited accounts have completed a payment")
+	ErrAffiliateProfileNotFound     = infraerrors.NotFound("AFFILIATE_PROFILE_NOT_FOUND", "affiliate profile not found")
+	ErrAffiliateCodeInvalid         = infraerrors.BadRequest("AFFILIATE_CODE_INVALID", "invalid affiliate code")
+	ErrAffiliateCodeTaken           = infraerrors.Conflict("AFFILIATE_CODE_TAKEN", "affiliate code already in use")
+	ErrAffiliateAlreadyBound        = infraerrors.Conflict("AFFILIATE_ALREADY_BOUND", "affiliate inviter already bound")
+	ErrAffiliateSelfBinding         = infraerrors.BadRequest("AFFILIATE_SELF_BINDING", "a user cannot invite themselves")
+	ErrAffiliateQuotaEmpty          = infraerrors.BadRequest("AFFILIATE_QUOTA_EMPTY", "no affiliate quota available to transfer")
+	ErrAffiliatePaidInviteesLow     = infraerrors.BadRequest("AFFILIATE_PAID_INVITEES_TOO_LOW", "not enough invited accounts have completed a payment")
+	ErrAffiliateTransferUnavailable = infraerrors.BadRequest("AFFILIATE_TRANSFER_UNAVAILABLE", "affiliate transfer is currently unavailable")
 )
 
 const (
-	affiliateInviteesLimit = 100
+	affiliateInviteesLimit              = 100
+	affiliateInviterRecentPaymentWindow = 7 * 24 * time.Hour
 	// AffiliateCodeMinLength / AffiliateCodeMaxLength bound both system-generated
 	// 12-char codes and admin-customized codes (e.g. "VIP2026").
 	AffiliateCodeMinLength = 4
@@ -116,7 +118,7 @@ type AffiliateRepository interface {
 	GetAccruedRebateFromInvitee(ctx context.Context, inviterID, inviteeUserID int64) (float64, error)
 	CountPaidInvitees(ctx context.Context, inviterID int64) (int, error)
 	ThawFrozenQuota(ctx context.Context, userID int64) (float64, error)
-	TransferQuotaToBalance(ctx context.Context, userID int64, minPaidInvitees int) (float64, float64, error)
+	TransferQuotaToBalance(ctx context.Context, userID int64, minPaidInvitees int, recentPaymentSince time.Time) (float64, float64, error)
 	ListInvitees(ctx context.Context, inviterID int64, limit int) ([]AffiliateInvitee, error)
 
 	// 管理端：用户级专属配置
@@ -457,7 +459,8 @@ func (s *AffiliateService) TransferAffiliateQuota(ctx context.Context, userID in
 		}
 	}
 
-	transferred, balance, err := s.repo.TransferQuotaToBalance(ctx, userID, minPaidInvitees)
+	recentPaymentSince := time.Now().Add(-affiliateInviterRecentPaymentWindow)
+	transferred, balance, err := s.repo.TransferQuotaToBalance(ctx, userID, minPaidInvitees, recentPaymentSince)
 	if err != nil {
 		return 0, 0, err
 	}

@@ -78,11 +78,12 @@
               <li>1. {{ t('affiliate.tips.line1') }}</li>
               <li>2. {{ t('affiliate.tips.line2', { rate: `${formattedRebateRate}%` }) }}</li>
               <li>3. {{ t('affiliate.tips.lineRecurringRecharge') }}</li>
+              <li>4. {{ t('affiliate.tips.lineNoSelfReferralAbuse') }}</li>
               <li v-if="detail.min_paid_invitees_for_transfer > 0">
-                4. {{ t('affiliate.tips.line3', { count: detail.min_paid_invitees_for_transfer }) }}
+                5. {{ t('affiliate.tips.line3', { count: detail.min_paid_invitees_for_transfer }) }}
               </li>
-              <li v-else>4. {{ t('affiliate.tips.line3NoMinimum') }}</li>
-              <li v-if="detail.aff_frozen_quota > 0">5. {{ t('affiliate.tips.line4') }}</li>
+              <li v-else>5. {{ t('affiliate.tips.line3NoMinimum') }}</li>
+              <li v-if="detail.aff_frozen_quota > 0">6. {{ t('affiliate.tips.line4') }}</li>
             </ul>
           </div>
         </div>

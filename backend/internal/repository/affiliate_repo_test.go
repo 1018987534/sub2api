@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
@@ -63,4 +64,26 @@ func TestCountPaidInviteesReturnsDistinctCompletedPaymentCount(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 5, count)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestHasRecentCompletedPaymentChecksTheInviterOwnOrder(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	since := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`SELECT EXISTS`).
+		WithArgs(int64(42), since).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+
+	exists, err := hasRecentCompletedPayment(context.Background(), db, 42, since)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.NoError(t, mock.ExpectationsWereMet())
+
+	source, err := os.ReadFile("affiliate_repo.go")
+	require.NoError(t, err)
+	content := string(source)
+	require.Contains(t, content, "payment.user_id = $1")
+	require.Contains(t, content, "payment.status = 'completed'")
+	require.Contains(t, content, "COALESCE(payment.completed_at, payment.paid_at) >= $2")
 }

@@ -79,6 +79,7 @@ describe('AffiliateView', () => {
     const values = wrapper.findAll('code')
     expect(values).toHaveLength(2)
     expect(wrapper.text()).toContain('affiliate.tips.lineRecurringRecharge')
+    expect(wrapper.text()).toContain('affiliate.tips.lineNoSelfReferralAbuse')
     for (const value of values) {
       expect(value.classes()).toEqual(expect.arrayContaining([
         'min-w-0',
