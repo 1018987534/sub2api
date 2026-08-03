@@ -40,27 +40,30 @@ const (
 	openAIQuotaHeadroomSnapshotStaleAfter      = 8 * time.Hour
 	openAIUpstreamCostNeutralFactor            = 0.5
 	defaultOpenAIOAuthSchedulingRateMultiplier = 1.0
+	openAILegacySessionStickyWeight            = 3.0
 )
 
 type cachedOpenAIAdvancedSchedulerSetting struct {
-	lowUpstreamRatePriorityEnabled bool
-	oauthSchedulingRateMultiplier  float64
-	enabled                        bool
-	stickyWeightedEnabled          bool
-	subscriptionPriorityEnabled    bool
-	lbTopKOverride                 int
-	weightOverrides                map[string]float64
-	expiresAt                      int64
+	lowUpstreamRatePriorityEnabled       bool
+	lowUpstreamRateStickyWeightedEnabled bool
+	oauthSchedulingRateMultiplier        float64
+	enabled                              bool
+	stickyWeightedEnabled                bool
+	subscriptionPriorityEnabled          bool
+	lbTopKOverride                       int
+	weightOverrides                      map[string]float64
+	expiresAt                            int64
 }
 
 type openAIAdvancedSchedulerRuntimeSettings struct {
-	lowUpstreamRatePriorityEnabled bool
-	oauthSchedulingRateMultiplier  float64
-	enabled                        bool
-	stickyWeightedEnabled          bool
-	subscriptionPriorityEnabled    bool
-	lbTopKOverride                 int
-	weightOverrides                map[string]float64
+	lowUpstreamRatePriorityEnabled       bool
+	lowUpstreamRateStickyWeightedEnabled bool
+	oauthSchedulingRateMultiplier        float64
+	enabled                              bool
+	stickyWeightedEnabled                bool
+	subscriptionPriorityEnabled          bool
+	lbTopKOverride                       int
+	weightOverrides                      map[string]float64
 }
 
 var openAIAdvancedSchedulerSettingCache atomic.Value // *cachedOpenAIAdvancedSchedulerSetting
@@ -1775,13 +1778,14 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return openAIAdvancedSchedulerRuntimeSettings{
-				lowUpstreamRatePriorityEnabled: cached.lowUpstreamRatePriorityEnabled,
-				oauthSchedulingRateMultiplier:  cached.oauthSchedulingRateMultiplier,
-				enabled:                        cached.enabled,
-				stickyWeightedEnabled:          cached.stickyWeightedEnabled,
-				subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
-				lbTopKOverride:                 cached.lbTopKOverride,
-				weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
+				lowUpstreamRatePriorityEnabled:       cached.lowUpstreamRatePriorityEnabled,
+				lowUpstreamRateStickyWeightedEnabled: cached.lowUpstreamRateStickyWeightedEnabled,
+				oauthSchedulingRateMultiplier:        cached.oauthSchedulingRateMultiplier,
+				enabled:                              cached.enabled,
+				stickyWeightedEnabled:                cached.stickyWeightedEnabled,
+				subscriptionPriorityEnabled:          cached.subscriptionPriorityEnabled,
+				lbTopKOverride:                       cached.lbTopKOverride,
+				weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
 			}
 		}
 	}
@@ -1790,18 +1794,20 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
 				return openAIAdvancedSchedulerRuntimeSettings{
-					lowUpstreamRatePriorityEnabled: cached.lowUpstreamRatePriorityEnabled,
-					oauthSchedulingRateMultiplier:  cached.oauthSchedulingRateMultiplier,
-					enabled:                        cached.enabled,
-					stickyWeightedEnabled:          cached.stickyWeightedEnabled,
-					subscriptionPriorityEnabled:    cached.subscriptionPriorityEnabled,
-					lbTopKOverride:                 cached.lbTopKOverride,
-					weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
+					lowUpstreamRatePriorityEnabled:       cached.lowUpstreamRatePriorityEnabled,
+					lowUpstreamRateStickyWeightedEnabled: cached.lowUpstreamRateStickyWeightedEnabled,
+					oauthSchedulingRateMultiplier:        cached.oauthSchedulingRateMultiplier,
+					enabled:                              cached.enabled,
+					stickyWeightedEnabled:                cached.stickyWeightedEnabled,
+					subscriptionPriorityEnabled:          cached.subscriptionPriorityEnabled,
+					lbTopKOverride:                       cached.lbTopKOverride,
+					weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
 				}, nil
 			}
 		}
 
 		lowUpstreamRatePriorityEnabled := false
+		lowUpstreamRateStickyWeightedEnabled := false
 		oauthSchedulingRateMultiplier := defaultOpenAIOAuthSchedulingRateMultiplier
 		enabled := false
 		stickyWeightedEnabled := false
@@ -1814,6 +1820,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 
 			if values, err := repo.GetMultiple(dbCtx, openAIAdvancedSchedulerRuntimeSettingKeys()); err == nil {
 				lowUpstreamRatePriorityEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAILowUpstreamRatePriorityEnabled]), "true")
+				lowUpstreamRateStickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAILowUpstreamRateStickyWeightedEnabled]), "true")
 				oauthSchedulingRateMultiplier = parseOpenAIOAuthSchedulingRateMultiplier(values[SettingKeyOpenAIOAuthSchedulingRateMultiplier])
 				enabled = strings.EqualFold(strings.TrimSpace(values[openAIAdvancedSchedulerSettingKey]), "true")
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
@@ -1831,6 +1838,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 					}
 				}
 				lowUpstreamRatePriorityEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAILowUpstreamRatePriorityEnabled]), "true")
+				lowUpstreamRateStickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAILowUpstreamRateStickyWeightedEnabled]), "true")
 				oauthSchedulingRateMultiplier = parseOpenAIOAuthSchedulingRateMultiplier(fallbackValues[SettingKeyOpenAIOAuthSchedulingRateMultiplier])
 				enabled = strings.EqualFold(strings.TrimSpace(fallbackValues[openAIAdvancedSchedulerSettingKey]), "true")
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
@@ -1841,23 +1849,25 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		}
 
 		openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
-			lowUpstreamRatePriorityEnabled: lowUpstreamRatePriorityEnabled,
-			oauthSchedulingRateMultiplier:  oauthSchedulingRateMultiplier,
-			enabled:                        enabled,
-			stickyWeightedEnabled:          stickyWeightedEnabled,
-			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
-			lbTopKOverride:                 lbTopKOverride,
-			weightOverrides:                cloneOpenAIAdvancedSchedulerWeightOverrides(weightOverrides),
-			expiresAt:                      time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
+			lowUpstreamRatePriorityEnabled:       lowUpstreamRatePriorityEnabled,
+			lowUpstreamRateStickyWeightedEnabled: lowUpstreamRateStickyWeightedEnabled,
+			oauthSchedulingRateMultiplier:        oauthSchedulingRateMultiplier,
+			enabled:                              enabled,
+			stickyWeightedEnabled:                stickyWeightedEnabled,
+			subscriptionPriorityEnabled:          subscriptionPriorityEnabled,
+			lbTopKOverride:                       lbTopKOverride,
+			weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(weightOverrides),
+			expiresAt:                            time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
 		})
 		return openAIAdvancedSchedulerRuntimeSettings{
-			lowUpstreamRatePriorityEnabled: lowUpstreamRatePriorityEnabled,
-			oauthSchedulingRateMultiplier:  oauthSchedulingRateMultiplier,
-			enabled:                        enabled,
-			stickyWeightedEnabled:          stickyWeightedEnabled,
-			subscriptionPriorityEnabled:    subscriptionPriorityEnabled,
-			lbTopKOverride:                 lbTopKOverride,
-			weightOverrides:                weightOverrides,
+			lowUpstreamRatePriorityEnabled:       lowUpstreamRatePriorityEnabled,
+			lowUpstreamRateStickyWeightedEnabled: lowUpstreamRateStickyWeightedEnabled,
+			oauthSchedulingRateMultiplier:        oauthSchedulingRateMultiplier,
+			enabled:                              enabled,
+			stickyWeightedEnabled:                stickyWeightedEnabled,
+			subscriptionPriorityEnabled:          subscriptionPriorityEnabled,
+			lbTopKOverride:                       lbTopKOverride,
+			weightOverrides:                      weightOverrides,
 		}, nil
 	})
 
@@ -1878,6 +1888,11 @@ func (s *OpenAIGatewayService) openAIOAuthSchedulingRateMultiplier(ctx context.C
 	return s.openAIAdvancedSchedulerRuntimeSettings(ctx).oauthSchedulingRateMultiplier
 }
 
+func (s *OpenAIGatewayService) isOpenAILowUpstreamRateSoftStickyEnabled(ctx context.Context) bool {
+	settings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
+	return !settings.enabled && settings.lowUpstreamRatePriorityEnabled && settings.lowUpstreamRateStickyWeightedEnabled
+}
+
 func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx context.Context) bool {
 	settings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
 	return settings.enabled && settings.stickyWeightedEnabled
@@ -1891,6 +1906,7 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerSubscriptionPriorityEnab
 func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
 	keys := []string{
 		SettingKeyOpenAILowUpstreamRatePriorityEnabled,
+		SettingKeyOpenAILowUpstreamRateStickyWeightedEnabled,
 		SettingKeyOpenAIOAuthSchedulingRateMultiplier,
 		openAIAdvancedSchedulerSettingKey,
 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled,
@@ -2666,8 +2682,6 @@ type openAILegacyUpstreamRateOrder struct {
 
 func newOpenAILegacyUpstreamRateOrder(accounts []*Account, now time.Time, oauthSchedulingRateMultiplier float64) openAILegacyUpstreamRateOrder {
 	rates := make(map[int64]float64, len(accounts))
-	var first float64
-	distinct := false
 	for _, account := range accounts {
 		if account == nil {
 			continue
@@ -2682,14 +2696,11 @@ func newOpenAILegacyUpstreamRateOrder(accounts []*Account, now time.Time, oauthS
 		if !ok {
 			continue
 		}
-		if len(rates) == 0 {
-			first = rate
-		} else if rate != first {
-			distinct = true
-		}
 		rates[account.ID] = rate
 	}
-	return openAILegacyUpstreamRateOrder{enabled: len(rates) >= 2 && distinct, rates: rates}
+	// 只要存在一个可信倍率，排序就有意义：已知倍率账号必须排在未知倍率账号前。
+	// 全部已知且倍率相同时 compare 会自然返回 0，保留原有的优先级/负载顺序。
+	return openAILegacyUpstreamRateOrder{enabled: len(rates) > 0, rates: rates}
 }
 
 func openAISchedulingRate(account *Account, now time.Time, oauthSchedulingRateMultiplier float64) (float64, bool) {
@@ -2720,6 +2731,93 @@ func (o openAILegacyUpstreamRateOrder) compare(a, b *Account) int {
 		return -1
 	}
 	return 1
+}
+
+type openAILegacySoftStickyPolicy struct {
+	enabled   bool
+	accountID int64
+	weight    float64
+	seed      uint64
+}
+
+func (o openAILegacyUpstreamRateOrder) sameTier(a, b *Account) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	aRate, aKnown := o.rates[a.ID]
+	bRate, bKnown := o.rates[b.ID]
+	if aKnown != bKnown {
+		return false
+	}
+	return !aKnown || aRate == bRate
+}
+
+// applyOpenAILegacySoftStickyOrder only chooses a weighted first candidate
+// inside the sticky account's already-sorted capability/rate bucket. It never
+// moves an account across a capability tier or an effective-rate tier.
+func applyOpenAILegacySoftStickyOrder[T any](
+	items []T,
+	accountOf func(T) *Account,
+	rateOrder openAILegacyUpstreamRateOrder,
+	policy openAILegacySoftStickyPolicy,
+	classOf func(*Account) int,
+) []T {
+	if !policy.enabled || policy.accountID <= 0 || policy.weight < 1 || len(items) <= 1 {
+		return items
+	}
+	stickyIndex := -1
+	for i := range items {
+		account := accountOf(items[i])
+		if account != nil && account.ID == policy.accountID {
+			stickyIndex = i
+			break
+		}
+	}
+	if stickyIndex < 0 {
+		return items
+	}
+
+	sameBucket := func(a, b *Account) bool {
+		return a != nil && b != nil && classOf(a) == classOf(b) && rateOrder.sameTier(a, b)
+	}
+	stickyAccount := accountOf(items[stickyIndex])
+	start, end := stickyIndex, stickyIndex+1
+	for start > 0 && sameBucket(accountOf(items[start-1]), stickyAccount) {
+		start--
+	}
+	for end < len(items) && sameBucket(accountOf(items[end]), stickyAccount) {
+		end++
+	}
+	if end-start <= 1 {
+		return items
+	}
+
+	totalWeight := 0.0
+	weights := make([]float64, end-start)
+	for i := start; i < end; i++ {
+		weight := float64(end - i)
+		if account := accountOf(items[i]); account != nil && account.ID == policy.accountID {
+			weight *= policy.weight
+		}
+		weights[i-start] = weight
+		totalWeight += weight
+	}
+	rng := newOpenAISelectionRNG(policy.seed)
+	draw := rng.nextFloat64() * totalWeight
+	winner := start
+	for i, weight := range weights {
+		draw -= weight
+		if draw < 0 {
+			winner = start + i
+			break
+		}
+	}
+	if winner > start {
+		selected := items[winner]
+		copy(items[start+1:winner+1], items[start:winner])
+		items[start] = selected
+	}
+	return items
 }
 
 func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, bool) {

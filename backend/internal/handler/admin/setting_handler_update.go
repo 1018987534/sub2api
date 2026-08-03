@@ -255,6 +255,7 @@ type UpdateSettingsRequest struct {
 
 	// OpenAI account scheduling
 	OpenAILowUpstreamRatePriorityEnabled               *bool    `json:"openai_low_upstream_rate_priority_enabled"`
+	OpenAILowUpstreamRateStickyWeightedEnabled         *bool    `json:"openai_low_upstream_rate_sticky_weighted_enabled"`
 	OpenAIOAuthSchedulingRateMultiplier                *float64 `json:"openai_oauth_scheduling_rate_multiplier"`
 	OpenAIAdvancedSchedulerEnabled                     *bool    `json:"openai_advanced_scheduler_enabled"`
 	OpenAIAdvancedSchedulerStickyWeightedEnabled       *bool    `json:"openai_advanced_scheduler_sticky_weighted_enabled"`
@@ -1604,6 +1605,12 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.OpenAILowUpstreamRatePriorityEnabled
 		}(),
+		OpenAILowUpstreamRateStickyWeightedEnabled: func() bool {
+			if req.OpenAILowUpstreamRateStickyWeightedEnabled != nil {
+				return *req.OpenAILowUpstreamRateStickyWeightedEnabled
+			}
+			return previousSettings.OpenAILowUpstreamRateStickyWeightedEnabled
+		}(),
 		OpenAIOAuthSchedulingRateMultiplier: func() float64 {
 			if req.OpenAIOAuthSchedulingRateMultiplier != nil {
 				return *req.OpenAIOAuthSchedulingRateMultiplier
@@ -2053,6 +2060,7 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		PaymentVisibleMethodAlipayEnabled:                      updatedSettings.PaymentVisibleMethodAlipayEnabled,
 		PaymentVisibleMethodWxpayEnabled:                       updatedSettings.PaymentVisibleMethodWxpayEnabled,
 		OpenAILowUpstreamRatePriorityEnabled:                   updatedSettings.OpenAILowUpstreamRatePriorityEnabled,
+		OpenAILowUpstreamRateStickyWeightedEnabled:             updatedSettings.OpenAILowUpstreamRateStickyWeightedEnabled,
 		OpenAIOAuthSchedulingRateMultiplier:                    updatedSettings.OpenAIOAuthSchedulingRateMultiplier,
 		OpenAIAdvancedSchedulerEnabled:                         updatedSettings.OpenAIAdvancedSchedulerEnabled,
 		OpenAIAdvancedSchedulerStickyWeightedEnabled:           updatedSettings.OpenAIAdvancedSchedulerStickyWeightedEnabled,

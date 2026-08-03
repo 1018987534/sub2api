@@ -464,6 +464,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.OpenAILowUpstreamRatePriorityEnabled != after.OpenAILowUpstreamRatePriorityEnabled {
 		changed = append(changed, "openai_low_upstream_rate_priority_enabled")
 	}
+	if before.OpenAILowUpstreamRateStickyWeightedEnabled != after.OpenAILowUpstreamRateStickyWeightedEnabled {
+		changed = append(changed, "openai_low_upstream_rate_sticky_weighted_enabled")
+	}
 	if before.OpenAIOAuthSchedulingRateMultiplier != after.OpenAIOAuthSchedulingRateMultiplier {
 		changed = append(changed, "openai_oauth_scheduling_rate_multiplier")
 	}

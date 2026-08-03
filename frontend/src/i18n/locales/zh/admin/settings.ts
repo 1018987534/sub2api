@@ -1216,6 +1216,8 @@ export default {
         description: '默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。',
         lowRatePriorityTitle: '低倍率优先',
         lowRatePriorityDescription: '开启后优先选择计费倍率较低的账号；倍率相同时，再比较账号优先级和当前负载等。启用实验调度策略后，此开关不生效。',
+        lowRateStickyWeightedTitle: '低倍率粘性加权',
+        lowRateStickyWeightedDescription: '开启后，session_hash 粘性只在相同有效倍率的账号之间增加选中权重；更高倍率粘性账号不会压过可用的低倍率账号。',
         oauthRateTitle: 'OAuth 调度参考倍率',
         oauthRatePriorityDescription: '同一分组同时包含 API Key 和 OAuth 账号时，OAuth 账号按此倍率与已探测的 API Key 计费倍率一起排序。',
         oauthRateWeightedDescription: '同一分组同时包含 API Key 和 OAuth 账号时，计算“计费倍率”得分时，OAuth 账号按此倍率参与计算。',
