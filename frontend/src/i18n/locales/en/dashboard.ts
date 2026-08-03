@@ -614,6 +614,7 @@ export default {
       title: 'How It Works',
       line1: 'Share your affiliate code or invite link with new users.',
       line2: 'When invitees recharge, you receive {rate} of the recharge as rebate quota.',
+      lineRecurringRecharge: 'Whenever an invited account recharges again later, you continue to earn rebate at the applicable rate.',
       line3: 'Rebates can be transferred after at least {count} distinct invited accounts complete a payment.',
       line3NoMinimum: 'Rebate quota can be transferred to your account balance.',
       line4: 'Newly earned rebates may have a waiting period before they can be transferred.'
