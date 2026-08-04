@@ -161,6 +161,47 @@ func TestOpenAILatencyTraceAggregatesFailoverTransportPhases(t *testing.T) {
 	require.Equal(t, int64(2000), nonNegativeMillis(completed[0].gotConn.Sub(completed[0].getConn))+nonNegativeMillis(current.gotConn.Sub(current.getConn)))
 }
 
+func TestOpenAILatencyTraceSeparatesInitialRoutingFromFailedAttempt(t *testing.T) {
+	logSink, restore := captureStructuredLog(t)
+	defer restore()
+
+	requestStart := time.Now().Add(-30 * time.Second)
+	trace := NewOpenAILatencyTrace(requestStart, 128, "gpt-test", true)
+	trace.MarkRoutingLatency(55 * time.Millisecond)
+	firstStart := requestStart.Add(100 * time.Millisecond)
+	trace.BeginAttempt(12006, 128, firstStart)
+	trace.markAttempt(func(a *openAILatencyAttempt) {
+		a.wroteRequest = firstStart.Add(20 * time.Millisecond)
+		a.firstResponseByte = firstStart.Add(20 * time.Second)
+		a.status = http.StatusBadGateway
+		a.upstreamHost = "xiaobaishu.test:443"
+		a.upstreamRequestID = "rid-failed"
+	})
+	trace.EndAttempt(firstStart.Add(20*time.Second), true)
+
+	secondStart := firstStart.Add(20*time.Second + 40*time.Millisecond)
+	trace.BeginAttempt(12017, 128, secondStart)
+	trace.markAttempt(func(a *openAILatencyAttempt) {
+		a.wroteRequest = secondStart.Add(20 * time.Millisecond)
+		a.firstResponseByte = secondStart.Add(1500 * time.Millisecond)
+		a.firstSSEEvent = secondStart.Add(1501 * time.Millisecond)
+		a.firstSemanticEvent = secondStart.Add(1800 * time.Millisecond)
+		a.firstDownstreamFlush = requestStart.Add(23 * time.Second)
+		a.status = http.StatusOK
+		a.upstreamHost = "shayulajiao.test:443"
+		a.upstreamCFRay = "ray-success"
+		a.upstreamRequestID = "rid-success"
+	})
+
+	trace.LogIfSlow(context.Background(), 3*time.Second, "first_downstream_flush", 0, "")
+
+	require.True(t, logSink.ContainsFieldValue("routing_ms", "55"))
+	require.True(t, logSink.ContainsFieldValue("failed_attempt_elapsed_ms", "20000"))
+	require.True(t, logSink.ContainsFieldValue("failover_wait_ms", "40"))
+	require.True(t, logSink.ContainsFieldValue("attempt_summaries", "rid-failed"))
+	require.True(t, logSink.ContainsFieldValue("attempt_summaries", "rid-success"))
+}
+
 func TestWithOpenAIHTTPTraceRecordsNetHTTPPhases(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("x-request-id", "rid-httptrace")

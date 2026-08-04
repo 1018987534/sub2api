@@ -20,6 +20,7 @@ type openAILatencyAttempt struct {
 	accountID              int64
 	bodyBytes              int
 	forwardStart           time.Time
+	forwardEnd             time.Time
 	clientAcquireStart     time.Time
 	clientAcquireDone      time.Time
 	dnsStart               time.Time
@@ -52,6 +53,7 @@ type openAILatencyAttempt struct {
 	reused                 bool
 	wasIdle                bool
 	wroteRequestError      bool
+	failed                 bool
 	preamblePendingLines   int
 }
 
@@ -66,15 +68,19 @@ type OpenAILatencyTrace struct {
 	model        string
 	stream       bool
 
-	authLatencyMs             int64
-	ingressToHandlerLatencyMs int64
-	requestBodyReadLatencyMs  int64
-	routingLatencyMs          int64
-	userSlotLatencyMs         int64
-	accountSelectionLatencyMs int64
-	accountSlotLatencyMs      int64
-	edgeRoutingWaitMs         int64
-	edgeRoutingSource         string
+	authLatencyMs                    int64
+	ingressToHandlerLatencyMs        int64
+	requestBodyReadLatencyMs         int64
+	routingLatencyMs                 int64
+	routingMarked                    bool
+	userSlotLatencyMs                int64
+	accountSelectionLatencyMs        int64
+	accountSlotLatencyMs             int64
+	initialUserSlotLatencyMs         int64
+	initialAccountSelectionLatencyMs int64
+	initialAccountSlotLatencyMs      int64
+	edgeRoutingWaitMs                int64
+	edgeRoutingSource                string
 
 	attempt           *openAILatencyAttempt
 	completedAttempts []openAILatencyAttempt
@@ -157,7 +163,12 @@ func (t *OpenAILatencyTrace) MarkRoutingLatency(d time.Duration) {
 		return
 	}
 	t.mu.Lock()
-	t.routingLatencyMs = nonNegativeMillis(d)
+	// This is the routing phase before the first upstream attempt. A failover
+	// must not turn the preceding upstream wait into "routing" time.
+	if !t.routingMarked {
+		t.routingLatencyMs = nonNegativeMillis(d)
+		t.routingMarked = true
+	}
 	t.mu.Unlock()
 }
 
@@ -166,7 +177,11 @@ func (t *OpenAILatencyTrace) AddUserSlotLatency(d time.Duration) {
 		return
 	}
 	t.mu.Lock()
-	t.userSlotLatencyMs += nonNegativeMillis(d)
+	ms := nonNegativeMillis(d)
+	t.userSlotLatencyMs += ms
+	if t.attemptCount == 0 {
+		t.initialUserSlotLatencyMs += ms
+	}
 	t.mu.Unlock()
 }
 
@@ -175,7 +190,11 @@ func (t *OpenAILatencyTrace) AddAccountSelectionLatency(d time.Duration) {
 		return
 	}
 	t.mu.Lock()
-	t.accountSelectionLatencyMs += nonNegativeMillis(d)
+	ms := nonNegativeMillis(d)
+	t.accountSelectionLatencyMs += ms
+	if t.attemptCount == 0 {
+		t.initialAccountSelectionLatencyMs += ms
+	}
 	t.mu.Unlock()
 }
 
@@ -184,7 +203,11 @@ func (t *OpenAILatencyTrace) AddAccountSlotLatency(d time.Duration) {
 		return
 	}
 	t.mu.Lock()
-	t.accountSlotLatencyMs += nonNegativeMillis(d)
+	ms := nonNegativeMillis(d)
+	t.accountSlotLatencyMs += ms
+	if t.attemptCount == 0 {
+		t.initialAccountSlotLatencyMs += ms
+	}
 	t.mu.Unlock()
 }
 
@@ -218,6 +241,24 @@ func (t *OpenAILatencyTrace) BeginAttempt(accountID int64, bodyBytes int, starte
 		forwardStart: startedAt,
 	}
 	t.mu.Unlock()
+}
+
+// EndAttempt closes the current upstream attempt at the point Forward returns.
+// It lets slow-stream logs separate a failed attempt's upstream wait from the
+// small amount of local work needed to select the next account.
+func (t *OpenAILatencyTrace) EndAttempt(at time.Time, failed bool) {
+	if t == nil {
+		return
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	t.markAttempt(func(a *openAILatencyAttempt) {
+		if a.forwardEnd.IsZero() {
+			a.forwardEnd = at
+		}
+		a.failed = failed
+	})
 }
 
 func (t *OpenAILatencyTrace) markAttempt(fn func(*openAILatencyAttempt)) {
@@ -399,6 +440,9 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 	userSlotLatencyMs := t.userSlotLatencyMs
 	accountSelectionLatencyMs := t.accountSelectionLatencyMs
 	accountSlotLatencyMs := t.accountSlotLatencyMs
+	initialUserSlotLatencyMs := t.initialUserSlotLatencyMs
+	initialAccountSelectionLatencyMs := t.initialAccountSelectionLatencyMs
+	initialAccountSlotLatencyMs := t.initialAccountSlotLatencyMs
 	edgeRoutingWaitMs := t.edgeRoutingWaitMs
 	edgeRoutingSource := t.edgeRoutingSource
 	attemptCount := t.attemptCount
@@ -446,9 +490,22 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 	if preRoutingOtherMs < 0 {
 		preRoutingOtherMs = 0
 	}
-	routingOtherMs := routingLatencyMs - userSlotLatencyMs - accountSelectionLatencyMs - accountSlotLatencyMs
+	routingOtherMs := routingLatencyMs - initialUserSlotLatencyMs - initialAccountSelectionLatencyMs - initialAccountSlotLatencyMs
 	if routingOtherMs < 0 {
 		routingOtherMs = 0
+	}
+	failedAttemptElapsedMs := int64(0)
+	failoverWaitMs := int64(0)
+	for i, candidate := range attempts {
+		if candidate.failed && !candidate.forwardEnd.IsZero() {
+			failedAttemptElapsedMs += nonNegativeMillis(candidate.forwardEnd.Sub(candidate.forwardStart))
+		}
+		if i > 0 {
+			previous := attempts[i-1]
+			if !previous.forwardEnd.IsZero() {
+				failoverWaitMs += nonNegativeMillis(candidate.forwardStart.Sub(previous.forwardEnd))
+			}
+		}
 	}
 	largestPhase, largestPhaseMs := openAILatencyLargestPhase([]openAILatencyPhase{
 		{name: "inbound_request_body_read", ms: requestBodyReadLatencyMs},
@@ -490,6 +547,8 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		zap.Int64("edge_routing_wait_ms", edgeRoutingWaitMs),
 		zap.String("edge_routing_source", edgeRoutingSource),
 		zap.Int64("routing_other_ms", routingOtherMs),
+		zap.Int64("failed_attempt_elapsed_ms", failedAttemptElapsedMs),
+		zap.Int64("failover_wait_ms", failoverWaitMs),
 		zap.Int64("forward_to_flush_ms", nonNegativeMillis(firstFlush.Sub(attempt.forwardStart))),
 		zap.Int64("upstream_request_prepare_ms", requestPrepareMs),
 		zap.Int64("client_acquire_ms", clientAcquireMs),
@@ -530,6 +589,9 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		zap.String("first_semantic_event_type", attempt.firstSemanticEventType),
 		zap.String("upstream_request_id", strings.TrimSpace(upstreamRequestID)),
 	}
+	if len(attempts) > 1 {
+		fields = append(fields, zap.Any("attempt_summaries", openAILatencyAttemptSummaries(attempts)))
+	}
 	if requestID, _ := ctx.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
 		fields = append(fields, zap.String("request_id", strings.TrimSpace(requestID)))
 	}
@@ -538,6 +600,46 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 	}
 	zapLogger := logger.FromContext(ctx).With(fields...)
 	zapLogger.Warn("openai.slow_stream_latency")
+}
+
+type openAILatencyAttemptSummary struct {
+	Attempt                 int    `json:"attempt"`
+	AccountID               int64  `json:"account_id"`
+	Failed                  bool   `json:"failed"`
+	StatusCode              int    `json:"status_code"`
+	ElapsedMs               int64  `json:"elapsed_ms"`
+	ResponseHeaderWaitMs    int64  `json:"response_header_wait_ms"`
+	FirstSSEAfterHeaderMs   int64  `json:"first_sse_after_header_ms"`
+	FirstSemanticAfterSSEMs int64  `json:"first_semantic_after_sse_ms"`
+	UpstreamHost            string `json:"upstream_host,omitempty"`
+	UpstreamRemoteAddr      string `json:"upstream_remote_addr,omitempty"`
+	UpstreamCFRay           string `json:"upstream_cf_ray,omitempty"`
+	UpstreamRequestID       string `json:"upstream_request_id,omitempty"`
+}
+
+func openAILatencyAttemptSummaries(attempts []openAILatencyAttempt) []openAILatencyAttemptSummary {
+	summaries := make([]openAILatencyAttemptSummary, 0, len(attempts))
+	for i, candidate := range attempts {
+		elapsedEnd := candidate.forwardEnd
+		if elapsedEnd.IsZero() {
+			elapsedEnd = candidate.firstDownstreamFlush
+		}
+		summaries = append(summaries, openAILatencyAttemptSummary{
+			Attempt:                 i + 1,
+			AccountID:               candidate.accountID,
+			Failed:                  candidate.failed,
+			StatusCode:              candidate.status,
+			ElapsedMs:               nonNegativeMillis(elapsedEnd.Sub(candidate.forwardStart)),
+			ResponseHeaderWaitMs:    nonNegativeMillis(candidate.firstResponseByte.Sub(candidate.wroteRequest)),
+			FirstSSEAfterHeaderMs:   nonNegativeMillis(candidate.firstSSEEvent.Sub(candidate.firstResponseByte)),
+			FirstSemanticAfterSSEMs: nonNegativeMillis(candidate.firstSemanticEvent.Sub(candidate.firstSSEEvent)),
+			UpstreamHost:            candidate.upstreamHost,
+			UpstreamRemoteAddr:      candidate.upstreamRemoteAddr,
+			UpstreamCFRay:           candidate.upstreamCFRay,
+			UpstreamRequestID:       candidate.upstreamRequestID,
+		})
+	}
+	return summaries
 }
 
 type openAILatencyPhase struct {
