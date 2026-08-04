@@ -2,6 +2,7 @@ const DEFAULT_VMISS_US_01_PERCENT = 10;
 const DEFAULT_YT_US_01_PERCENT = 0;
 const DEFAULT_VMISS_US_02_PERCENT = 0;
 const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 15;
+const DEFAULT_EDGE_REQUEST_GZIP_MIN_BYTES = 64 * 1024;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
 
 let routingConfigCache = null;
@@ -28,6 +29,18 @@ function environmentInteger(env, key, fallback, legacyKey = "") {
     return fallback;
   }
   return Math.min(100, Math.max(0, parsed));
+}
+
+function edgeRequestGzipMinBytes(env) {
+  const raw = String(env.EDGE_REQUEST_GZIP_MIN_BYTES ?? "").trim();
+  if (raw === "") {
+    return DEFAULT_EDGE_REQUEST_GZIP_MIN_BYTES;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_EDGE_REQUEST_GZIP_MIN_BYTES;
+  }
+  return Math.min(16 * 1024 * 1024, Math.max(0, parsed));
 }
 
 function appendUnique(origins, origin) {
@@ -294,6 +307,50 @@ function originRequest(request, originBase) {
   return new Request(incomingURL, request);
 }
 
+function shouldCompressRequestBody(request, env) {
+  if (
+    !request.body ||
+    typeof CompressionStream !== "function" ||
+    request.method === "GET" ||
+    request.method === "HEAD"
+  ) {
+    return false;
+  }
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.startsWith("application/json")) {
+    return false;
+  }
+  const contentEncoding = request.headers.get("content-encoding")?.trim().toLowerCase() ?? "";
+  if (contentEncoding && contentEncoding !== "identity") {
+    return false;
+  }
+  // Rewriting a signed body would invalidate the signature.
+  if (request.headers.has("content-md5") || request.headers.has("digest")) {
+    return false;
+  }
+  const contentLength = Number.parseInt(request.headers.get("content-length") ?? "", 10);
+  return Number.isFinite(contentLength) && contentLength >= edgeRequestGzipMinBytes(env);
+}
+
+function maybeCompressOriginRequest(request, forwarded, env) {
+  if (!shouldCompressRequestBody(request, env)) {
+    return forwarded;
+  }
+
+  const headers = new Headers(forwarded.headers);
+  headers.delete("content-length");
+  headers.delete("content-md5");
+  headers.delete("digest");
+  headers.set("content-encoding", "gzip");
+  return new Request(forwarded, {
+    body: forwarded.body.pipeThrough(new CompressionStream("gzip")),
+    headers,
+    // Node's Fetch implementation requires this for a streaming request body;
+    // Cloudflare Workers accepts the standard RequestInit member as well.
+    duplex: "half",
+  });
+}
+
 function shouldFailOver(response) {
   return response.status >= 500 && response.status <= 599;
 }
@@ -320,7 +377,11 @@ export default {
     // never replay it at the edge: the first origin may already have reached the
     // model upstream even if its connection fails before returning headers.
     if (!canRetry(request)) {
-      const forwarded = originRequest(request, origins[0]);
+      const forwarded = maybeCompressOriginRequest(
+        request,
+        originRequest(request, origins[0]),
+        env,
+      );
       forwarded.headers.set("X-Sub2API-Edge-Routing-Ms", String(routingWaitMs));
       forwarded.headers.set(
         "X-Sub2API-Edge-Routing-Source",

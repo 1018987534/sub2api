@@ -331,6 +331,98 @@ test("POST forwarding overwrites and sends edge routing trace headers", async ()
   }
 });
 
+test("compresses large uncompressed JSON POST bodies at the edge", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  let forwardedRequest;
+  const body = JSON.stringify({ input: "x".repeat(100_000) });
+  globalThis.fetch = async (request) => {
+    forwardedRequest = request;
+    return new Response("ok");
+  };
+
+  try {
+    const response = await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": String(new TextEncoder().encode(body).byteLength),
+        },
+        body,
+      }),
+      {
+        BWG_US_01_ORIGIN: "https://control.example",
+        BWG_US_01_PERCENT: "100",
+        EDGE_REQUEST_GZIP_MIN_BYTES: "1024",
+      },
+    );
+
+    assert.equal(await response.text(), "ok");
+    assert.equal(forwardedRequest.headers.get("content-encoding"), "gzip");
+    assert.equal(forwardedRequest.headers.get("content-length"), null);
+    const decoded = await new Response(
+      forwardedRequest.body.pipeThrough(new DecompressionStream("gzip")),
+    ).text();
+    assert.equal(decoded, body);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("does not recompress an already encoded or signed JSON body", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  globalThis.fetch = async (request) => {
+    forwarded.push(request);
+    return new Response("ok");
+  };
+  const body = "x".repeat(100_000);
+
+  try {
+    await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Encoding": "gzip",
+          "Content-Length": String(body.length),
+        },
+        body,
+      }),
+      {
+        BWG_US_01_ORIGIN: "https://control.example",
+        BWG_US_01_PERCENT: "100",
+        EDGE_REQUEST_GZIP_MIN_BYTES: "1024",
+      },
+    );
+    await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": String(body.length),
+          Digest: "sha-256=signature",
+        },
+        body,
+      }),
+      {
+        BWG_US_01_ORIGIN: "https://control.example",
+        BWG_US_01_PERCENT: "100",
+        EDGE_REQUEST_GZIP_MIN_BYTES: "1024",
+      },
+    );
+    assert.equal(forwarded[0].headers.get("content-encoding"), "gzip");
+    assert.equal(forwarded[1].headers.get("content-encoding"), null);
+    assert.equal(forwarded[1].headers.get("digest"), "sha-256=signature");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
 test("reads the legacy static variable names during migration", () => {
   const legacyEnv = {
     CONTROL_ORIGIN: "https://control.example",
