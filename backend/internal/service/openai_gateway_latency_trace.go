@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -27,8 +28,11 @@ type openAILatencyAttempt struct {
 	firstSSEEvent          time.Time
 	firstSemanticEvent     time.Time
 	firstDownstreamFlush   time.Time
+	firstTextDeltaEvent    time.Time
+	firstTextDeltaFlush    time.Time
 	firstSSEEventType      string
 	firstSemanticEventType string
+	firstTextDeltaBytes    int
 	upstreamHost           string
 	upstreamRequestID      string
 	protocol               string
@@ -62,6 +66,7 @@ type OpenAILatencyTrace struct {
 	completedAttempts []openAILatencyAttempt
 	attemptCount      int
 	logged            bool
+	textDeltaLogged   bool
 }
 
 type openAILatencyTraceContextKey struct{}
@@ -259,6 +264,26 @@ func (t *OpenAILatencyTrace) MarkFirstSemanticEvent(eventType string) {
 	})
 }
 
+func (t *OpenAILatencyTrace) MarkFirstTextDelta(data []byte, eventType string) bool {
+	if t == nil || strings.TrimSpace(eventType) != "response.output_text.delta" {
+		return false
+	}
+	delta := gjson.GetBytes(data, "delta")
+	if delta.Type != gjson.String || delta.String() == "" {
+		return false
+	}
+	now := time.Now()
+	first := false
+	t.markAttempt(func(a *openAILatencyAttempt) {
+		if a.firstTextDeltaEvent.IsZero() {
+			a.firstTextDeltaEvent = now
+			a.firstTextDeltaBytes = len(delta.String())
+			first = true
+		}
+	})
+	return first
+}
+
 func (t *OpenAILatencyTrace) MarkPreamblePendingLines(lines int) {
 	t.markAttempt(func(a *openAILatencyAttempt) {
 		if a.preamblePendingLines == 0 && lines > 0 {
@@ -282,21 +307,49 @@ func (t *OpenAILatencyTrace) MarkFirstDownstreamFlush() bool {
 	return first
 }
 
+func (t *OpenAILatencyTrace) MarkFirstTextDeltaFlush() bool {
+	if t == nil {
+		return false
+	}
+	now := time.Now()
+	first := false
+	t.markAttempt(func(a *openAILatencyAttempt) {
+		if !a.firstTextDeltaEvent.IsZero() && a.firstTextDeltaFlush.IsZero() {
+			a.firstTextDeltaFlush = now
+			first = true
+		}
+	})
+	return first
+}
+
 func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Duration, stage string, accountID int64, upstreamRequestID string) {
 	if t == nil || threshold <= 0 {
 		return
 	}
 	now := time.Now()
 	t.mu.Lock()
+	textDeltaStage := strings.TrimSpace(stage) == "first_text_delta_flush"
 	observedAt := now
-	if t.attempt != nil && !t.attempt.firstDownstreamFlush.IsZero() {
-		observedAt = t.attempt.firstDownstreamFlush
+	if t.attempt != nil {
+		if textDeltaStage && !t.attempt.firstTextDeltaFlush.IsZero() {
+			observedAt = t.attempt.firstTextDeltaFlush
+		} else if !textDeltaStage && !t.attempt.firstDownstreamFlush.IsZero() {
+			observedAt = t.attempt.firstDownstreamFlush
+		}
 	}
-	if t.logged || t.requestStart.IsZero() || observedAt.Sub(t.requestStart) < threshold {
+	alreadyLogged := t.logged
+	if textDeltaStage {
+		alreadyLogged = t.textDeltaLogged
+	}
+	if alreadyLogged || t.requestStart.IsZero() || observedAt.Sub(t.requestStart) < threshold {
 		t.mu.Unlock()
 		return
 	}
-	t.logged = true
+	if textDeltaStage {
+		t.textDeltaLogged = true
+	} else {
+		t.logged = true
+	}
 	requestStart := t.requestStart
 	bodyBytes := t.bodyBytes
 	model := t.model
@@ -331,6 +384,7 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 	requestPrepareMs, clientAcquireMs, transportDispatchMs := int64(0), int64(0), int64(0)
 	getConnWaitMs, requestWriteMs, responseHeaderWaitMs := int64(0), int64(0), int64(0)
 	firstSSEAfterHeaderMs, firstSemanticAfterSSEMs, firstFlushAfterSemanticMs := int64(0), int64(0), int64(0)
+	firstTextDeltaAfterSemanticMs, firstTextDeltaFlushMs := int64(0), int64(0)
 	for _, candidate := range attempts {
 		requestPrepareMs += nonNegativeMillis(candidate.clientAcquireStart.Sub(candidate.forwardStart))
 		clientAcquireMs += nonNegativeMillis(candidate.clientAcquireDone.Sub(candidate.clientAcquireStart))
@@ -341,6 +395,8 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		firstSSEAfterHeaderMs += nonNegativeMillis(candidate.firstSSEEvent.Sub(candidate.firstResponseByte))
 		firstSemanticAfterSSEMs += nonNegativeMillis(candidate.firstSemanticEvent.Sub(candidate.firstSSEEvent))
 		firstFlushAfterSemanticMs += nonNegativeMillis(candidate.firstDownstreamFlush.Sub(candidate.firstSemanticEvent))
+		firstTextDeltaAfterSemanticMs += nonNegativeMillis(candidate.firstTextDeltaEvent.Sub(candidate.firstSemanticEvent))
+		firstTextDeltaFlushMs += nonNegativeMillis(candidate.firstTextDeltaFlush.Sub(candidate.firstTextDeltaEvent))
 	}
 	preRoutingOtherMs := authLatencyMs - ingressToHandlerLatencyMs - requestBodyReadLatencyMs
 	if preRoutingOtherMs < 0 {
@@ -367,6 +423,8 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		{name: "upstream_first_sse_wait", ms: firstSSEAfterHeaderMs},
 		{name: "upstream_preamble_to_semantic_wait", ms: firstSemanticAfterSSEMs},
 		{name: "downstream_flush_delay", ms: firstFlushAfterSemanticMs},
+		{name: "upstream_semantic_to_text_delta_wait", ms: firstTextDeltaAfterSemanticMs},
+		{name: "downstream_text_delta_flush_delay", ms: firstTextDeltaFlushMs},
 	})
 	fields := []zap.Field{
 		zap.String("component", "service.openai_gateway.latency_trace"),
@@ -397,6 +455,11 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		zap.Int64("first_sse_after_header_ms", firstSSEAfterHeaderMs),
 		zap.Int64("first_semantic_after_sse_ms", firstSemanticAfterSSEMs),
 		zap.Int64("first_flush_after_semantic_ms", firstFlushAfterSemanticMs),
+		zap.Int64("first_text_delta_after_semantic_ms", firstTextDeltaAfterSemanticMs),
+		zap.Int64("first_text_delta_flush_ms", firstTextDeltaFlushMs),
+		zap.Int64("request_to_first_text_delta_ms", nonNegativeMillis(attempt.firstTextDeltaEvent.Sub(requestStart))),
+		zap.Int64("request_to_first_text_flush_ms", nonNegativeMillis(attempt.firstTextDeltaFlush.Sub(requestStart))),
+		zap.Int("first_text_delta_bytes", attempt.firstTextDeltaBytes),
 		zap.String("largest_phase", largestPhase),
 		zap.Int64("largest_phase_ms", largestPhaseMs),
 		zap.Int("preamble_pending_lines", attempt.preamblePendingLines),

@@ -79,6 +79,52 @@ func TestOpenAILatencyTraceDoesNotLogLongCompletionWhenFirstFlushWasFast(t *test
 	require.False(t, logSink.ContainsMessage("openai.slow_stream_latency"))
 }
 
+func TestOpenAILatencyTraceLogsSlowFirstTextDeltaAfterFastPreambleFlush(t *testing.T) {
+	logSink, restore := captureStructuredLog(t)
+	defer restore()
+
+	requestStart := time.Now().Add(-10 * time.Second)
+	trace := NewOpenAILatencyTrace(requestStart, 1024, "gpt-test", true)
+	trace.attemptCount = 1
+	trace.attempt = &openAILatencyAttempt{
+		accountID:            12017,
+		forwardStart:         requestStart.Add(50 * time.Millisecond),
+		firstResponseByte:    requestStart.Add(500 * time.Millisecond),
+		firstSSEEvent:        requestStart.Add(510 * time.Millisecond),
+		firstSemanticEvent:   requestStart.Add(800 * time.Millisecond),
+		firstDownstreamFlush: requestStart.Add(810 * time.Millisecond),
+		firstTextDeltaEvent:  requestStart.Add(5 * time.Second),
+		firstTextDeltaFlush:  requestStart.Add(5100 * time.Millisecond),
+		firstTextDeltaBytes:  4,
+	}
+
+	trace.LogIfSlow(context.Background(), 3*time.Second, "first_downstream_flush", 0, "")
+	trace.LogIfSlow(context.Background(), 3*time.Second, "first_text_delta_flush", 0, "")
+
+	require.True(t, logSink.ContainsMessageAtLevel("openai.slow_stream_latency", "warn"))
+	require.True(t, logSink.ContainsFieldValue("stage", "first_text_delta_flush"))
+	require.True(t, logSink.ContainsFieldValue("request_to_first_text_delta_ms", "5000"))
+	require.True(t, logSink.ContainsFieldValue("request_to_first_text_flush_ms", "5100"))
+	require.True(t, logSink.ContainsFieldValue("first_text_delta_after_semantic_ms", "4200"))
+	require.True(t, logSink.ContainsFieldValue("first_text_delta_bytes", "4"))
+
+	logSink.mu.Lock()
+	require.Len(t, logSink.events, 1)
+	logSink.mu.Unlock()
+}
+
+func TestOpenAILatencyTraceMarksOnlyNonEmptyOutputTextDelta(t *testing.T) {
+	trace := NewOpenAILatencyTrace(time.Now(), 1024, "gpt-test", true)
+	trace.BeginAttempt(12017, 1024, time.Now())
+
+	require.False(t, trace.MarkFirstTextDelta([]byte(`{"type":"response.output_item.added"}`), "response.output_item.added"))
+	require.False(t, trace.MarkFirstTextDelta([]byte(`{"type":"response.output_text.delta","delta":""}`), "response.output_text.delta"))
+	require.True(t, trace.MarkFirstTextDelta([]byte(`{"type":"response.output_text.delta","delta":"text"}`), "response.output_text.delta"))
+	require.False(t, trace.MarkFirstTextDelta([]byte(`{"type":"response.output_text.delta","delta":"again"}`), "response.output_text.delta"))
+	require.True(t, trace.MarkFirstTextDeltaFlush())
+	require.False(t, trace.MarkFirstTextDeltaFlush())
+}
+
 func TestOpenAILatencyTraceAggregatesFailoverTransportPhases(t *testing.T) {
 	trace := NewOpenAILatencyTrace(time.Now().Add(-8*time.Second), 128, "gpt-test", true)
 	firstStart := trace.requestStart.Add(100 * time.Millisecond)

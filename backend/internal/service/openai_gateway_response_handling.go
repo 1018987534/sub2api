@@ -138,6 +138,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if latencyTrace != nil && latencyTrace.MarkFirstDownstreamFlush() {
 			latencyTrace.LogIfSlow(ctx, OpenAISlowTraceThreshold(s.cfg), "first_downstream_flush", account.ID, resp.Header.Get("x-request-id"))
 		}
+		if latencyTrace != nil && latencyTrace.MarkFirstTextDeltaFlush() {
+			latencyTrace.LogIfSlow(ctx, OpenAISlowTraceThreshold(s.cfg), "first_text_delta_flush", account.ID, resp.Header.Get("x-request-id"))
+		}
 		return nil
 	}
 
@@ -535,6 +538,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
 			if latencyTrace != nil && startsClientOutput && strings.TrimSpace(data) != "[DONE]" && eventType != "response.failed" {
 				latencyTrace.MarkFirstSemanticEvent(eventType)
+			}
+			if latencyTrace != nil && strings.TrimSpace(data) != "[DONE]" {
+				latencyTrace.MarkFirstTextDelta(dataBytes, eventType)
 			}
 			if guardFirstOutput {
 				eventStartsClientOutput = eventStartsClientOutput || startsClientOutput
