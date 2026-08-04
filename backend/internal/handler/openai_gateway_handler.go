@@ -348,6 +348,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		trace := service.NewOpenAILatencyTrace(requestStart, len(body), reqModel, reqStream)
 		trace.MarkRequestBodyReadLatency(bodyReadDuration)
 		trace.MarkIngressToHandlerLatency(handlerStart.Sub(requestStart))
+		if edgeRoutingMs, err := strconv.ParseInt(strings.TrimSpace(c.GetHeader("X-Sub2API-Edge-Routing-Ms")), 10, 64); err == nil && edgeRoutingMs >= 0 {
+			trace.MarkEdgeRouting(edgeRoutingMs, c.GetHeader("X-Sub2API-Edge-Routing-Source"))
+		}
 		c.Request = c.Request.WithContext(service.WithOpenAILatencyTrace(c.Request.Context(), trace))
 	}
 	previousResponseID := strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String())

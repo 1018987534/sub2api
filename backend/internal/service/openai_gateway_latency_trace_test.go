@@ -22,6 +22,8 @@ func TestOpenAILatencyTraceLogsSlowFirstFlushOnce(t *testing.T) {
 	trace.userSlotLatencyMs = 30
 	trace.accountSelectionLatencyMs = 40
 	trace.accountSlotLatencyMs = 50
+	trace.edgeRoutingWaitMs = 180
+	trace.edgeRoutingSource = "refresh"
 	trace.attemptCount = 1
 	trace.attempt = &openAILatencyAttempt{
 		accountID:              12017,
@@ -39,7 +41,12 @@ func TestOpenAILatencyTraceLogsSlowFirstFlushOnce(t *testing.T) {
 		firstSSEEventType:      "response.created",
 		firstSemanticEventType: "response.output_text.delta",
 		upstreamHost:           "example.test:443",
+		upstreamRemoteAddr:     "203.0.113.10:443",
 		upstreamRequestID:      "rid-upstream",
+		upstreamCFRay:          "ray-test-LAX",
+		upstreamVia:            "1.1 Caddy",
+		upstreamServer:         "cloudflare",
+		upstreamServerTiming:   "origin;dur=2000",
 		protocol:               "HTTP/2.0",
 		status:                 http.StatusOK,
 		reused:                 true,
@@ -55,7 +62,12 @@ func TestOpenAILatencyTraceLogsSlowFirstFlushOnce(t *testing.T) {
 	require.True(t, logSink.ContainsFieldValue("largest_phase_ms", "3000"))
 	require.True(t, logSink.ContainsFieldValue("request_elapsed_ms", "6000"))
 	require.True(t, logSink.ContainsFieldValue("upstream_request_id", "rid-upstream"))
+	require.True(t, logSink.ContainsFieldValue("upstream_remote_addr", "203.0.113.10:443"))
+	require.True(t, logSink.ContainsFieldValue("upstream_cf_ray", "ray-test-LAX"))
+	require.True(t, logSink.ContainsFieldValue("upstream_server_timing", "origin;dur=2000"))
 	require.True(t, logSink.ContainsFieldValue("request_id", "rid-local"))
+	require.True(t, logSink.ContainsFieldValue("edge_routing_wait_ms", "180"))
+	require.True(t, logSink.ContainsFieldValue("edge_routing_source", "refresh"))
 
 	logSink.mu.Lock()
 	require.Len(t, logSink.events, 1)
@@ -152,6 +164,10 @@ func TestOpenAILatencyTraceAggregatesFailoverTransportPhases(t *testing.T) {
 func TestWithOpenAIHTTPTraceRecordsNetHTTPPhases(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("x-request-id", "rid-httptrace")
+		w.Header().Set("cf-ray", "ray-httptrace-LAX")
+		w.Header().Set("via", "1.1 Caddy")
+		w.Header().Set("server", "cloudflare")
+		w.Header().Set("server-timing", "origin;dur=2000")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -179,4 +195,9 @@ func TestWithOpenAIHTTPTraceRecordsNetHTTPPhases(t *testing.T) {
 	require.False(t, attempt.firstResponseByte.IsZero())
 	require.Equal(t, http.StatusOK, attempt.status)
 	require.Equal(t, "rid-httptrace", attempt.upstreamRequestID)
+	require.Equal(t, "ray-httptrace-LAX", attempt.upstreamCFRay)
+	require.Equal(t, "1.1 Caddy", attempt.upstreamVia)
+	require.Equal(t, "cloudflare", attempt.upstreamServer)
+	require.Equal(t, "origin;dur=2000", attempt.upstreamServerTiming)
+	require.NotEmpty(t, attempt.upstreamRemoteAddr)
 }

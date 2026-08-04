@@ -121,9 +121,10 @@ function normalizeRuntimeNodes(payload) {
   });
 }
 
-async function fetchRoutingNodes(env) {
+async function fetchRoutingNodes(env, metadata = null) {
   const configURL = String(env.ROUTING_CONFIG_URL ?? "").trim();
   if (!configURL) {
+    if (metadata) metadata.source = "static";
     return staticRoutingNodes(env);
   }
 
@@ -132,9 +133,11 @@ async function fetchRoutingNodes(env) {
     routingConfigCache?.configURL === configURL &&
     now < routingConfigCache.expiresAt
   ) {
+    if (metadata) metadata.source = "cache";
     return routingConfigCache.nodes;
   }
   if (routingConfigPromise) {
+    if (metadata) metadata.source = "shared_refresh";
     return routingConfigPromise;
   }
 
@@ -166,6 +169,7 @@ async function fetchRoutingNodes(env) {
         nodes,
         expiresAt: Date.now() + ttlSeconds * 1000,
       };
+      if (metadata) metadata.source = "refresh";
       return nodes;
     } catch (error) {
       console.error(
@@ -173,8 +177,10 @@ async function fetchRoutingNodes(env) {
         error instanceof Error ? error.message : String(error),
       );
       if (routingConfigCache?.configURL === configURL) {
+        if (metadata) metadata.source = "stale";
         return routingConfigCache.nodes;
       }
+      if (metadata) metadata.source = "fallback";
       return staticRoutingNodes(env);
     } finally {
       routingConfigPromise = null;
@@ -264,7 +270,10 @@ function canRetry(request) {
 
 export default {
   async fetch(request, env) {
-    const routingNodes = await fetchRoutingNodes(env);
+    const routingMetadata = {};
+    const routingStart = Date.now();
+    const routingNodes = await fetchRoutingNodes(env, routingMetadata);
+    const routingWaitMs = Math.max(0, Date.now() - routingStart);
     const origins = selectOrigins(env, crypto, routingNodes);
     if (origins.length === 0) {
       return Response.json(
@@ -277,7 +286,13 @@ export default {
     // never replay it at the edge: the first origin may already have reached the
     // model upstream even if its connection fails before returning headers.
     if (!canRetry(request)) {
-      return fetch(originRequest(request, origins[0]), {
+      const forwarded = originRequest(request, origins[0]);
+      forwarded.headers.set("X-Sub2API-Edge-Routing-Ms", String(routingWaitMs));
+      forwarded.headers.set(
+        "X-Sub2API-Edge-Routing-Source",
+        String(routingMetadata.source ?? "unknown"),
+      );
+      return fetch(forwarded, {
         redirect: "manual",
       });
     }

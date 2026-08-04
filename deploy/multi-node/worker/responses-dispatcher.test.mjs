@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
+import responsesDispatcher, {
   fetchRoutingNodes,
   normalizeRuntimeNodes,
   resetRoutingConfigCache,
@@ -163,6 +163,48 @@ test("fetches runtime weights and keeps the last good value on refresh failure",
 test("falls back to static nodes when no runtime endpoint is configured", async () => {
   resetRoutingConfigCache();
   assert.deepEqual(await fetchRoutingNodes(env), staticRoutingNodes(env));
+});
+
+test("POST forwarding overwrites and sends edge routing trace headers", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  const originalDateNow = Date.now;
+  let nowCall = 0;
+  let forwardedRequest;
+  Date.now = () => (nowCall++ === 0 ? 1_000 : 1_023);
+  globalThis.fetch = async (request) => {
+    forwardedRequest = request;
+    return new Response("ok");
+  };
+
+  try {
+    const response = await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        headers: {
+          "X-Sub2API-Edge-Routing-Ms": "99999",
+          "X-Sub2API-Edge-Routing-Source": "spoofed",
+        },
+        body: "{}",
+      }),
+      {
+        BWG_US_01_ORIGIN: "https://control.example",
+        BWG_US_01_PERCENT: "100",
+      },
+    );
+
+    assert.equal(await response.text(), "ok");
+    assert.equal(forwardedRequest.url, "https://control.example/v1/responses");
+    assert.equal(forwardedRequest.headers.get("X-Sub2API-Edge-Routing-Ms"), "23");
+    assert.equal(
+      forwardedRequest.headers.get("X-Sub2API-Edge-Routing-Source"),
+      "static",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    Date.now = originalDateNow;
+    resetRoutingConfigCache();
+  }
 });
 
 test("reads the legacy static variable names during migration", () => {

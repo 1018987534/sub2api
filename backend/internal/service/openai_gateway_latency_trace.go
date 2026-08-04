@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptrace"
 	"strings"
@@ -21,6 +22,12 @@ type openAILatencyAttempt struct {
 	forwardStart           time.Time
 	clientAcquireStart     time.Time
 	clientAcquireDone      time.Time
+	dnsStart               time.Time
+	dnsDone                time.Time
+	connectStart           time.Time
+	connectDone            time.Time
+	tlsHandshakeStart      time.Time
+	tlsHandshakeDone       time.Time
 	getConn                time.Time
 	gotConn                time.Time
 	wroteRequest           time.Time
@@ -34,7 +41,12 @@ type openAILatencyAttempt struct {
 	firstSemanticEventType string
 	firstTextDeltaBytes    int
 	upstreamHost           string
+	upstreamRemoteAddr     string
 	upstreamRequestID      string
+	upstreamCFRay          string
+	upstreamVia            string
+	upstreamServer         string
+	upstreamServerTiming   string
 	protocol               string
 	status                 int
 	reused                 bool
@@ -61,6 +73,8 @@ type OpenAILatencyTrace struct {
 	userSlotLatencyMs         int64
 	accountSelectionLatencyMs int64
 	accountSlotLatencyMs      int64
+	edgeRoutingWaitMs         int64
+	edgeRoutingSource         string
 
 	attempt           *openAILatencyAttempt
 	completedAttempts []openAILatencyAttempt
@@ -174,6 +188,18 @@ func (t *OpenAILatencyTrace) AddAccountSlotLatency(d time.Duration) {
 	t.mu.Unlock()
 }
 
+func (t *OpenAILatencyTrace) MarkEdgeRouting(waitMs int64, source string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	if waitMs > 0 {
+		t.edgeRoutingWaitMs = waitMs
+	}
+	t.edgeRoutingSource = strings.TrimSpace(source)
+	t.mu.Unlock()
+}
+
 func (t *OpenAILatencyTrace) BeginAttempt(accountID int64, bodyBytes int, startedAt time.Time) {
 	if t == nil {
 		return
@@ -234,6 +260,18 @@ func (t *OpenAILatencyTrace) MarkResponse(resp *http.Response) {
 		}
 		if a.upstreamRequestID == "" {
 			a.upstreamRequestID = strings.TrimSpace(resp.Header.Get("x-request-id"))
+		}
+		if a.upstreamCFRay == "" {
+			a.upstreamCFRay = traceHeaderValue(resp.Header, "cf-ray")
+		}
+		if a.upstreamVia == "" {
+			a.upstreamVia = traceHeaderValue(resp.Header, "via")
+		}
+		if a.upstreamServer == "" {
+			a.upstreamServer = traceHeaderValue(resp.Header, "server")
+		}
+		if a.upstreamServerTiming == "" {
+			a.upstreamServerTiming = traceHeaderValue(resp.Header, "server-timing")
 		}
 	})
 }
@@ -361,6 +399,8 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 	userSlotLatencyMs := t.userSlotLatencyMs
 	accountSelectionLatencyMs := t.accountSelectionLatencyMs
 	accountSlotLatencyMs := t.accountSlotLatencyMs
+	edgeRoutingWaitMs := t.edgeRoutingWaitMs
+	edgeRoutingSource := t.edgeRoutingSource
 	attemptCount := t.attemptCount
 	var attempt openAILatencyAttempt
 	attempts := make([]openAILatencyAttempt, 0, len(t.completedAttempts)+1)
@@ -382,12 +422,16 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		firstFlush = now
 	}
 	requestPrepareMs, clientAcquireMs, transportDispatchMs := int64(0), int64(0), int64(0)
+	dnsMs, connectMs, tlsHandshakeMs := int64(0), int64(0), int64(0)
 	getConnWaitMs, requestWriteMs, responseHeaderWaitMs := int64(0), int64(0), int64(0)
 	firstSSEAfterHeaderMs, firstSemanticAfterSSEMs, firstFlushAfterSemanticMs := int64(0), int64(0), int64(0)
 	firstTextDeltaAfterSemanticMs, firstTextDeltaFlushMs := int64(0), int64(0)
 	for _, candidate := range attempts {
 		requestPrepareMs += nonNegativeMillis(candidate.clientAcquireStart.Sub(candidate.forwardStart))
 		clientAcquireMs += nonNegativeMillis(candidate.clientAcquireDone.Sub(candidate.clientAcquireStart))
+		dnsMs += nonNegativeMillis(candidate.dnsDone.Sub(candidate.dnsStart))
+		connectMs += nonNegativeMillis(candidate.connectDone.Sub(candidate.connectStart))
+		tlsHandshakeMs += nonNegativeMillis(candidate.tlsHandshakeDone.Sub(candidate.tlsHandshakeStart))
 		transportDispatchMs += nonNegativeMillis(candidate.getConn.Sub(candidate.clientAcquireDone))
 		getConnWaitMs += nonNegativeMillis(candidate.gotConn.Sub(candidate.getConn))
 		requestWriteMs += nonNegativeMillis(candidate.wroteRequest.Sub(candidate.gotConn))
@@ -443,11 +487,16 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		zap.Int64("user_slot_ms", userSlotLatencyMs),
 		zap.Int64("account_selection_ms", accountSelectionLatencyMs),
 		zap.Int64("account_slot_ms", accountSlotLatencyMs),
+		zap.Int64("edge_routing_wait_ms", edgeRoutingWaitMs),
+		zap.String("edge_routing_source", edgeRoutingSource),
 		zap.Int64("routing_other_ms", routingOtherMs),
 		zap.Int64("forward_to_flush_ms", nonNegativeMillis(firstFlush.Sub(attempt.forwardStart))),
 		zap.Int64("upstream_request_prepare_ms", requestPrepareMs),
 		zap.Int64("client_acquire_ms", clientAcquireMs),
 		zap.Int64("transport_dispatch_ms", transportDispatchMs),
+		zap.Int64("dns_lookup_ms", dnsMs),
+		zap.Int64("tcp_connect_ms", connectMs),
+		zap.Int64("tls_handshake_ms", tlsHandshakeMs),
 		zap.Int64("get_conn_wait_ms", getConnWaitMs),
 		zap.Int64("forward_to_got_conn_ms", nonNegativeMillis(attempt.gotConn.Sub(attempt.forwardStart))),
 		zap.Int64("request_write_after_conn_ms", requestWriteMs),
@@ -472,6 +521,11 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		zap.Bool("request_write_error", attempt.wroteRequestError),
 		zap.String("protocol", attempt.protocol),
 		zap.String("upstream_host", attempt.upstreamHost),
+		zap.String("upstream_remote_addr", attempt.upstreamRemoteAddr),
+		zap.String("upstream_cf_ray", attempt.upstreamCFRay),
+		zap.String("upstream_via", attempt.upstreamVia),
+		zap.String("upstream_server", attempt.upstreamServer),
+		zap.String("upstream_server_timing", attempt.upstreamServerTiming),
 		zap.String("first_sse_event_type", attempt.firstSSEEventType),
 		zap.String("first_semantic_event_type", attempt.firstSemanticEventType),
 		zap.String("upstream_request_id", strings.TrimSpace(upstreamRequestID)),
@@ -508,6 +562,16 @@ func nonNegativeMillis(d time.Duration) int64 {
 	return d.Milliseconds()
 }
 
+const maxLatencyTraceHeaderValue = 256
+
+func traceHeaderValue(headers http.Header, key string) string {
+	value := strings.TrimSpace(headers.Get(key))
+	if len(value) > maxLatencyTraceHeaderValue {
+		return value[:maxLatencyTraceHeaderValue]
+	}
+	return value
+}
+
 // WithOpenAIHTTPTrace attaches callbacks to the request reaching net/http.
 // Callers must invoke this immediately before Client.Do so transport callbacks
 // cover connection-pool and HTTP/2 stream-slot waits.
@@ -520,6 +584,54 @@ func WithOpenAIHTTPTrace(req *http.Request) *http.Request {
 		return req
 	}
 	clientTrace := &httptrace.ClientTrace{
+		DNSStart: func(httptrace.DNSStartInfo) {
+			now := time.Now()
+			trace.markAttempt(func(a *openAILatencyAttempt) {
+				if a.dnsStart.IsZero() {
+					a.dnsStart = now
+				}
+			})
+		},
+		DNSDone: func(httptrace.DNSDoneInfo) {
+			now := time.Now()
+			trace.markAttempt(func(a *openAILatencyAttempt) {
+				if a.dnsDone.IsZero() {
+					a.dnsDone = now
+				}
+			})
+		},
+		ConnectStart: func(_, _ string) {
+			now := time.Now()
+			trace.markAttempt(func(a *openAILatencyAttempt) {
+				if a.connectStart.IsZero() {
+					a.connectStart = now
+				}
+			})
+		},
+		ConnectDone: func(_, _ string, err error) {
+			now := time.Now()
+			trace.markAttempt(func(a *openAILatencyAttempt) {
+				if a.connectDone.IsZero() || err == nil {
+					a.connectDone = now
+				}
+			})
+		},
+		TLSHandshakeStart: func() {
+			now := time.Now()
+			trace.markAttempt(func(a *openAILatencyAttempt) {
+				if a.tlsHandshakeStart.IsZero() {
+					a.tlsHandshakeStart = now
+				}
+			})
+		},
+		TLSHandshakeDone: func(tls.ConnectionState, error) {
+			now := time.Now()
+			trace.markAttempt(func(a *openAILatencyAttempt) {
+				if a.tlsHandshakeDone.IsZero() {
+					a.tlsHandshakeDone = now
+				}
+			})
+		},
 		GetConn: func(hostPort string) {
 			now := time.Now()
 			trace.markAttempt(func(a *openAILatencyAttempt) {
@@ -536,6 +648,9 @@ func WithOpenAIHTTPTrace(req *http.Request) *http.Request {
 					a.gotConn = now
 					a.reused = info.Reused
 					a.wasIdle = info.WasIdle
+					if info.Conn != nil && info.Conn.RemoteAddr() != nil {
+						a.upstreamRemoteAddr = info.Conn.RemoteAddr().String()
+					}
 				}
 			})
 		},
