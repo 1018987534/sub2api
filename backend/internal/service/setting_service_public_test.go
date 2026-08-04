@@ -19,7 +19,11 @@ func (s *settingPublicRepoStub) Get(ctx context.Context, key string) (*Setting, 
 }
 
 func (s *settingPublicRepoStub) GetValue(ctx context.Context, key string) (string, error) {
-	panic("unexpected GetValue call")
+	value, ok := s.values[key]
+	if !ok {
+		return "", ErrSettingNotFound
+	}
+	return value, nil
 }
 
 func (s *settingPublicRepoStub) Set(ctx context.Context, key, value string) error {
@@ -61,6 +65,26 @@ func TestSettingService_GetPublicSettings_ExposesRegistrationEmailSuffixWhitelis
 	settings, err := svc.GetPublicSettings(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, []string{"@example.com", "@foo.bar", "*.edu.cn"}, settings.RegistrationEmailSuffixWhitelist)
+}
+
+func TestSettingService_GetPublicSettings_ExposesPasswordResetWithoutEmailVerification(t *testing.T) {
+	repo := &settingPublicRepoStub{
+		values: map[string]string{
+			SettingKeyEmailVerifyEnabled:   "false",
+			SettingKeyPasswordResetEnabled: "true",
+		},
+	}
+	svc := NewSettingService(repo, &config.Config{})
+
+	settings, err := svc.GetPublicSettings(context.Background())
+	require.NoError(t, err)
+	require.False(t, settings.EmailVerifyEnabled)
+	require.True(t, settings.PasswordResetEnabled)
+	require.True(t, svc.IsPasswordResetEnabled(context.Background()))
+
+	parsed := svc.parseSettings(repo.values)
+	require.False(t, parsed.EmailVerifyEnabled)
+	require.True(t, parsed.PasswordResetEnabled)
 }
 
 func TestSettingService_GetPublicSettings_ExposesTablePreferences(t *testing.T) {

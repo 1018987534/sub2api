@@ -751,6 +751,30 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("keeps password reset and SMTP settings available when registration email verification is off", async () => {
+    getSettings.mockResolvedValue({
+      ...baseSettingsResponse,
+      email_verify_enabled: false,
+      password_reset_enabled: true,
+      frontend_url: "https://xiaohondou.com",
+    });
+
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(
+      wrapper.get('[data-testid="password-reset-setting"]').exists(),
+    ).toBe(true);
+    expect(wrapper.get('[data-testid="smtp-settings-card"]').exists()).toBe(true);
+
+    const frontendURL = wrapper
+      .get('[data-testid="password-reset-frontend-url"]')
+      .get('input');
+    expect((frontendURL.element as HTMLInputElement).value).toBe(
+      "https://xiaohondou.com",
+    );
+  });
+
   it("renders panel rate limit card and saves settings", async () => {
     getPanelRateLimitSettings.mockClear();
     updatePanelRateLimitSettings.mockClear();

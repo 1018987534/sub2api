@@ -110,8 +110,8 @@ export default {
           },
         },
       },
-      emailTabDisabledTitle: 'Email Verification Not Enabled',
-      emailTabDisabledHint: 'Enable email verification in the Security tab to configure SMTP settings.',
+      emailTabDisabledTitle: 'Email Features Not Enabled',
+      emailTabDisabledHint: 'Enable email verification or password reset in the Security tab to configure SMTP settings.',
       registration: {
         title: 'Registration Settings',
         description: 'Control user registration and verification',

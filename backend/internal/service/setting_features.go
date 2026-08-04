@@ -167,13 +167,9 @@ func (s *SettingService) GetAffiliateMinPaidInvitees(ctx context.Context) int {
 	return count
 }
 
-// IsPasswordResetEnabled 检查是否启用密码重置功能
-// 要求：必须同时开启邮件验证
+// IsPasswordResetEnabled 检查是否启用密码重置功能。
+// 密码重置依赖 SMTP，但不应强制开启注册邮箱验证。
 func (s *SettingService) IsPasswordResetEnabled(ctx context.Context) bool {
-	// Password reset requires email verification to be enabled
-	if !s.IsEmailVerifyEnabled(ctx) {
-		return false
-	}
 	value, err := s.settingRepo.GetValue(ctx, SettingKeyPasswordResetEnabled)
 	if err != nil {
 		return false // 默认关闭

@@ -110,8 +110,8 @@ export default {
           },
         },
       },
-      emailTabDisabledTitle: '邮箱验证未启用',
-      emailTabDisabledHint: '请在「安全与认证」选项卡中启用邮箱验证后，再配置 SMTP 设置。',
+      emailTabDisabledTitle: '邮件功能未启用',
+      emailTabDisabledHint: '请在「安全与认证」选项卡中启用邮箱验证或忘记密码后，再配置 SMTP 设置。',
       registration: {
         title: '注册设置',
         description: '控制用户注册和验证',

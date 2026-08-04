@@ -1703,9 +1703,9 @@
                 </div>
                 <Toggle v-model="form.invitation_code_enabled" />
               </div>
-              <!-- Password Reset - Only show when email verification is enabled -->
+              <!-- Password Reset -->
               <div
-                v-if="form.email_verify_enabled"
+                data-testid="password-reset-setting"
                 class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <div>
@@ -1720,7 +1720,8 @@
               </div>
               <!-- Frontend URL - Only show when password reset is enabled -->
               <div
-                v-if="form.email_verify_enabled && form.password_reset_enabled"
+                v-if="form.password_reset_enabled"
+                data-testid="password-reset-frontend-url"
                 class="border-t border-gray-100 pt-4 dark:border-dark-700"
               >
                 <label
@@ -7821,8 +7822,11 @@
         </div>
 
         <div v-show="activeTab === 'email'" class="space-y-6">
-          <!-- Email disabled hint - show when email_verify_enabled is off -->
-          <div v-if="!form.email_verify_enabled" class="card">
+          <!-- Email disabled hint -->
+          <div
+            v-if="!form.email_verify_enabled && !form.password_reset_enabled"
+            class="card"
+          >
             <div class="p-6">
               <div class="flex items-start gap-3">
                 <Icon
@@ -7842,8 +7846,12 @@
             </div>
           </div>
 
-          <!-- SMTP Settings - Only show when email verification is enabled -->
-          <div v-if="form.email_verify_enabled" class="card">
+          <!-- SMTP Settings -->
+          <div
+            v-if="form.email_verify_enabled || form.password_reset_enabled"
+            data-testid="smtp-settings-card"
+            class="card"
+          >
             <div
               class="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
@@ -8005,8 +8013,11 @@
             </div>
           </div>
 
-          <!-- Send Test Email - Only show when email verification is enabled -->
-          <div v-if="form.email_verify_enabled" class="card">
+          <!-- Send Test Email -->
+          <div
+            v-if="form.email_verify_enabled || form.password_reset_enabled"
+            class="card"
+          >
             <div
               class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
             >
