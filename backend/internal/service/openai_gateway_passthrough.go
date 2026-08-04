@@ -1084,6 +1084,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		resp.Body = firstOutputGuard
 		defer func() { _ = firstOutputGuard.Close() }()
 	}
+	latencyTrace := OpenAILatencyTraceFromContext(ctx)
+	if latencyTrace != nil {
+		defer latencyTrace.LogIfSlow(ctx, OpenAISlowTraceThreshold(s.cfg), "stream_end", account.ID, resp.Header.Get("x-request-id"))
+	}
 	writeOpenAIPassthroughResponseHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 
 	// SSE headers
@@ -1122,6 +1126,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		}
 		flusher.Flush()
 		flushPending = false
+		if latencyTrace != nil && latencyTrace.MarkFirstDownstreamFlush() {
+			latencyTrace.LogIfSlow(ctx, OpenAISlowTraceThreshold(s.cfg), "first_downstream_flush", account.ID, resp.Header.Get("x-request-id"))
+		}
 	}
 	defer flushPendingOutput()
 	writePendingLines := func() bool {
@@ -1159,6 +1166,15 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 
 	for documentScanner.Scan() {
 		line := documentScanner.Text()
+		if latencyTrace != nil && strings.TrimSpace(line) != "" {
+			eventType := ""
+			if data, ok := extractOpenAISSEDataLine(line); ok {
+				eventType = strings.TrimSpace(gjson.Get(strings.TrimSpace(data), "type").String())
+			} else if trimmedLine := strings.TrimSpace(line); strings.HasPrefix(trimmedLine, "event:") {
+				eventType = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "event:"))
+			}
+			latencyTrace.MarkFirstSSEEvent(eventType)
+		}
 		lineStartsClientOutput := false
 		forceFlushFailedEvent := false
 		if data, ok := extractOpenAISSEDataLine(line); ok {
@@ -1257,6 +1273,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				line = "data: " + string(sanitizedData)
 			}
 			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
+			if latencyTrace != nil && lineStartsClientOutput && trimmedData != "[DONE]" && eventType != "response.failed" {
+				latencyTrace.MarkPreamblePendingLines(len(pendingLines))
+				latencyTrace.MarkFirstSemanticEvent(eventType)
+			}
 			if firstTokenMs == nil && lineStartsClientOutput && trimmedData != "[DONE]" {
 				if firstOutputGuard != nil {
 					firstOutputGuard.MarkSemanticOutput()

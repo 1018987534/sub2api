@@ -43,6 +43,10 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
+	latencyTrace := OpenAILatencyTraceFromContext(ctx)
+	if latencyTrace != nil {
+		defer latencyTrace.LogIfSlow(ctx, OpenAISlowTraceThreshold(s.cfg), "stream_end", account.ID, resp.Header.Get("x-request-id"))
+	}
 	firstOutputDeadline := time.Time{}
 	firstOutputTimeout := time.Duration(0)
 	if account != nil && account.Platform == PlatformOpenAI {
@@ -131,6 +135,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 		}
 		flusher.Flush()
+		if latencyTrace != nil && latencyTrace.MarkFirstDownstreamFlush() {
+			latencyTrace.LogIfSlow(ctx, OpenAISlowTraceThreshold(s.cfg), "first_downstream_flush", account.ID, resp.Header.Get("x-request-id"))
+		}
 		return nil
 	}
 
@@ -402,6 +409,15 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if streamEarlyErr != nil {
 			return
 		}
+		if latencyTrace != nil && strings.TrimSpace(line) != "" {
+			eventType := ""
+			if data, ok := extractOpenAISSEDataLine(line); ok {
+				eventType = strings.TrimSpace(gjson.Get(strings.TrimSpace(data), "type").String())
+			} else if trimmedLine := strings.TrimSpace(line); strings.HasPrefix(trimmedLine, "event:") {
+				eventType = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "event:"))
+			}
+			latencyTrace.MarkFirstSSEEvent(eventType)
+		}
 		// Extract data from SSE line (supports both "data: " and "data:" formats)
 		if data, ok := extractOpenAISSEDataLine(line); ok {
 			dataBytes := []byte(data)
@@ -517,6 +533,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				line = s.replaceModelInSSELine(line, mappedModel, originalModel)
 			}
 			startsClientOutput := forceFlushFailedEvent || openAIStreamDataStartsClientOutput(data, eventType)
+			if latencyTrace != nil && startsClientOutput && strings.TrimSpace(data) != "[DONE]" && eventType != "response.failed" {
+				latencyTrace.MarkFirstSemanticEvent(eventType)
+			}
 			if guardFirstOutput {
 				eventStartsClientOutput = eventStartsClientOutput || startsClientOutput
 			}

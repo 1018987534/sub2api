@@ -192,8 +192,19 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 		profile = service.HTTPUpstreamProfileFromContext(req.Context())
 	}
 
+	trace := (*service.OpenAILatencyTrace)(nil)
+	if req != nil {
+		trace = service.OpenAILatencyTraceFromContext(req.Context())
+	}
+	clientAcquireStart := time.Now()
+	if trace != nil {
+		trace.MarkClientAcquireStart(clientAcquireStart)
+	}
 	// 获取或创建对应的客户端，并标记请求占用
 	entry, err := s.acquireClientWithProfile(proxyURL, accountID, accountConcurrency, profile)
+	if trace != nil {
+		trace.MarkClientAcquireDone(time.Now())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -201,6 +212,7 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	// 执行请求
 	client := httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
+	req = service.WithOpenAIHTTPTrace(req)
 	resp, err := servertiming.Do(client, req)
 	if err != nil {
 		s.recordOpenAIHTTP2Failure(profile, entry.protocolMode, entry.proxyKey, err)
@@ -210,6 +222,9 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 		return nil, err
 	}
 	s.recordOpenAIHTTP2Success(profile, entry.protocolMode, entry.proxyKey)
+	if trace != nil {
+		trace.MarkResponse(resp)
+	}
 
 	// 如果上游返回了压缩内容，解压后再交给业务层
 	decompressResponseBody(resp)
@@ -257,7 +272,17 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 		return nil, err
 	}
 
+	trace := (*service.OpenAILatencyTrace)(nil)
+	if req != nil {
+		trace = service.OpenAILatencyTraceFromContext(req.Context())
+	}
+	if trace != nil {
+		trace.MarkClientAcquireStart(time.Now())
+	}
 	entry, err := s.acquireClientWithTLS(proxyURL, accountID, accountConcurrency, profile, upstreamProfile)
+	if trace != nil {
+		trace.MarkClientAcquireDone(time.Now())
+	}
 	if err != nil {
 		slog.Debug("tls_fingerprint_acquire_client_failed", "account_id", accountID, "error", err)
 		return nil, err
@@ -265,12 +290,16 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 
 	client := httpClientForUpstreamRequest(entry.client, req)
 	client = httpClientWithGrokAccessDeniedFallback(client)
+	req = service.WithOpenAIHTTPTrace(req)
 	resp, err := servertiming.Do(client, req)
 	if err != nil {
 		atomic.AddInt64(&entry.inFlight, -1)
 		atomic.StoreInt64(&entry.lastUsed, time.Now().UnixNano())
 		slog.Debug("tls_fingerprint_request_failed", "account_id", accountID, "error", err)
 		return nil, err
+	}
+	if trace != nil {
+		trace.MarkResponse(resp)
 	}
 
 	decompressResponseBody(resp)

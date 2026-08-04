@@ -635,6 +635,20 @@ func TestLoadOpenAIResponseHeaderTimeoutFromEnv(t *testing.T) {
 	require.Equal(t, 1800, cfg.Gateway.OpenAIResponseHeaderTimeout)
 }
 
+func TestLoadOpenAISlowRequestTraceThreshold(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Zero(t, cfg.Gateway.OpenAISlowRequestTraceThresholdMs)
+
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_SLOW_REQUEST_TRACE_THRESHOLD_MS", "3000")
+	cfg, err = Load()
+	require.NoError(t, err)
+	require.Equal(t, 3000, cfg.Gateway.OpenAISlowRequestTraceThresholdMs)
+}
+
 func TestLoadImageNonstreamKeepaliveFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_IMAGE_NONSTREAM_KEEPALIVE_INTERVAL", "15")

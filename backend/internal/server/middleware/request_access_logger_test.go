@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -73,6 +74,10 @@ func TestRequestLogger_GenerateAndPropagateRequestID(t *testing.T) {
 		}
 		if got := c.Writer.Header().Get(requestIDHeader); got != reqID {
 			t.Fatalf("response header request_id mismatch, header=%q ctx=%q", got, reqID)
+		}
+		requestStart, ok := c.Request.Context().Value(ctxkey.RequestStart).(time.Time)
+		if !ok || requestStart.IsZero() {
+			t.Fatalf("request start missing from context")
 		}
 		c.Status(http.StatusOK)
 	})
