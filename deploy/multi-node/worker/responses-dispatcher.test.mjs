@@ -5,6 +5,7 @@ import responsesDispatcher, {
   fetchRoutingNodes,
   normalizeRuntimeNodes,
   resetRoutingConfigCache,
+  resolveRoutingNodes,
   selectOrigins,
   staticRoutingNodes,
 } from "./responses-dispatcher.mjs";
@@ -165,6 +166,128 @@ test("falls back to static nodes when no runtime endpoint is configured", async 
   assert.deepEqual(await fetchRoutingNodes(env), staticRoutingNodes(env));
 });
 
+test("cold routing cache uses static nodes while runtime config refreshes", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  let finishRefresh;
+  const refreshResponse = new Promise((resolve) => {
+    finishRefresh = resolve;
+  });
+  globalThis.fetch = async () => refreshResponse;
+  const background = [];
+  const metadata = {};
+  const runtimeEnv = {
+    ...env,
+    ROUTING_CONFIG_URL: "https://control.example/api/v1/gateway-routing/runtime",
+    ROUTING_CONFIG_TOKEN: "runtime-secret",
+  };
+
+  try {
+    assert.deepEqual(
+      resolveRoutingNodes(
+        runtimeEnv,
+        { waitUntil: (promise) => background.push(promise) },
+        metadata,
+      ),
+      staticRoutingNodes(runtimeEnv),
+    );
+    assert.equal(metadata.source, "static_refresh");
+    assert.equal(background.length, 1);
+
+    finishRefresh(
+      Response.json({
+        data: {
+          nodes: [
+            { id: "bwg-us-01", origin: "https://control.example", effective_weight: 5 },
+            { id: "vmiss-us-02", origin: "https://new.example", effective_weight: 1 },
+          ],
+        },
+      }),
+    );
+    await background[0];
+
+    const cachedMetadata = {};
+    assert.equal(resolveRoutingNodes(runtimeEnv, null, cachedMetadata).length, 2);
+    assert.equal(cachedMetadata.source, "cache");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("expired routing cache is served immediately and refreshed once", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  const originalDateNow = Date.now;
+  let now = 1_000_000;
+  let calls = 0;
+  let finishRefresh;
+  const runtimeEnv = {
+    ...env,
+    ROUTING_CONFIG_URL: "https://control.example/api/v1/gateway-routing/runtime",
+    ROUTING_CONFIG_TOKEN: "runtime-secret",
+    ROUTING_CONFIG_TTL_SECONDS: "5",
+  };
+  Date.now = () => now;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return Response.json({
+        data: {
+          nodes: [
+            { id: "bwg-us-01", origin: "https://control.example", effective_weight: 5 },
+            { id: "vmiss-us-02", origin: "https://new.example", effective_weight: 1 },
+          ],
+        },
+      });
+    }
+    return new Promise((resolve) => {
+      finishRefresh = resolve;
+    });
+  };
+
+  try {
+    const initial = await fetchRoutingNodes(runtimeEnv);
+    now += 6000;
+    const background = [];
+    const metadata = {};
+    assert.deepEqual(
+      resolveRoutingNodes(
+        runtimeEnv,
+        { waitUntil: (promise) => background.push(promise) },
+        metadata,
+      ),
+      initial,
+    );
+    assert.deepEqual(
+      resolveRoutingNodes(
+        runtimeEnv,
+        { waitUntil: (promise) => background.push(promise) },
+      ),
+      initial,
+    );
+    assert.equal(metadata.source, "stale_refresh");
+    assert.equal(calls, 2);
+    assert.equal(background.length, 2);
+    assert.equal(background[0], background[1]);
+
+    finishRefresh(
+      Response.json({
+        data: {
+          nodes: [
+            { id: "bwg-us-01", origin: "https://control.example", effective_weight: 4 },
+          ],
+        },
+      }),
+    );
+    await background[0];
+  } finally {
+    globalThis.fetch = originalFetch;
+    Date.now = originalDateNow;
+    resetRoutingConfigCache();
+  }
+});
+
 test("POST forwarding overwrites and sends edge routing trace headers", async () => {
   resetRoutingConfigCache();
   const originalFetch = globalThis.fetch;
@@ -191,6 +314,7 @@ test("POST forwarding overwrites and sends edge routing trace headers", async ()
         BWG_US_01_ORIGIN: "https://control.example",
         BWG_US_01_PERCENT: "100",
       },
+      { waitUntil() {} },
     );
 
     assert.equal(await response.text(), "ok");

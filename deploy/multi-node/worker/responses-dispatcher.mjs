@@ -121,7 +121,7 @@ function normalizeRuntimeNodes(payload) {
   });
 }
 
-async function fetchRoutingNodes(env, metadata = null) {
+function fetchRoutingNodes(env, metadata = null) {
   const configURL = String(env.ROUTING_CONFIG_URL ?? "").trim();
   if (!configURL) {
     if (metadata) metadata.source = "static";
@@ -188,6 +188,40 @@ async function fetchRoutingNodes(env, metadata = null) {
   })();
 
   return routingConfigPromise;
+}
+
+function scheduleRoutingConfigRefresh(env, ctx) {
+  const refresh = fetchRoutingNodes(env);
+  // waitUntil keeps the isolate alive without delaying the request that noticed
+  // an expired (or cold) routing cache. The promise is already single-flight.
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(refresh);
+  } else {
+    void refresh;
+  }
+}
+
+function resolveRoutingNodes(env, ctx, metadata = null) {
+  const configURL = String(env.ROUTING_CONFIG_URL ?? "").trim();
+  if (!configURL) {
+    if (metadata) metadata.source = "static";
+    return staticRoutingNodes(env);
+  }
+
+  const matchingCache = routingConfigCache?.configURL === configURL;
+  if (matchingCache && Date.now() < routingConfigCache.expiresAt) {
+    if (metadata) metadata.source = "cache";
+    return routingConfigCache.nodes;
+  }
+
+  scheduleRoutingConfigRefresh(env, ctx);
+  if (matchingCache) {
+    if (metadata) metadata.source = "stale_refresh";
+    return routingConfigCache.nodes;
+  }
+
+  if (metadata) metadata.source = "static_refresh";
+  return staticRoutingNodes(env);
 }
 
 function selectOrigins(env, randomSource = crypto, runtimeNodes = null) {
@@ -269,10 +303,10 @@ function canRetry(request) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const routingMetadata = {};
     const routingStart = Date.now();
-    const routingNodes = await fetchRoutingNodes(env, routingMetadata);
+    const routingNodes = resolveRoutingNodes(env, ctx, routingMetadata);
     const routingWaitMs = Math.max(0, Date.now() - routingStart);
     const origins = selectOrigins(env, crypto, routingNodes);
     if (origins.length === 0) {
@@ -310,6 +344,7 @@ export {
   fetchRoutingNodes,
   normalizeRuntimeNodes,
   resetRoutingConfigCache,
+  resolveRoutingNodes,
   selectOrigins,
   staticRoutingNodes,
 };
