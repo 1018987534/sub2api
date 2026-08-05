@@ -304,13 +304,14 @@ func TestBuildSchedulerMetadataAccount_KeepsOpenAIWSFlags(t *testing.T) {
 		Platform: service.PlatformOpenAI,
 		Type:     service.AccountTypeOAuth,
 		Extra: map[string]any{
-			"openai_oauth_responses_websockets_v2_enabled": true,
-			"openai_oauth_responses_websockets_v2_mode":    service.OpenAIWSIngressModePassthrough,
-			"openai_ws_force_http":                         true,
-			"openai_responses_mode":                        "force_chat_completions",
-			"openai_responses_supported":                   false,
-			"mixed_scheduling":                             true,
-			"unused_large_field":                           "drop-me",
+			"openai_oauth_responses_websockets_v2_enabled":   true,
+			"openai_oauth_responses_websockets_v2_mode":      service.OpenAIWSIngressModePassthrough,
+			"openai_ws_force_http":                           true,
+			"openai_responses_mode":                          "force_chat_completions",
+			"openai_responses_supported":                     false,
+			service.OpenAIUpstreamRequestGzipEnabledExtraKey: true,
+			"mixed_scheduling":                               true,
+			"unused_large_field":                             "drop-me",
 		},
 	}
 
@@ -321,6 +322,7 @@ func TestBuildSchedulerMetadataAccount_KeepsOpenAIWSFlags(t *testing.T) {
 	require.Equal(t, true, got.Extra["openai_ws_force_http"])
 	require.Equal(t, "force_chat_completions", got.Extra["openai_responses_mode"])
 	require.Equal(t, false, got.Extra["openai_responses_supported"])
+	require.Equal(t, true, got.Extra[service.OpenAIUpstreamRequestGzipEnabledExtraKey])
 	require.Equal(t, true, got.Extra["mixed_scheduling"])
 	require.Nil(t, got.Extra["unused_large_field"])
 }
