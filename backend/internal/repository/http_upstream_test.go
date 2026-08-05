@@ -628,6 +628,87 @@ func (s *HTTPUpstreamSuite) TestOpenAIProfileDefaultsToHTTP2AndNoHeaderTimeout()
 	require.Equal(s.T(), upstreamProtocolModeOpenAIH2, entry.protocolMode)
 }
 
+func (s *HTTPUpstreamSuite) TestOpenAIH2ShardCanaryUsesIndependentTransportsAndPreservesBudget() {
+	s.cfg.Gateway = config.GatewayConfig{
+		ConnectionPoolIsolation: config.ConnectionPoolIsolationAccount,
+		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{
+			Enabled:  true,
+			H2Shards: map[string]int{"12017": 4},
+		},
+	}
+	svc := s.newService()
+	entries := make([]*upstreamClientEntry, 0, 4)
+	transports := make(map[*http.Transport]struct{}, 4)
+	for i := 0; i < 4; i++ {
+		entry, err := svc.getClientEntry("", 12017, 12, service.HTTPUpstreamProfileOpenAI, false, false)
+		require.NoError(s.T(), err)
+		entries = append(entries, entry)
+		transport, ok := entry.client.Transport.(*http.Transport)
+		require.True(s.T(), ok, "expected *http.Transport")
+		transports[transport] = struct{}{}
+		require.Equal(s.T(), 4, entry.h2ShardCount)
+		require.Equal(s.T(), i, entry.h2Shard)
+		require.Equal(s.T(), upstreamProtocolModeOpenAIH2, entry.protocolMode)
+		require.Equal(s.T(), 3, transport.MaxConnsPerHost)
+	}
+	require.Len(s.T(), transports, 4, "each shard must own an independent transport")
+	require.Len(s.T(), svc.clients, 4)
+
+	maxConnections := 0
+	for _, entry := range entries {
+		transport, ok := entry.client.Transport.(*http.Transport)
+		require.True(s.T(), ok)
+		maxConnections += transport.MaxConnsPerHost
+	}
+	require.Equal(s.T(), 12, maxConnections, "sharding must preserve the account connection budget")
+}
+
+func (s *HTTPUpstreamSuite) TestOpenAIH2ShardCountClampsToAccountConcurrency() {
+	s.cfg.Gateway = config.GatewayConfig{
+		ConnectionPoolIsolation: config.ConnectionPoolIsolationAccount,
+		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{
+			Enabled:  true,
+			H2Shards: map[string]int{"12017": 4},
+		},
+	}
+	svc := s.newService()
+	entry, err := svc.getClientEntry("", 12017, 2, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), 2, entry.h2ShardCount)
+	transport, ok := entry.client.Transport.(*http.Transport)
+	require.True(s.T(), ok)
+	require.Equal(s.T(), 1, transport.MaxConnsPerHost)
+}
+
+func (s *HTTPUpstreamSuite) TestOpenAIH2ShardMapDoesNotAffectOtherProfiles() {
+	s.cfg.Gateway = config.GatewayConfig{
+		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{
+			Enabled:  true,
+			H2Shards: map[string]int{"12017": 4},
+		},
+	}
+	svc := s.newService()
+	entry, err := svc.getClientEntry("", 12017, 12, service.HTTPUpstreamProfileDefault, false, false)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), 1, entry.h2ShardCount)
+	require.Equal(s.T(), 0, entry.h2Shard)
+	require.Equal(s.T(), upstreamProtocolModeDefault, entry.protocolMode)
+}
+
+func (s *HTTPUpstreamSuite) TestOpenAIH2ShardMapDoesNotCrossProxyIsolationBoundary() {
+	s.cfg.Gateway = config.GatewayConfig{
+		ConnectionPoolIsolation: config.ConnectionPoolIsolationProxy,
+		OpenAIHTTP2: config.GatewayOpenAIHTTP2Config{
+			Enabled:  true,
+			H2Shards: map[string]int{"12017": 4},
+		},
+	}
+	svc := s.newService()
+	entry, err := svc.getClientEntry("http://proxy.local:8080", 12017, 12, service.HTTPUpstreamProfileOpenAI, false, false)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), 1, entry.h2ShardCount, "proxy-isolated pools cannot safely apply an account-only shard map")
+}
+
 func (s *HTTPUpstreamSuite) TestOpenAIProfileCustomHeaderTimeout() {
 	s.cfg.Gateway = config.GatewayConfig{
 		ResponseHeaderTimeout:       600,

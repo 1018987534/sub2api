@@ -618,6 +618,21 @@ func TestLoadOpenAIHTTP2DisabledFromEnv(t *testing.T) {
 	require.False(t, cfg.Gateway.OpenAIHTTP2.Enabled)
 }
 
+func TestValidateOpenAIHTTP2H2Shards(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Gateway.OpenAIHTTP2.H2Shards = map[string]int{"12017": 4}
+	require.NoError(t, cfg.Validate())
+
+	cfg.Gateway.OpenAIHTTP2.H2Shards = map[string]int{"bad-account": 4}
+	require.ErrorContains(t, cfg.Validate(), "must be an account ID")
+
+	cfg.Gateway.OpenAIHTTP2.H2Shards = map[string]int{"12017": 17}
+	require.ErrorContains(t, cfg.Validate(), "must be between 1 and 16")
+}
+
 func TestLoadDefaultOpenAIResponseHeaderTimeoutUnlimited(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
