@@ -50,6 +50,10 @@ func TestOpenAILatencyTraceLogsSlowFirstFlushOnce(t *testing.T) {
 		protocol:               "HTTP/2.0",
 		status:                 http.StatusOK,
 		reused:                 true,
+		upstreamBodyBytes:      4 * 1024 * 1024,
+		upstreamWireBytes:      420000,
+		upstreamGzipStreamMs:   12,
+		upstreamGzipEnabled:    true,
 		preamblePendingLines:   6,
 	}
 	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "rid-local")
@@ -68,6 +72,10 @@ func TestOpenAILatencyTraceLogsSlowFirstFlushOnce(t *testing.T) {
 	require.True(t, logSink.ContainsFieldValue("request_id", "rid-local"))
 	require.True(t, logSink.ContainsFieldValue("edge_routing_wait_ms", "180"))
 	require.True(t, logSink.ContainsFieldValue("edge_routing_source", "refresh"))
+	require.True(t, logSink.ContainsFieldValue("upstream_request_gzip", "true"))
+	require.True(t, logSink.ContainsFieldValue("upstream_request_body_bytes", "4194304"))
+	require.True(t, logSink.ContainsFieldValue("upstream_request_wire_bytes", "420000"))
+	require.True(t, logSink.ContainsFieldValue("upstream_request_gzip_stream_ms", "12"))
 
 	logSink.mu.Lock()
 	require.Len(t, logSink.events, 1)

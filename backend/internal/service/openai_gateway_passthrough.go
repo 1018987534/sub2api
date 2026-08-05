@@ -392,7 +392,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
 
-	requestBody, err := buildOpenAIUpstreamRequestBody(c, account, body)
+	requestBody, err := buildOpenAIUpstreamRequestBody(ctx, c, account, body)
 	if err != nil {
 		return nil, err
 	}

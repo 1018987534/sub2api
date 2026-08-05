@@ -97,7 +97,7 @@ func TestBuildUpstreamRequestOpenAIPassthroughStreamsGzipThroughHTTPTransport(t 
 }
 
 func TestOpenAIStreamingGzipBodyCloseUnblocksProducer(t *testing.T) {
-	body := newOpenAIStreamingGzipBody(bytes.Repeat([]byte("compressible"), 1<<20))
+	body := newOpenAIStreamingGzipBody(bytes.Repeat([]byte("compressible"), 1<<20), nil)
 	buffer := make([]byte, 1)
 	_, err := body.Read(buffer)
 	require.NoError(t, err)
@@ -108,6 +108,26 @@ func TestOpenAIStreamingGzipBodyCloseUnblocksProducer(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("gzip producer remained blocked after request body close")
 	}
+}
+
+func TestOpenAIStreamingGzipBodyRecordsWireMetrics(t *testing.T) {
+	source := bytes.Repeat([]byte("compressible-context-"), 5000)
+	trace := NewOpenAILatencyTrace(time.Now(), len(source), "gpt-test", true)
+	trace.BeginAttempt(12017, len(source), time.Now())
+	body := newOpenAIStreamingGzipBody(source, trace)
+
+	compressed, err := io.ReadAll(body)
+	require.NoError(t, err)
+	require.NoError(t, body.Close())
+	<-body.done
+
+	trace.mu.Lock()
+	attempt := *trace.attempt
+	trace.mu.Unlock()
+	require.True(t, attempt.upstreamGzipEnabled)
+	require.False(t, attempt.upstreamGzipError)
+	require.Equal(t, len(source), attempt.upstreamBodyBytes)
+	require.Equal(t, int64(len(compressed)), attempt.upstreamWireBytes)
 }
 
 func TestBuildUpstreamRequestOpenAIPassthroughGzipOptInGuards(t *testing.T) {

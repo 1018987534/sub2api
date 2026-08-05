@@ -3,10 +3,12 @@ package service
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -30,6 +32,7 @@ type openAIUpstreamRequestBody struct {
 }
 
 func buildOpenAIUpstreamRequestBody(
+	ctx context.Context,
 	c *gin.Context,
 	account *Account,
 	body []byte,
@@ -44,12 +47,13 @@ func buildOpenAIUpstreamRequestBody(
 		}, nil
 	}
 
+	trace := OpenAILatencyTraceFromContext(ctx)
 	return &openAIUpstreamRequestBody{
-		body:          newOpenAIStreamingGzipBody(body),
+		body:          newOpenAIStreamingGzipBody(body, trace),
 		contentLength: -1,
 		gzipped:       true,
 		getBody: func() (io.ReadCloser, error) {
-			return newOpenAIStreamingGzipBody(body), nil
+			return newOpenAIStreamingGzipBody(body, trace), nil
 		},
 	}, nil
 }
@@ -58,17 +62,19 @@ type openAIStreamingGzipBody struct {
 	reader    *io.PipeReader
 	writer    *io.PipeWriter
 	source    []byte
+	trace     *OpenAILatencyTrace
 	startOnce sync.Once
 	closeOnce sync.Once
 	done      chan struct{}
 }
 
-func newOpenAIStreamingGzipBody(source []byte) *openAIStreamingGzipBody {
+func newOpenAIStreamingGzipBody(source []byte, trace *OpenAILatencyTrace) *openAIStreamingGzipBody {
 	reader, writer := io.Pipe()
 	return &openAIStreamingGzipBody{
 		reader: reader,
 		writer: writer,
 		source: source,
+		trace:  trace,
 		done:   make(chan struct{}),
 	}
 }
@@ -92,7 +98,9 @@ func (b *openAIStreamingGzipBody) Close() error {
 }
 
 func (b *openAIStreamingGzipBody) compress() {
-	writer, err := gzip.NewWriterLevel(b.writer, gzip.BestSpeed)
+	startedAt := time.Now()
+	counter := &openAICountingWriter{writer: b.writer}
+	writer, err := gzip.NewWriterLevel(counter, gzip.BestSpeed)
 	if err == nil {
 		_, err = writer.Write(b.source)
 		if closeErr := writer.Close(); err == nil {
@@ -104,7 +112,21 @@ func (b *openAIStreamingGzipBody) compress() {
 	} else {
 		_ = b.writer.Close()
 	}
+	if b.trace != nil {
+		b.trace.MarkUpstreamRequestGzip(len(b.source), counter.written, time.Since(startedAt), err)
+	}
 	close(b.done)
+}
+
+type openAICountingWriter struct {
+	writer  io.Writer
+	written int64
+}
+
+func (w *openAICountingWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	w.written += int64(n)
+	return n, err
 }
 
 func shouldGzipOpenAIUpstreamRequestBody(c *gin.Context, account *Account, body []byte) bool {
