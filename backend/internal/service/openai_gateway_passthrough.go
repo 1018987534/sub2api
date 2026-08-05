@@ -841,7 +841,9 @@ func isOpenAIUpstreamCapacityShedEvent(payload []byte) bool {
 	} {
 		message := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, path).String()))
 		if strings.Contains(message, "selected model is at capacity") ||
-			(strings.Contains(message, "model") && strings.Contains(message, "at capacity")) {
+			(strings.Contains(message, "model") && strings.Contains(message, "at capacity")) ||
+			strings.Contains(message, "servers are currently overloaded") ||
+			(strings.Contains(message, "server") && strings.Contains(message, "overloaded") && strings.Contains(message, "try again later")) {
 			return true
 		}
 	}
@@ -1310,6 +1312,13 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					})
 				}
 				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+					// Capacity sheds are request-scoped transient failures. They must
+					// enter failover before configurable passthrough rules can commit
+					// the response as a client-visible invalid_request error.
+					if isOpenAIUpstreamCapacityShedEvent(dataBytes) {
+						s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "failover", dataBytes, failedMessage)
+						return resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage, resp.Header)
+					}
 					if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
 						// 命中透传规则也要记录 ops 上游错误事件（对齐 CC/Messages 与
 						// antigravity 先例），否则透传命中的 failed 在监控中不可见。
