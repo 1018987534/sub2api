@@ -5,7 +5,6 @@ package service
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,17 +23,6 @@ import (
 	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
-
-const openAIUpstreamRequestGzipMinBytes = 64 << 10
-
-var openAIUpstreamRequestBodyIntegrityHeaders = []string{
-	"Content-MD5",
-	"Digest",
-	"Signature",
-	"Signature-Input",
-	"X-Content-SHA256",
-	"X-Signature",
-}
 
 func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	ctx context.Context,
@@ -404,15 +392,18 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
 
-	requestBody, requestBodyGzipped, err := buildOpenAIUpstreamRequestBody(c, account, body)
+	requestBody, err := buildOpenAIUpstreamRequestBody(c, account, body)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(requestBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, requestBody.body)
 	if err != nil {
+		_ = requestBody.body.Close()
 		return nil, err
 	}
+	req.ContentLength = requestBody.contentLength
+	req.GetBody = requestBody.getBody
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 
 	// 透传客户端请求头（安全白名单）。
@@ -511,67 +502,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
-	if requestBodyGzipped {
+	if requestBody.gzipped {
 		req.Header.Set("Content-Encoding", "gzip")
 	}
 
 	return req, nil
-}
-
-func buildOpenAIUpstreamRequestBody(c *gin.Context, account *Account, body []byte) ([]byte, bool, error) {
-	if !shouldGzipOpenAIUpstreamRequestBody(c, account, body) {
-		return body, false, nil
-	}
-
-	var compressed bytes.Buffer
-	writer, err := gzip.NewWriterLevel(&compressed, gzip.BestSpeed)
-	if err != nil {
-		return nil, false, fmt.Errorf("create upstream request gzip writer: %w", err)
-	}
-	if _, err := writer.Write(body); err != nil {
-		_ = writer.Close()
-		return nil, false, fmt.Errorf("gzip upstream request body: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return nil, false, fmt.Errorf("close upstream request gzip writer: %w", err)
-	}
-	return compressed.Bytes(), true, nil
-}
-
-func shouldGzipOpenAIUpstreamRequestBody(c *gin.Context, account *Account, body []byte) bool {
-	if !account.IsOpenAIUpstreamRequestGzipEnabled() || len(body) < openAIUpstreamRequestGzipMinBytes {
-		return false
-	}
-
-	if c != nil && c.Request != nil {
-		contentType := strings.TrimSpace(c.Request.Header.Get("Content-Type"))
-		if contentType != "" && !strings.HasPrefix(strings.ToLower(contentType), "application/json") {
-			return false
-		}
-		if strings.TrimSpace(c.Request.Header.Get("Content-Encoding")) != "" {
-			return false
-		}
-		for _, name := range openAIUpstreamRequestBodyIntegrityHeaders {
-			if strings.TrimSpace(c.Request.Header.Get(name)) != "" {
-				return false
-			}
-		}
-	}
-
-	for name, value := range account.GetHeaderOverrides() {
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		if strings.EqualFold(name, "Content-Encoding") {
-			return false
-		}
-		for _, integrityHeader := range openAIUpstreamRequestBodyIntegrityHeaders {
-			if strings.EqualFold(name, integrityHeader) {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, responseBody []byte) bool {

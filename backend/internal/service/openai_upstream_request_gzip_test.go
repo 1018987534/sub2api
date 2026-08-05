@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
@@ -27,8 +28,9 @@ func TestBuildUpstreamRequestOpenAIPassthroughGzipsOptedInLargeAPIKeyBody(t *tes
 
 	require.Equal(t, "gzip", req.Header.Get("Content-Encoding"))
 	require.Equal(t, "application/json", req.Header.Get("Content-Type"))
+	require.Equal(t, int64(-1), req.ContentLength)
+	require.NotNil(t, req.GetBody)
 	compressed := readAllRequestBody(t, req)
-	require.Equal(t, int64(len(compressed)), req.ContentLength)
 	require.Less(t, len(compressed), len(body))
 
 	reader, err := gzip.NewReader(bytes.NewReader(compressed))
@@ -37,6 +39,75 @@ func TestBuildUpstreamRequestOpenAIPassthroughGzipsOptedInLargeAPIKeyBody(t *tes
 	require.NoError(t, err)
 	require.NoError(t, reader.Close())
 	require.Equal(t, body, decoded)
+}
+
+func TestBuildUpstreamRequestOpenAIPassthroughStreamsGzipThroughHTTPTransport(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.6-terra","input":"` + strings.Repeat("streaming-context-", 5000) + `"}`)
+	for _, protocol := range []struct {
+		name        string
+		enableHTTP2 bool
+	}{
+		{name: "http1"},
+		{name: "http2", enableHTTP2: true},
+	} {
+		t.Run(protocol.name, func(t *testing.T) {
+			received := make(chan []byte, 1)
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Header.Get("Content-Encoding") != "gzip" {
+					t.Errorf("Content-Encoding = %q, want gzip", req.Header.Get("Content-Encoding"))
+				}
+				if req.ContentLength != -1 {
+					t.Errorf("ContentLength = %d, want -1", req.ContentLength)
+				}
+				reader, err := gzip.NewReader(req.Body)
+				if err != nil {
+					t.Errorf("create gzip reader: %v", err)
+					received <- nil
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				decoded, err := io.ReadAll(reader)
+				if err != nil {
+					t.Errorf("read gzip body: %v", err)
+				}
+				if err := reader.Close(); err != nil {
+					t.Errorf("close gzip reader: %v", err)
+				}
+				received <- decoded
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			server.EnableHTTP2 = protocol.enableHTTP2
+			if protocol.enableHTTP2 {
+				server.StartTLS()
+			} else {
+				server.Start()
+			}
+			defer server.Close()
+
+			req := buildOpenAIUpstreamRequestForGzipTest(t, body, openAIUpstreamRequestGzipTestAccount(true), nil)
+			parsedURL, err := req.URL.Parse(server.URL)
+			require.NoError(t, err)
+			req.URL = parsedURL
+			resp, err := server.Client().Do(req)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			require.Equal(t, body, <-received)
+		})
+	}
+}
+
+func TestOpenAIStreamingGzipBodyCloseUnblocksProducer(t *testing.T) {
+	body := newOpenAIStreamingGzipBody(bytes.Repeat([]byte("compressible"), 1<<20))
+	buffer := make([]byte, 1)
+	_, err := body.Read(buffer)
+	require.NoError(t, err)
+	require.NoError(t, body.Close())
+
+	select {
+	case <-body.done:
+	case <-time.After(time.Second):
+		t.Fatal("gzip producer remained blocked after request body close")
+	}
 }
 
 func TestBuildUpstreamRequestOpenAIPassthroughGzipOptInGuards(t *testing.T) {
