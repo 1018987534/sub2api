@@ -518,6 +518,34 @@ func TestPassthroughLifecycle_FirstOutputTimeoutRemainsBounded(t *testing.T) {
 	}
 }
 
+func TestPassthroughLifecycle_CapacityErrorBeforeOutputReturnsFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx, cancelControl := context.WithCancelCause(context.Background())
+	defer cancelControl(context.Canceled)
+	upstream := newStagedPassthroughConn()
+	upstream.Send(`{"type":"error","error":{"type":"invalid_request_error","message":"Selected model is at capacity. Please try a different model."}}`)
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream), passthroughLifecycleAccount())
+	defer server.Close()
+	clientConn := dialPassthroughLifecycleClient(t, server)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	select {
+	case err := <-serverErr:
+		var failoverErr *UpstreamFailoverError
+		require.ErrorAs(t, err, &failoverErr)
+		require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+		require.True(t, failoverErr.RetryableOnSameAccount)
+		require.True(t, failoverErr.RequestScopedTransient)
+		require.Contains(t, string(failoverErr.ResponseBody), "Selected model is at capacity")
+	case <-time.After(3 * time.Second):
+		t.Fatal("capacity event did not return a websocket failover error")
+	}
+
+	payload, readErr := readPassthroughLifecycleFrame(t, clientConn, time.Second)
+	require.Error(t, readErr)
+	require.NotContains(t, string(payload), "Selected model is at capacity")
+}
+
 func TestPassthroughLifecycle_ResponseCreatedTimeoutClosesWithoutFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	controlCtx, cancelControl := context.WithCancelCause(context.Background())

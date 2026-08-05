@@ -61,6 +61,20 @@ func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
 	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch)
 }
 
+func nextOpenAIWSSameAccountRetry(account *service.Account, failoverErr *service.UpstreamFailoverError, retryCounts map[int64]int) (bool, int, int) {
+	if account == nil || failoverErr == nil || !failoverErr.RetryableOnSameAccount {
+		return false, 0, 0
+	}
+	retryLimit := account.GetPoolModeRetryCount()
+	current := retryCounts[account.ID]
+	if current >= retryLimit {
+		return false, current, retryLimit
+	}
+	current++
+	retryCounts[account.ID] = current
+	return true, current, retryLimit
+}
+
 func openAIWSTurnBillingModel(result *service.OpenAIForwardResult, mapping service.ChannelMappingResult, requestedModel, upstreamModel string) string {
 	billingModel := ""
 	if result != nil {
@@ -1864,6 +1878,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	switchCount := 0
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
+	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	handleWSFailover := func(account *service.Account, failoverErr *service.UpstreamFailoverError) bool {
@@ -1881,9 +1896,23 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		if ctx.Err() != nil {
 			return false
 		}
+		lastFailoverErr = failoverErr
+		if retry, retryCount, retryLimit := nextOpenAIWSSameAccountRetry(account, failoverErr, sameAccountRetryCount); retry {
+			reqLog.Warn("openai.websocket_same_account_retry",
+				zap.Int64("account_id", account.ID),
+				zap.Int("upstream_status", failoverErr.StatusCode),
+				zap.Int("retry_count", retryCount),
+				zap.Int("retry_limit", retryLimit),
+			)
+			select {
+			case <-ctx.Done():
+				return false
+			case <-time.After(sameAccountRetryDelay):
+			}
+			return ensureUserSlotHeld()
+		}
 		h.gatewayService.RecordOpenAIAccountSwitch()
 		failedAccountIDs[account.ID] = struct{}{}
-		lastFailoverErr = failoverErr
 		if switchCount >= maxAccountSwitches {
 			closeOpenAIWSFailoverExhausted(wsConn, failoverErr)
 			return false

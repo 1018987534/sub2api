@@ -512,6 +512,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		if eventType == "" {
 			continue
 		}
+		if !wroteDownstream && (eventType == "error" || eventType == "response.failed") {
+			if failoverErr := s.newOpenAIWSCapacityShedFailoverError(c, account, message, lease.HandshakeHeaders()); failoverErr != nil {
+				lease.MarkBroken()
+				return nil, failoverErr
+			}
+		}
 		eventCount++
 		if firstEventType == "" {
 			firstEventType = eventType

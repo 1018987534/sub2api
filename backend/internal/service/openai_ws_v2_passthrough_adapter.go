@@ -1165,6 +1165,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if eventType == "error" {
 					s.handleOpenAIWSErrorEventTransientFailure(ctx, account, capturedSessionModel, handshakeHeaders, payload)
 				}
+				if !wroteDownstream && (eventType == "error" || eventType == "response.failed") {
+					if failoverErr := s.newOpenAIWSCapacityShedFailoverError(c, account, payload, handshakeHeaders); failoverErr != nil {
+						logOpenAIWSV2Passthrough(
+							"relay_capacity_failover account_id=%d event_type=%s",
+							account.ID,
+							truncateOpenAIWSLogValue(eventType, openAIWSLogValueMaxLen),
+						)
+						return failoverErr
+					}
+				}
 				if wroteDownstream || eventType != "error" {
 					return nil
 				}
