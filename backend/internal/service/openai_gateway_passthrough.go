@@ -1295,6 +1295,17 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				}
 			}
 			eventType := strings.TrimSpace(gjson.Get(trimmedData, "type").String())
+			if eventType == "error" && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+				// Some OpenAI-compatible upstreams emit capacity sheds as a standalone
+				// `event: error` frame after `response.created`, without a later
+				// `response.failed` frame. Treat it as a request-scoped failover before
+				// the error becomes the first semantic client output.
+				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
+				if isOpenAIUpstreamCapacityShedEvent(dataBytes) {
+					s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "failover", dataBytes, failedMessage)
+					return resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage, resp.Header)
+				}
+			}
 			if eventType == "response.failed" {
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
 				// response.failed 自带上游已消耗的 usage（input token 通常已扣）；必须先解析
