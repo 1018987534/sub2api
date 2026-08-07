@@ -134,12 +134,12 @@ func (s *DashboardService) GetUsageTrendWithFilters(ctx context.Context, startTi
 
 func (s *DashboardService) GetUsageTrendWithUsageFilters(ctx context.Context, startTime, endTime time.Time, granularity string, filters usagestats.UsageLogFilters) ([]usagestats.TrendDataPoint, error) {
 	type usageTrendWithFiltersRepo interface {
-		GetUsageTrendWithUsageFilters(ctx context.Context, startTime, endTime time.Time, granularity string, filters usagestats.UsageLogFilters) ([]usagestats.TrendDataPoint, error)
+		GetUsageTrendWithUsageFilters(context.Context, time.Time, time.Time, string, usagestats.UsageLogFilters) ([]usagestats.TrendDataPoint, error)
 	}
-	if filterRepo, ok := s.usageRepo.(usageTrendWithFiltersRepo); ok {
-		trend, err := filterRepo.GetUsageTrendWithUsageFilters(ctx, startTime, endTime, granularity, filters)
+	if repo, ok := s.usageRepo.(usageTrendWithFiltersRepo); ok {
+		trend, err := repo.GetUsageTrendWithUsageFilters(ctx, startTime, endTime, granularity, filters)
 		if err != nil {
-			return nil, fmt.Errorf("get usage trend with filters: %w", err)
+			return nil, fmt.Errorf("get usage trend with usage filters: %w", err)
 		}
 		return trend, nil
 	}
@@ -177,13 +177,13 @@ func (s *DashboardService) GetModelStatsWithFiltersBySource(ctx context.Context,
 
 func (s *DashboardService) GetModelStatsWithUsageFiltersBySource(ctx context.Context, startTime, endTime time.Time, filters usagestats.UsageLogFilters, modelSource string) ([]usagestats.ModelStat, error) {
 	normalizedSource := usagestats.NormalizeModelSource(modelSource)
-	type modelStatsWithUsageFiltersRepo interface {
-		GetModelStatsWithUsageFiltersBySource(ctx context.Context, startTime, endTime time.Time, filters usagestats.UsageLogFilters, source string) ([]usagestats.ModelStat, error)
+	type modelStatsWithFiltersRepo interface {
+		GetModelStatsWithUsageFiltersBySource(context.Context, time.Time, time.Time, usagestats.UsageLogFilters, string) ([]usagestats.ModelStat, error)
 	}
-	if filterRepo, ok := s.usageRepo.(modelStatsWithUsageFiltersRepo); ok {
-		stats, err := filterRepo.GetModelStatsWithUsageFiltersBySource(ctx, startTime, endTime, filters, normalizedSource)
+	if repo, ok := s.usageRepo.(modelStatsWithFiltersRepo); ok {
+		stats, err := repo.GetModelStatsWithUsageFiltersBySource(ctx, startTime, endTime, filters, normalizedSource)
 		if err != nil {
-			return nil, fmt.Errorf("get model stats with filters by source: %w", err)
+			return nil, fmt.Errorf("get model stats with usage filters by source: %w", err)
 		}
 		return stats, nil
 	}
@@ -199,13 +199,13 @@ func (s *DashboardService) GetGroupStatsWithFilters(ctx context.Context, startTi
 }
 
 func (s *DashboardService) GetGroupStatsWithUsageFilters(ctx context.Context, startTime, endTime time.Time, filters usagestats.UsageLogFilters) ([]usagestats.GroupStat, error) {
-	type groupStatsWithUsageFiltersRepo interface {
-		GetGroupStatsWithUsageFilters(ctx context.Context, startTime, endTime time.Time, filters usagestats.UsageLogFilters) ([]usagestats.GroupStat, error)
+	type groupStatsWithFiltersRepo interface {
+		GetGroupStatsWithUsageFilters(context.Context, time.Time, time.Time, usagestats.UsageLogFilters) ([]usagestats.GroupStat, error)
 	}
-	if filterRepo, ok := s.usageRepo.(groupStatsWithUsageFiltersRepo); ok {
-		stats, err := filterRepo.GetGroupStatsWithUsageFilters(ctx, startTime, endTime, filters)
+	if repo, ok := s.usageRepo.(groupStatsWithFiltersRepo); ok {
+		stats, err := repo.GetGroupStatsWithUsageFilters(ctx, startTime, endTime, filters)
 		if err != nil {
-			return nil, fmt.Errorf("get group stats with filters: %w", err)
+			return nil, fmt.Errorf("get group stats with usage filters: %w", err)
 		}
 		return stats, nil
 	}
