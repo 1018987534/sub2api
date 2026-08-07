@@ -857,12 +857,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if responseID == "" && eventResponseID != "" {
 				responseID = eventResponseID
 			}
-			if !wroteDownstream && (eventType == "error" || eventType == "response.failed") {
-				if failoverErr := s.newOpenAIWSCapacityShedFailoverError(c, account, upstreamMessage, lease.HandshakeHeaders()); failoverErr != nil {
-					lease.MarkBroken()
-					return nil, failoverErr
-				}
-			}
 			if eventType != "" {
 				eventCount++
 				if firstEventType == "" {

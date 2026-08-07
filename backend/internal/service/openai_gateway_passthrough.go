@@ -841,49 +841,9 @@ func isOpenAIUpstreamCapacityShedEvent(payload []byte) bool {
 	switch openAIStreamFailedEventErrorCode(payload) {
 	case "server_is_overloaded", "slow_down":
 		return true
+	default:
+		return false
 	}
-
-	// ChatGPT/Codex also reports model capacity as a 400-shaped error without
-	// an explicit overload code. It is still a transient, request-scoped shed
-	// and must be handled before the event reaches the client.
-	for _, path := range []string{
-		"response.error.message",
-		"error.message",
-		"message",
-	} {
-		message := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, path).String()))
-		if strings.Contains(message, "selected model is at capacity") ||
-			(strings.Contains(message, "model") && strings.Contains(message, "at capacity")) {
-			return true
-		}
-	}
-	return false
-}
-
-// newOpenAIWSCapacityShedFailoverError converts the WS capacity event into the
-// same failover envelope used by the HTTP Responses stream. The event is
-// request-scoped, so callers may retry the immutable request before exposing
-// any upstream error frame to the client.
-func (s *OpenAIGatewayService) newOpenAIWSCapacityShedFailoverError(
-	c *gin.Context,
-	account *Account,
-	payload []byte,
-	responseHeaders http.Header,
-) *UpstreamFailoverError {
-	if !isOpenAIUpstreamCapacityShedEvent(payload) {
-		return nil
-	}
-	message := strings.TrimSpace(gjson.GetBytes(payload, "response.error.message").String())
-	if message == "" {
-		message = strings.TrimSpace(gjson.GetBytes(payload, "error.message").String())
-	}
-	if message == "" {
-		_, _, message = parseOpenAIWSErrorEventFields(payload)
-	}
-	if message == "" {
-		message = "Selected model is at capacity. Please try a different model."
-	}
-	return s.newOpenAIStreamFailoverError(c, account, true, "", payload, message, responseHeaders)
 }
 
 // openAICapacityShedRetryableClientCode 是把上游容量降载错误转发给客户端时改写
