@@ -801,6 +801,28 @@ func openAIStreamEventIsPreamble(eventType string) bool {
 	}
 }
 
+func openAIStreamEventIsPassthroughPreamble(eventType string) bool {
+	if openAIStreamEventIsPreamble(eventType) {
+		return true
+	}
+	switch strings.TrimSpace(eventType) {
+	case "response.output_item.added", "response.output_item.done",
+		"response.content_part.added", "response.content_part.done",
+		"response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
+		return true
+	default:
+		return false
+	}
+}
+
+func openAIStreamPassthroughDataStartsClientOutput(data, eventType string) bool {
+	trimmed := strings.TrimSpace(data)
+	if trimmed == "" || strings.TrimSpace(eventType) == "response.failed" {
+		return false
+	}
+	return !openAIStreamEventIsPassthroughPreamble(eventType)
+}
+
 func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)
 	if trimmed == "" {
@@ -1191,6 +1213,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	sawDone := false
 	sawTerminalEvent := false
 	sawFailedEvent := false
+	sawStructuralOutput := false
 	failedMessage := ""
 	clientOutputStarted := false
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
@@ -1295,6 +1318,15 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				}
 			}
 			eventType := strings.TrimSpace(gjson.Get(trimmedData, "type").String())
+			if eventType != "" && openAIStreamEventIsPassthroughPreamble(eventType) &&
+				!openAIStreamEventIsPreamble(eventType) {
+				// Keep structural output frames buffered for a capacity retry, but
+				// remember that the upstream did begin an output item. If the
+				// stream then ends without a terminal event, preserve the existing
+				// incomplete-stream classification instead of treating it as a
+				// clean pre-output disconnect.
+				sawStructuralOutput = true
+			}
 			if eventType == "error" && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
 				// Some OpenAI-compatible upstreams emit capacity sheds as a standalone
 				// `event: error` frame after `response.created`, without a later
@@ -1371,7 +1403,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				trimmedData = strings.TrimSpace(string(sanitizedData))
 				line = "data: " + string(sanitizedData)
 			}
-			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
+			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamPassthroughDataStartsClientOutput(trimmedData, eventType)
 			if latencyTrace != nil && lineStartsClientOutput && trimmedData != "[DONE]" && eventType != "response.failed" {
 				latencyTrace.MarkPreamblePendingLines(len(pendingLines))
 				latencyTrace.MarkFirstSemanticEvent(eventType)
@@ -1437,6 +1469,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			return resultWithUsage(), err
 		}
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+			if sawStructuralOutput {
+				return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
+			}
 			msg := "OpenAI stream disconnected before completion"
 			if errText := strings.TrimSpace(err.Error()); errText != "" {
 				msg += ": " + errText
@@ -1472,6 +1507,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			zap.String("upstream_request_id", upstreamRequestID),
 		).Info("OpenAI passthrough 上游流在未收到 [DONE] 时结束，疑似断流")
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+			if sawStructuralOutput {
+				return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
+			}
 			return resultWithUsage(),
 				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
 		}

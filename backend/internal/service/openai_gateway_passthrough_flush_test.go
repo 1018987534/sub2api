@@ -145,6 +145,23 @@ func TestOpenAIStreamingPassthroughKeepsPreamblePendingUntilFirstOutputBoundary(
 	}, writer.flushBodyLengths)
 }
 
+func TestOpenAIStreamingPassthroughKeepsStructuralOutputFramesPending(t *testing.T) {
+	structural := "event: response.output_item.added\n" +
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","status":"in_progress"}}` + "\n\n"
+	firstOutput := `data: {"type":"response.output_text.delta","delta":"ready"}` + "\n\n"
+	terminalEvent := `data: {"type":"response.completed","response":{"id":"resp_structural_pending","usage":{"input_tokens":4,"output_tokens":1,"total_tokens":5}}}` + "\n\n"
+	upstream := structural + firstOutput + terminalEvent
+
+	_, recorder, writer, err := runPassthroughFlushTest(t, io.NopCloser(strings.NewReader(upstream)), -1)
+
+	require.NoError(t, err)
+	require.Equal(t, upstream, recorder.Body.String())
+	require.Equal(t, []int{
+		len(structural) + len(firstOutput),
+		len(upstream),
+	}, writer.flushBodyLengths)
+}
+
 func TestOpenAIStreamingPassthroughFlushesTerminalEventAtEOFWithoutBlankLine(t *testing.T) {
 	upstream := "event: response.completed\n" +
 		`data: {"type":"response.completed","response":{"id":"resp_eof","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`
