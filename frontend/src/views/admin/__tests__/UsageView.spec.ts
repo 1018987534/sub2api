@@ -30,8 +30,9 @@ const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listE
 const messages: Record<string, string> = {
   'admin.dashboard.timeRange': 'Time Range',
   'admin.dashboard.day': 'Day',
-  'admin.dashboard.hour': 'Hour',
-  'admin.usage.failedToLoadUser': 'Failed to load user',
+	'admin.dashboard.hour': 'Hour',
+	'admin.usage.failedToLoadUser': 'Failed to load user',
+	'admin.usage.instance': 'Instance',
 	'usage.requestedModel': 'Requested model',
 	'usage.sentUpstreamModel': 'Sent upstream model',
 	'usage.upstreamResponseModel': 'Upstream response model',
@@ -571,6 +572,7 @@ describe('admin UsageView model audit export', () => {
 			items: [{
 				id: 1,
 				created_at: '2026-08-04T00:00:00Z',
+				instance_id: 'bwg-us-01',
 				model: 'gpt-5.6-sol',
 				upstream_model: 'gpt-5.5',
 				upstream_response_model: 'gpt-5.4',
@@ -601,7 +603,7 @@ describe('admin UsageView model audit export', () => {
 		vi.useRealTimers()
 	})
 
-	it('exports requested, sent, response, and mismatch as separate admin columns', async () => {
+	it('exports instance, requested, sent, response, and mismatch as separate admin columns', async () => {
 		const wrapper = mountRouteFilteredUsageView()
 		vi.advanceTimersByTime(120)
 		await flushPromises()
@@ -610,14 +612,15 @@ describe('admin UsageView model audit export', () => {
 		await flushPromises()
 
 		const headers = aoaToSheet.mock.calls[0][0][0]
-		expect(headers.slice(4, 8)).toEqual([
+		expect(headers.slice(4, 9)).toEqual([
+			'Instance',
 			'Requested model',
 			'Sent upstream model',
 			'Upstream response model',
 			'Upstream model mismatch',
 		])
 		const row = sheetAddAoa.mock.calls[0][1][0]
-		expect(row.slice(4, 8)).toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'Yes'])
+		expect(row.slice(4, 9)).toEqual(['bwg-us-01', 'gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'Yes'])
 		expect(saveAs).toHaveBeenCalledTimes(1)
 	})
 })
