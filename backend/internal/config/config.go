@@ -10,7 +10,6 @@ import (
 	"net/textproto"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -1055,9 +1054,6 @@ type GatewayOpenAIHTTP2Config struct {
 	FallbackWindowSeconds int `mapstructure:"fallback_window_seconds"`
 	// FallbackTTLSeconds: 触发后回退 HTTP/1.1 的持续时间（秒）
 	FallbackTTLSeconds int `mapstructure:"fallback_ttl_seconds"`
-	// H2Shards optionally enables independent HTTP/2 transports for selected
-	// account IDs. An omitted account keeps the historical single transport.
-	H2Shards map[string]int `mapstructure:"h2_shards"`
 }
 
 // GatewayOpenAIProxyStreamCircuitConfig controls the bounded, in-process
@@ -3393,15 +3389,6 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIHTTP2.FallbackTTLSeconds < 0 {
 		return fmt.Errorf("gateway.openai_http2.fallback_ttl_seconds must be non-negative")
-	}
-	for accountID, shardCount := range c.Gateway.OpenAIHTTP2.H2Shards {
-		parsedAccountID, err := strconv.ParseInt(strings.TrimSpace(accountID), 10, 64)
-		if err != nil || parsedAccountID <= 0 {
-			return fmt.Errorf("gateway.openai_http2.h2_shards key %q must be an account ID", accountID)
-		}
-		if shardCount < 1 || shardCount > 16 {
-			return fmt.Errorf("gateway.openai_http2.h2_shards[%q] must be between 1 and 16", accountID)
-		}
 	}
 	if c.Gateway.OpenAIProxyStreamCircuit.FailureThreshold < 0 {
 		return fmt.Errorf("gateway.openai_proxy_stream_circuit.failure_threshold must be non-negative")

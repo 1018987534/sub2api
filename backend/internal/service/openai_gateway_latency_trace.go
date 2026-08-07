@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net/http"
 	"net/http/httptrace"
 	"strings"
@@ -43,11 +42,7 @@ type openAILatencyAttempt struct {
 	firstSemanticEventType string
 	firstTextDeltaBytes    int
 	upstreamHost           string
-	h2Shard                int
-	h2ShardCount           int
-	upstreamLocalAddr      string
 	upstreamRemoteAddr     string
-	upstreamConnID         string
 	upstreamRequestID      string
 	upstreamCFRay          string
 	upstreamVia            string
@@ -305,22 +300,6 @@ func (t *OpenAILatencyTrace) MarkClientAcquireDone(at time.Time) {
 		if a.clientAcquireDone.IsZero() {
 			a.clientAcquireDone = at
 		}
-	})
-}
-
-// MarkH2Shard records the independent upstream HTTP/2 transport selected for
-// this attempt. A single-shard/default request is recorded as 0/1 so logs can
-// be compared directly with the canary account.
-func (t *OpenAILatencyTrace) MarkH2Shard(shard, shardCount int) {
-	t.markAttempt(func(a *openAILatencyAttempt) {
-		if shardCount <= 0 {
-			shardCount = 1
-		}
-		if shard < 0 || shard >= shardCount {
-			shard = 0
-		}
-		a.h2Shard = shard
-		a.h2ShardCount = shardCount
 	})
 }
 
@@ -621,11 +600,7 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		zap.Bool("upstream_request_gzip_error", attempt.upstreamGzipError),
 		zap.String("protocol", attempt.protocol),
 		zap.String("upstream_host", attempt.upstreamHost),
-		zap.Int("h2_shard", attempt.h2Shard),
-		zap.Int("h2_shard_count", attempt.h2ShardCount),
-		zap.String("upstream_local_addr", attempt.upstreamLocalAddr),
 		zap.String("upstream_remote_addr", attempt.upstreamRemoteAddr),
-		zap.String("upstream_conn_id", attempt.upstreamConnID),
 		zap.String("upstream_cf_ray", attempt.upstreamCFRay),
 		zap.String("upstream_via", attempt.upstreamVia),
 		zap.String("upstream_server", attempt.upstreamServer),
@@ -657,11 +632,7 @@ type openAILatencyAttemptSummary struct {
 	FirstSSEAfterHeaderMs   int64  `json:"first_sse_after_header_ms"`
 	FirstSemanticAfterSSEMs int64  `json:"first_semantic_after_sse_ms"`
 	UpstreamHost            string `json:"upstream_host,omitempty"`
-	H2Shard                 int    `json:"h2_shard,omitempty"`
-	H2ShardCount            int    `json:"h2_shard_count,omitempty"`
-	UpstreamLocalAddr       string `json:"upstream_local_addr,omitempty"`
 	UpstreamRemoteAddr      string `json:"upstream_remote_addr,omitempty"`
-	UpstreamConnID          string `json:"upstream_conn_id,omitempty"`
 	UpstreamCFRay           string `json:"upstream_cf_ray,omitempty"`
 	UpstreamRequestID       string `json:"upstream_request_id,omitempty"`
 }
@@ -683,11 +654,7 @@ func openAILatencyAttemptSummaries(attempts []openAILatencyAttempt) []openAILate
 			FirstSSEAfterHeaderMs:   nonNegativeMillis(candidate.firstSSEEvent.Sub(candidate.firstResponseByte)),
 			FirstSemanticAfterSSEMs: nonNegativeMillis(candidate.firstSemanticEvent.Sub(candidate.firstSSEEvent)),
 			UpstreamHost:            candidate.upstreamHost,
-			H2Shard:                 candidate.h2Shard,
-			H2ShardCount:            candidate.h2ShardCount,
-			UpstreamLocalAddr:       candidate.upstreamLocalAddr,
 			UpstreamRemoteAddr:      candidate.upstreamRemoteAddr,
-			UpstreamConnID:          candidate.upstreamConnID,
 			UpstreamCFRay:           candidate.upstreamCFRay,
 			UpstreamRequestID:       candidate.upstreamRequestID,
 		})
@@ -805,12 +772,6 @@ func WithOpenAIHTTPTrace(req *http.Request) *http.Request {
 					a.wasIdle = info.WasIdle
 					if info.Conn != nil && info.Conn.RemoteAddr() != nil {
 						a.upstreamRemoteAddr = info.Conn.RemoteAddr().String()
-					}
-					if info.Conn != nil && info.Conn.LocalAddr() != nil {
-						a.upstreamLocalAddr = info.Conn.LocalAddr().String()
-					}
-					if info.Conn != nil {
-						a.upstreamConnID = fmt.Sprintf("%p", info.Conn)
 					}
 				}
 			})

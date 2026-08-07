@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -129,8 +128,6 @@ type upstreamClientEntry struct {
 	proxyKey     string       // 代理标识（用于检测代理变更）
 	poolKey      string       // 连接池配置标识（用于检测配置变更）
 	protocolMode string       // 协议模式（default/openai_h1/openai_h2/openai_h1_fallback）
-	h2Shard      int          // OpenAI H2 shard index; zero for the default/single shard path
-	h2ShardCount int          // Effective OpenAI H2 shard count
 	lastUsed     int64        // 最后使用时间戳（纳秒），用于 LRU 淘汰
 	inFlight     int64        // 当前进行中的请求数，>0 时不可淘汰
 }
@@ -160,10 +157,9 @@ type openAIHTTP2FallbackState struct {
 // 7. 代理变更时清空旧连接池，避免复用错误代理
 // 8. 账号并发数与连接池上限对应（账号隔离策略下）
 type httpUpstreamService struct {
-	cfg             *config.Config                  // 全局配置
-	mu              sync.RWMutex                    // 保护 clients map 的读写锁
-	clients         map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
-	h2ShardSequence uint64                          // round-robin sequence for opted-in OpenAI H2 accounts
+	cfg     *config.Config                  // 全局配置
+	mu      sync.RWMutex                    // 保护 clients map 的读写锁
+	clients map[string]*upstreamClientEntry // 客户端缓存池，key 由隔离策略决定
 	// OpenAI 走 HTTP/HTTPS 代理时的 H2->H1 回退状态（key=标准化 proxyKey）
 	openAIHTTP2Fallbacks sync.Map
 }
@@ -224,9 +220,6 @@ func (s *httpUpstreamService) Do(req *http.Request, proxyURL string, accountID i
 	}
 	if err != nil {
 		return nil, err
-	}
-	if trace != nil {
-		trace.MarkH2Shard(entry.h2Shard, entry.h2ShardCount)
 	}
 
 	// 执行请求
@@ -306,9 +299,6 @@ func (s *httpUpstreamService) DoWithTLS(req *http.Request, proxyURL string, acco
 	if err != nil {
 		slog.Debug("tls_fingerprint_acquire_client_failed", "account_id", accountID, "error", err)
 		return nil, err
-	}
-	if trace != nil {
-		trace.MarkH2Shard(entry.h2Shard, entry.h2ShardCount)
 	}
 
 	client := httpClientForUpstreamRequest(entry.client, req)
@@ -688,13 +678,10 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 	protocolMode := s.resolveProtocolMode(profile, proxyKey, parsedProxy)
 	settings := s.resolvePoolSettings(isolation, accountConcurrency)
 	settings = s.applyProfilePoolSettings(settings, profile)
-	h2ShardCount := s.resolveOpenAIHTTP2ShardCount(isolation, accountID, accountConcurrency, profile, protocolMode, settings)
-	h2Shard := s.nextOpenAIHTTP2Shard(h2ShardCount)
-	settings = splitPoolSettings(settings, h2ShardCount, h2Shard)
 	// 构建缓存键（根据隔离策略不同）
-	cacheKey := buildH2ShardCacheKey(buildCacheKey(isolation, proxyKey, accountID, protocolMode), h2ShardCount, h2Shard)
+	cacheKey := buildCacheKey(isolation, proxyKey, accountID, protocolMode)
 	// 构建连接池配置键（用于检测配置变更）
-	poolKey := buildH2ShardPoolKey(buildPoolKey(settings, protocolMode), h2ShardCount, h2Shard)
+	poolKey := buildPoolKey(settings, protocolMode)
 
 	now := time.Now()
 	nowUnix := now.UnixNano()
@@ -751,8 +738,6 @@ func (s *httpUpstreamService) getClientEntry(proxyURL string, accountID int64, a
 		proxyKey:     proxyKey,
 		poolKey:      poolKey,
 		protocolMode: protocolMode,
-		h2Shard:      h2Shard,
-		h2ShardCount: h2ShardCount,
 	}
 	atomic.StoreInt64(&entry.lastUsed, nowUnix)
 	if markInFlight {
@@ -945,87 +930,6 @@ func (s *httpUpstreamService) applyProfilePoolSettings(settings poolSettings, pr
 		settings.responseHeaderTimeout = time.Duration(s.cfg.Gateway.OpenAIResponseHeaderTimeout) * time.Second
 	}
 	return settings
-}
-
-// resolveOpenAIHTTP2ShardCount returns the effective shard count for one
-// account. The opt-in map is intentionally account-scoped so the default path
-// remains byte-for-byte compatible with the existing single Transport.
-func (s *httpUpstreamService) resolveOpenAIHTTP2ShardCount(isolation string, accountID int64, accountConcurrency int, profile service.HTTPUpstreamProfile, protocolMode string, settings poolSettings) int {
-	if isolation == config.ConnectionPoolIsolationProxy || profile != service.HTTPUpstreamProfileOpenAI || protocolMode != upstreamProtocolModeOpenAIH2 || accountID <= 0 {
-		return 1
-	}
-	shardCount := 1
-	if s != nil && s.cfg != nil {
-		if configured, ok := s.cfg.Gateway.OpenAIHTTP2.H2Shards[strconv.FormatInt(accountID, 10)]; ok {
-			shardCount = configured
-		}
-	}
-	if shardCount < 1 {
-		return 1
-	}
-	if shardCount > 16 {
-		shardCount = 16
-	}
-	// Keep the account's total connection budget bounded. In account-isolated
-	// mode this also prevents a 4-shard canary from turning a 500-account limit
-	// into four independent 500-connection limits.
-	if accountConcurrency > 0 && shardCount > accountConcurrency {
-		shardCount = accountConcurrency
-	}
-	for _, limit := range []int{settings.maxConnsPerHost, settings.maxIdleConns, settings.maxIdleConnsPerHost} {
-		if limit > 0 && shardCount > limit {
-			shardCount = limit
-		}
-	}
-	if shardCount < 1 {
-		return 1
-	}
-	return shardCount
-}
-
-func (s *httpUpstreamService) nextOpenAIHTTP2Shard(shardCount int) int {
-	if shardCount <= 1 {
-		return 0
-	}
-	return int(atomic.AddUint64(&s.h2ShardSequence, 1)-1) % shardCount
-}
-
-// splitPoolSettings divides finite limits across independent transports. A
-// zero limit keeps net/http's existing unlimited semantics and is left zero
-// for every shard.
-func splitPoolSettings(settings poolSettings, shardCount, shardIndex int) poolSettings {
-	if shardCount <= 1 {
-		return settings
-	}
-	settings.maxIdleConns = splitPoolLimit(settings.maxIdleConns, shardCount, shardIndex)
-	settings.maxIdleConnsPerHost = splitPoolLimit(settings.maxIdleConnsPerHost, shardCount, shardIndex)
-	settings.maxConnsPerHost = splitPoolLimit(settings.maxConnsPerHost, shardCount, shardIndex)
-	return settings
-}
-
-func splitPoolLimit(total, shardCount, shardIndex int) int {
-	if total <= 0 || shardCount <= 1 {
-		return total
-	}
-	base := total / shardCount
-	if shardIndex < total%shardCount {
-		base++
-	}
-	return base
-}
-
-func buildH2ShardCacheKey(base string, shardCount, shardIndex int) string {
-	if shardCount <= 1 {
-		return base
-	}
-	return fmt.Sprintf("%s|h2_shard:%d/%d", base, shardIndex, shardCount)
-}
-
-func buildH2ShardPoolKey(base string, shardCount, shardIndex int) string {
-	if shardCount <= 1 {
-		return base
-	}
-	return fmt.Sprintf("%s|h2_shard:%d/%d", base, shardIndex, shardCount)
 }
 
 // buildPoolKey 构建连接池配置键，用于检测连接池配置变更。

@@ -804,28 +804,6 @@ func openAIStreamEventIsPreamble(eventType string) bool {
 	}
 }
 
-func openAIStreamEventIsPassthroughPreamble(eventType string) bool {
-	if openAIStreamEventIsPreamble(eventType) {
-		return true
-	}
-	switch strings.TrimSpace(eventType) {
-	case "response.output_item.added", "response.output_item.done",
-		"response.content_part.added", "response.content_part.done",
-		"response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
-		return true
-	default:
-		return false
-	}
-}
-
-func openAIStreamPassthroughDataStartsClientOutput(data, eventType string) bool {
-	trimmed := strings.TrimSpace(data)
-	if trimmed == "" || strings.TrimSpace(eventType) == "response.failed" {
-		return false
-	}
-	return !openAIStreamEventIsPassthroughPreamble(eventType)
-}
-
 func openAIStreamDataStartsClientOutput(data, eventType string) bool {
 	trimmed := strings.TrimSpace(data)
 	if trimmed == "" {
@@ -875,9 +853,7 @@ func isOpenAIUpstreamCapacityShedEvent(payload []byte) bool {
 	} {
 		message := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, path).String()))
 		if strings.Contains(message, "selected model is at capacity") ||
-			(strings.Contains(message, "model") && strings.Contains(message, "at capacity")) ||
-			strings.Contains(message, "servers are currently overloaded") ||
-			(strings.Contains(message, "server") && strings.Contains(message, "overloaded") && strings.Contains(message, "try again later")) {
+			(strings.Contains(message, "model") && strings.Contains(message, "at capacity")) {
 			return true
 		}
 	}
@@ -1264,7 +1240,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	sawDone := false
 	sawTerminalEvent := false
 	sawFailedEvent := false
-	sawStructuralOutput := false
 	failedMessage := ""
 	clientOutputStarted := false
 	upstreamRequestID := strings.TrimSpace(resp.Header.Get("x-request-id"))
@@ -1371,26 +1346,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				}
 			}
 			eventType := strings.TrimSpace(gjson.Get(trimmedData, "type").String())
-			if eventType != "" && openAIStreamEventIsPassthroughPreamble(eventType) &&
-				!openAIStreamEventIsPreamble(eventType) {
-				// Keep structural output frames buffered for a capacity retry, but
-				// remember that the upstream did begin an output item. If the
-				// stream then ends without a terminal event, preserve the existing
-				// incomplete-stream classification instead of treating it as a
-				// clean pre-output disconnect.
-				sawStructuralOutput = true
-			}
-			if eventType == "error" && !openAIStreamClientOutputStarted(c, clientOutputStarted) {
-				// Some OpenAI-compatible upstreams emit capacity sheds as a standalone
-				// `event: error` frame after `response.created`, without a later
-				// `response.failed` frame. Treat it as a request-scoped failover before
-				// the error becomes the first semantic client output.
-				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
-				if isOpenAIUpstreamCapacityShedEvent(dataBytes) {
-					s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "failover", dataBytes, failedMessage)
-					return resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage, resp.Header)
-				}
-			}
 			if eventType == "response.failed" {
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
 				// response.failed 自带上游已消耗的 usage（input token 通常已扣）；必须先解析
@@ -1408,13 +1363,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 					})
 				}
 				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
-					// Capacity sheds are request-scoped transient failures. They must
-					// enter failover before configurable passthrough rules can commit
-					// the response as a client-visible invalid_request error.
-					if isOpenAIUpstreamCapacityShedEvent(dataBytes) {
-						s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "failover", dataBytes, failedMessage)
-						return resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, dataBytes, failedMessage, resp.Header)
-					}
 					if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
 						// 命中透传规则也要记录 ops 上游错误事件（对齐 CC/Messages 与
 						// antigravity 先例），否则透传命中的 failed 在监控中不可见。
@@ -1456,7 +1404,7 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				trimmedData = strings.TrimSpace(string(sanitizedData))
 				line = "data: " + string(sanitizedData)
 			}
-			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamPassthroughDataStartsClientOutput(trimmedData, eventType)
+			lineStartsClientOutput = forceFlushFailedEvent || openAIStreamDataStartsClientOutput(trimmedData, eventType)
 			if latencyTrace != nil && lineStartsClientOutput && trimmedData != "[DONE]" && eventType != "response.failed" {
 				latencyTrace.MarkPreamblePendingLines(len(pendingLines))
 				latencyTrace.MarkFirstSemanticEvent(eventType)
@@ -1522,9 +1470,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			return resultWithUsage(), err
 		}
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
-			if sawStructuralOutput {
-				return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
-			}
 			msg := "OpenAI stream disconnected before completion"
 			if errText := strings.TrimSpace(err.Error()); errText != "" {
 				msg += ": " + errText
@@ -1560,9 +1505,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			zap.String("upstream_request_id", upstreamRequestID),
 		).Info("OpenAI passthrough 上游流在未收到 [DONE] 时结束，疑似断流")
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
-			if sawStructuralOutput {
-				return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
-			}
 			return resultWithUsage(),
 				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
 		}
