@@ -4,6 +4,7 @@ const DEFAULT_VMISS_US_02_PERCENT = 0;
 const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 15;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
 const MAX_INGRESS_ERROR_BODY_BYTES = 8 * 1024;
+const SAFE_EDGE_CONNECTION_FAILURE_STATUSES = new Set([521, 522, 523, 525, 526]);
 const NGINX_BAD_REQUEST_HTML = new RegExp(
   [
     "^\\s*<html>\\s*<head><title>400 Bad Request</title></head>",
@@ -305,11 +306,17 @@ function originRequest(request, originBase) {
 }
 
 async function safeIngressFailureType(request, response) {
-  if (request.method !== "POST" || response.status !== 400) {
+  if (request.method !== "POST") {
     return "";
+  }
+  if (SAFE_EDGE_CONNECTION_FAILURE_STATUSES.has(response.status)) {
+    return `edge_connection_${response.status}`;
   }
   const contentEncoding = request.headers.get("content-encoding")?.trim().toLowerCase() ?? "";
   if (contentEncoding && contentEncoding !== "identity") {
+    return "";
+  }
+  if (response.status !== 400) {
     return "";
   }
   const contentLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
