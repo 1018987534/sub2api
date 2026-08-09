@@ -23,6 +23,7 @@ const (
 	gatewayRoutingRuntimeErrorTTL         = 10 * time.Second
 	gatewayRoutingMonitorTimeout          = 5 * time.Second
 	gatewayRoutingMonitorStaleAfter       = 15 * time.Minute
+	gatewayRoutingHealthStaleAfter        = 3 * time.Minute
 	gatewayRoutingMonitorResponseLimit    = 4 << 20
 	maxGatewayRoutingNodes                = 16
 	maxGatewayRoutingWeight               = 100
@@ -35,8 +36,16 @@ var gatewayRoutingNodeIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62
 type GatewayRoutingSettings struct {
 	MonitorURL               string                       `json:"monitor_url"`
 	TrafficProtectionEnabled bool                         `json:"traffic_protection_enabled"`
+	HealthProtectionEnabled  bool                         `json:"health_protection_enabled"`
 	TrafficThresholdPercent  float64                      `json:"traffic_threshold_percent"`
 	Nodes                    []GatewayRoutingNodeSettings `json:"nodes"`
+}
+
+func (s *GatewayRoutingSettings) UnmarshalJSON(data []byte) error {
+	type gatewayRoutingSettingsJSON GatewayRoutingSettings
+	defaults := DefaultGatewayRoutingSettings()
+	*s = *defaults
+	return json.Unmarshal(data, (*gatewayRoutingSettingsJSON)(s))
 }
 
 type GatewayRoutingNodeSettings struct {
@@ -61,6 +70,7 @@ type GatewayRoutingNodeRuntime struct {
 	TargetWeight        int        `json:"target_weight"`
 	EffectiveWeight     int        `json:"effective_weight"`
 	AutoDisabled        bool       `json:"auto_disabled"`
+	AutoDisabledReason  string     `json:"auto_disabled_reason,omitempty"`
 	Status              string     `json:"status"`
 	TrafficLimitBytes   int64      `json:"traffic_limit_bytes"`
 	TrafficUsedBytes    int64      `json:"traffic_used_bytes"`
@@ -99,10 +109,18 @@ type gatewayRoutingRecordsResponse struct {
 	} `json:"data"`
 }
 
+type gatewayRoutingRecordResult struct {
+	index  int
+	node   gatewayRoutingMonitorNode
+	record gatewayRoutingMonitorRecord
+	err    error
+}
+
 func DefaultGatewayRoutingSettings() *GatewayRoutingSettings {
 	return &GatewayRoutingSettings{
 		MonitorURL:               defaultGatewayRoutingMonitorURL,
 		TrafficProtectionEnabled: true,
+		HealthProtectionEnabled:  true,
 		TrafficThresholdPercent:  defaultGatewayRoutingThresholdPercent,
 		Nodes: []GatewayRoutingNodeSettings{
 			{ID: "bwg-us-01", Origin: "https://control-origin.xiaohondou.com", TargetWeight: 50},
@@ -342,6 +360,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 		node  gatewayRoutingMonitorNode
 	}
 	matched := make([]matchedMonitorNode, 0, len(settings.Nodes))
+	missing := make([]int, 0)
 	for i, configured := range settings.Nodes {
 		status := "active"
 		if configured.TargetWeight == 0 {
@@ -356,8 +375,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 		}
 		monitorNode, ok := byName[configured.ID]
 		if !ok {
-			runtime.MonitorStale = true
-			applyStaleGatewayRoutingNode(&runtime.Nodes[i], configured, previousGatewayRoutingNode(previous, configured))
+			missing = append(missing, i)
 			continue
 		}
 		runtime.Nodes[i].TrafficLimitBytes = monitorNode.TrafficLimit
@@ -367,41 +385,79 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 	}
 
 	group, groupCtx := errgroup.WithContext(ctx)
-	for _, item := range matched {
+	results := make([]gatewayRoutingRecordResult, len(matched))
+	for resultIndex, item := range matched {
+		resultIndex := resultIndex
 		item := item
 		group.Go(func() error {
 			record, fetchErr := fetchGatewayRoutingLatestRecord(groupCtx, client, settings.MonitorURL, item.node.UUID)
-			if fetchErr != nil {
-				configured := settings.Nodes[item.index]
-				applyStaleGatewayRoutingNode(&runtime.Nodes[item.index], configured, previousGatewayRoutingNode(previous, configured))
-				return nil
-			}
-			runtime.Nodes[item.index].MonitorSampleAt = &record.Time
-			if record.Time.IsZero() || record.Time.After(now.Add(5*time.Minute)) || now.Sub(record.Time) > gatewayRoutingMonitorStaleAfter {
-				configured := settings.Nodes[item.index]
-				applyStaleGatewayRoutingNode(&runtime.Nodes[item.index], configured, previousGatewayRoutingNode(previous, configured))
-				return nil
-			}
-			used := gatewayRoutingTrafficUsed(runtime.Nodes[item.index].TrafficLimitType, record.NetTotalUp, record.NetTotalDown)
-			runtime.Nodes[item.index].TrafficUsedBytes = used
-			if runtime.Nodes[item.index].Unlimited {
-				if runtime.Nodes[item.index].TargetWeight == 0 {
-					return nil
-				}
-				runtime.Nodes[item.index].Status = "unlimited"
-				return nil
-			}
-			percentage := float64(used) / float64(runtime.Nodes[item.index].TrafficLimitBytes) * 100
-			runtime.Nodes[item.index].TrafficUsagePercent = &percentage
-			if runtime.Nodes[item.index].TargetWeight > 0 && settings.TrafficProtectionEnabled && percentage >= settings.TrafficThresholdPercent {
-				runtime.Nodes[item.index].EffectiveWeight = 0
-				runtime.Nodes[item.index].AutoDisabled = true
-				runtime.Nodes[item.index].Status = "auto_disabled"
+			results[resultIndex] = gatewayRoutingRecordResult{
+				index:  item.index,
+				node:   item.node,
+				record: record,
+				err:    fetchErr,
 			}
 			return nil
 		})
 	}
 	_ = group.Wait()
+
+	hasFreshPositiveNode := false
+	for _, result := range results {
+		if result.err != nil {
+			continue
+		}
+		configured := settings.Nodes[result.index]
+		if configured.TargetWeight > 0 && gatewayRoutingRecordFreshForHealth(result.record, now) {
+			hasFreshPositiveNode = true
+			break
+		}
+	}
+
+	for _, index := range missing {
+		configured := settings.Nodes[index]
+		applyStaleGatewayRoutingNode(&runtime.Nodes[index], configured, previousGatewayRoutingNode(previous, configured))
+		if settings.HealthProtectionEnabled && configured.TargetWeight > 0 && hasFreshPositiveNode {
+			applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[index], "monitor_missing")
+		}
+	}
+
+	for _, result := range results {
+		configured := settings.Nodes[result.index]
+		if result.err != nil {
+			applyStaleGatewayRoutingNode(&runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
+			if settings.HealthProtectionEnabled && configured.TargetWeight > 0 && hasFreshPositiveNode {
+				applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[result.index], "monitor_record_unavailable")
+			}
+			continue
+		}
+		runtime.Nodes[result.index].MonitorSampleAt = &result.record.Time
+		if !gatewayRoutingRecordFreshForHealth(result.record, now) {
+			applyStaleGatewayRoutingNode(&runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
+			if settings.HealthProtectionEnabled && configured.TargetWeight > 0 && hasFreshPositiveNode {
+				applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[result.index], "monitor_stale")
+			}
+			continue
+		}
+		if !gatewayRoutingRecordFreshForTraffic(result.record, now) {
+			applyStaleGatewayRoutingNode(&runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
+			continue
+		}
+		used := gatewayRoutingTrafficUsed(runtime.Nodes[result.index].TrafficLimitType, result.record.NetTotalUp, result.record.NetTotalDown)
+		runtime.Nodes[result.index].TrafficUsedBytes = used
+		if runtime.Nodes[result.index].Unlimited {
+			if runtime.Nodes[result.index].TargetWeight == 0 {
+				continue
+			}
+			runtime.Nodes[result.index].Status = "unlimited"
+			continue
+		}
+		percentage := float64(used) / float64(runtime.Nodes[result.index].TrafficLimitBytes) * 100
+		runtime.Nodes[result.index].TrafficUsagePercent = &percentage
+		if runtime.Nodes[result.index].TargetWeight > 0 && settings.TrafficProtectionEnabled && percentage >= settings.TrafficThresholdPercent {
+			applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[result.index], "traffic_threshold")
+		}
+	}
 	for _, node := range runtime.Nodes {
 		if node.MonitorStale {
 			runtime.MonitorStale = true
@@ -409,6 +465,18 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 		}
 	}
 	return runtime, nil
+}
+
+func gatewayRoutingRecordFreshForHealth(record gatewayRoutingMonitorRecord, now time.Time) bool {
+	return gatewayRoutingRecordFresh(record, now, gatewayRoutingHealthStaleAfter)
+}
+
+func gatewayRoutingRecordFreshForTraffic(record gatewayRoutingMonitorRecord, now time.Time) bool {
+	return gatewayRoutingRecordFresh(record, now, gatewayRoutingMonitorStaleAfter)
+}
+
+func gatewayRoutingRecordFresh(record gatewayRoutingMonitorRecord, now time.Time, staleAfter time.Duration) bool {
+	return !record.Time.IsZero() && !record.Time.After(now.Add(5*time.Minute)) && now.Sub(record.Time) <= staleAfter
 }
 
 func staleGatewayRoutingRuntime(settings *GatewayRoutingSettings, previous *GatewayRoutingRuntime, now time.Time, message string) *GatewayRoutingRuntime {
@@ -457,6 +525,7 @@ func applyStaleGatewayRoutingNode(runtime *GatewayRoutingNodeRuntime, configured
 		runtime.TrafficLimitType = previous.TrafficLimitType
 		runtime.Unlimited = previous.Unlimited
 		runtime.MonitorSampleAt = previous.MonitorSampleAt
+		runtime.AutoDisabledReason = previous.AutoDisabledReason
 		if previous.AutoDisabled {
 			runtime.EffectiveWeight = 0
 			runtime.AutoDisabled = true
@@ -466,8 +535,23 @@ func applyStaleGatewayRoutingNode(runtime *GatewayRoutingNodeRuntime, configured
 	if configured.TargetWeight == 0 {
 		runtime.EffectiveWeight = 0
 		runtime.AutoDisabled = false
+		runtime.AutoDisabledReason = ""
 		runtime.Status = "manual_disabled"
 	}
+}
+
+func applyAutoDisabledGatewayRoutingNode(runtime *GatewayRoutingNodeRuntime, reason string) {
+	if runtime == nil {
+		return
+	}
+	runtime.EffectiveWeight = 0
+	runtime.AutoDisabled = true
+	runtime.AutoDisabledReason = reason
+	if reason == "" || reason == "traffic_threshold" {
+		runtime.Status = "auto_disabled"
+		return
+	}
+	runtime.Status = "auto_disabled_" + reason
 }
 
 func fetchGatewayRoutingMonitorNodes(ctx context.Context, client *http.Client, baseURL string) ([]gatewayRoutingMonitorNode, error) {

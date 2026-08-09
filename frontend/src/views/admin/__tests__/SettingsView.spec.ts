@@ -653,6 +653,7 @@ describe("admin SettingsView payment visible method controls", () => {
       settings: {
         monitor_url: "https://check.example",
         traffic_protection_enabled: true,
+        health_protection_enabled: true,
         traffic_threshold_percent: 90,
         nodes: [
           { id: "bwg-us-01", origin: "https://control.example", target_weight: 50 },
@@ -1981,5 +1982,8 @@ describe("admin SettingsView platform quota matrix", () => {
     await saveButton!.trigger("click");
     await flushPromises();
     expect(updateGatewayRoutingSettings).toHaveBeenCalled();
+    expect(updateGatewayRoutingSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ health_protection_enabled: true }),
+    );
   });
 });

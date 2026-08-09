@@ -1247,6 +1247,7 @@ export interface GatewayRoutingNodeSettings {
 export interface GatewayRoutingSettings {
   monitor_url: string;
   traffic_protection_enabled: boolean;
+  health_protection_enabled: boolean;
   traffic_threshold_percent: number;
   nodes: GatewayRoutingNodeSettings[];
 }
@@ -1254,7 +1255,16 @@ export interface GatewayRoutingSettings {
 export interface GatewayRoutingNodeRuntime extends GatewayRoutingNodeSettings {
   effective_weight: number;
   auto_disabled: boolean;
-  status: "active" | "manual_disabled" | "auto_disabled" | "unlimited" | "monitor_stale";
+  auto_disabled_reason?: string;
+  status:
+    | "active"
+    | "manual_disabled"
+    | "auto_disabled"
+    | "auto_disabled_monitor_stale"
+    | "auto_disabled_monitor_missing"
+    | "auto_disabled_monitor_record_unavailable"
+    | "unlimited"
+    | "monitor_stale";
   traffic_limit_bytes: number;
   traffic_used_bytes: number;
   traffic_usage_percent: number | null;

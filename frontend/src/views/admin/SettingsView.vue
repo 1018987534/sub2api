@@ -265,6 +265,18 @@
                     <Toggle v-model="gatewayRoutingForm.traffic_protection_enabled" />
                   </div>
 
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <label class="font-medium text-gray-900 dark:text-white">
+                        {{ t("admin.settings.gatewayRouting.healthProtection") }}
+                      </label>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.gatewayRouting.healthProtectionHint") }}
+                      </p>
+                    </div>
+                    <Toggle v-model="gatewayRoutingForm.health_protection_enabled" />
+                  </div>
+
                   <div>
                     <label
                       class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -8927,6 +8939,7 @@ const gatewayRoutingSaving = ref(false);
 const gatewayRoutingForm = reactive<GatewayRoutingSettings>({
   monitor_url: "",
   traffic_protection_enabled: true,
+  health_protection_enabled: true,
   traffic_threshold_percent: 90,
   nodes: [],
 });
@@ -11769,6 +11782,8 @@ function applyGatewayRoutingResponse(response: {
   gatewayRoutingForm.monitor_url = response.settings.monitor_url;
   gatewayRoutingForm.traffic_protection_enabled =
     response.settings.traffic_protection_enabled;
+  gatewayRoutingForm.health_protection_enabled =
+    response.settings.health_protection_enabled;
   gatewayRoutingForm.traffic_threshold_percent =
     response.settings.traffic_threshold_percent;
   gatewayRoutingForm.nodes = response.settings.nodes.map((node) => ({ ...node }));
@@ -11809,6 +11824,8 @@ async function saveGatewayRoutingSettings() {
         monitor_url: gatewayRoutingForm.monitor_url,
         traffic_protection_enabled:
           gatewayRoutingForm.traffic_protection_enabled,
+        health_protection_enabled:
+          gatewayRoutingForm.health_protection_enabled,
         traffic_threshold_percent:
           gatewayRoutingForm.traffic_threshold_percent,
         nodes: gatewayRoutingForm.nodes.map((node) => ({ ...node })),
@@ -11857,7 +11874,7 @@ function gatewayRoutingStatusLabel(nodeID: string): string {
 function gatewayRoutingStatusClass(nodeID: string): string {
   const status = gatewayRoutingRuntimeByID.value[nodeID]?.status;
   const base = "inline-flex whitespace-nowrap rounded px-2 py-1 text-xs font-medium";
-  if (status === "auto_disabled" || status === "manual_disabled") {
+  if (status?.startsWith("auto_disabled") || status === "manual_disabled") {
     return `${base} bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300`;
   }
   if (status === "monitor_stale") {

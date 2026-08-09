@@ -94,6 +94,7 @@ func TestGatewayRoutingSettingsDefaultsAndValidation(t *testing.T) {
 		settings.Nodes[2].TargetWeight,
 		settings.Nodes[3].TargetWeight,
 	})
+	require.True(t, settings.HealthProtectionEnabled)
 
 	settings.Nodes[0].TargetWeight = 0
 	settings.Nodes[1].TargetWeight = 0
@@ -123,6 +124,7 @@ func TestGatewayRoutingSettingsMigratesLegacyRatiosOnRead(t *testing.T) {
 		settings.Nodes[2].TargetWeight,
 		settings.Nodes[3].TargetWeight,
 	})
+	require.True(t, settings.HealthProtectionEnabled)
 }
 
 func TestGatewayRoutingRuntimeAutoDisablesAtThresholdAndKeepsUnlimitedNode(t *testing.T) {
@@ -173,6 +175,159 @@ func TestGatewayRoutingRuntimeAutoDisablesAtThresholdAndKeepsUnlimitedNode(t *te
 	require.Equal(t, 50, runtime.Nodes[1].EffectiveWeight)
 	require.True(t, runtime.Nodes[1].Unlimited)
 	require.Equal(t, "unlimited", runtime.Nodes[1].Status)
+}
+
+func TestGatewayRoutingRuntimeAutoDisablesStaleNodeWhenPeerIsFresh(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/nodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+				{"uuid": "stale-uuid", "name": "stale", "traffic_limit": int64(1000), "traffic_limit_type": "sum"},
+				{"uuid": "fresh-uuid", "name": "fresh", "traffic_limit": int64(1000), "traffic_limit_type": "sum"},
+			}})
+		case "/api/records/load":
+			recordTime := now.Add(-30 * time.Second)
+			if r.URL.Query().Get("uuid") == "stale-uuid" {
+				recordTime = now.Add(-4 * time.Minute)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"records": []map[string]any{
+				{"time": recordTime, "net_total_up": int64(100), "net_total_down": int64(100)},
+			}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	repo := newGatewayRoutingRepoStub()
+	service := NewSettingService(repo, &config.Config{})
+	service.gatewayRoutingHTTPClient = server.Client()
+	settings := &GatewayRoutingSettings{
+		MonitorURL:               server.URL,
+		TrafficProtectionEnabled: true,
+		HealthProtectionEnabled:  true,
+		TrafficThresholdPercent:  90,
+		Nodes: []GatewayRoutingNodeSettings{
+			{ID: "stale", Origin: "https://stale.example", TargetWeight: 60},
+			{ID: "fresh", Origin: "https://fresh.example", TargetWeight: 40},
+		},
+	}
+	require.NoError(t, service.SetGatewayRoutingSettings(context.Background(), settings))
+
+	runtime, err := service.GetGatewayRoutingRuntime(context.Background())
+	require.NoError(t, err)
+	require.True(t, runtime.MonitorStale)
+	require.Equal(t, 0, runtime.Nodes[0].EffectiveWeight)
+	require.True(t, runtime.Nodes[0].AutoDisabled)
+	require.Equal(t, "monitor_stale", runtime.Nodes[0].AutoDisabledReason)
+	require.Equal(t, "auto_disabled_monitor_stale", runtime.Nodes[0].Status)
+	require.Equal(t, 40, runtime.Nodes[1].EffectiveWeight)
+	require.False(t, runtime.Nodes[1].MonitorStale)
+}
+
+func TestGatewayRoutingRuntimeDoesNotDisableEveryNodeWhenAllHealthSamplesAreStale(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/nodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+				{"uuid": "first-uuid", "name": "first", "traffic_limit": int64(1000), "traffic_limit_type": "sum"},
+				{"uuid": "second-uuid", "name": "second", "traffic_limit": int64(1000), "traffic_limit_type": "sum"},
+			}})
+		case "/api/records/load":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"records": []map[string]any{
+				{"time": now.Add(-4 * time.Minute), "net_total_up": int64(100), "net_total_down": int64(100)},
+			}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	repo := newGatewayRoutingRepoStub()
+	service := NewSettingService(repo, &config.Config{})
+	service.gatewayRoutingHTTPClient = server.Client()
+	settings := &GatewayRoutingSettings{
+		MonitorURL:               server.URL,
+		TrafficProtectionEnabled: true,
+		HealthProtectionEnabled:  true,
+		TrafficThresholdPercent:  90,
+		Nodes: []GatewayRoutingNodeSettings{
+			{ID: "first", Origin: "https://first.example", TargetWeight: 60},
+			{ID: "second", Origin: "https://second.example", TargetWeight: 40},
+		},
+	}
+	require.NoError(t, service.SetGatewayRoutingSettings(context.Background(), settings))
+
+	runtime, err := service.GetGatewayRoutingRuntime(context.Background())
+	require.NoError(t, err)
+	require.True(t, runtime.MonitorStale)
+	require.Equal(t, 60, runtime.Nodes[0].EffectiveWeight)
+	require.False(t, runtime.Nodes[0].AutoDisabled)
+	require.Equal(t, "monitor_stale", runtime.Nodes[0].Status)
+	require.Equal(t, 40, runtime.Nodes[1].EffectiveWeight)
+	require.False(t, runtime.Nodes[1].AutoDisabled)
+	require.Equal(t, "monitor_stale", runtime.Nodes[1].Status)
+}
+
+func TestGatewayRoutingRuntimeRestoresStaleNodeWhenSampleBecomesFresh(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var stale atomic.Bool
+	stale.Store(true)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/nodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+				{"uuid": "recovering-uuid", "name": "recovering", "traffic_limit": int64(1000), "traffic_limit_type": "sum"},
+				{"uuid": "fresh-uuid", "name": "fresh", "traffic_limit": int64(1000), "traffic_limit_type": "sum"},
+			}})
+		case "/api/records/load":
+			recordTime := now.Add(-30 * time.Second)
+			if r.URL.Query().Get("uuid") == "recovering-uuid" && stale.Load() {
+				recordTime = now.Add(-4 * time.Minute)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"records": []map[string]any{
+				{"time": recordTime, "net_total_up": int64(100), "net_total_down": int64(100)},
+			}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	repo := newGatewayRoutingRepoStub()
+	service := NewSettingService(repo, &config.Config{})
+	service.gatewayRoutingHTTPClient = server.Client()
+	settings := &GatewayRoutingSettings{
+		MonitorURL:               server.URL,
+		TrafficProtectionEnabled: true,
+		HealthProtectionEnabled:  true,
+		TrafficThresholdPercent:  90,
+		Nodes: []GatewayRoutingNodeSettings{
+			{ID: "recovering", Origin: "https://recovering.example", TargetWeight: 60},
+			{ID: "fresh", Origin: "https://fresh.example", TargetWeight: 40},
+		},
+	}
+	require.NoError(t, service.SetGatewayRoutingSettings(context.Background(), settings))
+
+	first, err := service.GetGatewayRoutingRuntime(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0, first.Nodes[0].EffectiveWeight)
+	require.Equal(t, "auto_disabled_monitor_stale", first.Nodes[0].Status)
+
+	stale.Store(false)
+	service.gatewayRoutingRuntimeCache.Store(&cachedGatewayRoutingRuntime{runtime: first, expiresAt: 0})
+	second, err := service.GetGatewayRoutingRuntime(context.Background())
+	require.NoError(t, err)
+	require.False(t, second.MonitorStale)
+	require.Equal(t, 60, second.Nodes[0].EffectiveWeight)
+	require.False(t, second.Nodes[0].AutoDisabled)
+	require.Empty(t, second.Nodes[0].AutoDisabledReason)
+	require.Equal(t, "active", second.Nodes[0].Status)
 }
 
 func TestGatewayRoutingRuntimeKeepsLastGoodResultWhenMonitorFails(t *testing.T) {
