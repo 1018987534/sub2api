@@ -331,7 +331,7 @@ test("POST forwarding overwrites and sends edge routing trace headers", async ()
   }
 });
 
-test("compresses large uncompressed JSON POST bodies at the edge", async () => {
+test("forwards large JSON POST bodies without edge recompression", async () => {
   resetRoutingConfigCache();
   const originalFetch = globalThis.fetch;
   let forwardedRequest;
@@ -354,24 +354,19 @@ test("compresses large uncompressed JSON POST bodies at the edge", async () => {
       {
         BWG_US_01_ORIGIN: "https://control.example",
         BWG_US_01_PERCENT: "100",
-        EDGE_REQUEST_GZIP_MIN_BYTES: "1024",
       },
     );
 
     assert.equal(await response.text(), "ok");
-    assert.equal(forwardedRequest.headers.get("content-encoding"), "gzip");
-    assert.equal(forwardedRequest.headers.get("content-length"), null);
-    const decoded = await new Response(
-      forwardedRequest.body.pipeThrough(new DecompressionStream("gzip")),
-    ).text();
-    assert.equal(decoded, body);
+    assert.equal(forwardedRequest.headers.get("content-encoding"), null);
+    assert.equal(await forwardedRequest.text(), body);
   } finally {
     globalThis.fetch = originalFetch;
     resetRoutingConfigCache();
   }
 });
 
-test("does not recompress an already encoded or signed JSON body", async () => {
+test("preserves existing content encoding and request signatures", async () => {
   resetRoutingConfigCache();
   const originalFetch = globalThis.fetch;
   const forwarded = [];
@@ -395,7 +390,6 @@ test("does not recompress an already encoded or signed JSON body", async () => {
       {
         BWG_US_01_ORIGIN: "https://control.example",
         BWG_US_01_PERCENT: "100",
-        EDGE_REQUEST_GZIP_MIN_BYTES: "1024",
       },
     );
     await responsesDispatcher.fetch(
@@ -411,12 +405,250 @@ test("does not recompress an already encoded or signed JSON body", async () => {
       {
         BWG_US_01_ORIGIN: "https://control.example",
         BWG_US_01_PERCENT: "100",
-        EDGE_REQUEST_GZIP_MIN_BYTES: "1024",
       },
     );
     assert.equal(forwarded[0].headers.get("content-encoding"), "gzip");
     assert.equal(forwarded[1].headers.get("content-encoding"), null);
     assert.equal(forwarded[1].headers.get("digest"), "sha-256=signature");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("retries a POST after an origin Nginx request-read 400", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  const body = JSON.stringify({ model: "gpt-5", input: "hello" });
+  globalThis.fetch = async (request) => {
+    forwarded.push({ url: request.url, body: await request.text() });
+    if (forwarded.length === 1) {
+      return new Response(
+        `<html>
+<head><title>400 Bad Request</title></head>
+<body>
+<center><h1>400 Bad Request</h1></center>
+<hr><center>nginx/1.22.1</center>
+</body>
+</html>`,
+        { status: 400, headers: { "Content-Type": "text/html" } },
+      );
+    }
+    return new Response("recovered");
+  };
+
+  try {
+    const response = await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }),
+      {
+        BWG_US_01_ORIGIN: "https://control.example",
+        BWG_US_01_PERCENT: "50",
+        VMISS_US_01_ORIGIN: "https://gateway.example",
+        VMISS_US_01_PERCENT: "50",
+      },
+    );
+
+    assert.equal(await response.text(), "recovered");
+    assert.equal(forwarded.length, 2);
+    assert.notEqual(new URL(forwarded[0].url).origin, new URL(forwarded[1].url).origin);
+    assert.deepEqual(
+      forwarded.map((request) => request.body),
+      [body, body],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("retries a POST after Sub2API rejects the unreadable request body", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (request) => {
+    calls += 1;
+    await request.text();
+    if (calls === 1) {
+      return Response.json(
+        {
+          error: {
+            message: "Failed to read request body",
+            type: "invalid_request_error",
+          },
+        },
+        { status: 400, headers: { "X-Request-ID": "request-read-failure" } },
+      );
+    }
+    return new Response("recovered");
+  };
+
+  try {
+    const response = await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: '{"model":"gpt-5","input":"hello"}',
+      }),
+      {
+        BWG_US_01_ORIGIN: "https://control.example",
+        BWG_US_01_PERCENT: "50",
+        VMISS_US_01_ORIGIN: "https://gateway.example",
+        VMISS_US_01_PERCENT: "50",
+      },
+    );
+
+    assert.equal(await response.text(), "recovered");
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("does not retry ordinary application 400 or upstream 5xx responses", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  const responses = [
+    Response.json(
+      { error: { message: "model is required", type: "invalid_request_error" } },
+      { status: 400 },
+    ),
+    Response.json(
+      {
+        error: {
+          message: "Failed to read request body",
+          type: "invalid_request_error",
+        },
+      },
+      { status: 400 },
+    ),
+    Response.json(
+      { error: { message: "upstream unavailable", type: "server_error" } },
+      { status: 502 },
+    ),
+  ];
+
+  try {
+    for (const expected of responses) {
+      let calls = 0;
+      globalThis.fetch = async () => {
+        calls += 1;
+        return expected.clone();
+      };
+      const response = await responsesDispatcher.fetch(
+        new Request("https://public.example/v1/responses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: '{"model":"gpt-5","input":"hello"}',
+        }),
+        {
+          BWG_US_01_ORIGIN: "https://control.example",
+          BWG_US_01_PERCENT: "50",
+          VMISS_US_01_ORIGIN: "https://gateway.example",
+          VMISS_US_01_PERCENT: "50",
+        },
+      );
+
+      assert.equal(response.status, expected.status);
+      assert.equal(calls, 1);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("does not retry a request-body 400 for an encoded client body", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json(
+      {
+        error: {
+          message: "Failed to read request body",
+          type: "invalid_request_error",
+        },
+      },
+      { status: 400, headers: { "X-Request-ID": "request-read-failure" } },
+    );
+  };
+
+  try {
+    const response = await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        headers: {
+          "Content-Encoding": "gzip",
+          "Content-Type": "application/json",
+        },
+        body: "client-encoded-body",
+      }),
+      {
+        BWG_US_01_ORIGIN: "https://control.example",
+        BWG_US_01_PERCENT: "50",
+        VMISS_US_01_ORIGIN: "https://gateway.example",
+        VMISS_US_01_PERCENT: "50",
+      },
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("turns repeated safe ingress rejections into a client-retryable 503", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (request) => {
+    calls += 1;
+    await request.text();
+    return Response.json(
+      {
+        error: {
+          message: "Failed to read request body",
+          type: "invalid_request_error",
+        },
+      },
+      { status: 400, headers: { "X-Request-ID": "request-read-failure" } },
+    );
+  };
+
+  try {
+    const response = await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: '{"model":"gpt-5","input":"hello"}',
+      }),
+      {
+        BWG_US_01_ORIGIN: "https://control.example",
+        BWG_US_01_PERCENT: "50",
+        VMISS_US_01_ORIGIN: "https://gateway.example",
+        VMISS_US_01_PERCENT: "50",
+      },
+    );
+
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("retry-after"), "1");
+    assert.deepEqual(await response.json(), {
+      error: {
+        code: "server_error",
+        message: "Temporary ingress failure. Please retry the request.",
+        type: "server_error",
+      },
+    });
+    assert.equal(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
     resetRoutingConfigCache();

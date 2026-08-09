@@ -2,8 +2,17 @@ const DEFAULT_VMISS_US_01_PERCENT = 10;
 const DEFAULT_YT_US_01_PERCENT = 0;
 const DEFAULT_VMISS_US_02_PERCENT = 0;
 const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 15;
-const DEFAULT_EDGE_REQUEST_GZIP_MIN_BYTES = 64 * 1024;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
+const MAX_INGRESS_ERROR_BODY_BYTES = 8 * 1024;
+const NGINX_BAD_REQUEST_HTML = new RegExp(
+  [
+    "^\\s*<html>\\s*<head><title>400 Bad Request</title></head>",
+    "\\s*<body>\\s*<center><h1>400 Bad Request</h1></center>",
+    "\\s*<hr><center>nginx(?:/[0-9.]+)?</center>",
+    "\\s*</body>\\s*</html>\\s*$",
+  ].join(""),
+  "i",
+);
 
 let routingConfigCache = null;
 let routingConfigPromise = null;
@@ -29,18 +38,6 @@ function environmentInteger(env, key, fallback, legacyKey = "") {
     return fallback;
   }
   return Math.min(100, Math.max(0, parsed));
-}
-
-function edgeRequestGzipMinBytes(env) {
-  const raw = String(env.EDGE_REQUEST_GZIP_MIN_BYTES ?? "").trim();
-  if (raw === "") {
-    return DEFAULT_EDGE_REQUEST_GZIP_MIN_BYTES;
-  }
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed)) {
-    return DEFAULT_EDGE_REQUEST_GZIP_MIN_BYTES;
-  }
-  return Math.min(16 * 1024 * 1024, Math.max(0, parsed));
 }
 
 function appendUnique(origins, origin) {
@@ -307,48 +304,100 @@ function originRequest(request, originBase) {
   return new Request(incomingURL, request);
 }
 
-function shouldCompressRequestBody(request, env) {
-  if (
-    !request.body ||
-    typeof CompressionStream !== "function" ||
-    request.method === "GET" ||
-    request.method === "HEAD"
-  ) {
-    return false;
-  }
-  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
-  if (!contentType.startsWith("application/json")) {
-    return false;
+async function safeIngressFailureType(request, response) {
+  if (request.method !== "POST" || response.status !== 400) {
+    return "";
   }
   const contentEncoding = request.headers.get("content-encoding")?.trim().toLowerCase() ?? "";
   if (contentEncoding && contentEncoding !== "identity") {
-    return false;
+    return "";
   }
-  // Rewriting a signed body would invalidate the signature.
-  if (request.headers.has("content-md5") || request.headers.has("digest")) {
-    return false;
+  const contentLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+  if (Number.isFinite(contentLength) && contentLength > MAX_INGRESS_ERROR_BODY_BYTES) {
+    return "";
   }
-  const contentLength = Number.parseInt(request.headers.get("content-length") ?? "", 10);
-  return Number.isFinite(contentLength) && contentLength >= edgeRequestGzipMinBytes(env);
+
+  let body;
+  try {
+    body = await response.clone().text();
+  } catch {
+    return "";
+  }
+  if (new TextEncoder().encode(body).byteLength > MAX_INGRESS_ERROR_BODY_BYTES) {
+    return "";
+  }
+
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (contentType.startsWith("text/html") && NGINX_BAD_REQUEST_HTML.test(body)) {
+    return "nginx_bad_request";
+  }
+  if (!contentType.startsWith("application/json") || !response.headers.has("x-request-id")) {
+    return "";
+  }
+  try {
+    const payload = JSON.parse(body);
+    if (
+      payload?.error?.type === "invalid_request_error" &&
+      payload?.error?.message === "Failed to read request body"
+    ) {
+      return "sub2api_request_body_read";
+    }
+  } catch {
+    return "";
+  }
+  return "";
 }
 
-function maybeCompressOriginRequest(request, forwarded, env) {
-  if (!shouldCompressRequestBody(request, env)) {
-    return forwarded;
+function retryableIngressFailureResponse() {
+  return Response.json(
+    {
+      error: {
+        code: "server_error",
+        message: "Temporary ingress failure. Please retry the request.",
+        type: "server_error",
+      },
+    },
+    {
+      status: 503,
+      headers: {
+        "Cache-Control": "no-store",
+        "Retry-After": "1",
+      },
+    },
+  );
+}
+
+async function fetchWithSafeIngressRecovery(
+  request,
+  origins,
+  routingWaitMs,
+  routingSource,
+) {
+  let attemptRequest = request;
+
+  for (let i = 0; i < origins.length; i += 1) {
+    const replayRequest = i < origins.length - 1 ? attemptRequest.clone() : null;
+    const forwarded = originRequest(attemptRequest, origins[i]);
+    forwarded.headers.set("X-Sub2API-Edge-Routing-Ms", String(routingWaitMs));
+    forwarded.headers.set("X-Sub2API-Edge-Routing-Source", routingSource);
+    const response = await fetch(forwarded, { redirect: "manual" });
+    const failureType = await safeIngressFailureType(attemptRequest, response);
+    if (!failureType) {
+      return response;
+    }
+
+    console.warn("retrying safe Responses ingress rejection", {
+      attempt: i + 1,
+      failureType,
+      origin: origins[i],
+    });
+    if (!replayRequest) {
+      return retryableIngressFailureResponse();
+    }
+    attemptRequest = replayRequest;
   }
 
-  const headers = new Headers(forwarded.headers);
-  headers.delete("content-length");
-  headers.delete("content-md5");
-  headers.delete("digest");
-  headers.set("content-encoding", "gzip");
-  return new Request(forwarded, {
-    body: forwarded.body.pipeThrough(new CompressionStream("gzip")),
-    headers,
-    // Node's Fetch implementation requires this for a streaming request body;
-    // Cloudflare Workers accepts the standard RequestInit member as well.
-    duplex: "half",
-  });
+  return retryableIngressFailureResponse();
 }
 
 function shouldFailOver(response) {
@@ -374,22 +423,16 @@ export default {
     }
 
     // Creating a Response is not idempotent. Once a POST is sent to an origin,
-    // never replay it at the edge: the first origin may already have reached the
-    // model upstream even if its connection fails before returning headers.
+    // only replay a narrowly classified ingress rejection that proves the body
+    // was not accepted. Network failures, 5xx responses, and ordinary 4xx
+    // responses may have reached the model and remain terminal at this layer.
     if (!canRetry(request)) {
-      const forwarded = maybeCompressOriginRequest(
+      return fetchWithSafeIngressRecovery(
         request,
-        originRequest(request, origins[0]),
-        env,
-      );
-      forwarded.headers.set("X-Sub2API-Edge-Routing-Ms", String(routingWaitMs));
-      forwarded.headers.set(
-        "X-Sub2API-Edge-Routing-Source",
+        origins,
+        routingWaitMs,
         String(routingMetadata.source ?? "unknown"),
       );
-      return fetch(forwarded, {
-        redirect: "manual",
-      });
     }
 
     return fetchWithFailover(request, origins);
