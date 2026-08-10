@@ -314,6 +314,8 @@ export default {
       autoBanHint: 'Disable the user, invalidate auth cache, and send a ban notice after the hit threshold is reached.',
       cyberPolicyExcludeBan: 'Exclude Cyber Policy Hits from Ban Count',
       cyberPolicyExcludeBanHint: 'When enabled, cyber_policy hits no longer count toward auto-ban violations: no ban judgment on the hit itself, and history rows are excluded from the rolling count. Logs and notice emails are unaffected.',
+      failClosedOnError: 'Reject Requests When Audit Fails',
+      failClosedOnErrorHint: 'Pre-block mode only. When enabled, a failed moderation API call or a missing audit key rejects the request with 503 instead of letting it through. When disabled (default), audit failures fail open and availability wins. Enable this only if your moderation service is reliable — otherwise an outage there takes down live traffic.',
       violationNotCounted: 'Not counted',
       banThreshold: 'Ban Threshold',
       violationWindowHours: 'Count Window (hours)',

@@ -415,4 +415,69 @@ describe('admin RiskControlView', () => {
       'overflow-y-auto',
     ]))
   })
+
+  // 防"开关静默失效"：后端返回的 fail_closed_on_error 必须回填到表单，并在保存时
+  // 原样回传，否则运维打开的开关会被下一次保存悄悄清掉。
+  it('round-trips fail_closed_on_error between load and save', async () => {
+    getConfig.mockResolvedValue({ ...baseConfig(), fail_closed_on_error: true })
+
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      fail_closed_on_error: true,
+    }))
+    expect(showError).not.toHaveBeenCalled()
+  })
+
+  it('defaults fail_closed_on_error to false when the backend omits it', async () => {
+    const { fail_closed_on_error: _omitted, ...withoutSwitch } = {
+      ...baseConfig(),
+      fail_closed_on_error: false,
+    }
+    getConfig.mockResolvedValue(withoutSwitch)
+
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+          ProxySelector: true,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.saveConfig').trigger('click')
+    await flushPromises()
+
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      fail_closed_on_error: false,
+    }))
+  })
 })

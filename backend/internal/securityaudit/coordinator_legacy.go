@@ -2,6 +2,7 @@ package securityaudit
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -27,9 +28,24 @@ func (a *LegacyModerationAdapter) Check(ctx context.Context, req Request) (*Lega
 	if err != nil || decision == nil {
 		return nil, err
 	}
+	return legacyDecisionFromModeration(decision), nil
+}
+
+// legacyDecisionFromModeration 把内容审计决策映射成协调器决策。
+//
+// 审计链路故障（fail-closed）自带 content_moderation_unavailable；内容策略拦截不带
+// 错误码，回退到 content_policy_violation。
+func legacyDecisionFromModeration(decision *service.ContentModerationDecision) *LegacyDecision {
+	if decision == nil {
+		return nil
+	}
+	errorCode := strings.TrimSpace(decision.ErrorCode)
+	if errorCode == "" {
+		errorCode = "content_policy_violation"
+	}
 	return &LegacyDecision{
 		Allowed: decision.Allowed, Blocked: decision.Blocked, Flagged: decision.Flagged,
 		Message: decision.Message, StatusCode: decision.StatusCode,
-		ErrorCode: "content_policy_violation", Action: decision.Action,
-	}, nil
+		ErrorCode: errorCode, Action: decision.Action,
+	}
 }

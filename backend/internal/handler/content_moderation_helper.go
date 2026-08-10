@@ -19,7 +19,15 @@ func contentModerationStatus(decision *service.ContentModerationDecision) int {
 	return decision.StatusCode
 }
 
+// contentModerationErrorCode 优先使用决策自带的错误码，只有内容策略拦截才回退到
+// content_policy_violation。审计链路故障（fail-closed）会带
+// content_moderation_unavailable，不能让客户端以为自己触犯了内容策略。
 func contentModerationErrorCode(decision *service.ContentModerationDecision) string {
+	if decision != nil {
+		if code := strings.TrimSpace(decision.ErrorCode); code != "" {
+			return code
+		}
+	}
 	return "content_policy_violation"
 }
 

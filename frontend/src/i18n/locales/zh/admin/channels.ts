@@ -314,6 +314,8 @@ export default {
       autoBanHint: '命中次数达到阈值后将禁用用户账号、刷新认证缓存并发送封禁通知邮件。',
       cyberPolicyExcludeBan: 'cyber_policy 不计入封号次数',
       cyberPolicyExcludeBanHint: '开启后，cyber_policy 拦截不再计入自动封号的违规次数：当次不判定封号，历史累计亦排除。风控日志与通知邮件照常。',
+      failClosedOnError: '审计异常时拒绝请求',
+      failClosedOnErrorHint: '仅对「前置拦截」模式生效。开启后，审计接口调用失败或无可用审核 Key 时返回 503 拒绝请求，而不是放行；关闭时（默认）审计异常放行，优先保证可用性。开启前请确认审核服务足够稳定，否则审核侧故障会直接中断线上流量。',
       violationNotCounted: '未计入封号',
       banThreshold: '封禁触发次数',
       violationWindowHours: '累计窗口（小时）',

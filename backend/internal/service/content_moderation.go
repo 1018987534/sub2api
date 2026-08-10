@@ -41,6 +41,14 @@ const (
 	ContentModerationActionError        = "error"
 	ContentModerationActionCyberPolicy  = "cyber_policy" // cyber_policy 硬阻断的风控日志 action（封号计数排除按此值过滤）
 
+	// ContentModerationErrorCodeUnavailable 标记"审计链路自身故障导致的拒绝"。
+	// 与 content_policy_violation 区分开：前者是系统不可用（503，客户端可重试），
+	// 后者是内容命中策略（403，重试无用）。
+	ContentModerationErrorCodeUnavailable = "content_moderation_unavailable"
+	// ContentModerationUnavailableMessage 是 fail-closed 时返回给客户端的文案。
+	// 不复用 cfg.BlockMessage：那是给违规内容看的，会误导用户以为自己触犯了策略。
+	ContentModerationUnavailableMessage = "风控审计服务暂时不可用，请稍后重试"
+
 	contentModerationKeywordCategory = "keyword"
 
 	ContentModerationKeywordModeKeywordOnly   = "keyword_only"
@@ -172,6 +180,36 @@ type ContentModerationConfig struct {
 	// 当次不判定封号，且历史 cyber 行在 CountFlaggedByUserSince 中被排除。
 	// 默认 false（计入，与历史行为一致；旧配置 JSON 无此字段时反序列化为 false）。
 	CyberPolicyExcludeFromBanCount bool `json:"cyber_policy_exclude_from_ban_count"`
+	// FailClosedOnError 为 true 时，pre_block 模式下审计链路自身异常（审计 API 调用
+	// 失败、无可用审计 Key）拒绝请求而不是放行，返回 503 +
+	// content_moderation_unavailable。默认 false（放行，与历史行为一致；旧配置 JSON
+	// 无此字段时反序列化为 false）——这是可用性开关，必须由运维显式打开。
+	FailClosedOnError bool `json:"fail_closed_on_error"`
+}
+
+// failClosedOnError 表示"审计链路自身异常时拒绝请求"的运维意图。
+//
+// 三个条件缺一不可：审计总开关开着、运维显式打开了 fail-closed、且处于同步前置
+// 拦截模式。observe 模式本就没有阻断语义，异步 worker 也没有可拒绝的客户端，
+// 对它们 fail-closed 毫无意义。
+func (c *ContentModerationConfig) failClosedOnError() bool {
+	return c != nil && c.Enabled && c.FailClosedOnError && c.Mode == ContentModerationModePreBlock
+}
+
+// contentModerationUnavailableDecision 构造 fail-closed 决策。
+//
+// Flagged 恒为 false 且调用方不写 flagged 日志行，因此这类拒绝永远不会进入
+// CountFlaggedByUserSince 的自动封号计数——系统故障不该把用户封掉。
+func contentModerationUnavailableDecision() *ContentModerationDecision {
+	return &ContentModerationDecision{
+		Allowed:    false,
+		Blocked:    true,
+		Flagged:    false,
+		Message:    ContentModerationUnavailableMessage,
+		StatusCode: http.StatusServiceUnavailable,
+		Action:     ContentModerationActionError,
+		ErrorCode:  ContentModerationErrorCodeUnavailable,
+	}
 }
 
 type ContentModerationConfigView struct {
@@ -207,6 +245,7 @@ type ContentModerationConfigView struct {
 	KeywordBlockingMode            string                          `json:"keyword_blocking_mode"`
 	ModelFilter                    ContentModerationModelFilter    `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount bool                            `json:"cyber_policy_exclude_from_ban_count"`
+	FailClosedOnError              bool                            `json:"fail_closed_on_error"`
 }
 
 type ContentModerationAPIKeyStatus struct {
@@ -299,6 +338,7 @@ type UpdateContentModerationConfigInput struct {
 	KeywordBlockingMode            *string                       `json:"keyword_blocking_mode"`
 	ModelFilter                    *ContentModerationModelFilter `json:"model_filter"`
 	CyberPolicyExcludeFromBanCount *bool                         `json:"cyber_policy_exclude_from_ban_count"`
+	FailClosedOnError              *bool                         `json:"fail_closed_on_error"`
 }
 
 type ContentModerationModelFilter struct {
@@ -383,6 +423,10 @@ type ContentModerationDecision struct {
 	HighestScore    float64            `json:"highest_score"`
 	CategoryScores  map[string]float64 `json:"category_scores"`
 	Action          string             `json:"action"`
+	// ErrorCode 为空时调用方回退到 content_policy_violation。审计链路自身故障
+	// （fail-closed）填 ContentModerationErrorCodeUnavailable，避免把系统不可用
+	// 伪装成内容违规。
+	ErrorCode string `json:"error_code,omitempty"`
 }
 
 type ContentModerationLog struct {
@@ -699,6 +743,9 @@ func (s *ContentModerationService) UpdateConfig(ctx context.Context, input Updat
 	if input.CyberPolicyExcludeFromBanCount != nil {
 		cfg.CyberPolicyExcludeFromBanCount = *input.CyberPolicyExcludeFromBanCount
 	}
+	if input.FailClosedOnError != nil {
+		cfg.FailClosedOnError = *input.FailClosedOnError
+	}
 	if input.Thresholds != nil {
 		cfg.Thresholds = mergeContentModerationThresholds(ContentModerationDefaultThresholds(), *input.Thresholds)
 	}
@@ -824,21 +871,20 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 	}
 	runtimeSnapshot, err := s.loadRuntimeSnapshot(ctx)
 	if err != nil {
-		slog.Warn("content_moderation.skip_config_load_failed",
+		// 这里必须放行。loadRuntimeSnapshot 只在"进程冷启动、快照尚未建立"时返回错误
+		// （已有快照时它返回陈旧快照并后台刷新，不返回错误），此刻我们既不知道
+		// risk_control_enabled，也不知道 fail_closed_on_error，无法确认运维的阻断意图。
+		// 若在此拦截，一次设置读取抖动、或一行损坏的 content_moderation_config JSON，
+		// 就会让全部网关流量（含从未开启风控的部署）返回 5xx。
+		// 审计链路自身异常的 fail-closed 由 cfg.failClosedOnError() 在配置已知时处理。
+		slog.Warn("content_moderation.allow_config_load_failed",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
 			"group_id", contentModerationLogGroupID(input.GroupID),
 			"endpoint", input.Endpoint,
 			"protocol", input.Protocol,
 			"error", err)
-		return &ContentModerationDecision{
-			Allowed:    false,
-			Blocked:    true,
-			Flagged:    false,
-			Message:    "风控系统暂时不可用，请稍后重试",
-			StatusCode: http.StatusInternalServerError,
-			Action:     ContentModerationActionError,
-		}, nil
+		return allow, nil
 	}
 	if !runtimeSnapshot.riskControlEnabled {
 		slog.Info("content_moderation.skip_feature_disabled",
@@ -1028,6 +1074,15 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		if cfg.Mode == ContentModerationModePreBlock {
 			s.recordPreBlockSyncMetric(0, ContentModerationActionError)
 		}
+		if cfg.failClosedOnError() {
+			slog.Warn("content_moderation.block_no_audit_api_keys",
+				"user_id", input.UserID,
+				"api_key_id", input.APIKeyID,
+				"group_id", contentModerationLogGroupID(input.GroupID),
+				"endpoint", input.Endpoint,
+				"protocol", input.Protocol)
+			return contentModerationUnavailableDecision(), nil
+		}
 		slog.Warn("content_moderation.skip_no_audit_api_keys",
 			"user_id", input.UserID,
 			"api_key_id", input.APIKeyID,
@@ -1075,6 +1130,7 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 			"allow_block", allowBlock,
 			"queue_delay_ms", queueDelay,
 			"latency_ms", latency,
+			"fail_closed", trackPreBlock && cfg.failClosedOnError(),
 			"error", err)
 		if queueDelay != nil {
 			s.asyncErrors.Add(1)
@@ -1082,6 +1138,12 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 		if cfg.RecordNonHits {
 			log := s.buildLog(input, cfg, ContentModerationActionError, false, "", 0, nil, content.ExcerptText(), &latency, queueDelay, err.Error())
 			_ = s.repo.CreateLog(ctx, log)
+		}
+		// trackPreBlock 恰好等价于"同步前置拦截路径"（queueDelay == nil && allowBlock
+		// && Mode == pre_block），异步 worker 与 observe 模式因此永远走放行分支——
+		// 它们没有可拒绝的客户端。
+		if trackPreBlock && cfg.failClosedOnError() {
+			return contentModerationUnavailableDecision()
 		}
 		return allow
 	}
@@ -2114,6 +2176,7 @@ func defaultContentModerationConfig() *ContentModerationConfig {
 			Models: []string{},
 		},
 		CyberPolicyExcludeFromBanCount: false,
+		FailClosedOnError:              false,
 	}
 }
 
@@ -2446,6 +2509,7 @@ func (s *ContentModerationService) configView(cfg *ContentModerationConfig) *Con
 		KeywordBlockingMode:            cfg.KeywordBlockingMode,
 		ModelFilter:                    cloneContentModerationModelFilter(cfg.ModelFilter),
 		CyberPolicyExcludeFromBanCount: cfg.CyberPolicyExcludeFromBanCount,
+		FailClosedOnError:              cfg.FailClosedOnError,
 	}
 }
 
