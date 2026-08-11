@@ -15,10 +15,12 @@ import (
 const FirstTokenLatencyAutoPauseReasonSource = "first_token_latency_auto_pause"
 
 type firstTokenLatencyRuleMatch struct {
-	index       int
-	rule        FirstTokenLatencyAutoPauseRule
-	count       int64
-	thresholdMS int
+	index           int
+	rule            FirstTokenLatencyAutoPauseRule
+	totalCount      int64
+	slowCount       int64
+	observedPercent float64
+	thresholdMS     int
 }
 
 // ObserveFirstTokenLatency records one successful request's first-token latency.
@@ -43,24 +45,34 @@ func (s *RateLimitService) ObserveFirstTokenLatency(ctx context.Context, account
 	var winner *firstTokenLatencyRuleMatch
 	for index, rule := range settings.Rules {
 		thresholdMS := int(math.Round(rule.ThresholdSeconds * 1000))
-		if *firstTokenMs <= thresholdMS {
-			continue
-		}
-		count, err := s.firstTokenLatencyCounterCache.RecordSlowFirstToken(
+		isSlow := *firstTokenMs > thresholdMS
+		counts, err := s.firstTokenLatencyCounterCache.RecordFirstTokenSample(
 			ctx,
 			account.ID,
 			firstTokenLatencyRuleKey(rule),
 			rule.WindowMinutes*60,
 			eventID,
+			isSlow,
 		)
 		if err != nil {
-			slog.Warn("first_token_latency_counter_record_failed", "account_id", account.ID, "rule_index", index, "error", err)
+			slog.Warn("first_token_latency_sample_record_failed", "account_id", account.ID, "rule_index", index, "error", err)
 			continue
 		}
-		if count < int64(rule.TriggerCount) {
+		if !isSlow || counts.Total <= 0 || counts.Slow < 0 {
 			continue
 		}
-		matched := &firstTokenLatencyRuleMatch{index: index, rule: rule, count: count, thresholdMS: thresholdMS}
+		observedPercent := float64(counts.Slow) * 100 / float64(counts.Total)
+		if observedPercent+1e-9 < rule.TriggerPercent {
+			continue
+		}
+		matched := &firstTokenLatencyRuleMatch{
+			index:           index,
+			rule:            rule,
+			totalCount:      counts.Total,
+			slowCount:       counts.Slow,
+			observedPercent: observedPercent,
+			thresholdMS:     thresholdMS,
+		}
 		if winner == nil || matched.rule.PauseMinutes > winner.rule.PauseMinutes {
 			winner = matched
 		}
@@ -85,13 +97,15 @@ func (s *RateLimitService) ObserveFirstTokenLatency(ctx context.Context, account
 		UntilUnix:             until.Unix(),
 		TriggeredAtUnix:       now.Unix(),
 		RuleIndex:             winner.index,
-		ErrorMessage:          fmt.Sprintf("first-token latency %dms exceeded %dms %d/%d times within %d minutes; scheduling paused for %d minutes", *firstTokenMs, winner.thresholdMS, winner.count, winner.rule.TriggerCount, winner.rule.WindowMinutes, winner.rule.PauseMinutes),
-		TriggerCount:          winner.count,
-		TriggerThreshold:      winner.rule.TriggerCount,
+		ErrorMessage:          fmt.Sprintf("first-token latency %dms exceeded %dms; slow-request share %.3f%% (%d/%d) reached %.3f%% within %d minutes; scheduling paused for %d minutes", *firstTokenMs, winner.thresholdMS, winner.observedPercent, winner.slowCount, winner.totalCount, winner.rule.TriggerPercent, winner.rule.WindowMinutes, winner.rule.PauseMinutes),
 		TriggerWindowMinutes:  winner.rule.WindowMinutes,
 		TriggerMode:           "first_token_latency",
 		FirstTokenMs:          *firstTokenMs,
 		FirstTokenThresholdMs: winner.thresholdMS,
+		SampleCount:           winner.totalCount,
+		SlowSampleCount:       winner.slowCount,
+		ObservedPercent:       winner.observedPercent,
+		TriggerPercent:        winner.rule.TriggerPercent,
 		PauseMinutes:          winner.rule.PauseMinutes,
 	}
 	reasonBytes, marshalErr := json.Marshal(state)
@@ -116,7 +130,7 @@ func (s *RateLimitService) ObserveFirstTokenLatency(ctx context.Context, account
 			slog.Warn("first_token_latency_temp_unsched_cache_set_failed", "account_id", account.ID, "error", err)
 		}
 	}
-	if err := s.firstTokenLatencyCounterCache.ResetSlowFirstTokens(ctx, account.ID); err != nil {
+	if err := s.firstTokenLatencyCounterCache.ResetFirstTokenSamples(ctx, account.ID); err != nil {
 		slog.Warn("first_token_latency_counter_reset_failed", "account_id", account.ID, "error", err)
 	}
 
@@ -125,8 +139,10 @@ func (s *RateLimitService) ObserveFirstTokenLatency(ctx context.Context, account
 		"rule_index", winner.index,
 		"first_token_ms", *firstTokenMs,
 		"threshold_ms", winner.thresholdMS,
-		"trigger_count", winner.count,
-		"trigger_threshold", winner.rule.TriggerCount,
+		"sample_count", winner.totalCount,
+		"slow_sample_count", winner.slowCount,
+		"observed_percent", winner.observedPercent,
+		"trigger_percent", winner.rule.TriggerPercent,
 		"window_minutes", winner.rule.WindowMinutes,
 		"pause_minutes", winner.rule.PauseMinutes,
 		"until", until)

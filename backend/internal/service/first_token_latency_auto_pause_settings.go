@@ -19,13 +19,38 @@ const (
 	firstTokenLatencyAutoPauseErrorTTL  = 5 * time.Second
 	firstTokenLatencyAutoPauseDBTimeout = 5 * time.Second
 	maxFirstTokenLatencyAutoPauseRules  = 20
+	legacyFirstTokenLatencyPercent      = 100
 )
 
 type FirstTokenLatencyAutoPauseRule struct {
 	WindowMinutes    int     `json:"window_minutes"`
 	ThresholdSeconds float64 `json:"threshold_seconds"`
-	TriggerCount     int     `json:"trigger_count"`
+	TriggerPercent   float64 `json:"trigger_percent"`
 	PauseMinutes     int     `json:"pause_minutes"`
+}
+
+func (r *FirstTokenLatencyAutoPauseRule) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		WindowMinutes    int      `json:"window_minutes"`
+		ThresholdSeconds float64  `json:"threshold_seconds"`
+		TriggerPercent   *float64 `json:"trigger_percent"`
+		TriggerCount     *int     `json:"trigger_count"`
+		PauseMinutes     int      `json:"pause_minutes"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	r.WindowMinutes = raw.WindowMinutes
+	r.ThresholdSeconds = raw.ThresholdSeconds
+	r.PauseMinutes = raw.PauseMinutes
+	if raw.TriggerPercent != nil {
+		r.TriggerPercent = *raw.TriggerPercent
+	} else if raw.TriggerCount != nil {
+		// Count-based rules have no denominator. Migrate them conservatively so an
+		// upgrade cannot suddenly pause accounts on a very small slow-request share.
+		r.TriggerPercent = legacyFirstTokenLatencyPercent
+	}
+	return nil
 }
 
 type FirstTokenLatencyAutoPauseSettings struct {
@@ -34,7 +59,7 @@ type FirstTokenLatencyAutoPauseSettings struct {
 }
 
 func firstTokenLatencyRuleKey(rule FirstTokenLatencyAutoPauseRule) string {
-	raw := fmt.Sprintf("%d|%.3f|%d|%d", rule.WindowMinutes, rule.ThresholdSeconds, rule.TriggerCount, rule.PauseMinutes)
+	raw := fmt.Sprintf("%d|%.3f|%.3f|%d", rule.WindowMinutes, rule.ThresholdSeconds, rule.TriggerPercent, rule.PauseMinutes)
 	sum := sha256.Sum256([]byte(raw))
 	return fmt.Sprintf("%x", sum[:12])
 }
@@ -48,7 +73,7 @@ func DefaultFirstTokenLatencyAutoPauseSettings() FirstTokenLatencyAutoPauseSetti
 	return FirstTokenLatencyAutoPauseSettings{
 		Enabled: false,
 		Rules: []FirstTokenLatencyAutoPauseRule{
-			{WindowMinutes: 5, ThresholdSeconds: 10, TriggerCount: 1, PauseMinutes: 10},
+			{WindowMinutes: 5, ThresholdSeconds: 10, TriggerPercent: 50, PauseMinutes: 10},
 		},
 	}
 }
@@ -85,14 +110,15 @@ func validateFirstTokenLatencyAutoPauseSettings(input FirstTokenLatencyAutoPause
 		if math.IsNaN(rule.ThresholdSeconds) || math.IsInf(rule.ThresholdSeconds, 0) || rule.ThresholdSeconds < 0.1 || rule.ThresholdSeconds > 600 {
 			return FirstTokenLatencyAutoPauseSettings{}, invalidFirstTokenLatencyRule(index, "threshold_seconds must be between 0.1 and 600")
 		}
-		if rule.TriggerCount < 1 || rule.TriggerCount > 100 {
-			return FirstTokenLatencyAutoPauseSettings{}, invalidFirstTokenLatencyRule(index, "trigger_count must be between 1 and 100")
+		if math.IsNaN(rule.TriggerPercent) || math.IsInf(rule.TriggerPercent, 0) || rule.TriggerPercent < 0.1 || rule.TriggerPercent > 100 {
+			return FirstTokenLatencyAutoPauseSettings{}, invalidFirstTokenLatencyRule(index, "trigger_percent must be between 0.1 and 100")
 		}
 		if rule.PauseMinutes < 1 || rule.PauseMinutes > 1440 {
 			return FirstTokenLatencyAutoPauseSettings{}, invalidFirstTokenLatencyRule(index, "pause_minutes must be between 1 and 1440")
 		}
 
 		rule.ThresholdSeconds = float64(int(rule.ThresholdSeconds*1000+0.5)) / 1000
+		rule.TriggerPercent = float64(int(rule.TriggerPercent*1000+0.5)) / 1000
 		key := firstTokenLatencyRuleKey(rule)
 		if _, exists := seen[key]; exists {
 			return FirstTokenLatencyAutoPauseSettings{}, invalidFirstTokenLatencyRule(index, "duplicate rule")

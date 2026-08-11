@@ -69,24 +69,30 @@
           </div>
           <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
             <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ isConsecutiveFailure
+              {{ isConsecutiveFailure || isFirstTokenLatency
                 ? t('admin.accounts.tempUnschedulable.triggerMode')
                 : t('admin.accounts.tempUnschedulable.errorCode') }}
             </p>
             <p class="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">
-              {{ isConsecutiveFailure
-                ? t('admin.accounts.tempUnschedulable.modeConsecutiveFailures')
+              {{ isConsecutiveFailure || isFirstTokenLatency
+                ? (isConsecutiveFailure
+                  ? t('admin.accounts.tempUnschedulable.modeConsecutiveFailures')
+                  : t('admin.accounts.tempUnschedulable.modeFirstTokenLatency'))
                 : (state?.status_code || '-') }}
             </p>
           </div>
           <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
             <p class="text-xs text-gray-500 dark:text-gray-400">
-              {{ isConsecutiveFailure
-                ? t('admin.accounts.tempUnschedulable.failureThreshold')
+              {{ isConsecutiveFailure || isFirstTokenLatency
+                ? (isConsecutiveFailure
+                  ? t('admin.accounts.tempUnschedulable.failureThreshold')
+                  : t('admin.accounts.tempUnschedulable.firstTokenThreshold'))
                 : t('admin.accounts.tempUnschedulable.matchedKeyword') }}
             </p>
             <p class="mt-1 text-sm font-medium text-gray-900 dark:text-gray-100">
-              {{ isConsecutiveFailure ? consecutiveFailureText : (state?.matched_keyword || '-') }}
+              {{ isConsecutiveFailure || isFirstTokenLatency
+                ? (isConsecutiveFailure ? consecutiveFailureText : firstTokenThresholdText)
+                : (state?.matched_keyword || '-') }}
             </p>
           </div>
           <div class="rounded-lg border border-gray-200 p-3 dark:border-dark-600">
@@ -184,6 +190,7 @@ const status = ref<TempUnschedulableStatus | null>(null)
 
 const state = computed(() => status.value?.state || null)
 const isConsecutiveFailure = computed(() => state.value?.trigger_mode === 'consecutive_failures')
+const isFirstTokenLatency = computed(() => state.value?.trigger_mode === 'first_token_latency')
 
 const consecutiveFailureText = computed(() => {
   if (!state.value || !isConsecutiveFailure.value) return '-'
@@ -194,19 +201,46 @@ const consecutiveFailureText = computed(() => {
   })
 })
 
+const firstTokenThresholdText = computed(() => {
+  if (!state.value || !isFirstTokenLatency.value) return '-'
+  return t('admin.accounts.tempUnschedulable.firstTokenThresholdSummary', {
+    observed: formatMilliseconds(state.value.first_token_ms || 0),
+    threshold: formatMilliseconds(state.value.first_token_threshold_ms || 0)
+  })
+})
+
 const isActive = computed(() => {
   if (!status.value?.active || !state.value) return false
   return state.value.until_unix * 1000 > Date.now()
 })
 
 const ruleIndexDisplay = computed(() => {
-  if (!state.value || !state.value.matched_keyword || state.value.rule_index < 0) return '-'
+  if (!state.value || state.value.rule_index < 0) return '-'
+  if (!isFirstTokenLatency.value && !state.value.matched_keyword) return '-'
   return state.value.rule_index + 1
 })
 
-const hasThresholdEvidence = computed(() => (state.value?.trigger_count || 0) > 1)
+const hasFirstTokenRatioEvidence = computed(() =>
+  state.value?.trigger_mode === 'first_token_latency'
+  && (state.value.sample_count || 0) > 0
+  && typeof state.value.observed_percent === 'number'
+  && typeof state.value.trigger_percent === 'number'
+)
+
+const hasThresholdEvidence = computed(() =>
+  hasFirstTokenRatioEvidence.value || (state.value?.trigger_count || 0) > 1
+)
 
 const triggerEvidenceText = computed(() => {
+  if (hasFirstTokenRatioEvidence.value) {
+    return t('admin.accounts.tempUnschedulable.firstTokenRatioTrigger', {
+      slow: state.value?.slow_sample_count || 0,
+      total: state.value?.sample_count || 0,
+      observed: formatPercent(state.value?.observed_percent || 0),
+      threshold: formatPercent(state.value?.trigger_percent || 0),
+      minutes: state.value?.trigger_window_minutes || 0
+    })
+  }
   const count = state.value?.trigger_count || 0
   const threshold = state.value?.trigger_threshold || 0
   const minutes = state.value?.trigger_window_minutes || 0
@@ -221,6 +255,9 @@ const triggerEvidenceText = computed(() => {
   }
   return t('admin.accounts.tempUnschedulable.multipleErrorCount', { count })
 })
+
+const formatPercent = (value: number) => Number(value.toFixed(3)).toString()
+const formatMilliseconds = (value: number) => Number((value / 1000).toFixed(3)).toString()
 
 const triggeredAtText = computed(() => {
   if (!state.value?.triggered_at_unix) return '-'

@@ -427,11 +427,11 @@ export default {
         accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。',
         firstTokenLatencyAutoPauseTitle: '首字延迟自动停调',
         firstTokenLatencyAutoPauseDescription: '对所有账号的真实首字耗时进行滚动统计；同一账号命中任意一条规则后临时移出调度，到期自动恢复。',
-        firstTokenLatencyRulesOrHint: '规则之间为“或”关系。同一次请求命中多条规则时，采用最长的暂停时长。仅统计带首字耗时的成功请求。',
+        firstTokenLatencyRulesOrHint: '规则之间为“或”关系。同一次请求命中多条规则时，采用最长的暂停时长。触发占比 = 超过首字阈值的成功请求数 ÷ 窗口内所有带首字耗时的成功请求数。',
         firstTokenLatencyRule: '规则 {number}',
         firstTokenLatencyWindowMinutes: '统计窗口（分钟）',
         firstTokenLatencyThresholdSeconds: '首字超过（秒）',
-        firstTokenLatencyTriggerCount: '触发次数',
+        firstTokenLatencyTriggerPercent: '触发占比（%）',
         firstTokenLatencyPauseMinutes: '暂停时长（分钟）',
         addFirstTokenLatencyRule: '添加规则',
         removeFirstTokenLatencyRule: '删除规则'

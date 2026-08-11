@@ -13,27 +13,34 @@ import (
 const firstTokenLatencyCounterPrefix = "first_token_latency:account:"
 
 var firstTokenLatencyRecordScript = redis.NewScript(`
-	local counter_key = KEYS[1]
-	local registry_key = KEYS[2]
-	local claim_key = KEYS[3]
+	local total_key = KEYS[1]
+	local slow_key = KEYS[2]
+	local registry_key = KEYS[3]
+	local claim_key = KEYS[4]
 	local event_id = ARGV[1]
 	local window_seconds = tonumber(ARGV[2])
+	local is_slow = tonumber(ARGV[3])
 	if redis.call('EXISTS', claim_key) == 1 then
-		return -1
+		return {-1, -1}
 	end
 	local now = redis.call('TIME')
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 	local cutoff_ms = now_ms - window_seconds * 1000
 	local ttl_seconds = window_seconds + 60
-	redis.call('ZREMRANGEBYSCORE', counter_key, '-inf', cutoff_ms)
-	redis.call('ZADD', counter_key, 'NX', now_ms, event_id)
-	redis.call('EXPIRE', counter_key, ttl_seconds)
-	redis.call('SADD', registry_key, counter_key)
+	redis.call('ZREMRANGEBYSCORE', total_key, '-inf', cutoff_ms)
+	redis.call('ZREMRANGEBYSCORE', slow_key, '-inf', cutoff_ms)
+	redis.call('ZADD', total_key, 'NX', now_ms, event_id)
+	if is_slow == 1 then
+		redis.call('ZADD', slow_key, 'NX', now_ms, event_id)
+	end
+	redis.call('EXPIRE', total_key, ttl_seconds)
+	redis.call('EXPIRE', slow_key, ttl_seconds)
+	redis.call('SADD', registry_key, total_key, slow_key)
 	local registry_ttl = redis.call('TTL', registry_key)
 	if registry_ttl < ttl_seconds then
 		redis.call('EXPIRE', registry_key, ttl_seconds)
 	end
-	return redis.call('ZCARD', counter_key)
+	return {redis.call('ZCARD', total_key), redis.call('ZCARD', slow_key)}
 `)
 
 var firstTokenLatencyResetScript = redis.NewScript(`
@@ -54,20 +61,33 @@ func NewFirstTokenLatencyCounterCache(rdb *redis.Client) service.FirstTokenLaten
 	return &firstTokenLatencyCounterCache{rdb: rdb}
 }
 
-func (c *firstTokenLatencyCounterCache) RecordSlowFirstToken(ctx context.Context, accountID int64, ruleKey string, windowSeconds int, eventID string) (int64, error) {
+func (c *firstTokenLatencyCounterCache) RecordFirstTokenSample(ctx context.Context, accountID int64, ruleKey string, windowSeconds int, eventID string, slow bool) (service.FirstTokenLatencySampleCounts, error) {
 	ruleKey = strings.TrimSpace(ruleKey)
 	eventID = strings.TrimSpace(eventID)
 	if accountID <= 0 || ruleKey == "" || windowSeconds <= 0 || eventID == "" {
-		return 0, nil
+		return service.FirstTokenLatencySampleCounts{}, nil
 	}
 	registryKey := fmt.Sprintf("%s%d:rules", firstTokenLatencyCounterPrefix, accountID)
-	counterKey := fmt.Sprintf("%s%d:rule:%s", firstTokenLatencyCounterPrefix, accountID, ruleKey)
+	totalKey := fmt.Sprintf("%s%d:rule:%s:total", firstTokenLatencyCounterPrefix, accountID, ruleKey)
+	slowKey := fmt.Sprintf("%s%d:rule:%s:slow", firstTokenLatencyCounterPrefix, accountID, ruleKey)
 	claimKey := fmt.Sprintf("%s%d:pause_claim", firstTokenLatencyCounterPrefix, accountID)
-	count, err := firstTokenLatencyRecordScript.Run(ctx, c.rdb, []string{counterKey, registryKey, claimKey}, eventID, windowSeconds).Int64()
-	if err != nil {
-		return 0, fmt.Errorf("record slow first-token event: %w", err)
+	isSlow := 0
+	if slow {
+		isSlow = 1
 	}
-	return count, nil
+	result, err := firstTokenLatencyRecordScript.Run(ctx, c.rdb, []string{totalKey, slowKey, registryKey, claimKey}, eventID, windowSeconds, isSlow).Slice()
+	if err != nil {
+		return service.FirstTokenLatencySampleCounts{}, fmt.Errorf("record first-token sample: %w", err)
+	}
+	if len(result) != 2 {
+		return service.FirstTokenLatencySampleCounts{}, fmt.Errorf("record first-token sample: unexpected result length %d", len(result))
+	}
+	total, totalOK := result[0].(int64)
+	slowCount, slowOK := result[1].(int64)
+	if !totalOK || !slowOK {
+		return service.FirstTokenLatencySampleCounts{}, fmt.Errorf("record first-token sample: unexpected result types")
+	}
+	return service.FirstTokenLatencySampleCounts{Total: total, Slow: slowCount}, nil
 }
 
 func (c *firstTokenLatencyCounterCache) ClaimFirstTokenPause(ctx context.Context, accountID int64, pauseSeconds int) (bool, error) {
@@ -93,13 +113,13 @@ func (c *firstTokenLatencyCounterCache) ReleaseFirstTokenPauseClaim(ctx context.
 	return nil
 }
 
-func (c *firstTokenLatencyCounterCache) ResetSlowFirstTokens(ctx context.Context, accountID int64) error {
+func (c *firstTokenLatencyCounterCache) ResetFirstTokenSamples(ctx context.Context, accountID int64) error {
 	if accountID <= 0 {
 		return nil
 	}
 	registryKey := fmt.Sprintf("%s%d:rules", firstTokenLatencyCounterPrefix, accountID)
 	if _, err := firstTokenLatencyResetScript.Run(ctx, c.rdb, []string{registryKey}).Result(); err != nil {
-		return fmt.Errorf("reset slow first-token events: %w", err)
+		return fmt.Errorf("reset first-token samples: %w", err)
 	}
 	return nil
 }

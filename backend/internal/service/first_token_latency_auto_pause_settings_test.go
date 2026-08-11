@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -26,8 +27,8 @@ func TestFirstTokenLatencyAutoPauseSettings_RoundTripMultipleRules(t *testing.T)
 	input := &FirstTokenLatencyAutoPauseSettings{
 		Enabled: true,
 		Rules: []FirstTokenLatencyAutoPauseRule{
-			{WindowMinutes: 1, ThresholdSeconds: 12.5, TriggerCount: 1, PauseMinutes: 3},
-			{WindowMinutes: 10, ThresholdSeconds: 6, TriggerCount: 3, PauseMinutes: 15},
+			{WindowMinutes: 1, ThresholdSeconds: 12.5, TriggerPercent: 25, PauseMinutes: 3},
+			{WindowMinutes: 10, ThresholdSeconds: 6, TriggerPercent: 66.7, PauseMinutes: 15},
 		},
 	}
 
@@ -38,8 +39,8 @@ func TestFirstTokenLatencyAutoPauseSettings_RoundTripMultipleRules(t *testing.T)
 	require.JSONEq(t, `{
 		"enabled": true,
 		"rules": [
-			{"window_minutes":1,"threshold_seconds":12.5,"trigger_count":1,"pause_minutes":3},
-			{"window_minutes":10,"threshold_seconds":6,"trigger_count":3,"pause_minutes":15}
+				{"window_minutes":1,"threshold_seconds":12.5,"trigger_percent":25,"pause_minutes":3},
+				{"window_minutes":10,"threshold_seconds":6,"trigger_percent":66.7,"pause_minutes":15}
 		]
 	}`, updates[SettingKeyFirstTokenLatencyAutoPauseSettings])
 
@@ -48,7 +49,7 @@ func TestFirstTokenLatencyAutoPauseSettings_RoundTripMultipleRules(t *testing.T)
 }
 
 func TestFirstTokenLatencyAutoPauseSettings_RejectsDuplicateAndInvalidRules(t *testing.T) {
-	rule := FirstTokenLatencyAutoPauseRule{WindowMinutes: 5, ThresholdSeconds: 10, TriggerCount: 1, PauseMinutes: 10}
+	rule := FirstTokenLatencyAutoPauseRule{WindowMinutes: 5, ThresholdSeconds: 10, TriggerPercent: 50, PauseMinutes: 10}
 
 	_, err := validateFirstTokenLatencyAutoPauseSettings(FirstTokenLatencyAutoPauseSettings{
 		Enabled: true,
@@ -69,6 +70,33 @@ func TestFirstTokenLatencyAutoPauseSettings_RejectsDuplicateAndInvalidRules(t *t
 		Rules:   []FirstTokenLatencyAutoPauseRule{rule},
 	})
 	require.ErrorContains(t, err, "threshold_seconds")
+
+	rule.ThresholdSeconds = 10
+	rule.TriggerPercent = 0
+	_, err = validateFirstTokenLatencyAutoPauseSettings(FirstTokenLatencyAutoPauseSettings{
+		Enabled: true,
+		Rules:   []FirstTokenLatencyAutoPauseRule{rule},
+	})
+	require.ErrorContains(t, err, "trigger_percent")
+}
+
+func TestFirstTokenLatencyAutoPauseSettings_LegacyCountMigratesConservatively(t *testing.T) {
+	settings, err := parseFirstTokenLatencyAutoPauseSettings(`{
+		"enabled": true,
+		"rules": [
+			{"window_minutes":1,"threshold_seconds":120,"trigger_count":2,"pause_minutes":360}
+		]
+	}`)
+	require.NoError(t, err)
+	require.True(t, settings.Enabled)
+	require.Equal(t, float64(100), settings.Rules[0].TriggerPercent)
+
+	encoded, err := json.Marshal(settings)
+	require.NoError(t, err)
+	require.JSONEq(t, `{
+		"enabled":true,
+		"rules":[{"window_minutes":1,"threshold_seconds":120,"trigger_percent":100,"pause_minutes":360}]
+	}`, string(encoded))
 }
 
 func TestGetFirstTokenLatencyAutoPauseSettings_MissingSettingUsesCachedDefault(t *testing.T) {

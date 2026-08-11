@@ -13,7 +13,7 @@ import (
 )
 
 type firstTokenLatencyCounterStub struct {
-	counts       map[string]int64
+	counts       map[string]FirstTokenLatencySampleCounts
 	recordedKeys []string
 	claimed      bool
 	claimSeconds int
@@ -21,10 +21,15 @@ type firstTokenLatencyCounterStub struct {
 	reset        bool
 }
 
-func (s *firstTokenLatencyCounterStub) RecordSlowFirstToken(_ context.Context, _ int64, ruleKey string, _ int, _ string) (int64, error) {
+func (s *firstTokenLatencyCounterStub) RecordFirstTokenSample(_ context.Context, _ int64, ruleKey string, _ int, _ string, slow bool) (FirstTokenLatencySampleCounts, error) {
 	s.recordedKeys = append(s.recordedKeys, ruleKey)
-	s.counts[ruleKey]++
-	return s.counts[ruleKey], nil
+	counts := s.counts[ruleKey]
+	counts.Total++
+	if slow {
+		counts.Slow++
+	}
+	s.counts[ruleKey] = counts
+	return counts, nil
 }
 
 func (s *firstTokenLatencyCounterStub) ClaimFirstTokenPause(_ context.Context, _ int64, pauseSeconds int) (bool, error) {
@@ -41,7 +46,7 @@ func (s *firstTokenLatencyCounterStub) ReleaseFirstTokenPauseClaim(_ context.Con
 	return nil
 }
 
-func (s *firstTokenLatencyCounterStub) ResetSlowFirstTokens(_ context.Context, _ int64) error {
+func (s *firstTokenLatencyCounterStub) ResetFirstTokenSamples(_ context.Context, _ int64) error {
 	s.reset = true
 	return nil
 }
@@ -54,7 +59,7 @@ func newFirstTokenLatencyRateLimitService(t *testing.T, rules []FirstTokenLatenc
 	settingsRepo.data[SettingKeyFirstTokenLatencyAutoPauseSettings] = string(settingsJSON)
 
 	accountRepo := &rateLimitAccountRepoStub{}
-	counter := &firstTokenLatencyCounterStub{counts: map[string]int64{}}
+	counter := &firstTokenLatencyCounterStub{counts: map[string]FirstTokenLatencySampleCounts{}}
 	svc := NewRateLimitService(accountRepo, nil, &config.Config{}, nil, nil)
 	svc.SetSettingService(NewSettingService(settingsRepo, &config.Config{}))
 	svc.SetFirstTokenLatencyCounterCache(counter)
@@ -63,11 +68,13 @@ func newFirstTokenLatencyRateLimitService(t *testing.T, rules []FirstTokenLatenc
 
 func TestObserveFirstTokenLatency_AnyRuleCanTrigger(t *testing.T) {
 	rules := []FirstTokenLatencyAutoPauseRule{
-		{WindowMinutes: 5, ThresholdSeconds: 5, TriggerCount: 3, PauseMinutes: 5},
-		{WindowMinutes: 1, ThresholdSeconds: 10, TriggerCount: 1, PauseMinutes: 20},
+		{WindowMinutes: 5, ThresholdSeconds: 5, TriggerPercent: 75, PauseMinutes: 5},
+		{WindowMinutes: 1, ThresholdSeconds: 10, TriggerPercent: 50, PauseMinutes: 20},
 	}
 	svc, repo, counter := newFirstTokenLatencyRateLimitService(t, rules)
 	account := &Account{ID: 42, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true}
+	fastFirstTokenMS := 1_000
+	require.False(t, svc.ObserveFirstTokenLatency(context.Background(), account, "request-0", &fastFirstTokenMS))
 	firstTokenMS := 11_000
 
 	blocked := svc.ObserveFirstTokenLatency(context.Background(), account, "request-1", &firstTokenMS)
@@ -82,25 +89,32 @@ func TestObserveFirstTokenLatency_AnyRuleCanTrigger(t *testing.T) {
 
 func TestObserveFirstTokenLatency_MultipleMatchesUseLongestPause(t *testing.T) {
 	rules := []FirstTokenLatencyAutoPauseRule{
-		{WindowMinutes: 5, ThresholdSeconds: 5, TriggerCount: 1, PauseMinutes: 5},
-		{WindowMinutes: 1, ThresholdSeconds: 10, TriggerCount: 1, PauseMinutes: 20},
+		{WindowMinutes: 1, ThresholdSeconds: 60, TriggerPercent: 50, PauseMinutes: 60},
+		{WindowMinutes: 1, ThresholdSeconds: 15, TriggerPercent: 50, PauseMinutes: 30},
+		{WindowMinutes: 1, ThresholdSeconds: 120, TriggerPercent: 50, PauseMinutes: 360},
 	}
 	svc, repo, counter := newFirstTokenLatencyRateLimitService(t, rules)
 	account := &Account{ID: 43, Platform: PlatformAnthropic, Status: StatusActive, Schedulable: true}
-	firstTokenMS := 11_000
+	fastFirstTokenMS := 1_000
+	require.False(t, svc.ObserveFirstTokenLatency(context.Background(), account, "request-1", &fastFirstTokenMS))
+	firstTokenMS := 130_000
 
 	blocked := svc.ObserveFirstTokenLatency(context.Background(), account, "request-2", &firstTokenMS)
 
 	require.True(t, blocked)
-	require.Len(t, counter.recordedKeys, 2)
-	require.Equal(t, 20*60, counter.claimSeconds)
-	require.Contains(t, repo.lastTempReason, `"rule_index":1`)
-	require.Contains(t, repo.lastTempReason, `"pause_minutes":20`)
+	require.Len(t, counter.recordedKeys, 6)
+	require.Equal(t, 360*60, counter.claimSeconds)
+	require.Contains(t, repo.lastTempReason, `"rule_index":2`)
+	require.Contains(t, repo.lastTempReason, `"pause_minutes":360`)
+	require.Contains(t, repo.lastTempReason, `"sample_count":2`)
+	require.Contains(t, repo.lastTempReason, `"slow_sample_count":1`)
+	require.Contains(t, repo.lastTempReason, `"observed_percent":50`)
+	require.Contains(t, repo.lastTempReason, `"trigger_percent":50`)
 }
 
 func TestObserveFirstTokenLatency_ExactThresholdDoesNotCount(t *testing.T) {
 	rules := []FirstTokenLatencyAutoPauseRule{
-		{WindowMinutes: 5, ThresholdSeconds: 10, TriggerCount: 1, PauseMinutes: 5},
+		{WindowMinutes: 5, ThresholdSeconds: 10, TriggerPercent: 50, PauseMinutes: 5},
 	}
 	svc, repo, counter := newFirstTokenLatencyRateLimitService(t, rules)
 	account := &Account{ID: 44, Platform: PlatformGrok, Status: StatusActive, Schedulable: true}
@@ -109,6 +123,7 @@ func TestObserveFirstTokenLatency_ExactThresholdDoesNotCount(t *testing.T) {
 	blocked := svc.ObserveFirstTokenLatency(context.Background(), account, "request-3", &firstTokenMS)
 
 	require.False(t, blocked)
-	require.Empty(t, counter.recordedKeys)
+	require.Len(t, counter.recordedKeys, 1)
+	require.Equal(t, FirstTokenLatencySampleCounts{Total: 1, Slow: 0}, counter.counts[firstTokenLatencyRuleKey(rules[0])])
 	require.Zero(t, repo.tempCalls)
 }

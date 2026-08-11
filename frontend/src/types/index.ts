@@ -1006,13 +1006,20 @@ export interface TempUnschedulableState {
   matched_keyword: string
   rule_index: number
   error_message: string
-  trigger_mode?: 'rules' | 'consecutive_failures'
+  trigger_mode?: 'rules' | 'consecutive_failures' | 'first_token_latency'
   failure_count?: number
   failure_threshold?: number
   window_seconds?: number
   trigger_count?: number
   trigger_threshold?: number
   trigger_window_minutes?: number
+  first_token_ms?: number
+  first_token_threshold_ms?: number
+  sample_count?: number
+  slow_sample_count?: number
+  observed_percent?: number
+  trigger_percent?: number
+  pause_minutes?: number
 }
 
 export interface TempUnschedulableStatus {

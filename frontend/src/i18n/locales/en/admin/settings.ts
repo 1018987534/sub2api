@@ -434,11 +434,11 @@ export default {
         accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.',
         firstTokenLatencyAutoPauseTitle: 'First-Token Latency Auto-Pause',
         firstTokenLatencyAutoPauseDescription: 'Track real first-token latency for every account in rolling windows. An account is temporarily removed from scheduling when any rule fires and returns automatically after the pause.',
-        firstTokenLatencyRulesOrHint: 'Rules use OR semantics. If one request fires multiple rules, the longest pause wins. Only successful requests with measured first-token latency are counted.',
+        firstTokenLatencyRulesOrHint: 'Rules use OR semantics. If one request fires multiple rules, the longest pause wins. Trigger share is slow successful requests divided by all successful requests with measured first-token latency in the window.',
         firstTokenLatencyRule: 'Rule {number}',
         firstTokenLatencyWindowMinutes: 'Window (minutes)',
         firstTokenLatencyThresholdSeconds: 'First token over (seconds)',
-        firstTokenLatencyTriggerCount: 'Occurrences',
+        firstTokenLatencyTriggerPercent: 'Trigger Share (%)',
         firstTokenLatencyPauseMinutes: 'Pause (minutes)',
         addFirstTokenLatencyRule: 'Add rule',
         removeFirstTokenLatencyRule: 'Remove rule'

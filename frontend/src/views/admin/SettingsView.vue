@@ -5259,17 +5259,17 @@
                       <div>
                         <label
                           class="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-300"
-                          :for="`first-token-count-${index}`"
+                          :for="`first-token-percent-${index}`"
                         >
-                          {{ t("admin.settings.scheduling.firstTokenLatencyTriggerCount") }}
+                          {{ t("admin.settings.scheduling.firstTokenLatencyTriggerPercent") }}
                         </label>
                         <input
-                          :id="`first-token-count-${index}`"
-                          v-model.number="rule.trigger_count"
+                          :id="`first-token-percent-${index}`"
+                          v-model.number="rule.trigger_percent"
                           type="number"
-                          min="1"
+                          min="0.1"
                           max="100"
-                          step="1"
+                          step="0.1"
                           class="input"
                         />
                       </div>

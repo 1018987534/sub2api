@@ -67,7 +67,8 @@ export function sanitizeAccountSchedulingThresholdsMap(
 export interface FirstTokenLatencyAutoPauseRule {
   window_minutes: number
   threshold_seconds: number
-  trigger_count: number
+  trigger_percent: number
+  trigger_count?: number
   pause_minutes: number
 }
 
@@ -76,11 +77,15 @@ export interface FirstTokenLatencyAutoPauseSettings {
   rules: FirstTokenLatencyAutoPauseRule[]
 }
 
+type FirstTokenLatencyAutoPauseSettingsInput = Omit<Partial<FirstTokenLatencyAutoPauseSettings>, "rules"> & {
+  rules?: Array<Partial<FirstTokenLatencyAutoPauseRule>>
+}
+
 export function defaultFirstTokenLatencyAutoPauseRule(): FirstTokenLatencyAutoPauseRule {
   return {
     window_minutes: 5,
     threshold_seconds: 10,
-    trigger_count: 1,
+    trigger_percent: 50,
     pause_minutes: 10,
   }
 }
@@ -92,7 +97,7 @@ function clampFiniteNumber(value: unknown, min: number, max: number, fallback: n
 }
 
 export function normalizeFirstTokenLatencyAutoPauseSettings(
-  input?: Partial<FirstTokenLatencyAutoPauseSettings> | null,
+  input?: FirstTokenLatencyAutoPauseSettingsInput | null,
 ): FirstTokenLatencyAutoPauseSettings {
   const sourceRules = Array.isArray(input?.rules) && input.rules.length > 0
     ? input.rules.slice(0, 20)
@@ -102,14 +107,19 @@ export function normalizeFirstTokenLatencyAutoPauseSettings(
     rules: sourceRules.map((rule) => ({
       window_minutes: Math.trunc(clampFiniteNumber(rule?.window_minutes, 1, 1440, 5)),
       threshold_seconds: Math.round(clampFiniteNumber(rule?.threshold_seconds, 0.1, 600, 10) * 1000) / 1000,
-      trigger_count: Math.trunc(clampFiniteNumber(rule?.trigger_count, 1, 100, 1)),
+      trigger_percent: Math.round(clampFiniteNumber(
+        rule?.trigger_percent ?? (rule?.trigger_count === undefined ? undefined : 100),
+        0.1,
+        100,
+        50,
+      ) * 1000) / 1000,
       pause_minutes: Math.trunc(clampFiniteNumber(rule?.pause_minutes, 1, 1440, 10)),
     })),
   }
 }
 
 export function sanitizeFirstTokenLatencyAutoPauseSettings(
-  input?: Partial<FirstTokenLatencyAutoPauseSettings> | null,
+  input?: FirstTokenLatencyAutoPauseSettingsInput | null,
 ): FirstTokenLatencyAutoPauseSettings {
   return normalizeFirstTokenLatencyAutoPauseSettings(input)
 }

@@ -540,7 +540,7 @@ const baseSettingsResponse = {
   first_token_latency_auto_pause_settings: {
     enabled: false,
     rules: [
-      { window_minutes: 5, threshold_seconds: 10, trigger_count: 1, pause_minutes: 10 },
+      { window_minutes: 5, threshold_seconds: 10, trigger_percent: 50, pause_minutes: 10 },
     ],
   },
   // 平台限额嵌套字段（新后端契约）
@@ -1384,7 +1384,7 @@ describe("admin SettingsView payment visible method controls", () => {
       first_token_latency_auto_pause_settings: {
         enabled: true,
         rules: [
-          { window_minutes: 2, threshold_seconds: 8, trigger_count: 2, pause_minutes: 5 },
+          { window_minutes: 2, threshold_seconds: 8, trigger_percent: 25, pause_minutes: 5 },
         ],
       },
     });
@@ -1401,7 +1401,7 @@ describe("admin SettingsView payment visible method controls", () => {
     const inputs = secondRule.findAll('input[type="number"]');
     await inputs[0].setValue(15);
     await inputs[1].setValue(4.5);
-    await inputs[2].setValue(3);
+    await inputs[2].setValue(30);
     await inputs[3].setValue(20);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
@@ -1410,8 +1410,8 @@ describe("admin SettingsView payment visible method controls", () => {
       first_token_latency_auto_pause_settings: {
         enabled: true,
         rules: [
-          { window_minutes: 2, threshold_seconds: 8, trigger_count: 2, pause_minutes: 5 },
-          { window_minutes: 15, threshold_seconds: 4.5, trigger_count: 3, pause_minutes: 20 },
+          { window_minutes: 2, threshold_seconds: 8, trigger_percent: 25, pause_minutes: 5 },
+          { window_minutes: 15, threshold_seconds: 4.5, trigger_percent: 30, pause_minutes: 20 },
         ],
       },
     }));
