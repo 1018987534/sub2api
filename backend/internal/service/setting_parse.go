@@ -977,6 +977,15 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 			result.AccountSchedulingThresholds = thresholds
 		}
 	}
+	firstTokenLatencySettings := DefaultFirstTokenLatencyAutoPauseSettings()
+	if raw := strings.TrimSpace(settings[SettingKeyFirstTokenLatencyAutoPauseSettings]); raw != "" {
+		if parsed, err := parseFirstTokenLatencyAutoPauseSettings(raw); err != nil {
+			slog.Warn("[Setting] parseSettings: unmarshal first_token_latency_auto_pause_settings failed", "error", err)
+		} else {
+			firstTokenLatencySettings = parsed
+		}
+	}
+	result.FirstTokenLatencyAutoPauseSettings = &firstTokenLatencySettings
 
 	result.AllowUserViewErrorRequests = settings[SettingKeyAllowUserViewErrorRequests] == "true" // default false
 

@@ -537,6 +537,12 @@ const baseSettingsResponse = {
   subscription_expiry_notify_enabled: true,
   account_quota_notify_enabled: false,
   account_quota_notify_emails: [],
+  first_token_latency_auto_pause_settings: {
+    enabled: false,
+    rules: [
+      { window_minutes: 5, threshold_seconds: 10, trigger_count: 1, pause_minutes: 10 },
+    ],
+  },
   // 平台限额嵌套字段（新后端契约）
   default_platform_quotas: {
     anthropic:   { daily: null, weekly: null, monthly: null },
@@ -1370,6 +1376,45 @@ describe("admin SettingsView payment visible method controls", () => {
       "默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑",
     );
     expect(wrapper.text()).not.toContain("OpenAI 高级调度器");
+  });
+
+  it("loads, adds, and submits OR first-token latency auto-pause rules", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      first_token_latency_auto_pause_settings: {
+        enabled: true,
+        rules: [
+          { window_minutes: 2, threshold_seconds: 8, trigger_count: 2, pause_minutes: 5 },
+        ],
+      },
+    });
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    expect(wrapper.findAll('[data-testid^="first-token-latency-rule-"]')).toHaveLength(1);
+    await wrapper.get('[data-testid="add-first-token-latency-rule"]').trigger("click");
+    expect(wrapper.findAll('[data-testid^="first-token-latency-rule-"]')).toHaveLength(2);
+
+    const secondRule = wrapper.get('[data-testid="first-token-latency-rule-1"]');
+    const inputs = secondRule.findAll('input[type="number"]');
+    await inputs[0].setValue(15);
+    await inputs[1].setValue(4.5);
+    await inputs[2].setValue(3);
+    await inputs[3].setValue(20);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      first_token_latency_auto_pause_settings: {
+        enabled: true,
+        rules: [
+          { window_minutes: 2, threshold_seconds: 8, trigger_count: 2, pause_minutes: 5 },
+          { window_minutes: 15, threshold_seconds: 4.5, trigger_count: 3, pause_minutes: 20 },
+        ],
+      },
+    }));
   });
 
   it("loads and saves upstream billing probe settings from the gateway tab", async () => {

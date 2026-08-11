@@ -424,7 +424,17 @@ export default {
         accountSchedulingThresholdsDescription: '当账号当前原生用量窗口（OpenAI Codex/Anthropic 会话，或 Grok 请求/Token 利用率）达到该百分比时，Sub2API 会临时将其移出调度，直到窗口重置。填 100 表示禁用。',
         accountSchedulingThresholdsGlobalHint: '系统级默认值，作用于该平台全部账号。可在账号编辑页对单个账号覆盖。',
         accountSchedulingThresholdsDisabledHint: '100 表示禁用该平台自动停调；1–99 表示达到该利用率后暂停调度。',
-        accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。'
+        accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。',
+        firstTokenLatencyAutoPauseTitle: '首字延迟自动停调',
+        firstTokenLatencyAutoPauseDescription: '对所有账号的真实首字耗时进行滚动统计；同一账号命中任意一条规则后临时移出调度，到期自动恢复。',
+        firstTokenLatencyRulesOrHint: '规则之间为“或”关系。同一次请求命中多条规则时，采用最长的暂停时长。仅统计带首字耗时的成功请求。',
+        firstTokenLatencyRule: '规则 {number}',
+        firstTokenLatencyWindowMinutes: '统计窗口（分钟）',
+        firstTokenLatencyThresholdSeconds: '首字超过（秒）',
+        firstTokenLatencyTriggerCount: '触发次数',
+        firstTokenLatencyPauseMinutes: '暂停时长（分钟）',
+        addFirstTokenLatencyRule: '添加规则',
+        removeFirstTokenLatencyRule: '删除规则'
       },
       upstreamBillingProbe: {
         title: '上游倍率自动探测',

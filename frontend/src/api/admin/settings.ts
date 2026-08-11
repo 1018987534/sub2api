@@ -64,6 +64,56 @@ export function sanitizeAccountSchedulingThresholdsMap(
   return normalizeAccountSchedulingThresholdsMap(input)
 }
 
+export interface FirstTokenLatencyAutoPauseRule {
+  window_minutes: number
+  threshold_seconds: number
+  trigger_count: number
+  pause_minutes: number
+}
+
+export interface FirstTokenLatencyAutoPauseSettings {
+  enabled: boolean
+  rules: FirstTokenLatencyAutoPauseRule[]
+}
+
+export function defaultFirstTokenLatencyAutoPauseRule(): FirstTokenLatencyAutoPauseRule {
+  return {
+    window_minutes: 5,
+    threshold_seconds: 10,
+    trigger_count: 1,
+    pause_minutes: 10,
+  }
+}
+
+function clampFiniteNumber(value: unknown, min: number, max: number, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : fallback
+}
+
+export function normalizeFirstTokenLatencyAutoPauseSettings(
+  input?: Partial<FirstTokenLatencyAutoPauseSettings> | null,
+): FirstTokenLatencyAutoPauseSettings {
+  const sourceRules = Array.isArray(input?.rules) && input.rules.length > 0
+    ? input.rules.slice(0, 20)
+    : [defaultFirstTokenLatencyAutoPauseRule()]
+  return {
+    enabled: Boolean(input?.enabled),
+    rules: sourceRules.map((rule) => ({
+      window_minutes: Math.trunc(clampFiniteNumber(rule?.window_minutes, 1, 1440, 5)),
+      threshold_seconds: Math.round(clampFiniteNumber(rule?.threshold_seconds, 0.1, 600, 10) * 1000) / 1000,
+      trigger_count: Math.trunc(clampFiniteNumber(rule?.trigger_count, 1, 100, 1)),
+      pause_minutes: Math.trunc(clampFiniteNumber(rule?.pause_minutes, 1, 1440, 10)),
+    })),
+  }
+}
+
+export function sanitizeFirstTokenLatencyAutoPauseSettings(
+  input?: Partial<FirstTokenLatencyAutoPauseSettings> | null,
+): FirstTokenLatencyAutoPauseSettings {
+  return normalizeFirstTokenLatencyAutoPauseSettings(input)
+}
+
 /** 归一化为全 4 平台 × 3 窗口（缺失填 null），供模板非空绑定 */
 export function normalizePlatformQuotasMap(input?: DefaultPlatformQuotasMap | null): DefaultPlatformQuotasMap {
   const result: DefaultPlatformQuotasMap = {}
@@ -598,6 +648,7 @@ export interface SystemSettings {
 
   // Per-platform account auto-pause thresholds (100 = disabled)
   account_scheduling_thresholds: AccountSchedulingThresholdsMap;
+  first_token_latency_auto_pause_settings: FirstTokenLatencyAutoPauseSettings;
 
   // Identity patch configuration (Claude -> Gemini)
   enable_identity_patch: boolean;
@@ -925,6 +976,7 @@ export interface UpdateSettingsRequest {
   grok_cross_client_model_map_enabled?: boolean;
   grok_default_base_url_mode?: string;
   account_scheduling_thresholds?: AccountSchedulingThresholdsMap;
+  first_token_latency_auto_pause_settings?: FirstTokenLatencyAutoPauseSettings;
   enable_identity_patch?: boolean;
   identity_patch_prompt?: string;
   ops_monitoring_enabled?: boolean;

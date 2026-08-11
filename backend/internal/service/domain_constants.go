@@ -632,6 +632,10 @@ const SettingKeyDefaultPlatformQuotas = "default_platform_quotas"
 // 值为 map[platform]percent，1..100；100 = 禁用该平台自动停调。
 const SettingKeyAccountSchedulingThresholds = "account_scheduling_thresholds"
 
+// SettingKeyFirstTokenLatencyAutoPauseSettings stores the global rolling-window
+// first-token latency circuit-breaker rules as JSON.
+const SettingKeyFirstTokenLatencyAutoPauseSettings = "first_token_latency_auto_pause_settings"
+
 // SettingKeyAuthSourcePlatformQuotas 返回某 auth source 的 platform quota JSON key。
 // 形如 auth_source_default_{source}_platform_quotas
 func SettingKeyAuthSourcePlatformQuotas(source string) string {

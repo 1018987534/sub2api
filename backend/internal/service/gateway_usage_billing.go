@@ -797,6 +797,9 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 			cost.TotalCost,
 		)
 	}
+	if s.rateLimitService != nil {
+		s.rateLimitService.ObserveFirstTokenLatency(ctx, account, usageLog.RequestID, usageLog.FirstTokenMs)
+	}
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")

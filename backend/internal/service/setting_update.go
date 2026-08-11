@@ -547,6 +547,17 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 		}
 		updates[SettingKeyAccountSchedulingThresholds] = string(blob)
 	}
+	if settings.FirstTokenLatencyAutoPauseSettings != nil {
+		normalized, err := validateFirstTokenLatencyAutoPauseSettings(*settings.FirstTokenLatencyAutoPauseSettings)
+		if err != nil {
+			return nil, err
+		}
+		blob, err := json.Marshal(normalized)
+		if err != nil {
+			return nil, fmt.Errorf("marshal first-token latency auto-pause settings: %w", err)
+		}
+		updates[SettingKeyFirstTokenLatencyAutoPauseSettings] = string(blob)
+	}
 
 	updates[SettingKeyAllowUserViewErrorRequests] = strconv.FormatBool(settings.AllowUserViewErrorRequests)
 
@@ -787,6 +798,19 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	} else {
 		// Partial/omitted payload: clear cache so the next hot-path read reloads from DB.
 		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{})
+	}
+	s.firstTokenLatencyAutoPauseSF.Forget(SettingKeyFirstTokenLatencyAutoPauseSettings)
+	if settings.FirstTokenLatencyAutoPauseSettings != nil {
+		normalized, err := validateFirstTokenLatencyAutoPauseSettings(*settings.FirstTokenLatencyAutoPauseSettings)
+		if err != nil {
+			normalized = DefaultFirstTokenLatencyAutoPauseSettings()
+		}
+		s.firstTokenLatencyAutoPauseCache.Store(&cachedFirstTokenLatencyAutoPauseSettings{
+			settings:  cloneFirstTokenLatencyAutoPauseSettings(normalized),
+			expiresAt: time.Now().Add(firstTokenLatencyAutoPauseCacheTTL).UnixNano(),
+		})
+	} else {
+		s.firstTokenLatencyAutoPauseCache.Store(&cachedFirstTokenLatencyAutoPauseSettings{})
 	}
 	if s.cfg != nil {
 		s.cfg.SetForwardedClientIPSettings(settings.APIKeyACLTrustForwardedIP, settings.ForwardedClientIPHeaders)
