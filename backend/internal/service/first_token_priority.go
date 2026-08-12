@@ -139,7 +139,7 @@ func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache F
 	for _, accountID := range priorityAccountIDs {
 		stat, found := stats[accountID]
 		age := now.Sub(stat.UpdatedAt)
-		if !found || stat.SampleCount < firstTokenPriorityMinimumSamples || age < 0 || age > firstTokenPriorityFreshFor || stat.PredictedMS <= 0 || stat.PredictedMS > firstTokenPriorityFastThreshold {
+		if !found || !firstTokenPriorityStatsReliable(stat) || age < 0 || age > firstTokenPriorityFreshFor || stat.PredictedMS <= 0 || stat.PredictedMS > firstTokenPriorityFastThreshold {
 			allPriorityAccountsFast = false
 			break
 		}
@@ -186,7 +186,7 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 	for index, accountID := range accountIDs {
 		stat, found := stats[accountID]
 		age := now.Sub(stat.UpdatedAt)
-		known := found && stat.SampleCount >= firstTokenPriorityMinimumSamples && age >= 0 && age <= firstTokenPriorityFreshFor && stat.PredictedMS > 0
+		known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= firstTokenPriorityFreshFor && stat.PredictedMS > 0
 		if !known || stat.PredictedMS > firstTokenPriorityFastThreshold {
 			allFastKnown = false
 		}
@@ -255,6 +255,10 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		ordered = append(ordered, item.id)
 	}
 	return ordered
+}
+
+func firstTokenPriorityStatsReliable(stats FirstTokenLatencyStats) bool {
+	return stats.SampleCount >= firstTokenPriorityMinimumSamples || (stats.ReliableFast && stats.PredictedMS > 0 && stats.PredictedMS <= firstTokenPriorityFastThreshold)
 }
 
 func dynamicFirstTokenProbeIndex(ranked []firstTokenRankedAccount, fastestMS float64, now time.Time) int {

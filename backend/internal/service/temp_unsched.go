@@ -51,10 +51,11 @@ type TimeoutCounterCache interface {
 }
 
 type FirstTokenLatencyStats struct {
-	PredictedMS float64
-	SampleCount int64
-	UpdatedAt   time.Time
-	SlowStreak  int
+	PredictedMS  float64
+	SampleCount  int64
+	UpdatedAt    time.Time
+	SlowStreak   int
+	ReliableFast bool
 }
 
 // FirstTokenLatencyStatsCache is shared by every gateway so scheduling decisions

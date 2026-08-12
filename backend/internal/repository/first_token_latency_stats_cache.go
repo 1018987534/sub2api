@@ -33,6 +33,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 
 	local old_ewma = tonumber(redis.call('HGET', stats_key, 'ewma_ms'))
 	local old_median = tonumber(redis.call('HGET', stats_key, 'median_ms'))
+	local old_reliable_fast = tonumber(redis.call('HGET', stats_key, 'reliable_fast')) or 0
 	local old_updated = tonumber(redis.call('HGET', stats_key, 'updated_at_ms'))
 	local elapsed_seconds = 0
 	if old_updated and now_ms > old_updated then
@@ -78,11 +79,14 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 
 	local sample_count = tonumber(redis.call('HGET', stats_key, 'sample_count')) or 0
 	if elapsed_seconds > 1200 then sample_count = 0 end
-	-- A newly discovered or recovered sub-10-second account is immediately
-	-- trustworthy enough to cross the hard scheduling boundary. Without this,
-	-- a probe would need two more user requests before the scheduler could use it.
-	if fast_recovery and sample_count < 2 then sample_count = 2 end
 	sample_count = sample_count + 1
+	-- A newly discovered or recovered sub-10-second account is immediately
+	-- trustworthy enough to cross the hard scheduling boundary without inflating
+	-- the real sample count shown to operators.
+	local reliable_fast = 0
+	if latency_ms <= 10000 and (fast_recovery or (elapsed_seconds <= 1200 and old_reliable_fast == 1)) then
+		reliable_fast = 1
+	end
 	local slow_streak = tonumber(redis.call('HGET', stats_key, 'slow_streak')) or 0
 	if elapsed_seconds > 1200 then
 		slow_streak = 0
@@ -97,6 +101,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 		'ewma_ms', tostring(ewma),
 		'median_ms', tostring(median),
 		'sample_count', tostring(sample_count),
+		'reliable_fast', tostring(reliable_fast),
 		'slow_streak', tostring(slow_streak),
 		'updated_at_ms', tostring(now_ms),
 		'recent_samples', table.concat(parts, ','))
@@ -151,14 +156,14 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		if accountID <= 0 {
 			continue
 		}
-		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID), "ewma_ms", "median_ms", "sample_count", "updated_at_ms", "slow_streak")
+		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID), "ewma_ms", "median_ms", "sample_count", "updated_at_ms", "slow_streak", "reliable_fast")
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("get first-token latency stats: %w", err)
 	}
 	for accountID, cmd := range commands {
 		values, err := cmd.Result()
-		if err != nil || len(values) != 5 || values[0] == nil {
+		if err != nil || len(values) != 6 || values[0] == nil {
 			continue
 		}
 		ewma, ewmaErr := strconv.ParseFloat(fmt.Sprint(values[0]), 64)
@@ -166,14 +171,16 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		count, countErr := strconv.ParseInt(fmt.Sprint(values[2]), 10, 64)
 		updatedAtMS, updatedErr := strconv.ParseInt(fmt.Sprint(values[3]), 10, 64)
 		slowStreak, streakErr := strconv.Atoi(fmt.Sprint(values[4]))
+		reliableFast := values[5] != nil && fmt.Sprint(values[5]) == "1"
 		if ewmaErr != nil || medianErr != nil || countErr != nil || updatedErr != nil || streakErr != nil || count <= 0 || updatedAtMS <= 0 {
 			continue
 		}
 		result[accountID] = service.FirstTokenLatencyStats{
-			PredictedMS: 0.30*median + 0.70*ewma,
-			SampleCount: count,
-			UpdatedAt:   time.UnixMilli(updatedAtMS),
-			SlowStreak:  slowStreak,
+			PredictedMS:  0.30*median + 0.70*ewma,
+			SampleCount:  count,
+			UpdatedAt:    time.UnixMilli(updatedAtMS),
+			SlowStreak:   slowStreak,
+			ReliableFast: reliableFast,
 		}
 	}
 	return result, nil

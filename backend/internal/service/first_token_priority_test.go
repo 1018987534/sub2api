@@ -177,7 +177,7 @@ func TestFirstTokenPriorityOrderImmediatelyPromotesFirstReliableFastProbeFromSlo
 	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
 		1: {PredictedMS: 18_000, SampleCount: 5, UpdatedAt: now},
 		2: {PredictedMS: 25_000, SampleCount: 5, UpdatedAt: now},
-		3: {PredictedMS: 7_500, SampleCount: 3, UpdatedAt: now},
+		3: {PredictedMS: 7_500, SampleCount: 1, UpdatedAt: now, ReliableFast: true},
 	}}
 	accounts := []*Account{
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},

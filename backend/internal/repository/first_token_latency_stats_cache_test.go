@@ -150,7 +150,8 @@ func TestFirstTokenLatencyStatsCacheFirstFastProbeIsImmediatelyReliable(t *testi
 	stats, err := cache.GetStatsBatch(ctx, []int64{15})
 	require.NoError(t, err)
 	require.Equal(t, 7_500.0, stats[15].PredictedMS)
-	require.GreaterOrEqual(t, stats[15].SampleCount, int64(3))
+	require.Equal(t, int64(1), stats[15].SampleCount)
+	require.True(t, stats[15].ReliableFast)
 	require.Zero(t, stats[15].SlowStreak)
 }
 
@@ -172,5 +173,6 @@ func TestFirstTokenLatencyStatsCacheFastProbeAfterStaleHistoryIsImmediatelyRelia
 	stats, err := cache.GetStatsBatch(ctx, []int64{16})
 	require.NoError(t, err)
 	require.Equal(t, 9_000.0, stats[16].PredictedMS)
-	require.GreaterOrEqual(t, stats[16].SampleCount, int64(3))
+	require.Equal(t, int64(1), stats[16].SampleCount)
+	require.True(t, stats[16].ReliableFast)
 }
