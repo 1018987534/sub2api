@@ -77,7 +77,16 @@ export default {
       groupPricingDesc: 'Configure batch discount and hold ratio',
       systemSettings: 'System Settings',
       configureSystem: 'Configure system settings',
-      failedToLoad: 'Failed to load dashboard statistics'
+      failedToLoad: 'Failed to load dashboard statistics',
+      firstTokenLatencyTitle: 'Relay First-Token Latency',
+      firstTokenLatencyDescription: 'Only enabled OpenAI API-key relay accounts are included. The value is the scheduler prediction combining a recent median and EWMA; OAuth accounts are excluded.',
+      firstTokenLatencyFailed: 'Failed to load first-token latency statistics',
+      firstTokenLatencyEmpty: 'No first-token data for enabled relay accounts yet',
+      firstTokenAccount: 'Account',
+      firstTokenPrediction: 'Recent prediction',
+      firstTokenSamples: 'Samples',
+      firstTokenUpdated: 'Updated',
+      firstTokenProbeInterval: 'Dynamic probe interval'
     },
 
     backup: {

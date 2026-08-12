@@ -432,8 +432,10 @@ export default {
         accountSchedulingThresholdsGlobalHint: 'System-wide default for every account on that platform. Individual accounts can still override this in the account editor.',
         accountSchedulingThresholdsDisabledHint: '100 disables platform auto-pause. Values 1–99 pause scheduling once utilization reaches that percent.',
         accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.',
-        firstTokenPriorityTitle: 'First-Token Priority Scheduling',
-        firstTokenPriorityDescription: 'Prioritize accounts using recent measured first-token latency while probing unknown or potentially recovered accounts. Persistently slow accounts are probed less often. When every candidate has reliable data and averages at most 10 seconds, lower upstream rate takes priority.'
+        priorityModeTitle: 'OpenAI Scheduling Priority',
+        firstTokenPriorityTitle: 'First-Token Priority',
+        firstTokenPriorityDescription: 'Make recent first-token prediction absolute. Adaptive probes back off persistently slow accounts and switch immediately when an account recovers below 10 seconds.',
+        lowRateModeDescription: 'Prioritize billing rate and automatically use sticky weighting within the same rate tier.'
       },
       upstreamBillingProbe: {
         title: 'Upstream Rate Auto Detection',

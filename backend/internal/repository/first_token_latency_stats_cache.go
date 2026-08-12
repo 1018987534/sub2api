@@ -12,6 +12,7 @@ import (
 )
 
 const firstTokenLatencyStatsPrefix = "scheduler:first_token:account:"
+const firstTokenLatencyProbePrefix = "scheduler:first_token:probe:"
 
 // The recent median protects the prediction from one-off tail latency. The
 // EWMA still moves on every observation and gives a recovered upstream more
@@ -19,6 +20,7 @@ const firstTokenLatencyStatsPrefix = "scheduler:first_token:account:"
 var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	local stats_key = KEYS[1]
 	local dedupe_key = KEYS[2]
+	local probe_key = KEYS[3]
 	local latency_ms = tonumber(ARGV[1])
 	local stats_ttl_seconds = tonumber(ARGV[2])
 	local dedupe_ttl_seconds = tonumber(ARGV[3])
@@ -30,15 +32,21 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	end
 
 	local old_ewma = tonumber(redis.call('HGET', stats_key, 'ewma_ms'))
+	local old_median = tonumber(redis.call('HGET', stats_key, 'median_ms'))
 	local old_updated = tonumber(redis.call('HGET', stats_key, 'updated_at_ms'))
 	local elapsed_seconds = 0
 	if old_updated and now_ms > old_updated then
 		elapsed_seconds = (now_ms - old_updated) / 1000
 	end
 
+	local fast_recovery = latency_ms <= 10000 and (
+		not old_ewma or
+		not old_median or
+		elapsed_seconds > 1200 or
+		(0.30 * old_median + 0.70 * old_ewma) > 10000)
 	local samples = {}
 	local encoded = redis.call('HGET', stats_key, 'recent_samples')
-	if encoded and elapsed_seconds <= 1200 then
+	if encoded and elapsed_seconds <= 1200 and not fast_recovery then
 		for value in string.gmatch(encoded, '[^,]+') do
 			table.insert(samples, tonumber(value))
 		end
@@ -59,7 +67,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	end
 
 	local ewma = latency_ms
-	if old_ewma then
+	if old_ewma and not fast_recovery then
 		local alpha = 0.25
 		if elapsed_seconds > 0 then
 			local time_alpha = 1 - math.exp(-elapsed_seconds / 900)
@@ -70,6 +78,10 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 
 	local sample_count = tonumber(redis.call('HGET', stats_key, 'sample_count')) or 0
 	if elapsed_seconds > 1200 then sample_count = 0 end
+	-- A newly discovered or recovered sub-10-second account is immediately
+	-- trustworthy enough to cross the hard scheduling boundary. Without this,
+	-- a probe would need two more user requests before the scheduler could use it.
+	if fast_recovery and sample_count < 2 then sample_count = 2 end
 	sample_count = sample_count + 1
 	local slow_streak = tonumber(redis.call('HGET', stats_key, 'slow_streak')) or 0
 	if elapsed_seconds > 1200 then
@@ -89,6 +101,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 		'updated_at_ms', tostring(now_ms),
 		'recent_samples', table.concat(parts, ','))
 	redis.call('EXPIRE', stats_key, stats_ttl_seconds)
+	redis.call('DEL', probe_key)
 	return 1
 `)
 
@@ -109,10 +122,22 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 	const dedupeTTL = 2 * time.Hour
 	statsKey := fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID)
 	dedupeKey := fmt.Sprintf("scheduler:first_token:event:%d:%s", accountID, requestID)
-	if _, err := firstTokenLatencyStatsRecordScript.Run(ctx, c.rdb, []string{statsKey, dedupeKey}, firstTokenMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds())).Result(); err != nil {
+	probeKey := fmt.Sprintf("%s%d", firstTokenLatencyProbePrefix, accountID)
+	if _, err := firstTokenLatencyStatsRecordScript.Run(ctx, c.rdb, []string{statsKey, dedupeKey, probeKey}, firstTokenMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds())).Result(); err != nil {
 		return fmt.Errorf("record first-token latency stats: %w", err)
 	}
 	return nil
+}
+
+func (c *firstTokenLatencyStatsCache) TryClaimProbe(ctx context.Context, accountID int64, lease time.Duration) (bool, error) {
+	if accountID <= 0 || lease <= 0 {
+		return false, nil
+	}
+	claimed, err := c.rdb.SetNX(ctx, fmt.Sprintf("%s%d", firstTokenLatencyProbePrefix, accountID), "1", lease).Result()
+	if err != nil {
+		return false, fmt.Errorf("claim first-token probe: %w", err)
+	}
+	return claimed, nil
 }
 
 func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, accountIDs []int64) (map[int64]service.FirstTokenLatencyStats, error) {

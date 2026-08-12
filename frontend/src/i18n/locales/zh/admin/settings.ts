@@ -425,8 +425,10 @@ export default {
         accountSchedulingThresholdsGlobalHint: '系统级默认值，作用于该平台全部账号。可在账号编辑页对单个账号覆盖。',
         accountSchedulingThresholdsDisabledHint: '100 表示禁用该平台自动停调；1–99 表示达到该利用率后暂停调度。',
         accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。',
-        firstTokenPriorityTitle: '首字优先调度',
-        firstTokenPriorityDescription: '根据近期真实首字耗时动态优先快账号，并少量探测未知或可能恢复的账号；持续慢账号会逐步降低探测频率。所有候选账号都有可靠数据且平均首字均在 10 秒内时，改走低倍率优先。'
+        priorityModeTitle: 'OpenAI 调度优先模式',
+        firstTokenPriorityTitle: '首字优先',
+        firstTokenPriorityDescription: '按近期首字预测绝对优先；动态探测会对持续慢账号逐步退避，发现 10 秒内恢复账号后立即切换。',
+        lowRateModeDescription: '按计费倍率优先，并自动启用同倍率内的粘性加权。'
       },
       upstreamBillingProbe: {
         title: '上游倍率自动探测',

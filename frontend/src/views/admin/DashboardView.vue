@@ -216,6 +216,66 @@
           </div>
         </div>
 
+        <section class="border-y border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800/40" data-testid="first-token-latency-panel">
+          <div class="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 class="text-sm font-semibold text-gray-900 dark:text-white">
+                {{ t('admin.dashboard.firstTokenLatencyTitle') }}
+              </h2>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.dashboard.firstTokenLatencyDescription') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              class="btn btn-secondary inline-flex items-center gap-2 self-start"
+              :disabled="firstTokenLoading"
+              :title="t('common.refresh')"
+              data-testid="refresh-first-token-latencies"
+              @click="loadFirstTokenLatencies"
+            >
+              <Icon name="refresh" size="sm" />
+              {{ t('common.refresh') }}
+            </button>
+          </div>
+          <div v-if="firstTokenLoading" class="flex min-h-32 items-center justify-center border-t border-gray-100 dark:border-dark-700">
+            <LoadingSpinner size="md" />
+          </div>
+          <div v-else-if="firstTokenError" class="border-t border-gray-100 px-4 py-8 text-center text-sm text-red-600 dark:border-dark-700 dark:text-red-400">
+            {{ t('admin.dashboard.firstTokenLatencyFailed') }}
+          </div>
+          <div v-else-if="firstTokenMetrics.length === 0" class="border-t border-gray-100 px-4 py-8 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
+            {{ t('admin.dashboard.firstTokenLatencyEmpty') }}
+          </div>
+          <div v-else class="overflow-x-auto border-t border-gray-100 dark:border-dark-700">
+            <table class="min-w-full table-fixed text-left text-sm">
+              <thead class="bg-gray-50 text-xs text-gray-500 dark:bg-dark-800 dark:text-gray-400">
+                <tr>
+                  <th class="w-2/5 px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
+                  <th class="w-1/5 px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
+                  <th class="w-1/5 px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSamples') }}</th>
+                  <th class="w-1/5 px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
+                  <th class="w-1/5 px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenProbeInterval') }}</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+                <tr v-for="metric in firstTokenMetrics" :key="metric.account_id" data-testid="first-token-latency-row">
+                  <td class="px-4 py-3">
+                    <div class="truncate font-medium text-gray-900 dark:text-white" :title="metric.account_name">{{ metric.account_name }}</div>
+                    <div class="text-xs text-gray-400">#{{ metric.account_id }}</div>
+                  </td>
+                  <td class="px-4 py-3 font-mono font-semibold" :class="metric.predicted_ms <= 10000 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
+                    {{ formatDuration(metric.predicted_ms) }}
+                  </td>
+                  <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ metric.sample_count }}</td>
+                  <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{{ formatFirstTokenUpdatedAt(metric.updated_at) }}</td>
+                  <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ formatProbeInterval(metric.probe_interval_seconds) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <!-- Quick Actions -->
         <div class="card p-4">
           <div class="mb-3 flex items-center justify-between">
@@ -353,7 +413,8 @@ import type {
   TrendDataPoint,
   ModelStat,
   UserUsageTrendPoint,
-  UserSpendingRankingItem
+  UserSpendingRankingItem,
+  AccountFirstTokenLatencyMetric
 } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -396,6 +457,9 @@ const chartsLoading = ref(false)
 const userTrendLoading = ref(false)
 const rankingLoading = ref(false)
 const rankingError = ref(false)
+const firstTokenLoading = ref(false)
+const firstTokenError = ref(false)
+const firstTokenMetrics = ref<AccountFirstTokenLatencyMetric[]>([])
 
 // Chart data
 const trendData = ref<TrendDataPoint[]>([])
@@ -607,6 +671,23 @@ const formatDuration = (ms: number): string => {
   return `${Math.round(ms)}ms`
 }
 
+const formatFirstTokenUpdatedAt = (value: string): string => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return new Intl.DateTimeFormat(undefined, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date)
+}
+
+const formatProbeInterval = (seconds: number): string => {
+  if (seconds >= 3600) return `${Math.round(seconds / 3600)}h`
+  if (seconds >= 60) return `${Math.round(seconds / 60)}m`
+  return `${Math.max(0, Math.round(seconds))}s`
+}
+
 const goToUserUsage = (item: UserSpendingRankingItem) => {
   void router.push({
     path: '/admin/usage',
@@ -728,6 +809,21 @@ const loadUserSpendingRanking = async () => {
   }
 }
 
+const loadFirstTokenLatencies = async () => {
+  firstTokenLoading.value = true
+  firstTokenError.value = false
+  try {
+    const response = await adminAPI.accounts.getFirstTokenLatencies()
+    firstTokenMetrics.value = response.items || []
+  } catch (error) {
+    console.error('Error loading account first-token latencies:', error)
+    firstTokenMetrics.value = []
+    firstTokenError.value = true
+  } finally {
+    firstTokenLoading.value = false
+  }
+}
+
 const loadDashboardStats = async () => {
   await Promise.all([
     loadDashboardSnapshot(true),
@@ -746,7 +842,7 @@ const loadChartData = async () => {
 
 onMounted(() => {
   void refreshBatchImageAccess()
-  loadDashboardStats()
+  void Promise.all([loadDashboardStats(), loadFirstTokenLatencies()])
 })
 </script>
 

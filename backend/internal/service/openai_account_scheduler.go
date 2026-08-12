@@ -1895,7 +1895,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerSettingRepo() SettingRepos
 func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx context.Context) openAIAdvancedSchedulerRuntimeSettings {
 	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
-			return openAIAdvancedSchedulerRuntimeSettings{
+			return normalizeOpenAISchedulerRuntimeSettings(openAIAdvancedSchedulerRuntimeSettings{
 				lowUpstreamRatePriorityEnabled:       cached.lowUpstreamRatePriorityEnabled,
 				lowUpstreamRateStickyWeightedEnabled: cached.lowUpstreamRateStickyWeightedEnabled,
 				oauthSchedulingRateMultiplier:        cached.oauthSchedulingRateMultiplier,
@@ -1905,14 +1905,14 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				firstTokenPriorityEnabled:            cached.firstTokenPriorityEnabled,
 				lbTopKOverride:                       cached.lbTopKOverride,
 				weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
-			}
+			})
 		}
 	}
 
 	result, _, _ := openAIAdvancedSchedulerSettingSF.Do(openAIAdvancedSchedulerSettingKey, func() (any, error) {
 		if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
-				return openAIAdvancedSchedulerRuntimeSettings{
+				return normalizeOpenAISchedulerRuntimeSettings(openAIAdvancedSchedulerRuntimeSettings{
 					lowUpstreamRatePriorityEnabled:       cached.lowUpstreamRatePriorityEnabled,
 					lowUpstreamRateStickyWeightedEnabled: cached.lowUpstreamRateStickyWeightedEnabled,
 					oauthSchedulingRateMultiplier:        cached.oauthSchedulingRateMultiplier,
@@ -1922,7 +1922,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 					firstTokenPriorityEnabled:            cached.firstTokenPriorityEnabled,
 					lbTopKOverride:                       cached.lbTopKOverride,
 					weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
-				}, nil
+				}), nil
 			}
 		}
 
@@ -1970,6 +1970,13 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(fallbackValues)
 			}
 		}
+		if firstTokenPriorityEnabled {
+			lowUpstreamRatePriorityEnabled = false
+			lowUpstreamRateStickyWeightedEnabled = false
+		} else {
+			lowUpstreamRatePriorityEnabled = true
+			lowUpstreamRateStickyWeightedEnabled = true
+		}
 
 		openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
 			lowUpstreamRatePriorityEnabled:       lowUpstreamRatePriorityEnabled,
@@ -1983,7 +1990,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 			weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(weightOverrides),
 			expiresAt:                            time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
 		})
-		return openAIAdvancedSchedulerRuntimeSettings{
+		return normalizeOpenAISchedulerRuntimeSettings(openAIAdvancedSchedulerRuntimeSettings{
 			lowUpstreamRatePriorityEnabled:       lowUpstreamRatePriorityEnabled,
 			lowUpstreamRateStickyWeightedEnabled: lowUpstreamRateStickyWeightedEnabled,
 			oauthSchedulingRateMultiplier:        oauthSchedulingRateMultiplier,
@@ -1993,10 +2000,21 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 			firstTokenPriorityEnabled:            firstTokenPriorityEnabled,
 			lbTopKOverride:                       lbTopKOverride,
 			weightOverrides:                      weightOverrides,
-		}, nil
+		}), nil
 	})
 
 	settings, _ := result.(openAIAdvancedSchedulerRuntimeSettings)
+	return normalizeOpenAISchedulerRuntimeSettings(settings)
+}
+
+func normalizeOpenAISchedulerRuntimeSettings(settings openAIAdvancedSchedulerRuntimeSettings) openAIAdvancedSchedulerRuntimeSettings {
+	if settings.firstTokenPriorityEnabled {
+		settings.lowUpstreamRatePriorityEnabled = false
+		settings.lowUpstreamRateStickyWeightedEnabled = false
+	} else {
+		settings.lowUpstreamRatePriorityEnabled = true
+		settings.lowUpstreamRateStickyWeightedEnabled = true
+	}
 	return settings
 }
 
@@ -2005,6 +2023,9 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerEnabled(ctx context.Cont
 }
 
 func (s *OpenAIGatewayService) isOpenAILowUpstreamRatePriorityEnabled(ctx context.Context) bool {
+	if s == nil || s.openAIAdvancedSchedulerSettingRepo() == nil {
+		return false
+	}
 	settings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
 	return !settings.enabled && settings.lowUpstreamRatePriorityEnabled
 }
@@ -2014,6 +2035,9 @@ func (s *OpenAIGatewayService) openAIOAuthSchedulingRateMultiplier(ctx context.C
 }
 
 func (s *OpenAIGatewayService) isOpenAILowUpstreamRateSoftStickyEnabled(ctx context.Context) bool {
+	if s == nil || s.openAIAdvancedSchedulerSettingRepo() == nil {
+		return false
+	}
 	settings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
 	return !settings.enabled && settings.lowUpstreamRatePriorityEnabled && settings.lowUpstreamRateStickyWeightedEnabled
 }
@@ -2029,6 +2053,9 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerSubscriptionPriorityEnab
 }
 
 func (s *OpenAIGatewayService) isFirstTokenPriorityEnabled(ctx context.Context) bool {
+	if s == nil || s.openAIAdvancedSchedulerSettingRepo() == nil {
+		return false
+	}
 	return s.openAIAdvancedSchedulerRuntimeSettings(ctx).firstTokenPriorityEnabled
 }
 
@@ -2327,6 +2354,18 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		}
 	}
 	stickyWeighted := s.isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx)
+	if s.isFirstTokenPriorityEnabled(ctx) {
+		// First-token mode is absolute: a recovered account must be selected on
+		// the request after its sub-10-second probe sample, not held back by an
+		// older session or movable previous-response preference. An immovable
+		// previous_response_id remains pinned because the upstream chain cannot
+		// be reconstructed on a different account.
+		if stickyAccountID > 0 && sessionHash != "" && s.cache != nil {
+			_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		}
+		stickyAccountID = 0
+		stickyWeighted = true
+	}
 	subscriptionPriority := s.isOpenAIAdvancedSchedulerSubscriptionPriorityEnabled(ctx)
 	stickyPreviousAccountID := int64(0)
 	if stickyWeighted && previousResponseCanMove && strings.TrimSpace(previousResponseID) != "" && platform == PlatformOpenAI {

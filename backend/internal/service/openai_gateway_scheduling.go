@@ -968,6 +968,12 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			stickyAccountID = accountID
 		}
 	}
+	if s.isFirstTokenPriorityEnabled(ctx) {
+		if stickyAccountID > 0 && sessionHash != "" && s.cache != nil {
+			_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
+		}
+		stickyAccountID = 0
+	}
 	softSticky := s.openAILegacySoftStickyPolicy(ctx, groupID, sessionHash, requestedModel, stickyAccountID, preferLowUpstreamRate)
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
 		if !softSticky.enabled {

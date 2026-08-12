@@ -5,10 +5,11 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { DashboardStats } from '@/types'
 import DashboardView from '../DashboardView.vue'
 
-const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking } = vi.hoisted(() => ({
+const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies } = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
   getUserUsageTrend: vi.fn(),
-  getUserSpendingRanking: vi.fn()
+  getUserSpendingRanking: vi.fn(),
+  getFirstTokenLatencies: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -17,7 +18,8 @@ vi.mock('@/api/admin', () => ({
       getSnapshotV2,
       getUserUsageTrend,
       getUserSpendingRanking
-    }
+    },
+    accounts: { getFirstTokenLatencies }
   }
 }))
 
@@ -93,6 +95,7 @@ describe('admin DashboardView', () => {
     getSnapshotV2.mockReset()
     getUserUsageTrend.mockReset()
     getUserSpendingRanking.mockReset()
+    getFirstTokenLatencies.mockReset()
 
     getSnapshotV2.mockResolvedValue({
       stats: createDashboardStats(),
@@ -113,6 +116,7 @@ describe('admin DashboardView', () => {
       start_date: '',
       end_date: ''
     })
+    getFirstTokenLatencies.mockResolvedValue({ items: [], total: 0 })
   })
 
   it('uses today as default dashboard range', async () => {
@@ -142,5 +146,41 @@ describe('admin DashboardView', () => {
       end_date: today,
       granularity: 'hour'
     }))
+    expect(getFirstTokenLatencies).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders enabled API-key relay first-token predictions', async () => {
+    getFirstTokenLatencies.mockResolvedValueOnce({
+      items: [{
+        account_id: 42,
+        account_name: 'relay-fast',
+        predicted_ms: 4321,
+        sample_count: 8,
+        updated_at: '2026-08-12T01:00:00Z',
+        slow_streak: 0,
+        probe_interval_seconds: 120
+      }],
+      total: 1
+    })
+
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('relay-fast')
+    expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('4.32s')
+    expect(wrapper.findAll('[data-testid="first-token-latency-row"]')).toHaveLength(1)
   })
 })

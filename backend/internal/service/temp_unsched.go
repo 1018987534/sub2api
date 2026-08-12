@@ -62,4 +62,5 @@ type FirstTokenLatencyStats struct {
 type FirstTokenLatencyStatsCache interface {
 	RecordSample(ctx context.Context, accountID int64, requestID string, firstTokenMs int) error
 	GetStatsBatch(ctx context.Context, accountIDs []int64) (map[int64]FirstTokenLatencyStats, error)
+	TryClaimProbe(ctx context.Context, accountID int64, lease time.Duration) (bool, error)
 }

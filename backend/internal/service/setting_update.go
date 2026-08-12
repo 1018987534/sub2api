@@ -99,6 +99,7 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
+	normalizeOpenAISchedulerPriorityMode(settings)
 	if err := s.validateDefaultSignupAPIKeyGroup(ctx, settings.DefaultSignupAPIKeyGroupID); err != nil {
 		return nil, err
 	}
@@ -552,6 +553,19 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyAllowUserViewErrorRequests] = strconv.FormatBool(settings.AllowUserViewErrorRequests)
 
 	return updates, nil
+}
+
+func normalizeOpenAISchedulerPriorityMode(settings *SystemSettings) {
+	if settings == nil {
+		return
+	}
+	if settings.FirstTokenPriorityEnabled {
+		settings.OpenAILowUpstreamRatePriorityEnabled = false
+		settings.OpenAILowUpstreamRateStickyWeightedEnabled = false
+		return
+	}
+	settings.OpenAILowUpstreamRatePriorityEnabled = true
+	settings.OpenAILowUpstreamRateStickyWeightedEnabled = true
 }
 
 func defaultAccountSchedulingThresholds() map[string]int {

@@ -561,11 +561,19 @@ func TestSettingService_UpdateSettings_OpenAIAdvancedSchedulerWeightSums(t *test
 	}
 }
 
-func TestSettingService_ParseSettingsDefaultsOpenAISchedulerSettings(t *testing.T) {
+func TestSettingService_ParseSettingsNormalizesOpenAISchedulerPriorityMode(t *testing.T) {
 	svc := NewSettingService(&settingUpdateRepoStub{}, &config.Config{})
 
-	require.False(t, svc.parseSettings(map[string]string{}).OpenAILowUpstreamRatePriorityEnabled)
-	require.False(t, svc.parseSettings(map[string]string{}).OpenAILowUpstreamRateStickyWeightedEnabled)
+	require.True(t, svc.parseSettings(map[string]string{}).OpenAILowUpstreamRatePriorityEnabled)
+	require.True(t, svc.parseSettings(map[string]string{}).OpenAILowUpstreamRateStickyWeightedEnabled)
+	firstToken := svc.parseSettings(map[string]string{
+		SettingKeyFirstTokenPriorityEnabled:                  "true",
+		SettingKeyOpenAILowUpstreamRatePriorityEnabled:       "true",
+		SettingKeyOpenAILowUpstreamRateStickyWeightedEnabled: "true",
+	})
+	require.True(t, firstToken.FirstTokenPriorityEnabled)
+	require.False(t, firstToken.OpenAILowUpstreamRatePriorityEnabled)
+	require.False(t, firstToken.OpenAILowUpstreamRateStickyWeightedEnabled)
 	require.Equal(t, 1.0, svc.parseSettings(map[string]string{}).OpenAIOAuthSchedulingRateMultiplier)
 	require.Equal(t, 0.05, svc.parseSettings(map[string]string{SettingKeyOpenAIOAuthSchedulingRateMultiplier: "0.05"}).OpenAIOAuthSchedulingRateMultiplier)
 }

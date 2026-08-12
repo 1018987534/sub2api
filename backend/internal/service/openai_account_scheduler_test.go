@@ -2158,6 +2158,45 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionSticky(t *testin
 	}
 }
 
+func TestOpenAIGatewayService_FirstTokenPriorityClearsSessionStickyBeforeSelection(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	ctx := context.Background()
+	groupID := int64(10010)
+	slow := Account{ID: 2011, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0, GroupIDs: []int64{groupID}}
+	fast := Account{ID: 2012, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID}}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_fast_recovery": slow.ID}}
+	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		slow.ID: {PredictedMS: 20_000, SampleCount: 5, UpdatedAt: time.Now()},
+		fast.ID: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: time.Now()},
+	}}
+	repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+		SettingKeyFirstTokenPriorityEnabled: "true",
+	}}
+	rateLimitService := &RateLimitService{
+		settingService:              NewSettingService(repo, &config.Config{}),
+		firstTokenLatencyStatsCache: stats,
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{slow, fast}},
+		cache:              cache,
+		cfg:                &config.Config{},
+		rateLimitService:   rateLimitService,
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "session_fast_recovery", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, fast.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, 1, cache.deletedSessions["openai:session_fast_recovery"])
+	require.Equal(t, fast.ID, cache.sessionBindings["openai:session_fast_recovery"])
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyKeepsSticky(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10100)

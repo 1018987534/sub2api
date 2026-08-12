@@ -884,6 +884,21 @@ export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bed
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
 
+export interface AccountFirstTokenLatencyMetric {
+  account_id: number
+  account_name: string
+  predicted_ms: number
+  sample_count: number
+  updated_at: string
+  slow_streak: number
+  probe_interval_seconds: number
+}
+
+export interface AccountFirstTokenLatencyResponse {
+  items: AccountFirstTokenLatencyMetric[]
+  total: number
+}
+
 // Claude Model type (returned by /v1/models and account models API)
 export interface ClaudeModel {
   id: string

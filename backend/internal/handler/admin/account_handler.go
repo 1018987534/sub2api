@@ -699,6 +699,34 @@ func (h *AccountHandler) List(c *gin.Context) {
 	response.Paginated(c, result, total, page, pageSize)
 }
 
+// GetFirstTokenLatencies returns recent scheduling predictions for enabled
+// OpenAI API-key relay accounts. OAuth accounts are intentionally excluded.
+func (h *AccountHandler) GetFirstTokenLatencies(c *gin.Context) {
+	if h.adminService == nil || h.rateLimitService == nil {
+		response.Success(c, gin.H{"items": []service.AccountFirstTokenLatencyMetric{}, "total": 0})
+		return
+	}
+	accounts, err := h.adminService.ListAccountsForSchedulerScoreFilter(
+		c.Request.Context(),
+		service.PlatformOpenAI,
+		service.AccountTypeAPIKey,
+		service.StatusActive,
+		"",
+		0,
+		"",
+	)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	metrics, err := h.rateLimitService.AccountFirstTokenLatencyMetrics(c.Request.Context(), accounts)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"items": metrics, "total": len(metrics)})
+}
+
 func buildAccountsListETag(
 	items []AccountWithConcurrency,
 	total int64,

@@ -761,7 +761,7 @@ func TestOpenAIGatewayServiceLegacyLowRateSoftStickyFallsThroughFullRateTier(t *
 	}
 }
 
-func TestOpenAIGatewayServiceLegacyLowRateSoftStickyOffKeepsHardAffinity(t *testing.T) {
+func TestOpenAIGatewayServiceLowRateModeAlwaysUsesSoftSticky(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 
@@ -794,7 +794,8 @@ func TestOpenAIGatewayServiceLegacyLowRateSoftStickyOffKeepsHardAffinity(t *test
 
 	selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "session", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
 	require.NoError(t, err)
-	require.Equal(t, expensive.ID, selection.Account.ID)
+	require.Equal(t, cheap.ID, selection.Account.ID)
+	require.Equal(t, cheap.ID, cache.sessionBindings[stickyKey])
 	selection.ReleaseFunc()
 }
 
@@ -843,7 +844,7 @@ func TestOpenAIGatewayServiceLegacyLowRatePriorityIsIndependentFromAdvancedSched
 		loadErr   error
 		wantID    int64
 	}{
-		{name: "switch off keeps priority first", loadBatch: true, wantID: 2},
+		{name: "legacy false is normalized to low rate", loadBatch: true, wantID: 1},
 		{name: "load batch", enabled: true, loadBatch: true, wantID: 1},
 		{name: "load batch disabled", enabled: true, wantID: 1},
 		{name: "load lookup failure", enabled: true, loadBatch: true, loadErr: errors.New("load unavailable"), wantID: 1},

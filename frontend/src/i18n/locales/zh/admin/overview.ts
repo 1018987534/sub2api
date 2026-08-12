@@ -77,7 +77,16 @@ export default {
       groupPricingDesc: '设置批量折扣和冻结比例',
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
-      failedToLoad: '加载仪表盘数据失败'
+      failedToLoad: '加载仪表盘数据失败',
+      firstTokenLatencyTitle: '上游中转近期首字',
+      firstTokenLatencyDescription: '仅统计当前启用的 OpenAI API Key 上游账号。数值为近期中位数与 EWMA 组合的调度预测，不含 OAuth 账号。',
+      firstTokenLatencyFailed: '首字统计加载失败',
+      firstTokenLatencyEmpty: '当前启用的上游中转账号暂无首字统计',
+      firstTokenAccount: '账号',
+      firstTokenPrediction: '近期首字预测',
+      firstTokenSamples: '样本数',
+      firstTokenUpdated: '最近更新',
+      firstTokenProbeInterval: '动态探测间隔'
     },
 
     backup: {
