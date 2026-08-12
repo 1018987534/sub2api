@@ -391,9 +391,9 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 
 		AffiliateEnabled: settings.AffiliateEnabled,
 
-		AccountSchedulingThresholds:        settings.AccountSchedulingThresholds,
-		FirstTokenLatencyAutoPauseSettings: settings.FirstTokenLatencyAutoPauseSettings,
-		AllowUserViewErrorRequests:         settings.AllowUserViewErrorRequests,
+		AccountSchedulingThresholds: settings.AccountSchedulingThresholds,
+		FirstTokenPriorityEnabled:   settings.FirstTokenPriorityEnabled,
+		AllowUserViewErrorRequests:  settings.AllowUserViewErrorRequests,
 	}
 
 	// OpenAI fast policy (stored under a dedicated setting key)

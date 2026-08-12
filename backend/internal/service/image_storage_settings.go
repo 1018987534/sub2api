@@ -163,7 +163,8 @@ func (s *ImageStorageSettingService) SecretConfigured(ctx context.Context) bool 
 	return settings.SecretAccessKey != ""
 }
 
-// Update 保存设置并立即生效。SecretAccessKey 留空表示沿用已保存的值。
+// Update 保存设置并立即生效。SecretAccessKey 留空表示沿用已保存的值；
+// 后台从未保存过设置时，沿用 config.yaml/环境变量里的回落值。
 func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorageSettings) (*ImageStorageSettings, error) {
 	normalizeImageStorageSettings(&in)
 
@@ -172,8 +173,21 @@ func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorage
 		in.Endpoint, in.Region, in.AccessKeyID, in.SecretAccessKey = "", "", "", ""
 		in.ForcePathStyle = false
 	} else if in.SecretAccessKey == "" {
-		if old, err := s.load(ctx); err == nil && old != nil {
-			in.SecretAccessKey = old.SecretAccessKey
+		secret, fromStoredSettings, err := s.savedOrFallbackSecret(ctx)
+		if err == nil {
+			in.SecretAccessKey = secret
+			if !fromStoredSettings && secret != "" {
+				// A config-file secret becomes persisted data once the admin saves
+				// the form, so encrypt it before writing the settings row.
+				if s.backup == nil || !s.backup.EncryptionKeyConfigured() {
+					return nil, ErrSecretEncryptionKeyNotConfigured
+				}
+				encrypted, err := s.encryptor.Encrypt(secret)
+				if err != nil {
+					return nil, fmt.Errorf("encrypt secret: %w", err)
+				}
+				in.SecretAccessKey = encrypted
+			}
 		}
 	} else {
 		// 拒绝用自动生成的临时密钥加密：重启后密文无法解密（#4524）。
@@ -202,13 +216,12 @@ func (s *ImageStorageSettingService) Update(ctx context.Context, in ImageStorage
 }
 
 // TestConnection 用给定设置试建一次客户端，用于后台的"测试连接"按钮。
-// 与 Update 一样支持留空 SecretAccessKey 表示沿用已保存的值。
+// 与 Update 一样支持留空 SecretAccessKey 表示沿用已保存的值或配置文件回落值。
 func (s *ImageStorageSettingService) TestConnection(ctx context.Context, in ImageStorageSettings) error {
 	normalizeImageStorageSettings(&in)
 	if !in.ReuseBackupS3 && in.SecretAccessKey == "" {
-		old, err := s.load(ctx)
-		if err == nil && old != nil {
-			in.SecretAccessKey = old.SecretAccessKey
+		if secret, _, err := s.savedOrFallbackSecret(ctx); err == nil {
+			in.SecretAccessKey = secret
 		}
 	}
 	cfg, err := s.toImageStorageConfig(ctx, &in)
@@ -222,6 +235,20 @@ func (s *ImageStorageSettingService) TestConnection(ctx context.Context, in Imag
 		return err
 	}
 	return nil
+}
+
+// savedOrFallbackSecret returns the encrypted value from the admin settings row
+// when one exists. When the row has never been written, it returns the plaintext
+// secret supplied by config.yaml or its environment overrides instead.
+func (s *ImageStorageSettingService) savedOrFallbackSecret(ctx context.Context) (string, bool, error) {
+	settings, err := s.load(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	if settings != nil {
+		return settings.SecretAccessKey, true, nil
+	}
+	return s.fallback.SecretAccessKey, false, nil
 }
 
 // effectiveConfig 把后台设置（或 config.yaml 回落）解析成运行时配置。

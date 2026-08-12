@@ -50,6 +50,7 @@ type cachedOpenAIAdvancedSchedulerSetting struct {
 	enabled                              bool
 	stickyWeightedEnabled                bool
 	subscriptionPriorityEnabled          bool
+	firstTokenPriorityEnabled            bool
 	lbTopKOverride                       int
 	weightOverrides                      map[string]float64
 	expiresAt                            int64
@@ -62,6 +63,7 @@ type openAIAdvancedSchedulerRuntimeSettings struct {
 	enabled                              bool
 	stickyWeightedEnabled                bool
 	subscriptionPriorityEnabled          bool
+	firstTokenPriorityEnabled            bool
 	lbTopKOverride                       int
 	weightOverrides                      map[string]float64
 }
@@ -994,6 +996,9 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	plan.candidates = candidates
 
 	plan.topK = s.service.openAIWSLBTopKForRequest(ctx)
+	if s.service.isFirstTokenPriorityEnabled(ctx) {
+		plan.topK = len(candidates)
+	}
 	if plan.topK > len(candidates) {
 		plan.topK = len(candidates)
 	}
@@ -1002,7 +1007,68 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	}
 
 	plan.selectionOrder = s.buildOpenAISelectionOrder(req, plan)
+	if s.service.isFirstTokenPriorityEnabled(ctx) && s.service.rateLimitService != nil {
+		plan.selectionOrder = applyOpenAIFirstTokenPriorityOrder(
+			ctx,
+			req,
+			plan.selectionOrder,
+			s.service.rateLimitService.firstTokenLatencyStatsCache,
+			s.service.openAIOAuthSchedulingRateMultiplier(ctx),
+		)
+	}
 	return plan
+}
+
+func applyOpenAIFirstTokenPriorityOrder(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+	selectionOrder []openAIAccountCandidateScore,
+	cache FirstTokenLatencyStatsCache,
+	oauthSchedulingRateMultiplier float64,
+) []openAIAccountCandidateScore {
+	if len(selectionOrder) <= 1 {
+		return selectionOrder
+	}
+	if req.UseUpstreamTokenCost {
+		accounts := make([]*Account, 0, len(selectionOrder))
+		for _, candidate := range selectionOrder {
+			accounts = append(accounts, candidate.account)
+		}
+		rateOrder := newOpenAILegacyUpstreamRateOrder(accounts, time.Now(), oauthSchedulingRateMultiplier)
+		if rateOrder.enabled {
+			sort.SliceStable(selectionOrder, func(i, j int) bool {
+				if req.RequireCompact {
+					leftTier := openAICompactSupportTier(selectionOrder[i].account)
+					rightTier := openAICompactSupportTier(selectionOrder[j].account)
+					if leftTier != rightTier {
+						return leftTier > rightTier
+					}
+				}
+				return rateOrder.compare(selectionOrder[i].account, selectionOrder[j].account) < 0
+			})
+		}
+	}
+
+	for start := 0; start < len(selectionOrder); {
+		end := len(selectionOrder)
+		if req.RequireCompact {
+			tier := openAICompactSupportTier(selectionOrder[start].account)
+			end = start + 1
+			for end < len(selectionOrder) && openAICompactSupportTier(selectionOrder[end].account) == tier {
+				end++
+			}
+		}
+		accounts := make([]*Account, 0, end-start)
+		for _, candidate := range selectionOrder[start:end] {
+			accounts = append(accounts, candidate.account)
+		}
+		ranks := firstTokenPriorityRanks(ctx, accounts, cache)
+		sort.SliceStable(selectionOrder[start:end], func(i, j int) bool {
+			return ranks[selectionOrder[start+i].account.ID] < ranks[selectionOrder[start+j].account.ID]
+		})
+		start = end
+	}
+	return selectionOrder
 }
 
 func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
@@ -1836,6 +1902,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled:                              cached.enabled,
 				stickyWeightedEnabled:                cached.stickyWeightedEnabled,
 				subscriptionPriorityEnabled:          cached.subscriptionPriorityEnabled,
+				firstTokenPriorityEnabled:            cached.firstTokenPriorityEnabled,
 				lbTopKOverride:                       cached.lbTopKOverride,
 				weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
 			}
@@ -1852,6 +1919,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 					enabled:                              cached.enabled,
 					stickyWeightedEnabled:                cached.stickyWeightedEnabled,
 					subscriptionPriorityEnabled:          cached.subscriptionPriorityEnabled,
+					firstTokenPriorityEnabled:            cached.firstTokenPriorityEnabled,
 					lbTopKOverride:                       cached.lbTopKOverride,
 					weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
 				}, nil
@@ -1864,6 +1932,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		enabled := false
 		stickyWeightedEnabled := false
 		subscriptionPriorityEnabled := false
+		firstTokenPriorityEnabled := false
 		lbTopKOverride := 0
 		weightOverrides := map[string]float64{}
 		if repo := s.openAIAdvancedSchedulerSettingRepo(); repo != nil {
@@ -1877,6 +1946,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled = strings.EqualFold(strings.TrimSpace(values[openAIAdvancedSchedulerSettingKey]), "true")
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
+				firstTokenPriorityEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyFirstTokenPriorityEnabled]), "true")
 				lbTopKOverride = parsePositiveIntOverride(values[SettingKeyOpenAIAdvancedSchedulerLBTopK])
 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(values)
 			} else {
@@ -1895,6 +1965,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled = strings.EqualFold(strings.TrimSpace(fallbackValues[openAIAdvancedSchedulerSettingKey]), "true")
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
+				firstTokenPriorityEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyFirstTokenPriorityEnabled]), "true")
 				lbTopKOverride = parsePositiveIntOverride(fallbackValues[SettingKeyOpenAIAdvancedSchedulerLBTopK])
 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(fallbackValues)
 			}
@@ -1907,6 +1978,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 			enabled:                              enabled,
 			stickyWeightedEnabled:                stickyWeightedEnabled,
 			subscriptionPriorityEnabled:          subscriptionPriorityEnabled,
+			firstTokenPriorityEnabled:            firstTokenPriorityEnabled,
 			lbTopKOverride:                       lbTopKOverride,
 			weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(weightOverrides),
 			expiresAt:                            time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
@@ -1918,6 +1990,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 			enabled:                              enabled,
 			stickyWeightedEnabled:                stickyWeightedEnabled,
 			subscriptionPriorityEnabled:          subscriptionPriorityEnabled,
+			firstTokenPriorityEnabled:            firstTokenPriorityEnabled,
 			lbTopKOverride:                       lbTopKOverride,
 			weightOverrides:                      weightOverrides,
 		}, nil
@@ -1955,6 +2028,10 @@ func (s *OpenAIGatewayService) isOpenAIAdvancedSchedulerSubscriptionPriorityEnab
 	return settings.enabled && settings.subscriptionPriorityEnabled
 }
 
+func (s *OpenAIGatewayService) isFirstTokenPriorityEnabled(ctx context.Context) bool {
+	return s.openAIAdvancedSchedulerRuntimeSettings(ctx).firstTokenPriorityEnabled
+}
+
 func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
 	keys := []string{
 		SettingKeyOpenAILowUpstreamRatePriorityEnabled,
@@ -1963,6 +2040,7 @@ func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
 		openAIAdvancedSchedulerSettingKey,
 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled,
 		SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
+		SettingKeyFirstTokenPriorityEnabled,
 		SettingKeyOpenAIAdvancedSchedulerLBTopK,
 	}
 	for _, spec := range openAIAdvancedSchedulerWeightOverrideSpecs() {
@@ -2034,7 +2112,8 @@ func (s *OpenAIGatewayService) getOpenAIAccountScheduler(ctx context.Context) Op
 	if s == nil {
 		return nil
 	}
-	if !s.isOpenAIAdvancedSchedulerEnabled(ctx) {
+	settings := s.openAIAdvancedSchedulerRuntimeSettings(ctx)
+	if !settings.enabled && !settings.firstTokenPriorityEnabled {
 		return nil
 	}
 	s.openaiSchedulerOnce.Do(func() {

@@ -558,6 +558,8 @@ const (
 	SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost          = "openai_advanced_scheduler_weight_upstream_cost"
 	SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse      = "openai_advanced_scheduler_weight_previous_response"
 	SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky         = "openai_advanced_scheduler_weight_session_sticky"
+	// SettingKeyFirstTokenPriorityEnabled makes recent TTFT the primary non-sticky scheduling order.
+	SettingKeyFirstTokenPriorityEnabled = "first_token_priority_enabled"
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
@@ -631,10 +633,6 @@ const SettingKeyDefaultPlatformQuotas = "default_platform_quotas"
 // SettingKeyAccountSchedulingThresholds —— 系统全局：按平台自动停调阈值（JSON map）。
 // 值为 map[platform]percent，1..100；100 = 禁用该平台自动停调。
 const SettingKeyAccountSchedulingThresholds = "account_scheduling_thresholds"
-
-// SettingKeyFirstTokenLatencyAutoPauseSettings stores the global rolling-window
-// first-token latency circuit-breaker rules as JSON.
-const SettingKeyFirstTokenLatencyAutoPauseSettings = "first_token_latency_auto_pause_settings"
 
 // SettingKeyAuthSourcePlatformQuotas 返回某 auth source 的 platform quota JSON key。
 // 形如 auth_source_default_{source}_platform_quotas

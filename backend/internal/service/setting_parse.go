@@ -261,6 +261,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost:          "",
 		SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse:      "",
 		SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky:         "",
+		SettingKeyFirstTokenPriorityEnabled:                          "false",
 
 		SettingKeyAllowUserViewErrorRequests: "false",
 	}
@@ -930,6 +931,7 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAIAdvancedSchedulerWeightUpstreamCost = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost])
 	result.OpenAIAdvancedSchedulerWeightPreviousResponse = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse])
 	result.OpenAIAdvancedSchedulerWeightSessionSticky = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky])
+	result.FirstTokenPriorityEnabled = settings[SettingKeyFirstTokenPriorityEnabled] == "true"
 	result.OpenAIAdvancedSchedulerEffectiveLBTopK = s.openAIAdvancedSchedulerEffectiveLBTopK()
 	effectiveWeights := s.openAIAdvancedSchedulerEffectiveWeights()
 	result.OpenAIAdvancedSchedulerEffectiveWeightPriority = formatOpenAIAdvancedSchedulerFloat(effectiveWeights.Priority)
@@ -977,16 +979,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 			result.AccountSchedulingThresholds = thresholds
 		}
 	}
-	firstTokenLatencySettings := DefaultFirstTokenLatencyAutoPauseSettings()
-	if raw := strings.TrimSpace(settings[SettingKeyFirstTokenLatencyAutoPauseSettings]); raw != "" {
-		if parsed, err := parseFirstTokenLatencyAutoPauseSettings(raw); err != nil {
-			slog.Warn("[Setting] parseSettings: unmarshal first_token_latency_auto_pause_settings failed", "error", err)
-		} else {
-			firstTokenLatencySettings = parsed
-		}
-	}
-	result.FirstTokenLatencyAutoPauseSettings = &firstTokenLatencySettings
-
 	result.AllowUserViewErrorRequests = settings[SettingKeyAllowUserViewErrorRequests] == "true" // default false
 
 	// Publish Grok default model_mapping options for accounts with empty mapping.

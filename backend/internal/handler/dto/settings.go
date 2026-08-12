@@ -265,6 +265,7 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEffectiveWeightUpstreamCost     string  `json:"openai_advanced_scheduler_effective_weight_upstream_cost"`
 	OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse string  `json:"openai_advanced_scheduler_effective_weight_previous_response"`
 	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string  `json:"openai_advanced_scheduler_effective_weight_session_sticky"`
+	FirstTokenPriorityEnabled                              bool    `json:"first_token_priority_enabled"`
 
 	// Payment configuration
 	PaymentEnabled                   bool     `json:"payment_enabled"`
@@ -341,8 +342,6 @@ type SystemSettings struct {
 
 	// 系统全局账号自动停调阈值（key = platform，100 = disabled）
 	AccountSchedulingThresholds map[string]int `json:"account_scheduling_thresholds,omitempty"`
-
-	FirstTokenLatencyAutoPauseSettings *service.FirstTokenLatencyAutoPauseSettings `json:"first_token_latency_auto_pause_settings,omitempty"`
 
 	// 允许终端用户在用量页查看自己的失败请求
 	AllowUserViewErrorRequests bool `json:"allow_user_view_error_requests"`

@@ -5180,128 +5180,17 @@
                 <div class="flex items-start justify-between gap-4">
                   <div>
                     <label class="font-medium text-gray-900 dark:text-white">
-                      {{ t("admin.settings.scheduling.firstTokenLatencyAutoPauseTitle") }}
+                      {{ t("admin.settings.scheduling.firstTokenPriorityTitle") }}
                     </label>
                     <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                      {{ t("admin.settings.scheduling.firstTokenLatencyAutoPauseDescription") }}
+                      {{ t("admin.settings.scheduling.firstTokenPriorityDescription") }}
                     </p>
                   </div>
                   <Toggle
-                    v-model="form.first_token_latency_auto_pause_settings.enabled"
-                    :aria-label="t('admin.settings.scheduling.firstTokenLatencyAutoPauseTitle')"
-                    data-testid="first-token-latency-auto-pause-enabled"
+                    v-model="form.first_token_priority_enabled"
+                    :aria-label="t('admin.settings.scheduling.firstTokenPriorityTitle')"
+                    data-testid="first-token-priority-enabled"
                   />
-                </div>
-
-                <div
-                  v-if="form.first_token_latency_auto_pause_settings.enabled"
-                  class="mt-5 space-y-4"
-                >
-                  <p class="text-xs text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.scheduling.firstTokenLatencyRulesOrHint") }}
-                  </p>
-                  <div
-                    v-for="(rule, index) in form.first_token_latency_auto_pause_settings.rules"
-                    :key="index"
-                    class="rounded-lg border border-gray-200 p-4 dark:border-dark-700"
-                    :data-testid="`first-token-latency-rule-${index}`"
-                  >
-                    <div class="mb-4 flex items-center justify-between gap-3">
-                      <span class="text-sm font-medium text-gray-900 dark:text-white">
-                        {{ t("admin.settings.scheduling.firstTokenLatencyRule", { number: index + 1 }) }}
-                      </span>
-                      <button
-                        v-if="form.first_token_latency_auto_pause_settings.rules.length > 1"
-                        type="button"
-                        class="rounded p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20"
-                        :title="t('admin.settings.scheduling.removeFirstTokenLatencyRule')"
-                        :aria-label="t('admin.settings.scheduling.removeFirstTokenLatencyRule')"
-                        @click="removeFirstTokenLatencyRule(index)"
-                      >
-                        <Icon name="trash" size="sm" />
-                      </button>
-                    </div>
-                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                      <div>
-                        <label
-                          class="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-300"
-                          :for="`first-token-window-${index}`"
-                        >
-                          {{ t("admin.settings.scheduling.firstTokenLatencyWindowMinutes") }}
-                        </label>
-                        <input
-                          :id="`first-token-window-${index}`"
-                          v-model.number="rule.window_minutes"
-                          type="number"
-                          min="1"
-                          max="1440"
-                          step="1"
-                          class="input"
-                        />
-                      </div>
-                      <div>
-                        <label
-                          class="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-300"
-                          :for="`first-token-threshold-${index}`"
-                        >
-                          {{ t("admin.settings.scheduling.firstTokenLatencyThresholdSeconds") }}
-                        </label>
-                        <input
-                          :id="`first-token-threshold-${index}`"
-                          v-model.number="rule.threshold_seconds"
-                          type="number"
-                          min="0.1"
-                          max="600"
-                          step="0.1"
-                          class="input"
-                        />
-                      </div>
-                      <div>
-                        <label
-                          class="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-300"
-                          :for="`first-token-percent-${index}`"
-                        >
-                          {{ t("admin.settings.scheduling.firstTokenLatencyTriggerPercent") }}
-                        </label>
-                        <input
-                          :id="`first-token-percent-${index}`"
-                          v-model.number="rule.trigger_percent"
-                          type="number"
-                          min="0.1"
-                          max="100"
-                          step="0.1"
-                          class="input"
-                        />
-                      </div>
-                      <div>
-                        <label
-                          class="mb-1.5 block text-xs font-medium text-gray-600 dark:text-gray-300"
-                          :for="`first-token-pause-${index}`"
-                        >
-                          {{ t("admin.settings.scheduling.firstTokenLatencyPauseMinutes") }}
-                        </label>
-                        <input
-                          :id="`first-token-pause-${index}`"
-                          v-model.number="rule.pause_minutes"
-                          type="number"
-                          min="1"
-                          max="1440"
-                          step="1"
-                          class="input"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    class="btn btn-secondary btn-sm"
-                    :disabled="form.first_token_latency_auto_pause_settings.rules.length >= 20"
-                    data-testid="add-first-token-latency-rule"
-                    @click="addFirstTokenLatencyRule"
-                  >
-                    <Icon name="plus" size="sm" class="mr-1.5" />
-                    {{ t("admin.settings.scheduling.addFirstTokenLatencyRule") }}
-                  </button>
                 </div>
               </div>
 
@@ -9068,12 +8957,9 @@ import { adminAPI } from "@/api";
 import {
   appendAuthSourceDefaultsToUpdateRequest,
   buildAuthSourceDefaultsState,
-  defaultFirstTokenLatencyAutoPauseRule,
   normalizeAccountSchedulingThresholdsMap,
-  normalizeFirstTokenLatencyAutoPauseSettings,
   normalizePlatformQuotasMap,
   sanitizeAccountSchedulingThresholdsMap,
-  sanitizeFirstTokenLatencyAutoPauseSettings,
   sanitizePlatformQuotasMap,
   SCHEDULING_THRESHOLD_PLATFORMS,
   defaultWeChatConnectScopesForMode,
@@ -9850,22 +9736,9 @@ type SettingsForm = Omit<
   // 系统全局平台限额 map；form 内始终归一化为全 4 平台对象（模板非空绑定依赖此不变量）
   default_platform_quotas: DefaultPlatformQuotasMap;
   account_scheduling_thresholds: ReturnType<typeof normalizeAccountSchedulingThresholdsMap>;
-  first_token_latency_auto_pause_settings: ReturnType<typeof normalizeFirstTokenLatencyAutoPauseSettings>;
 };
 
 const schedulingThresholdPlatforms = SCHEDULING_THRESHOLD_PLATFORMS;
-
-function addFirstTokenLatencyRule() {
-  if (form.first_token_latency_auto_pause_settings.rules.length >= 20) return;
-  form.first_token_latency_auto_pause_settings.rules.push(
-    defaultFirstTokenLatencyAutoPauseRule(),
-  );
-}
-
-function removeFirstTokenLatencyRule(index: number) {
-  if (form.first_token_latency_auto_pause_settings.rules.length <= 1) return;
-  form.first_token_latency_auto_pause_settings.rules.splice(index, 1);
-}
 
 const form = reactive<SettingsForm>({
   registration_enabled: true,
@@ -9892,7 +9765,7 @@ const form = reactive<SettingsForm>({
   default_signup_api_key_group_id: 0,
   default_platform_quotas: normalizePlatformQuotasMap() as DefaultPlatformQuotasMap,
   account_scheduling_thresholds: normalizeAccountSchedulingThresholdsMap(),
-  first_token_latency_auto_pause_settings: normalizeFirstTokenLatencyAutoPauseSettings(),
+  first_token_priority_enabled: false,
   affiliate_rebate_rate: 20,
   affiliate_rebate_freeze_hours: 0,
   affiliate_rebate_duration_days: 0,
@@ -11170,9 +11043,6 @@ async function loadSettings() {
     form.account_scheduling_thresholds = normalizeAccountSchedulingThresholdsMap(
       settings.account_scheduling_thresholds,
     );
-    form.first_token_latency_auto_pause_settings = normalizeFirstTokenLatencyAutoPauseSettings(
-      settings.first_token_latency_auto_pause_settings,
-    );
     form.backend_mode_enabled = settings.backend_mode_enabled;
     form.default_subscriptions = normalizeDefaultSubscriptionSettings(
       settings.default_subscriptions,
@@ -11861,9 +11731,7 @@ async function saveSettings() {
     payload.account_scheduling_thresholds = sanitizeAccountSchedulingThresholdsMap(
       form.account_scheduling_thresholds,
     );
-    payload.first_token_latency_auto_pause_settings = sanitizeFirstTokenLatencyAutoPauseSettings(
-      form.first_token_latency_auto_pause_settings,
-    );
+    payload.first_token_priority_enabled = form.first_token_priority_enabled;
     appendAuthSourceDefaultsToUpdateRequest(payload, authSourceDefaults);
 
     const updated = await settingsStepUp.run(() =>
@@ -11879,9 +11747,6 @@ async function saveSettings() {
     form.default_platform_quotas = normalizePlatformQuotasMap(updated.default_platform_quotas);
     form.account_scheduling_thresholds = normalizeAccountSchedulingThresholdsMap(
       updated.account_scheduling_thresholds,
-    );
-    form.first_token_latency_auto_pause_settings = normalizeFirstTokenLatencyAutoPauseSettings(
-      updated.first_token_latency_auto_pause_settings,
     );
     registrationEmailSuffixWhitelistTags.value =
       normalizeRegistrationEmailSuffixDomains(

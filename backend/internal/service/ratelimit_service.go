@@ -30,7 +30,7 @@ type RateLimitService struct {
 	geminiQuotaService             *GeminiQuotaService
 	tempUnschedCache               TempUnschedCache
 	tempUnschedFailureCounterCache TempUnschedFailureCounterCache
-	firstTokenLatencyCounterCache  FirstTokenLatencyCounterCache
+	firstTokenLatencyStatsCache    FirstTokenLatencyStatsCache
 	timeoutCounterCache            TimeoutCounterCache
 	openAI403CounterCache          OpenAI403CounterCache
 	settingService                 *SettingService
@@ -107,8 +107,8 @@ func (s *RateLimitService) SetTempUnschedFailureCounterCache(cache TempUnschedFa
 	s.tempUnschedFailureCounterCache = cache
 }
 
-func (s *RateLimitService) SetFirstTokenLatencyCounterCache(cache FirstTokenLatencyCounterCache) {
-	s.firstTokenLatencyCounterCache = cache
+func (s *RateLimitService) SetFirstTokenLatencyStatsCache(cache FirstTokenLatencyStatsCache) {
+	s.firstTokenLatencyStatsCache = cache
 }
 
 // SetOpenAI403CounterCache 设置 OpenAI 403 连续失败计数器（可选依赖）

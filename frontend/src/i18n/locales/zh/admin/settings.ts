@@ -425,16 +425,8 @@ export default {
         accountSchedulingThresholdsGlobalHint: '系统级默认值，作用于该平台全部账号。可在账号编辑页对单个账号覆盖。',
         accountSchedulingThresholdsDisabledHint: '100 表示禁用该平台自动停调；1–99 表示达到该利用率后暂停调度。',
         accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。',
-        firstTokenLatencyAutoPauseTitle: '首字延迟自动停调',
-        firstTokenLatencyAutoPauseDescription: '对所有账号的真实首字耗时进行滚动统计；同一账号命中任意一条规则后临时移出调度，到期自动恢复。',
-        firstTokenLatencyRulesOrHint: '规则之间为“或”关系。同一次请求命中多条规则时，采用最长的暂停时长。触发占比 = 超过首字阈值的成功请求数 ÷ 窗口内所有带首字耗时的成功请求数。',
-        firstTokenLatencyRule: '规则 {number}',
-        firstTokenLatencyWindowMinutes: '统计窗口（分钟）',
-        firstTokenLatencyThresholdSeconds: '首字超过（秒）',
-        firstTokenLatencyTriggerPercent: '触发占比（%）',
-        firstTokenLatencyPauseMinutes: '暂停时长（分钟）',
-        addFirstTokenLatencyRule: '添加规则',
-        removeFirstTokenLatencyRule: '删除规则'
+        firstTokenPriorityTitle: '首字优先调度',
+        firstTokenPriorityDescription: '根据近期真实首字耗时动态优先快账号，并少量探测未知或可能恢复的账号；持续慢账号会逐步降低探测频率。所有候选账号都有可靠数据且平均首字均在 10 秒内时，改走低倍率优先。'
       },
       upstreamBillingProbe: {
         title: '上游倍率自动探测',

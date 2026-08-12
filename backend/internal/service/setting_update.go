@@ -516,6 +516,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost] = settings.OpenAIAdvancedSchedulerWeightUpstreamCost
 	updates[SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse] = settings.OpenAIAdvancedSchedulerWeightPreviousResponse
 	updates[SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky] = settings.OpenAIAdvancedSchedulerWeightSessionSticky
+	updates[SettingKeyFirstTokenPriorityEnabled] = strconv.FormatBool(settings.FirstTokenPriorityEnabled)
 
 	// 余额、订阅到期与账号限额通知
 	updates[SettingKeyBalanceLowNotifyEnabled] = strconv.FormatBool(settings.BalanceLowNotifyEnabled)
@@ -546,17 +547,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 			return nil, fmt.Errorf("marshal account scheduling thresholds: %w", err)
 		}
 		updates[SettingKeyAccountSchedulingThresholds] = string(blob)
-	}
-	if settings.FirstTokenLatencyAutoPauseSettings != nil {
-		normalized, err := validateFirstTokenLatencyAutoPauseSettings(*settings.FirstTokenLatencyAutoPauseSettings)
-		if err != nil {
-			return nil, err
-		}
-		blob, err := json.Marshal(normalized)
-		if err != nil {
-			return nil, fmt.Errorf("marshal first-token latency auto-pause settings: %w", err)
-		}
-		updates[SettingKeyFirstTokenLatencyAutoPauseSettings] = string(blob)
 	}
 
 	updates[SettingKeyAllowUserViewErrorRequests] = strconv.FormatBool(settings.AllowUserViewErrorRequests)
@@ -759,6 +749,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		enabled:                              settings.OpenAIAdvancedSchedulerEnabled,
 		stickyWeightedEnabled:                settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
 		subscriptionPriorityEnabled:          settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
+		firstTokenPriorityEnabled:            settings.FirstTokenPriorityEnabled,
 		lbTopKOverride:                       parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),
 		weightOverrides: parseOpenAIAdvancedSchedulerWeightOverrides(map[string]string{
 			SettingKeyOpenAIAdvancedSchedulerWeightPriority:         settings.OpenAIAdvancedSchedulerWeightPriority,
@@ -798,19 +789,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	} else {
 		// Partial/omitted payload: clear cache so the next hot-path read reloads from DB.
 		accountSchedulingThresholdsCache.Store(&cachedAccountSchedulingThresholds{})
-	}
-	s.firstTokenLatencyAutoPauseSF.Forget(SettingKeyFirstTokenLatencyAutoPauseSettings)
-	if settings.FirstTokenLatencyAutoPauseSettings != nil {
-		normalized, err := validateFirstTokenLatencyAutoPauseSettings(*settings.FirstTokenLatencyAutoPauseSettings)
-		if err != nil {
-			normalized = DefaultFirstTokenLatencyAutoPauseSettings()
-		}
-		s.firstTokenLatencyAutoPauseCache.Store(&cachedFirstTokenLatencyAutoPauseSettings{
-			settings:  cloneFirstTokenLatencyAutoPauseSettings(normalized),
-			expiresAt: time.Now().Add(firstTokenLatencyAutoPauseCacheTTL).UnixNano(),
-		})
-	} else {
-		s.firstTokenLatencyAutoPauseCache.Store(&cachedFirstTokenLatencyAutoPauseSettings{})
 	}
 	if s.cfg != nil {
 		s.cfg.SetForwardedClientIPSettings(settings.APIKeyACLTrustForwardedIP, settings.ForwardedClientIPHeaders)

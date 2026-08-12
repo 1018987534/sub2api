@@ -156,9 +156,6 @@ type SettingService struct {
 	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
 	openAIQuotaAutoPauseSettingsSF    singleflight.Group
 
-	firstTokenLatencyAutoPauseCache atomic.Value // *cachedFirstTokenLatencyAutoPauseSettings
-	firstTokenLatencyAutoPauseSF    singleflight.Group
-
 	// gatewayRoutingRuntimeCache holds the last monitor-backed routing result.
 	// It is deliberately per-service so tests and multiple processes do not share state.
 	gatewayRoutingRuntimeCache atomic.Value // *cachedGatewayRoutingRuntime

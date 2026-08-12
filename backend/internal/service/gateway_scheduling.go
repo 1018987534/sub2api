@@ -707,19 +707,53 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				})
 			}
 		}
+		firstTokenPriority := s.rateLimitService != nil && s.rateLimitService.FirstTokenPriorityEnabled(ctx)
+		if firstTokenPriority && len(available) > 1 {
+			// Build the old layered order first. It remains the tie-breaker when
+			// measured TTFT differs by no more than the noise band.
+			remaining := append([]accountWithLoad(nil), available...)
+			baseline := make([]accountWithLoad, 0, len(available))
+			for len(remaining) > 0 {
+				layer := filterByMinPriority(remaining)
+				if cfg.PreferSoonestReset {
+					layer = filterBySoonestReset(layer)
+				}
+				layer = filterByMinLoadRate(layer)
+				selected := selectByLRU(layer, preferOAuth)
+				if selected == nil {
+					break
+				}
+				baseline = append(baseline, *selected)
+				remaining = removeAccountWithLoad(remaining, selected.account.ID)
+			}
+			accounts := make([]*Account, 0, len(baseline))
+			for _, candidate := range baseline {
+				accounts = append(accounts, candidate.account)
+			}
+			ranks := firstTokenPriorityRanks(ctx, accounts, s.rateLimitService.firstTokenLatencyStatsCache)
+			sort.SliceStable(baseline, func(i, j int) bool {
+				return ranks[baseline[i].account.ID] < ranks[baseline[j].account.ID]
+			})
+			available = baseline
+		}
 
 		// 分层过滤选择：优先级 →（可选）最早重置 → 负载率 → LRU
 		for len(available) > 0 {
-			// 1. 取优先级最小的集合
-			candidates := filterByMinPriority(available)
-			// 2. （可选）use-it-or-lose-it：优先选用会话窗口最早重置的账号
-			if cfg.PreferSoonestReset {
-				candidates = filterBySoonestReset(candidates)
+			var selected *accountWithLoad
+			if firstTokenPriority {
+				selected = &available[0]
+			} else {
+				// 1. 取优先级最小的集合
+				layer := filterByMinPriority(available)
+				// 2. （可选）use-it-or-lose-it：优先选用会话窗口最早重置的账号
+				if cfg.PreferSoonestReset {
+					layer = filterBySoonestReset(layer)
+				}
+				// 3. 取负载率最低的集合
+				layer = filterByMinLoadRate(layer)
+				// 4. LRU 选择最久未用的账号
+				selected = selectByLRU(layer, preferOAuth)
 			}
-			// 3. 取负载率最低的集合
-			candidates = filterByMinLoadRate(candidates)
-			// 4. LRU 选择最久未用的账号
-			selected := selectByLRU(candidates, preferOAuth)
 			if selected == nil {
 				break
 			}
@@ -739,13 +773,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 			// 移除已尝试的账号，重新进行分层过滤
 			selectedID := selected.account.ID
-			newAvailable := make([]accountWithLoad, 0, len(available)-1)
-			for _, acc := range available {
-				if acc.account.ID != selectedID {
-					newAvailable = append(newAvailable, acc)
-				}
-			}
-			available = newAvailable
+			available = removeAccountWithLoad(available, selectedID)
 		}
 	}
 
@@ -764,6 +792,16 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		})
 	}
 	return nil, ErrNoAvailableAccounts
+}
+
+func removeAccountWithLoad(accounts []accountWithLoad, accountID int64) []accountWithLoad {
+	result := make([]accountWithLoad, 0, len(accounts)-1)
+	for _, account := range accounts {
+		if account.account.ID != accountID {
+			result = append(result, account)
+		}
+	}
+	return result
 }
 
 func (s *GatewayService) tryAcquireByLegacyOrder(ctx context.Context, candidates []*Account, groupID *int64, sessionHash string, preferOAuth bool) (*AccountSelectionResult, bool, error) {

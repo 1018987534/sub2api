@@ -432,16 +432,8 @@ export default {
         accountSchedulingThresholdsGlobalHint: 'System-wide default for every account on that platform. Individual accounts can still override this in the account editor.',
         accountSchedulingThresholdsDisabledHint: '100 disables platform auto-pause. Values 1–99 pause scheduling once utilization reaches that percent.',
         accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.',
-        firstTokenLatencyAutoPauseTitle: 'First-Token Latency Auto-Pause',
-        firstTokenLatencyAutoPauseDescription: 'Track real first-token latency for every account in rolling windows. An account is temporarily removed from scheduling when any rule fires and returns automatically after the pause.',
-        firstTokenLatencyRulesOrHint: 'Rules use OR semantics. If one request fires multiple rules, the longest pause wins. Trigger share is slow successful requests divided by all successful requests with measured first-token latency in the window.',
-        firstTokenLatencyRule: 'Rule {number}',
-        firstTokenLatencyWindowMinutes: 'Window (minutes)',
-        firstTokenLatencyThresholdSeconds: 'First token over (seconds)',
-        firstTokenLatencyTriggerPercent: 'Trigger Share (%)',
-        firstTokenLatencyPauseMinutes: 'Pause (minutes)',
-        addFirstTokenLatencyRule: 'Add rule',
-        removeFirstTokenLatencyRule: 'Remove rule'
+        firstTokenPriorityTitle: 'First-Token Priority Scheduling',
+        firstTokenPriorityDescription: 'Prioritize accounts using recent measured first-token latency while probing unknown or potentially recovered accounts. Persistently slow accounts are probed less often. When every candidate has reliable data and averages at most 10 seconds, lower upstream rate takes priority.'
       },
       upstreamBillingProbe: {
         title: 'Upstream Rate Auto Detection',

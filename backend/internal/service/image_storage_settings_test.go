@@ -193,6 +193,44 @@ func TestImageStorageSettingsOwnCredentialsAreEncryptedAndMasked(t *testing.T) {
 	require.Equal(t, "super-secret", (*built)[1].SecretAccessKey)
 }
 
+func TestImageStorageSettingsTestConnectionUsesConfigFallbackSecret(t *testing.T) {
+	svc, _, built := newImageStorageFixture(t, config.ImageStorageConfig{
+		Enabled: true, Endpoint: "https://acct.r2.cloudflarestorage.com", Region: "auto",
+		Bucket: "yaml-bucket", AccessKeyID: "yaml-ak", SecretAccessKey: "yaml-sk",
+	})
+
+	err := svc.TestConnection(context.Background(), ImageStorageSettings{
+		Enabled: true, Endpoint: "https://acct.r2.cloudflarestorage.com", Region: "auto",
+		Bucket: "yaml-bucket", AccessKeyID: "yaml-ak",
+	})
+	require.NoError(t, err, "testing an unsaved config-file setup must reuse its fallback secret")
+	require.Len(t, *built, 1)
+	require.Equal(t, "yaml-sk", (*built)[0].SecretAccessKey)
+}
+
+func TestImageStorageSettingsUpdateEncryptsConfigFallbackSecret(t *testing.T) {
+	svc, repo, built := newImageStorageFixture(t, config.ImageStorageConfig{
+		Enabled: true, Endpoint: "https://acct.r2.cloudflarestorage.com", Region: "auto",
+		Bucket: "yaml-bucket", AccessKeyID: "yaml-ak", SecretAccessKey: "yaml-sk",
+	})
+
+	saved, err := svc.Update(context.Background(), ImageStorageSettings{
+		Enabled: true, Endpoint: "https://acct.r2.cloudflarestorage.com", Region: "auto",
+		Bucket: "yaml-bucket", AccessKeyID: "yaml-ak",
+	})
+	require.NoError(t, err)
+	require.Empty(t, saved.SecretAccessKey)
+
+	raw, err := repo.GetValue(context.Background(), settingKeyImageStorageConfig)
+	require.NoError(t, err)
+	require.Contains(t, raw, "enc:yaml-sk")
+
+	_, enabled := svc.resolve()
+	require.True(t, enabled)
+	require.Len(t, *built, 1)
+	require.Equal(t, "yaml-sk", (*built)[0].SecretAccessKey)
+}
+
 // Persisting the service's own S3 secret must be refused when the encryption key
 // is auto-generated, otherwise the ciphertext cannot be decrypted after a
 // restart (#4524). Reusing the backup credentials stays allowed because it does
