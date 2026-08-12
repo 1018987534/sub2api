@@ -2197,6 +2197,64 @@ func TestOpenAIGatewayService_FirstTokenPriorityClearsSessionStickyBeforeSelecti
 	}
 }
 
+func TestOpenAIGatewayService_FirstTokenPriorityOnlyRanksAccountsSupportingRequestedModel(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	ctx := context.Background()
+	groupID := int64(10011)
+	requestedModel := "model-a"
+	now := time.Now()
+	slowSupported := Account{
+		ID: 2021, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+		Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID},
+		Credentials: map[string]any{"model_mapping": map[string]any{requestedModel: requestedModel}},
+	}
+	fastUnsupported := Account{
+		ID: 2022, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+		Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID},
+		Credentials: map[string]any{"model_mapping": map[string]any{"model-b": "model-b"}},
+	}
+	mediumSupported := Account{
+		ID: 2023, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive,
+		Schedulable: true, Concurrency: 1, GroupIDs: []int64{groupID},
+		Credentials: map[string]any{"model_mapping": map[string]any{requestedModel: requestedModel}},
+	}
+	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		slowSupported.ID:   {PredictedMS: 20_000, SampleCount: 5, UpdatedAt: now},
+		fastUnsupported.ID: {PredictedMS: 1_000, SampleCount: 5, UpdatedAt: now},
+		mediumSupported.ID: {PredictedMS: 12_000, SampleCount: 5, UpdatedAt: now},
+	}}
+	settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+		SettingKeyFirstTokenPriorityEnabled: "true",
+	}}
+	cfg := &config.Config{}
+	svc := &OpenAIGatewayService{
+		accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{
+			slowSupported, fastUnsupported, mediumSupported,
+		}},
+		cache: &schedulerTestGatewayCache{},
+		cfg:   cfg,
+		rateLimitService: &RateLimitService{
+			settingService:              NewSettingService(settings, cfg),
+			firstTokenLatencyStatsCache: stats,
+		},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		ctx, &groupID, "", "", requestedModel, nil, OpenAIUpstreamTransportAny, false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, mediumSupported.ID, selection.Account.ID)
+	require.ElementsMatch(t, []int64{slowSupported.ID, mediumSupported.ID}, stats.fetchedIDs)
+	require.NotContains(t, stats.fetchedIDs, fastUnsupported.ID)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestOpenAIGatewayService_SelectAccountWithScheduler_SessionStickyBusyKeepsSticky(t *testing.T) {
 	ctx := context.Background()
 	groupID := int64(10100)
