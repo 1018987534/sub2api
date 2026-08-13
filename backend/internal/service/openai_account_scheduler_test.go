@@ -2239,6 +2239,83 @@ func TestOpenAIGatewayService_FirstTokenPriorityKeepsEqualRateFastSessionSticky(
 	}
 }
 
+func TestOpenAIGatewayService_FirstTokenPriorityUsesDefaultStickyAtOrBelowFifteenSeconds(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	ctx := context.Background()
+	groupID := int64(10013)
+	now := time.Now()
+	preferred := upstreamCostTestAccount(2041, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
+	sticky := upstreamCostTestAccount(2042, UpstreamBillingProbeStatusOK, 0.080, now.Add(-time.Minute), 30*time.Minute)
+	for _, account := range []*Account{preferred, sticky} {
+		account.Status = StatusActive
+		account.Schedulable = true
+		account.Concurrency = 1
+		account.GroupIDs = []int64{groupID}
+	}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_healthy_sticky": sticky.ID}}
+	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		preferred.ID: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
+		sticky.ID:    {PredictedMS: 15_000, SampleCount: 5, UpdatedAt: now},
+	}}
+	repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyFirstTokenPriorityEnabled: "true"}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*preferred, *sticky}},
+		cache:              cache,
+		cfg:                &config.Config{},
+		rateLimitService:   &RateLimitService{settingService: NewSettingService(repo, &config.Config{}), firstTokenLatencyStatsCache: stats},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "session_healthy_sticky", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, sticky.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerSessionSticky, decision.Layer)
+	require.True(t, decision.StickySessionHit)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_FirstTokenPriorityFallsBackToWeightedStickyAboveFifteenSeconds(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	ctx := context.Background()
+	groupID := int64(10014)
+	now := time.Now()
+	fast := upstreamCostTestAccount(2051, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
+	slowSticky := upstreamCostTestAccount(2052, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
+	for _, account := range []*Account{fast, slowSticky} {
+		account.Status = StatusActive
+		account.Schedulable = true
+		account.Concurrency = 1
+		account.GroupIDs = []int64{groupID}
+	}
+	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_slow_sticky": slowSticky.ID}}
+	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		fast.ID:       {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
+		slowSticky.ID: {PredictedMS: 15_001, SampleCount: 5, UpdatedAt: now},
+	}}
+	repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyFirstTokenPriorityEnabled: "true"}}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*slowSticky, *fast}},
+		cache:              cache,
+		cfg:                &config.Config{},
+		rateLimitService:   &RateLimitService{settingService: NewSettingService(repo, &config.Config{}), firstTokenLatencyStatsCache: stats},
+		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(ctx, &groupID, "", "session_slow_sticky", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, fast.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
 func TestOpenAIGatewayService_FirstTokenPriorityOnlyRanksAccountsSupportingRequestedModel(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()

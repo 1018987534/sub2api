@@ -1,16 +1,17 @@
 # Sub2API 多 VPS 迁移与 `/v1/responses` 分流实施记录
 
 > 状态：已上线。完整主站和数据层位于新 VPS `95.169.18.157`；旧 VPS
-> `38.47.117.85` 已降级为 Responses-only gateway；新增 VPS `154.23.243.26`
-> 和 `38.47.113.166` 已作为第二、第三个 Responses-only gateway 接入。Cloudflare
-> Worker 当前按 `50% bwg-us-01 / 10% vmiss-us-01 / 30% yt-us-01 / 10% vmiss-us-02`
-> 分配新 Responses 请求。
+> `38.47.117.85` 已降级为 Responses-only gateway；新增 VPS `154.23.243.26`、
+> `38.47.113.166` 和 `179.255.105.184` 已作为第二、第三、第四个 Responses-only
+> gateway 接入。Cloudflare Worker 当前按 `25% bwg-us-01 / 20% vmiss-us-01 /`
+> `40% yt-us-01 / 10% vmiss-us-02 / 5% dmit-us-01` 分配新 Responses 请求。
 >
 > 数据迁移最终停机点：2026-07-31 00:02:36（Asia/Shanghai）。初始边缘 90/10
-> 分流启用日期：2026-07-31；gateway154 接入后曾为 90/5/5，当前四节点比例为
-> 50/10/30/10。旧数据库和旧完整应用回滚容器仍保留，但不得和新主同时运行。
+> 分流启用日期：2026-07-31；gateway154 接入后曾为 90/5/5，历史四节点比例为
+> 50/10/30/10；2026-08-13 接入 `dmit-us-01` 后为 25/20/40/10/5。旧数据库和
+> 旧完整应用回滚容器仍保留，但不得和新主同时运行。
 >
-> 最后核验日期：2026-08-01（Asia/Shanghai）。
+> 最后核验日期：2026-08-13（Asia/Shanghai）。
 >
 > 2026-07-31 节点扩容：`154.23.243.26` 已完成 Debian 12、Docker、Nginx、
 > WireGuard、Certbot、Sub2API gateway 容器和 BBR/fq 网络参数配置。新增 origin
@@ -20,6 +21,11 @@
 > 2026-08-01 新增 `38.47.113.166`，实例 ID 为 `vmiss-us-02`，通过
 > `10.20.2.2/32 -> 10.20.0.1` 访问新主 PostgreSQL/Redis；四个实例均已升级到
 > `0.1.169 / c81e8b2ca`，容器均启用 `no-new-privileges:true`。
+>
+> 2026-08-13 新增 `179.255.105.184`，实例 ID 为 `dmit-us-01`，通过
+> `10.20.3.2/32 -> 10.20.0.1` 访问共享 PostgreSQL/Redis。新 origin
+> `gateway3-origin.xiaohondou.com` 为 DNS-only；五个实例均运行
+> `0.1.176 / 9b0b2169b`，监控站标题和首页任务已同步为五节点。
 >
 > 2026-07-31 故障修正：多节点首版加入的全局两阶段 drain 会在容器重启时让
 > control 连续返回 `503`，与当前“单容器快速重启、允许短暂中断”的发布方式不匹配。
@@ -35,18 +41,21 @@ flowchart LR
     C["客户端"] --> CF["Cloudflare Worker / CDN"]
 
     CF -->|"网页、后台、其他 API 100%"| NEW["bwg-us-01 control"]
-    CF -->|"Responses 50%"| NEW
-    CF -->|"Responses 10%"| OLD["vmiss-us-01 gateway"]
-    CF -->|"Responses 30%"| G154["yt-us-01 gateway"]
+    CF -->|"Responses 25%"| NEW
+    CF -->|"Responses 20%"| OLD["vmiss-us-01 gateway"]
+    CF -->|"Responses 40%"| G154["yt-us-01 gateway"]
     CF -->|"Responses 10%"| G2["vmiss-us-02 gateway"]
+    CF -->|"Responses 5%"| D["dmit-us-01 gateway"]
 
     NEW -->|"直接请求和接收响应"| AI["模型上游"]
     OLD -->|"直接请求和接收响应"| AI
     G154 -->|"直接请求和接收响应"| AI
     G2 -->|"直接请求和接收响应"| AI
+    D -->|"直接请求和接收响应"| AI
     OLD <-->|"WireGuard：鉴权、调度、计费、用量状态"| DB["新 VPS PostgreSQL / Redis"]
     G154 <-->|"WireGuard：鉴权、调度、计费、用量状态"| DB
     G2 <-->|"WireGuard：鉴权、调度、计费、用量状态"| DB
+    D <-->|"WireGuard：鉴权、调度、计费、用量状态"| DB
 ```
 
 ```text
@@ -69,10 +78,15 @@ flowchart LR
   = 只运行 /v1/responses 请求链路
   = 通过 WireGuard 访问新 VPS 的 PostgreSQL/Redis
 
+新增 VPS 179.255.105.184
+  = dmit-us-01 gateway 子节点
+  = 只运行 /v1/responses 请求链路
+  = 通过 WireGuard 访问新 VPS 的 PostgreSQL/Redis
+
 Cloudflare Worker sub2api-responses-dispatcher
   = 不部署在任意一台 VPS 上
   = 其他请求固定到新 VPS
-  = /v1/responses 在 bwg-us-01、vmiss-us-01、yt-us-01、vmiss-us-02 之间按权重选择
+  = /v1/responses 在 bwg-us-01、vmiss-us-01、yt-us-01、vmiss-us-02、dmit-us-01 之间按权重选择
 ```
 
 请求命中任一 gateway VPS 时，模型大流量不会绕回新 VPS：
@@ -88,11 +102,11 @@ gateway 只把鉴权、调度、余额、计费和用量记录所需的状态请
 gateway VPS <-> WireGuard <-> 新 VPS PostgreSQL/Redis
 ```
 
-用户前端的余额、今日用量、RPM、TPM 和费用统一从新 VPS 的共享 PostgreSQL 查询。浏览器不会分别访问四个应用节点，也不会在前端相加。
+用户前端的余额、今日用量、RPM、TPM 和费用统一从新 VPS 的共享 PostgreSQL 查询。浏览器不会分别访问五个应用节点，也不会在前端相加。
 
 上游项目原本没有 `gateway-only` 模式。本分支已通过二开增加
-`INSTANCE_ROLE=control|gateway`，角色化核心提交为 `1677984c0`；当前四个应用节点均部署
-`0.1.169 / c81e8b2ca`。这不是上游原生能力，后续升级必须继续保留并回归这组改动。
+`INSTANCE_ROLE=control|gateway`，角色化核心提交为 `1677984c0`；当前五个应用节点均部署
+`0.1.176 / 9b0b2169b`。这不是上游原生能力，后续升级必须继续保留并回归这组改动。
 
 ### 0.1 当前关键对象
 
@@ -104,10 +118,11 @@ gateway VPS <-> WireGuard <-> 新 VPS PostgreSQL/Redis
 | gateway origin | `gateway-origin.xiaohondou.com -> 38.47.117.85`，DNS-only |
 | gateway154 origin | `gateway154-origin.xiaohondou.com -> 154.23.243.26`，DNS-only |
 | gateway2 origin | `gateway2-origin.xiaohondou.com -> 38.47.113.166`，DNS-only |
-| Worker | `sub2api-responses-dispatcher`；兜底变量使用 `BWG_US_01_PERCENT=50`、`VMISS_US_01_PERCENT=10`、`YT_US_01_PERCENT=30`、`VMISS_US_02_PERCENT=10`，变量名直接对应节点 |
+| gateway3 origin | `gateway3-origin.xiaohondou.com -> 179.255.105.184`，DNS-only |
+| Worker | `sub2api-responses-dispatcher`；兜底变量使用 `BWG_US_01_PERCENT=25`、`VMISS_US_01_PERCENT=20`、`YT_US_01_PERCENT=40`、`VMISS_US_02_PERCENT=10`、`DMIT_US_01_PERCENT=5`，变量名直接对应节点 |
 | Worker 路径 | `xiaohondou.com`、`nideyiyi.com`、`api.nideyiyi.com` 上的 `/v1/responses*`、`/responses*`、`/backend-api/codex/responses*` |
 | 其他路径 | 不经过 Worker，固定由新主 control 处理 |
-| WireGuard | 新主 `10.20.0.1`，`vmiss-us-01=10.20.0.2/32`，`yt-us-01=10.20.1.2/32`，`vmiss-us-02=10.20.2.2/32` |
+| WireGuard | 新主 `10.20.0.1`，`vmiss-us-01=10.20.0.2/32`，`yt-us-01=10.20.1.2/32`，`vmiss-us-02=10.20.2.2/32`，`dmit-us-01=10.20.3.2/32` |
 | 共享数据 relay | 新主 `10.20.0.1:5432`、`10.20.0.1:6379`，仅绑定 `wg0` 地址 |
 | 最终数据库备份 | 新主 `/tmp/sub2api-final.dump`，约 162 MB |
 | 备份 SHA256 | `cd94a22d13573774db9810050a5f0ca284167ff7f1dc15194659e64d0706852f` |
@@ -123,7 +138,7 @@ usage_logs=767548
 
 `usage_logs` 后续会因新请求写入和清理任务变化，以上数字只用于证明最终迁移点一致。
 
-## 1. 四台机器的真实基线
+## 1. 五台机器的真实基线
 
 ### 1.1 新主 VPS：`95.169.18.157`
 
@@ -193,6 +208,22 @@ Running, LA: 0.00 0.01 0.00 1/118 852
 | TLS | Let's Encrypt，证书到期日 `2026-10-29` |
 | WireGuard | 本机 `10.20.1.2/32`，对端新主 `10.20.0.1/32` |
 | 数据连接 | PostgreSQL/Redis 均指向新主 `10.20.0.1` |
+
+### 1.5 新增 gateway VPS：`179.255.105.184`
+
+2026-08-13 已作为第四个 Responses-only gateway 接入。
+
+| 字段 | 已确认值 |
+|---|---|
+| 系统 | Debian GNU/Linux `13 (trixie)`，`x86_64` |
+| 主机资源 | `2 vCPU`，约 `2 GiB` RAM，根分区约 `40 GB` |
+| 应用 | Sub2API `0.1.176`，commit `9b0b2169b`，`INSTANCE_ID=dmit-us-01` |
+| 容器 | `sub2api` gateway healthy，端口只绑定 `127.0.0.1:8080`，`no-new-privileges:true` |
+| gateway 目录 | `/opt/sub2api-gateway-dmit` |
+| origin | `gateway3-origin.xiaohondou.com`，DNS-only，A 记录 `179.255.105.184` |
+| TLS | Let's Encrypt，证书到期日 `2026-11-11` |
+| WireGuard | 本机 `10.20.3.2/32`，对端新主 `10.20.0.1/32` |
+| 数据连接 | PostgreSQL/Redis 均指向新主 `10.20.0.1`，已验证 `select 1` 和 `PONG` |
 | 网络参数 | `tcp_congestion_control=bbr`，`default_qdisc=fq`；buffer 上限 64 MiB，默认收发 buffer 32 MiB |
 
 ### 1.4 新增 gateway VPS：`38.47.113.166`
@@ -219,6 +250,7 @@ Running, LA: 0.00 0.01 0.00 1/118 852
 | `38.47.117.85` | `vmiss-us-01` / `gateway` 子节点 | Responses 最小路由 | 不保存主数据库、不保存主 Redis | 按权重承接 `/v1/responses` |
 | `154.23.243.26` | `yt-us-01` / `gateway` 子节点 | Responses 最小路由 | 不保存主数据库、不保存主 Redis | 按权重承接 `/v1/responses` |
 | `38.47.113.166` | `vmiss-us-02` / `gateway` 子节点 | Responses 最小路由 | 不保存主数据库、不保存主 Redis | 按权重承接 `/v1/responses` |
+| `179.255.105.184` | `dmit-us-01` / `gateway` 子节点 | Responses 最小路由 | 不保存主数据库、不保存主 Redis | 按权重承接 `/v1/responses` |
 | CDN/边缘 | dispatcher | 路径、健康、权重 | 无业务数据 | 选择一个 origin |
 
 各应用节点必须使用同一版本、同一 commit、同一计费和安全配置。差异只允许出现在：
@@ -232,7 +264,7 @@ REDIS_HOST
 节点日志标签
 ```
 
-四个节点当前均报告 `0.1.169 / c81e8b2ca`，角色化业务代码和构建产物一致。control 发布前
+五个节点当前均报告 `0.1.176 / 9b0b2169b`，角色化业务代码和构建产物一致。control 发布前
 二进制保存在
 `/opt/sub2api-control/patched-binaries/sub2api-before-0.1.168-20260730165610`，可用于直接回滚。
 
@@ -303,7 +335,7 @@ GET /api/v1/usage/dashboard/models
 
 不能把这些路径分给旧 gateway，否则旧节点需要承接完整用户面板和 JWT/管理路由，失去“只处理 Codex 请求”的边界。
 
-### 3.4 四台机器的粗略字节方向
+### 3.4 多台机器的粗略字节方向
 
 对于命中旧 gateway 的请求：
 
@@ -314,7 +346,7 @@ GET /api/v1/usage/dashboard/models
 | 新 VPS `wg0` | `S` | `S` | 数据层返回和用量写入 |
 | 新 VPS Docker 内网 | `S` | `S` | control/数据库/Redis本机通信 |
 
-服务商是否把入口和出口相加，各家口径不同。最终以四台 VPS 服务商流量面板为套餐计费权威，以 `ip -s link`、Nginx 和应用日志解释组成。
+服务商是否把入口和出口相加，各家口径不同。最终以五台 VPS 服务商流量面板为套餐计费权威，以 `ip -s link`、Nginx 和应用日志解释组成。
 
 ## 4. 前端 RPM/TPM 是否聚合
 
@@ -343,21 +375,22 @@ backend/internal/repository/usage_log_repo_dashboard.go
 | 累计请求/Token/费用 | 新主 PostgreSQL `usage_logs` 按用户聚合 |
 | API Key数量 | 新主 PostgreSQL `api_keys` 按用户统计 |
 
-任一 gateway 处理完请求后，必须将计费和用量写入新主 PostgreSQL。这样新主面板自然看到四个节点的合计：
+任一 gateway 处理完请求后，必须将计费和用量写入新主 PostgreSQL。这样新主面板自然看到五个节点的合计：
 
 ```text
 vmiss-us-01 usage_logs 写入新 PostgreSQL
 yt-us-01 usage_logs 写入新 PostgreSQL
 vmiss-us-02 usage_logs 写入新 PostgreSQL
+dmit-us-01 usage_logs 写入新 PostgreSQL
 bwg-us-01 usage_logs 写入新 PostgreSQL
 前端从新 PostgreSQL 一次查询
 ```
 
-前端不会显示“bwg-us-01 5 RPM、vmiss-us-01 6 RPM”，因为 `usage_logs` 当前没有在默认聚合 UI 中展示 `instance_id` 维度。当前已保留 `usage_logs.instance_id` 记录来源，可通过管理端筛选核对四个实例。
+前端不会显示“bwg-us-01 5 RPM、vmiss-us-01 6 RPM”，因为 `usage_logs` 当前没有在默认聚合 UI 中展示 `instance_id` 维度。当前已保留 `usage_logs.instance_id` 记录来源，可通过管理端筛选核对五个实例。
 
 ### 4.2 TPM 不等于流量
 
-当前用户面板 `tpm` 不包含 `cache_creation_tokens` 和 `cache_read_tokens`。Codex 长上下文大量使用缓存 Token 时，TPM 不能代表真实网卡流量，也不能作为四台 VPS 套餐配额分配依据。
+当前用户面板 `tpm` 不包含 `cache_creation_tokens` 和 `cache_read_tokens`。Codex 长上下文大量使用缓存 Token 时，TPM 不能代表真实网卡流量，也不能作为五台 VPS 套餐配额分配依据。
 
 ### 4.3 用量可见时机
 
@@ -376,7 +409,7 @@ bwg-us-01 usage_logs 写入新 PostgreSQL
 
 ```text
 INSTANCE_ROLE=control|gateway
-  INSTANCE_ID=bwg-us-01|vmiss-us-01|yt-us-01|vmiss-us-02
+  INSTANCE_ID=bwg-us-01|vmiss-us-01|yt-us-01|vmiss-us-02|dmit-us-01
 ```
 
 规则：
@@ -425,10 +458,10 @@ INSTANCE_ROLE=control|gateway
 | `backend/internal/service/usage_record_worker_pool.go` | 有界用量 worker 已存在 | gateway继续保留请求完成后的计费和用量提交 |
 | `deploy/docker-compose.standalone.yml` | app-only Compose 已存在 | 增加 role、ready healthcheck 和本地 data 路径参数 |
 | `deploy/docker-compose.local.yml` | 完整 app+Postgres+Redis | 增加 control role 和 ready healthcheck |
-| `deploy/multi-node/` | 当前不存在 | 新增四节点 env、WireGuard、Nginx 和 control 数据端口 override 模板 |
+| `deploy/multi-node/` | 当前不存在 | 新增多节点 env、WireGuard、Nginx 和 control 数据端口 override 模板 |
 
 初始迁移阶段未增加 `usage_logs.instance_id`；当前已增加该字段，用于记录并筛选
-`bwg-us-01`、`vmiss-us-01`、`yt-us-01`、`vmiss-us-02` 四个实例来源。客户端 Base URL 和计费口径不变。
+`bwg-us-01`、`vmiss-us-01`、`yt-us-01`、`vmiss-us-02`、`dmit-us-01` 五个实例来源。客户端 Base URL 和计费口径不变。
 
 ### 5.5 健康和顺序重启
 
@@ -445,11 +478,11 @@ schema兼容在进程启动阶段校验：control 可执行缺失 migration；ga
 任一 gateway 的 DB/Redis 隧道断开时必须由 `/health/ready` 返回 `503`。日常二进制发布不做
 POST 自动转投，也不启用长时间 drain，固定按以下顺序执行：
 
-1. 确认四个节点当前均为 ready。
-2. 按 `vmiss-us-01 -> yt-us-01 -> vmiss-us-02 -> bwg-us-01` 依次替换并重启；每次只允许当前节点承接的 Responses 出现实际进程切换造成的短暂中断。
+1. 确认五个节点当前均为 ready。
+2. 按 `vmiss-us-01 -> yt-us-01 -> vmiss-us-02 -> dmit-us-01 -> bwg-us-01` 依次替换并重启；每次只允许当前节点承接的 Responses 出现实际进程切换造成的短暂中断。
 3. 每个 gateway 恢复 ready 后，确认其直接 origin 和真实 Responses 返回 `200`，再继续下一个节点。
 4. 最后替换并重启 `bwg-us-01` control；前端、管理 API 和 control 承接的 Responses 只允许短暂中断。
-5. 等 control 恢复 ready，复核页面数据、四节点请求和共享用量记录。
+5. 等 control 恢复 ready，复核页面数据、五节点请求和共享用量记录。
 
 不能并行重启多个节点，也不能在一个节点尚未恢复时继续重启下一个节点。
 发布脚本必须显式使用 `docker restart -t 10`，覆盖现有容器可能残留的长
@@ -610,6 +643,7 @@ TLS、`map $http_upgrade`、Cloudflare/本机来源白名单、独立访问日�
 vmiss-us-01：10.20.0.2/32
 yt-us-01：10.20.1.2/32
 vmiss-us-02：10.20.2.2/32
+dmit-us-01：10.20.3.2/32
 ```
 
 只为对端地址配置 `AllowedIPs`，不把 WireGuard 设为默认路由：
@@ -618,8 +652,9 @@ vmiss-us-02：10.20.2.2/32
 新主 peer AllowedIPs：10.20.0.2/32
 新主 peer AllowedIPs：10.20.1.2/32
 新主 peer AllowedIPs：10.20.2.2/32
-三个 gateway peer AllowedIPs：10.20.0.1/32
-三个 gateway PersistentKeepalive：25 秒
+新主 peer AllowedIPs：10.20.3.2/32
+四个 gateway peer AllowedIPs：10.20.0.1/32
+四个 gateway PersistentKeepalive：25 秒
 ```
 
 这样只有访问新主数据库/Redis的 `S` 进入 `wg0`；gateway 到模型上游的 `Q/R` 继续从自己的公网 `eth0` 直接进出。
@@ -628,9 +663,9 @@ vmiss-us-02：10.20.2.2/32
 
 | 机器 | 监听 | 允许来源 | 用途 |
 |---|---|---|---|
-| 新主 | UDP `51820` | 三个 gateway 公网 IP | WireGuard |
-| 新主 | `10.20.0.1:5432` | `10.20.0.2`、`10.20.1.2`、`10.20.2.2` | PostgreSQL relay |
-| 新主 | `10.20.0.1:6379` | `10.20.0.2`、`10.20.1.2`、`10.20.2.2` | Redis relay |
+| 新主 | UDP `51820` | 四个 gateway 公网 IP | WireGuard |
+| 新主 | `10.20.0.1:5432` | `10.20.0.2`、`10.20.1.2`、`10.20.2.2`、`10.20.3.2` | PostgreSQL relay |
+| 新主 | `10.20.0.1:6379` | `10.20.0.2`、`10.20.1.2`、`10.20.2.2`、`10.20.3.2` | Redis relay |
 | 新主 | TCP `443` | CDN/运维来源 | 主 origin |
 | 新主 | `127.0.0.1:8080` | 本机 | Nginx -> control |
 | 旧 gateway | UDP `51820` | `95.169.18.157` | WireGuard |
@@ -642,6 +677,9 @@ vmiss-us-02：10.20.2.2/32
 | `vmiss-us-02` | UDP `51820` | `95.169.18.157` | WireGuard |
 | `vmiss-us-02` | TCP `443` | CDN/运维来源 | 子节点 origin |
 | `vmiss-us-02` | `127.0.0.1:8080` | 本机 | Nginx -> gateway |
+| `dmit-us-01` | UDP `51820` | `95.169.18.157` | WireGuard |
+| `dmit-us-01` | TCP `443` | CDN/运维来源 | 子节点 origin |
+| `dmit-us-01` | `127.0.0.1:8080` | 本机 | Nginx -> gateway |
 
 绝不出现：
 
@@ -666,7 +704,7 @@ relay 规则：
 
 - 单独 Compose 文件，加入新主的 Sub2API Docker 网络。
 - `ports` 只绑定 `10.20.0.1`，不绑定 `0.0.0.0`。
-- 主机防火墙只允许 `wg0` 对端 `10.20.0.2`、`10.20.1.2`、`10.20.2.2` 访问 relay。
+- 主机防火墙只允许 `wg0` 对端 `10.20.0.2`、`10.20.1.2`、`10.20.2.2`、`10.20.3.2` 访问 relay。
 - Redis继续使用认证；PostgreSQL只允许应用账号和目标数据库。
 - relay停止不会影响新主 control 访问自己的 Docker 内网。
 
@@ -699,8 +737,8 @@ dump SHA256：cd94a22d13573774db9810050a5f0ca284167ff7f1dc15194659e64d0706852f
 旧完整应用：已停止并重命名保留
 旧 gateway：healthy，数据库和 Redis 检查均为 ok
 初始边缘权重：control 90%，old-gateway 10%
-当前边缘权重：bwg-us-01 50%，vmiss-us-01 10%，yt-us-01 30%，vmiss-us-02 10%
-当前应用版本：0.1.169 / c81e8b2ca
+当前边缘权重：bwg-us-01 25%，vmiss-us-01 20%，yt-us-01 40%，vmiss-us-02 10%，dmit-us-01 5%
+当前应用版本：0.1.176 / 9b0b2169b
 ```
 
 ### 9.1 迁移前冻结
@@ -790,7 +828,7 @@ PostgreSQL 是余额、用户、账号、用量和计费的权威数据，必须
 ```text
 Worker：sub2api-responses-dispatcher
 版本：8b4ec4d9-cfa8-4032-ba3f-8e0cf15ba539
-配置：BWG_US_01_PERCENT=50, VMISS_US_01_PERCENT=10, YT_US_01_PERCENT=30, VMISS_US_02_PERCENT=10
+配置：BWG_US_01_PERCENT=25, VMISS_US_01_PERCENT=20, YT_US_01_PERCENT=40, VMISS_US_02_PERCENT=10, DMIT_US_01_PERCENT=5
 源码：deploy/multi-node/worker/responses-dispatcher.mjs
 配置文件：deploy/multi-node/worker/wrangler.toml
 ```
@@ -800,23 +838,24 @@ Worker：sub2api-responses-dispatcher
 | 方案 | 结论 |
 |---|---|
 | Cloudflare Load Balancing + HTTP 路径规则 | API 可访问，但账户当前没有既有 LB/pool，本次未启用 |
-| Cloudflare Worker dispatcher | 当前生产方案，三个入口域名共九条 route，四 origin 权重为 50/10/30/10 |
+| Cloudflare Worker dispatcher | 当前生产方案，三个入口域名共九条 route，五 origin 权重为 25/20/40/10/5 |
 | DNS 多 A/轮询 | 不能按 `/v1/responses` 分流和按字节控量，不作为生产方案 |
 
-四个 origin：
+五个 origin：
 
 ```text
 ORIGIN_NEW = https://control-origin.xiaohondou.com -> 95.169.18.157
 ORIGIN_OLD = https://gateway-origin.xiaohondou.com -> 38.47.117.85
 ORIGIN_GATEWAY154 = https://gateway154-origin.xiaohondou.com -> 154.23.243.26
 ORIGIN_GATEWAY2 = https://gateway2-origin.xiaohondou.com -> 38.47.113.166
+ORIGIN_DMIT = https://gateway3-origin.xiaohondou.com -> 179.255.105.184
 ```
 
 边缘规则：
 
 ```text
 `xiaohondou.com`、`nideyiyi.com`、`api.nideyiyi.com` 的
-/v1/responses*、/responses*、/backend-api/codex/responses*：按 50/10/30/10 选择 origin
+/v1/responses*、/responses*、/backend-api/codex/responses*：按 25/20/40/10/5 选择 origin
 其他所有路径：100% ORIGIN_NEW
 ```
 
@@ -842,8 +881,8 @@ ORIGIN_GATEWAY2 = https://gateway2-origin.xiaohondou.com -> 38.47.113.166
   -> 新建 Responses 请求按生效权重选一个 origin
 ```
 
-目标权重现在按百分比保存，四个节点必须相加等于 `100%`：默认值为
-`50% / 10% / 30% / 10%`。历史存量 `5:1:3:1` 会在读取时自动换算为这组百分比；管理员
+目标权重现在按百分比保存，五个节点必须相加等于 `100%`：默认值为
+`25% / 20% / 40% / 10% / 5%`。历史存量比值仍会在读取时自动换算为百分比；管理员
 设置目标权重后，Worker 不需要重新部署即可在约 15 秒内采用新配置。
 
 流量保护读取 `https://check.nideyiyi.com/api/nodes` 的 `traffic_limit`、
@@ -853,7 +892,7 @@ ORIGIN_GATEWAY2 = https://gateway2-origin.xiaohondou.com -> 38.47.113.166
 15 分钟时保留上一份有效结果并标记 `monitor_stale`，不执行新的自动摘流。
 
 Worker 获取运行态失败时优先沿用其进程内上一份配置；冷启动且从未成功获取时才使用
-`BWG_US_01_PERCENT/VMISS_US_01_PERCENT/YT_US_01_PERCENT/VMISS_US_02_PERCENT` 静态变量。
+`BWG_US_01_PERCENT/VMISS_US_01_PERCENT/YT_US_01_PERCENT/VMISS_US_02_PERCENT/DMIT_US_01_PERCENT` 静态变量。
 创建 Responses 的
 POST 仍只发送一次，不能用 POST 自动重试代替摘流。
 
@@ -875,7 +914,8 @@ POST 仍只发送一次，不能用 POST 自动重试代替摘流。
 阶段 1：新主 90%，old-gateway 10%（第一档正式流量）
 阶段 1b：新主 90%，old-gateway 5%，gateway154 5%（gateway154 接入后的初始配置）
 历史：新主 65%，old-gateway 5%，gateway154 30%
-当前：bwg-us-01 50%，vmiss-us-01 10%，yt-us-01 30%，vmiss-us-02 10%
+历史四节点：bwg-us-01 50%，vmiss-us-01 10%，yt-us-01 30%，vmiss-us-02 10%
+当前五节点：bwg-us-01 25%，vmiss-us-01 20%，yt-us-01 40%，vmiss-us-02 10%，dmit-us-01 5%
 阶段 3：按各服务商实际出口 GB 和长上下文比例动态调整
 ```
 
@@ -890,7 +930,7 @@ POST 仍只发送一次，不能用 POST 自动重试代替摘流。
 传播稳定后生产探测 50 次：全部 401；origin 日志 control=41、gateway=9
 ```
 
-2026-08-01 20:36（Asia/Shanghai）四 origin 当前小时真实 `POST /v1/responses` 200
+2026-08-01 20:36（Asia/Shanghai）四 origin 历史小时真实 `POST /v1/responses` 200
 日志快照：
 
 | 实例 | 200 请求数 | Nginx 响应字节 | 请求数占比 |
@@ -917,7 +957,7 @@ go test ./...
 pnpm build
 Worker node syntax和 POST 不重放/GET failover 语义测试
 gateway 路由边界、ready、远程 DB/Redis 和 linux/amd64 运行态检查
-Cloudflare 四节点 50/10/30/10 配置、Worker 活跃版本和四 origin 真实 200 日志
+Cloudflare 五节点 25/20/40/10/5 配置、Worker 活跃版本和五 origin 真实 200 日志
 ```
 
 仍需使用专用测试 Key 补齐真实模型非流式、SSE、WS、计费写入和面板聚合验收。
@@ -933,20 +973,20 @@ Cloudflare 四节点 50/10/30/10 配置、Worker 活跃版本和四 origin 真�
 - `ready` 能反映 DB/Redis 隧道故障。
 - 收到关停信号后不进入全局拒绝状态，最长 5 秒完成快速关停。
 
-### 11.2 四实例集成测试
+### 11.2 五实例集成测试
 
 ```text
 新主：PostgreSQL + Redis + bwg-us-01 control
-三个子节点：vmiss-us-01 + yt-us-01 + vmiss-us-02
+四个子节点：vmiss-us-01 + yt-us-01 + vmiss-us-02 + dmit-us-01
 共享：同一 API Key、同一用户、同一账号池、同一 Redis
 ```
 
 必须验证：
 
-1. 同一个 API Key 在新主和三个 gateway 都能鉴权。
-2. 新主禁用 API Key 或修改分组后，三个 gateway 的 L1 缓存都能失效。
-3. 四台同时调度时，并发、RPM、额度、账号冷却和错误状态一致。
-4. 三个 gateway 的计费/用量都写入新主 PostgreSQL，不丢不重。
+1. 同一个 API Key 在新主和四个 gateway 都能鉴权。
+2. 新主禁用 API Key 或修改分组后，四个 gateway 的 L1 缓存都能失效。
+3. 五台同时调度时，并发、RPM、额度、账号冷却和错误状态一致。
+4. 四个 gateway 的计费/用量都写入新主 PostgreSQL，不丢不重。
 5. 任一 gateway DB/Redis 断开后 ready 失败且停止新流量。
 6. Responses 非流式、SSE、WebSocket、compact和长请求均不缓冲。
 7. 单一 request_id 不会被多个 origin 自动重放。
@@ -960,15 +1000,16 @@ Cloudflare 四节点 50/10/30/10 配置、Worker 活跃版本和四 origin 真�
 2. 发一条请求固定命中 vmiss-us-01。
 3. 发一条请求固定命中 yt-us-01。
 4. 发一条请求固定命中 vmiss-us-02。
-5. 在新主面板读取 `/api/v1/usage/dashboard/stats`。
-6. 四个节点各完成至少 5 条请求后，再验证 RPM 整数除法。
+5. 发一条请求固定命中 dmit-us-01。
+6. 在新主面板读取 `/api/v1/usage/dashboard/stats`。
+7. 五个节点各完成至少 5 条请求后，再验证 RPM 整数除法。
 
 必须看到：
 
 ```text
-四个节点的 usage_logs 都在新 PostgreSQL
-total/today/cost/token 包含四个节点请求
-rpm = 最近 5 分钟四节点总请求数 / 5
+五个节点的 usage_logs 都在新 PostgreSQL
+total/today/cost/token 包含五个节点请求
+rpm = 最近 5 分钟五节点总请求数 / 5
 tpm = 当前代码口径的 input_tokens + output_tokens / 5
 ```
 
@@ -991,15 +1032,16 @@ curl --noproxy '*' --resolve "$ORIGIN_HOST:443:$ORIGIN_IP" -N -sS \
   "https://$ORIGIN_HOST/v1/responses"
 ```
 
-其余三个 origin 分别使用 `control-origin.xiaohondou.com / 95.169.18.157`、
+其余四个 origin 分别使用 `control-origin.xiaohondou.com / 95.169.18.157`、
 `gateway154-origin.xiaohondou.com / 154.23.243.26`、
-`gateway2-origin.xiaohondou.com / 38.47.113.166` 执行同一组测试。origin
+`gateway2-origin.xiaohondou.com / 38.47.113.166`、
+`gateway3-origin.xiaohondou.com / 179.255.105.184` 执行同一组测试。origin
 vhost 有来源白名单，运维出口 IP 不在白名单时直连会返回 403；这不代表 Worker 回源失败。
 不得把测试 API Key、请求正文和响应正文写入文档或日志。
 
 ## 12. 监控、流量和告警
 
-四台至少记录：
+五台至少记录：
 
 ```text
 eth0 ingress/egress
@@ -1013,23 +1055,23 @@ usage worker waiting/completed/failed/dropped/sync fallback
 ready 状态和依赖状态
 ```
 
-四个应用节点日志都增加固定 `instance_id`，但不得记录 Authorization、API Key、Token、请求正文或模型输出。
+五个应用节点日志都增加固定 `instance_id`，但不得记录 Authorization、API Key、Token、请求正文或模型输出。
 
 前端 RPM/TPM是用户合计，不作为节点流量监控；节点请求数从 Nginx/应用日志取，套餐流量从服务商面板取。
 
 建议每日报表：
 
-| 指标 | `bwg-us-01` | `vmiss-us-01` | `yt-us-01` | `vmiss-us-02` |
-|---|---:|---:|---:|---:|
-| 公网入口 GB |  |  |  |  |
-| 公网出口 GB |  |  |  |  |
-| WireGuard 入口 GB |  |  |  |  |
-| WireGuard 出口 GB |  |  |  |  |
-| `/v1/responses` 请求数 |  |  |  |  |
-| `/v1/responses` 响应字节 |  |  |  |  |
-| 首包 p95 |  |  |  |  |
-| SSE 断流率 |  |  |  |  |
-| 5xx 比例 |  |  |  |  |
+| 指标 | `bwg-us-01` | `vmiss-us-01` | `yt-us-01` | `vmiss-us-02` | `dmit-us-01` |
+|---|---:|---:|---:|---:|---:|
+| 公网入口 GB |  |  |  |  |  |
+| 公网出口 GB |  |  |  |  |  |
+| WireGuard 入口 GB |  |  |  |  |  |
+| WireGuard 出口 GB |  |  |  |  |  |
+| `/v1/responses` 请求数 |  |  |  |  |  |
+| `/v1/responses` 响应字节 |  |  |  |  |  |
+| 首包 p95 |  |  |  |  |  |
+| SSE 断流率 |  |  |  |  |  |
+| 5xx 比例 |  |  |  |  |  |
 
 Komari/LuminaPlus 监控入口为 `https://check.nideyiyi.com/`。公开节点必须保持：
 
@@ -1039,8 +1081,9 @@ Komari/LuminaPlus 监控入口为 `https://check.nideyiyi.com/`。公开节点�
 | `42399843-af9b-48f7-896b-ad41de3dc703` | `vmiss-us-01` | `Sub2API` | `gateway` |
 | `c1975100-e7e6-4587-bdd7-718f286ab868` | `yt-us-01` | `Sub2API` | `gateway` |
 | `f31f2918-acf9-4dca-abfb-4c7d31a91fc7` | `vmiss-us-02` | `Sub2API` | `gateway` |
+| `6ac35fa2-7a30-4420-afe4-8b06cc08ff34` | `dmit-us-01` | `Sub2API` | `gateway` |
 
-站点标题为 `Sub2API 四节点监控`，首页 Ping 任务 `1` 绑定全部四个 UUID。每次节点
+站点标题为 `Sub2API 五节点监控`，首页 Ping 任务绑定全部五个 UUID。每次节点
 新增、删除或改名都必须同步此表、Komari 公开 API 和 LuminaPlus 首页绑定。
 
 ## 13. 回滚
@@ -1088,7 +1131,7 @@ wrangler deploy --config deploy/multi-node/worker/wrangler.toml
 
 ### 13.3 新主故障
 
-新主是数据层单点；如果 PostgreSQL/Redis 或新主应用故障，四个节点都可能不可用。应优先恢复新主数据层，再恢复应用；不能仅把 gateway 权重调高来绕过新主数据层。
+新主是数据层单点；如果 PostgreSQL/Redis 或新主应用故障，五个节点都可能不可用。应优先恢复新主数据层，再恢复应用；不能仅把 gateway 权重调高来绕过新主数据层。
 
 ### 13.4 节点失陷
 
@@ -1123,8 +1166,8 @@ wrangler deploy --config deploy/multi-node/worker/wrangler.toml
 - [x] 主站与兼容域名已切到新主，公网健康检查通过。
 - [x] WireGuard、PostgreSQL relay 和 Redis relay 已建立并验证。
 - [x] 旧完整应用已停止保留，Responses-only gateway 已健康运行。
-- [x] 四个 origin DNS、TLS 和限制路径 Nginx vhost 已部署。
-- [x] Cloudflare Worker 已按 50/10/30/10 在三个入口域名绑定九条 Responses 路径。
+- [x] 五个 origin DNS、TLS 和限制路径 Nginx vhost 已部署。
+- [x] Cloudflare Worker 已按 25/20/40/10/5 在三个入口域名绑定九条 Responses 路径。
 - [x] 兼容域名无 Key 分布探测、真实计费落库、路由边界和非 Responses 固定新主验证通过。
 
 ### 14.2 第一批代码任务
@@ -1143,21 +1186,21 @@ wrangler deploy --config deploy/multi-node/worker/wrangler.toml
 3. [x] 新主验收后切换 canonical 与兼容域名。
 4. [x] 旧 VPS 安装 WireGuard 客户端和 gateway app-only 运行环境。
 5. [x] 旧 gateway 通过隧道访问新主数据层并完成路由/ready 验收。
-6. [x] 边缘先完成 `90% 新主 / 5% 旧 gateway / 5% gateway154` 灰度，随后扩为当前四节点比例。
-7. [x] 四个应用节点已切换到 `0.1.169 / c81e8b2ca` 二进制并启用 `no-new-privileges:true`。
+6. [x] 边缘先完成 `90% 新主 / 5% 旧 gateway / 5% gateway154` 灰度，随后扩为当前五节点比例。
+7. [x] 五个应用节点已切换到 `0.1.176 / 9b0b2169b` 二进制并启用 `no-new-privileges:true`。
 8. [ ] 完成 24 小时观察和专用 Key 端到端验收。
 
 ### 14.4 正式完成定义
 
 ```text
 新主 control 可独立运行完整 Sub2API
-三个 gateway 只能处理 Responses/health
-三个 gateway 的计费和用量都可写入新主 PostgreSQL
-新主面板能聚合四节点统计，并按服务器筛选
+四个 gateway 只能处理 Responses/health
+四个 gateway 的计费和用量都可写入新主 PostgreSQL
+新主面板能聚合五节点统计，并按服务器筛选
 数据库/Redis未暴露公网
 SSE/WS和长上下游连接通过
-当前 50%/10%/30%/10% 分流持续观察
-四台均有流量、健康、日志、版本和回滚证据
+当前 25%/20%/40%/10%/5% 分流持续观察
+五台均有流量、健康、日志、版本和回滚证据
 ```
 
 基础迁移和请求数分流已完成；真实模型长流量、计费聚合和 24 小时稳定性仍按上述未完成项继续验收。

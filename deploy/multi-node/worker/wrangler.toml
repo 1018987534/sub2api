@@ -17,12 +17,14 @@ routes = [
 
 [vars]
 BWG_US_01_ORIGIN = "https://control-origin.xiaohondou.com"
-BWG_US_01_PERCENT = "50"
+BWG_US_01_PERCENT = "25"
 VMISS_US_01_ORIGIN = "https://gateway-origin.xiaohondou.com"
-VMISS_US_01_PERCENT = "10"
+VMISS_US_01_PERCENT = "20"
 YT_US_01_ORIGIN = "https://gateway154-origin.xiaohondou.com"
-YT_US_01_PERCENT = "30"
+YT_US_01_PERCENT = "40"
 VMISS_US_02_ORIGIN = "https://gateway2-origin.xiaohondou.com"
 VMISS_US_02_PERCENT = "10"
+DMIT_US_01_ORIGIN = "https://gateway3-origin.xiaohondou.com"
+DMIT_US_01_PERCENT = "5"
 ROUTING_CONFIG_URL = "https://control-origin.xiaohondou.com/api/v1/gateway-routing/runtime"
 ROUTING_CONFIG_TTL_SECONDS = "15"

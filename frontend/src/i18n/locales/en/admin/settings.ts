@@ -434,7 +434,7 @@ export default {
         accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.',
         priorityModeTitle: 'OpenAI Scheduling Priority',
         firstTokenPriorityTitle: 'First-Token Priority',
-        firstTokenPriorityDescription: 'Make recent first-token prediction absolute. Adaptive probes back off persistently slow accounts and switch immediately when an account recovers below 10 seconds.',
+        firstTokenPriorityDescription: 'Prioritize recent first-token predictions. Keep normal session affinity while the bound account\'s stable prediction is at most 15 seconds; above 15 seconds, fall back to weighted affinity and first-token ordering. Adaptive probes back off persistently slow accounts.',
         lowRateModeDescription: 'Prioritize billing rate and automatically use sticky weighting within the same rate tier.'
       },
       upstreamBillingProbe: {

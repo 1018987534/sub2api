@@ -434,6 +434,21 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		if escapedSticky {
 			req.PreserveStickyBinding = true
 		}
+	} else if req.FirstTokenPriority && s.shouldUseFirstTokenDefaultSticky(ctx, req.StickyAccountID) {
+		selection, escapedSticky, err := s.selectBySessionHash(ctx, req)
+		if err != nil {
+			return nil, decision, err
+		}
+		if selection != nil && selection.Account != nil {
+			decision.Layer = openAIAccountScheduleLayerSessionSticky
+			decision.StickySessionHit = true
+			decision.SelectedAccountID = selection.Account.ID
+			decision.SelectedAccountType = selection.Account.Type
+			return selection, decision, nil
+		}
+		if escapedSticky {
+			req.PreserveStickyBinding = true
+		}
 	}
 
 	selection, candidateCount, topK, loadSkew, err := s.selectByLoadBalance(ctx, req)
@@ -457,6 +472,22 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 	}
 	return selection, decision, nil
+}
+
+func (s *defaultOpenAIAccountScheduler) shouldUseFirstTokenDefaultSticky(ctx context.Context, accountID int64) bool {
+	if accountID <= 0 || s == nil || s.service == nil || s.service.rateLimitService == nil {
+		return false
+	}
+	cache := s.service.rateLimitService.firstTokenLatencyStatsCache
+	if cache == nil {
+		return false
+	}
+	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
+	if err != nil {
+		return false
+	}
+	stat, ok := stats[accountID]
+	return ok && firstTokenPriorityDefaultStickyEligible(stat, time.Now())
 }
 
 func (s *defaultOpenAIAccountScheduler) selectBySessionHash(

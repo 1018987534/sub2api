@@ -427,7 +427,7 @@ export default {
         accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。',
         priorityModeTitle: 'OpenAI 调度优先模式',
         firstTokenPriorityTitle: '首字优先',
-        firstTokenPriorityDescription: '按近期首字预测绝对优先；动态探测会对持续慢账号逐步退避，发现 10 秒内恢复账号后立即切换。',
+        firstTokenPriorityDescription: '按近期首字预测优先；会话账号稳定预测不超过 15 秒时保持默认粘性，超过 15 秒时退回加权粘性和首字排序；动态探测会对持续慢账号逐步退避。',
         lowRateModeDescription: '按计费倍率优先，并自动启用同倍率内的粘性加权。'
       },
       upstreamBillingProbe: {

@@ -1,6 +1,7 @@
-const DEFAULT_VMISS_US_01_PERCENT = 10;
-const DEFAULT_YT_US_01_PERCENT = 0;
-const DEFAULT_VMISS_US_02_PERCENT = 0;
+const DEFAULT_VMISS_US_01_PERCENT = 20;
+const DEFAULT_YT_US_01_PERCENT = 40;
+const DEFAULT_VMISS_US_02_PERCENT = 10;
+const DEFAULT_DMIT_US_01_PERCENT = 5;
 const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 15;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
 const MAX_INGRESS_ERROR_BODY_BYTES = 8 * 1024;
@@ -77,6 +78,15 @@ function staticRoutingNodes(env) {
         "VMISS_US_02_PERCENT",
         DEFAULT_VMISS_US_02_PERCENT,
         "GATEWAY2_PERCENT",
+      ),
+    },
+    {
+      id: "dmit-us-01",
+      origin: environmentValue(env, "DMIT_US_01_ORIGIN"),
+      effective_weight: environmentInteger(
+        env,
+        "DMIT_US_01_PERCENT",
+        DEFAULT_DMIT_US_01_PERCENT,
       ),
     },
   ].filter((node) => node.origin);

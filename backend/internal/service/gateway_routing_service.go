@@ -123,10 +123,11 @@ func DefaultGatewayRoutingSettings() *GatewayRoutingSettings {
 		HealthProtectionEnabled:  true,
 		TrafficThresholdPercent:  defaultGatewayRoutingThresholdPercent,
 		Nodes: []GatewayRoutingNodeSettings{
-			{ID: "bwg-us-01", Origin: "https://control-origin.xiaohondou.com", TargetWeight: 50},
-			{ID: "vmiss-us-01", Origin: "https://gateway-origin.xiaohondou.com", TargetWeight: 10},
-			{ID: "yt-us-01", Origin: "https://gateway154-origin.xiaohondou.com", TargetWeight: 30},
+			{ID: "bwg-us-01", Origin: "https://control-origin.xiaohondou.com", TargetWeight: 25},
+			{ID: "vmiss-us-01", Origin: "https://gateway-origin.xiaohondou.com", TargetWeight: 20},
+			{ID: "yt-us-01", Origin: "https://gateway154-origin.xiaohondou.com", TargetWeight: 40},
 			{ID: "vmiss-us-02", Origin: "https://gateway2-origin.xiaohondou.com", TargetWeight: 10},
+			{ID: "dmit-us-01", Origin: "https://gateway3-origin.xiaohondou.com", TargetWeight: 5},
 		},
 	}
 }

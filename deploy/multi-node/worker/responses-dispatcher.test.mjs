@@ -12,13 +12,15 @@ import responsesDispatcher, {
 
 const env = {
   BWG_US_01_ORIGIN: "https://control.example",
-  BWG_US_01_PERCENT: "50",
+  BWG_US_01_PERCENT: "25",
   VMISS_US_01_ORIGIN: "https://old.example",
-  VMISS_US_01_PERCENT: "10",
+  VMISS_US_01_PERCENT: "20",
   YT_US_01_ORIGIN: "https://yt.example",
-  YT_US_01_PERCENT: "30",
+  YT_US_01_PERCENT: "40",
   VMISS_US_02_ORIGIN: "https://new.example",
   VMISS_US_02_PERCENT: "10",
+  DMIT_US_01_ORIGIN: "https://dmit.example",
+  DMIT_US_01_PERCENT: "5",
 };
 
 function originsFor(randomValue, nodes = null) {
@@ -34,30 +36,41 @@ function originsFor(randomValue, nodes = null) {
   );
 }
 
-test("selects the four static nodes with the configured percentages", () => {
+test("selects the five static nodes with the configured percentages", () => {
   assert.deepEqual(originsFor(0), [
     "https://control.example",
     "https://old.example",
     "https://yt.example",
     "https://new.example",
+    "https://dmit.example",
   ]);
-  assert.deepEqual(originsFor(50), [
+  assert.deepEqual(originsFor(25), [
     "https://old.example",
     "https://control.example",
     "https://yt.example",
     "https://new.example",
+    "https://dmit.example",
   ]);
-  assert.deepEqual(originsFor(60), [
+  assert.deepEqual(originsFor(45), [
     "https://yt.example",
     "https://control.example",
     "https://old.example",
     "https://new.example",
+    "https://dmit.example",
   ]);
-  assert.deepEqual(originsFor(90), [
+  assert.deepEqual(originsFor(85), [
     "https://new.example",
     "https://control.example",
     "https://old.example",
     "https://yt.example",
+    "https://dmit.example",
+  ]);
+  assert.deepEqual(originsFor(95), [
+    "https://dmit.example",
+    "https://control.example",
+    "https://old.example",
+    "https://yt.example",
+    "https://new.example",
   ]);
 });
 
@@ -706,5 +719,10 @@ test("reads the legacy static variable names during migration", () => {
     GATEWAY2_ORIGIN: "https://new.example",
     GATEWAY2_PERCENT: "10",
   };
-  assert.deepEqual(staticRoutingNodes(legacyEnv), staticRoutingNodes(env));
+  assert.deepEqual(staticRoutingNodes(legacyEnv), [
+    { id: "bwg-us-01", origin: "https://control.example", effective_weight: 50 },
+    { id: "vmiss-us-01", origin: "https://old.example", effective_weight: 10 },
+    { id: "yt-us-01", origin: "https://yt.example", effective_weight: 30 },
+    { id: "vmiss-us-02", origin: "https://new.example", effective_weight: 10 },
+  ]);
 });

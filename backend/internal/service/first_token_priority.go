@@ -8,15 +8,16 @@ import (
 )
 
 const (
-	firstTokenPriorityMinimumSamples = 3
-	firstTokenPriorityFreshFor       = 20 * time.Minute
-	firstTokenPriorityNearTieRatio   = 0.20
-	firstTokenPriorityNearTieFloor   = 2_000.0
-	firstTokenPriorityFastThreshold  = 10_000.0
-	firstTokenPriorityProbeBase      = 2 * time.Minute
-	firstTokenPriorityRecoveryProbe  = 30 * time.Second
-	firstTokenPriorityProbeMax       = 6 * time.Hour
-	firstTokenPriorityProbeLease     = 10 * time.Minute
+	firstTokenPriorityMinimumSamples  = 3
+	firstTokenPriorityFreshFor        = 20 * time.Minute
+	firstTokenPriorityNearTieRatio    = 0.20
+	firstTokenPriorityNearTieFloor    = 2_000.0
+	firstTokenPriorityFastThreshold   = 10_000.0
+	firstTokenPriorityStickyThreshold = 15_000.0
+	firstTokenPriorityProbeBase       = 2 * time.Minute
+	firstTokenPriorityRecoveryProbe   = 30 * time.Second
+	firstTokenPriorityProbeMax        = 6 * time.Hour
+	firstTokenPriorityProbeLease      = 10 * time.Minute
 )
 
 type firstTokenRankedAccount struct {
@@ -296,6 +297,17 @@ func firstTokenPriorityStatsFast(stats FirstTokenLatencyStats, now time.Time) bo
 	return confirmed && age >= 0 && age <= firstTokenPriorityFreshFor && stats.PredictedMS > 0 && stats.PredictedMS <= firstTokenPriorityFastThreshold
 }
 
+// firstTokenPriorityDefaultStickyEligible keeps the legacy hard session
+// affinity only while the shared, stable TTFT signal remains healthy. Unknown
+// or stale data falls back to the adaptive weighted policy instead of pinning
+// a session to an account whose current latency cannot be trusted.
+func firstTokenPriorityDefaultStickyEligible(stats FirstTokenLatencyStats, now time.Time) bool {
+	age := now.Sub(stats.UpdatedAt)
+	return firstTokenPriorityStatsReliable(stats) &&
+		age >= 0 && age <= firstTokenPriorityFreshFor &&
+		stats.PredictedMS > 0 && stats.PredictedMS <= firstTokenPriorityStickyThreshold
+}
+
 // firstTokenPriorityClearlyFaster is the ranking hysteresis gate. Crossing the
 // fast-pool boundary always wins; inside the slow pool, minor prediction
 // movement does not reshuffle accounts.
@@ -342,8 +354,9 @@ func stableFirstTokenRankedOrder(ranked []firstTokenRankedAccount, now time.Time
 }
 
 // applyOpenAIFirstTokenStickyOrder reuses the legacy low-rate weighted sticky
-// policy inside the reliable fast pool. It never crosses a rate tier and never
-// lets a slow sticky account override the TTFT ranking.
+// policy inside the current TTFT pool. A reliable account above the 15-second
+// hard-sticky threshold may receive weighted affinity in the slow pool, but it
+// never crosses a rate tier or lets a slow sticky account override the fast pool.
 func applyOpenAIFirstTokenStickyOrder(
 	ctx context.Context,
 	ordered []openAIAccountCandidateScore,
@@ -369,7 +382,12 @@ func applyOpenAIFirstTokenStickyOrder(
 		return
 	}
 	now := time.Now()
-	if !firstTokenPriorityStatsFast(stats[req.StickyAccountID], now) {
+	stickyStats, stickyFound := stats[req.StickyAccountID]
+	if !stickyFound || !firstTokenPriorityStatsReliable(stickyStats) {
+		return
+	}
+	stickyAge := now.Sub(stickyStats.UpdatedAt)
+	if stickyAge < 0 || stickyAge > firstTokenPriorityFreshFor || stickyStats.PredictedMS <= firstTokenPriorityStickyThreshold {
 		return
 	}
 	applyOpenAILegacySoftStickyOrder(

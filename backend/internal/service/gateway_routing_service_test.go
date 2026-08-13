@@ -88,18 +88,25 @@ func TestGatewayRoutingSettingsDefaultsAndValidation(t *testing.T) {
 
 	settings, err := service.GetGatewayRoutingSettings(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []int{50, 10, 30, 10}, []int{
+	require.Equal(t, []string{"bwg-us-01", "vmiss-us-01", "yt-us-01", "vmiss-us-02", "dmit-us-01"}, []string{
+		settings.Nodes[0].ID,
+		settings.Nodes[1].ID,
+		settings.Nodes[2].ID,
+		settings.Nodes[3].ID,
+		settings.Nodes[4].ID,
+	})
+	require.Equal(t, []int{25, 20, 40, 10, 5}, []int{
 		settings.Nodes[0].TargetWeight,
 		settings.Nodes[1].TargetWeight,
 		settings.Nodes[2].TargetWeight,
 		settings.Nodes[3].TargetWeight,
+		settings.Nodes[4].TargetWeight,
 	})
 	require.True(t, settings.HealthProtectionEnabled)
 
-	settings.Nodes[0].TargetWeight = 0
-	settings.Nodes[1].TargetWeight = 0
-	settings.Nodes[2].TargetWeight = 0
-	settings.Nodes[3].TargetWeight = 0
+	for i := range settings.Nodes {
+		settings.Nodes[i].TargetWeight = 0
+	}
 	require.ErrorContains(t, service.SetGatewayRoutingSettings(context.Background(), settings), "at least one node")
 
 	settings = DefaultGatewayRoutingSettings()
