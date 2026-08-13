@@ -3,13 +3,22 @@ package service
 import (
 	"net/http"
 	"strings"
+
+	"github.com/tidwall/gjson"
 )
 
 var upstreamModelNotFoundKeywords = []string{"model not found", "unknown model", "not found"}
 
 func isUpstreamModelNotFoundError(statusCode int, body []byte) bool {
-	if statusCode != http.StatusNotFound {
+	if statusCode != http.StatusNotFound && statusCode != http.StatusBadRequest {
 		return false
+	}
+	if statusCode == http.StatusBadRequest {
+		code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.code").String()))
+		param := strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "error.param").String()))
+		if code != "model_not_found" || (param != "" && param != "model") {
+			return false
+		}
 	}
 	normalized := normalizeModelNotFoundBody(body)
 	if normalized == "" || !strings.Contains(normalized, "model") {

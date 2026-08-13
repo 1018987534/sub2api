@@ -1448,6 +1448,17 @@ func TestOpenAIGatewayService_OpenAIPassthrough_RetryableStatusesTriggerFailover
 			},
 		},
 		{
+			name:           "oauth_400_structured_model_not_found",
+			accountType:    AccountTypeOAuth,
+			statusCode:     http.StatusBadRequest,
+			body:           `{"error":{"code":"model_not_found","message":"unknown provider for model gpt-5.6-sol","param":"model","type":"invalid_request_error"}}`,
+			expectFailover: true,
+			assertRepo: func(t *testing.T, repo *openAIPassthroughFailoverRepo, _ time.Time) {
+				require.Empty(t, repo.rateLimitCalls)
+				require.Empty(t, repo.overloadCalls)
+			},
+		},
+		{
 			name:        "apikey_429_rate_limit",
 			accountType: AccountTypeAPIKey,
 			statusCode:  http.StatusTooManyRequests,

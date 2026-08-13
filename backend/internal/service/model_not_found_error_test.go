@@ -31,6 +31,18 @@ func TestIsUpstreamModelNotFoundError(t *testing.T) {
 			want:       true,
 		},
 		{
+			name:       "400 structured model not found from relay",
+			statusCode: http.StatusBadRequest,
+			body:       []byte(`{"error":{"code":"model_not_found","message":"unknown provider for model gpt-5.6-sol","param":"model","type":"invalid_request_error"}}`),
+			want:       true,
+		},
+		{
+			name:       "400 model not found for another parameter",
+			statusCode: http.StatusBadRequest,
+			body:       []byte(`{"error":{"code":"model_not_found","message":"model not found","param":"input"}}`),
+			want:       false,
+		},
+		{
 			name:       "404 endpoint not found is not model specific",
 			statusCode: http.StatusNotFound,
 			body:       []byte(`{"error":{"message":"endpoint not found"}}`),
@@ -43,7 +55,7 @@ func TestIsUpstreamModelNotFoundError(t *testing.T) {
 			want:       false,
 		},
 		{
-			name:       "non 404 does not match",
+			name:       "unstructured 400 does not match",
 			statusCode: http.StatusBadRequest,
 			body:       []byte(`{"error":{"message":"model not found"}}`),
 			want:       false,
