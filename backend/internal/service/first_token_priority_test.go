@@ -163,7 +163,6 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 					SampleCount:             9,
 					UpdatedAt:               now.Add(-time.Minute),
 					FastConfirmationTracked: true,
-					RecoveryFastStreak:      2,
 				},
 			},
 			expected: []int64{1, 2},
@@ -258,6 +257,13 @@ func TestFirstTokenProbePreservesHealthyFastStickyBinding(t *testing.T) {
 	}
 	ordered := []openAIAccountCandidateScore{{account: probe}, {account: fast}}
 
+	require.True(t, scheduler.shouldPreserveFirstTokenStickyBinding(context.Background(), req, probe.ID, ordered))
+
+	cheaperFast := upstreamCostTestAccount(13, UpstreamBillingProbeStatusOK, 0.02, now.Add(-time.Minute), 30*time.Minute)
+	cheaperFast.Status = StatusActive
+	cheaperFast.Schedulable = true
+	stats.stats[cheaperFast.ID] = FirstTokenLatencyStats{PredictedMS: 6_000, SampleCount: 5, UpdatedAt: now}
+	ordered = append(ordered, openAIAccountCandidateScore{account: cheaperFast})
 	require.True(t, scheduler.shouldPreserveFirstTokenStickyBinding(context.Background(), req, probe.ID, ordered))
 
 	recoveredCheap := *probe

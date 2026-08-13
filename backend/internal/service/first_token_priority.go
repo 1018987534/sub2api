@@ -187,7 +187,7 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		stat, found := stats[accountID]
 		age := now.Sub(stat.UpdatedAt)
 		known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= firstTokenPriorityFreshFor && stat.PredictedMS > 0
-		if stat.FastConfirmationTracked && stat.RecoveryFastStreak > 0 && !stat.ReliableFast {
+		if stat.FastConfirmationTracked && !stat.ReliableFast && stat.PredictedMS <= firstTokenPriorityFastThreshold {
 			known = false
 		}
 		if !known || !firstTokenPriorityStatsFast(stat, now) {
@@ -223,6 +223,9 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		sort.SliceStable(slow, func(i, j int) bool {
 			if slow[i].known != slow[j].known {
 				return slow[i].known
+			}
+			if !slow[i].known {
+				return slow[i].original < slow[j].original
 			}
 			left, right := slow[i].stats.PredictedMS, slow[j].stats.PredictedMS
 			if left > 0 && right > 0 && left != right {
@@ -264,6 +267,9 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 	sort.SliceStable(ranked, func(i, j int) bool {
 		if ranked[i].known != ranked[j].known {
 			return ranked[i].known
+		}
+		if !ranked[i].known {
+			return ranked[i].original < ranked[j].original
 		}
 		left, right := ranked[i].stats.PredictedMS, ranked[j].stats.PredictedMS
 		if left > 0 && right > 0 && left != right {
@@ -406,6 +412,9 @@ func (s *defaultOpenAIAccountScheduler) shouldPreserveFirstTokenStickyBinding(
 	now := time.Now()
 	if err != nil || !firstTokenPriorityStatsFast(stats[sticky.ID], now) {
 		return false
+	}
+	if !firstTokenPriorityStatsFast(stats[selectedAccountID], now) {
+		return true
 	}
 	if !req.UseUpstreamTokenCost {
 		return true
