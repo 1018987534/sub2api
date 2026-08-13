@@ -183,14 +183,76 @@ func promoteFirstTokenAccount(accountIDs []int64, accountID int64) []int64 {
 func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstTokenLatencyStats, now time.Time, explore bool) []int64 {
 	ranked := make([]firstTokenRankedAccount, 0, len(accountIDs))
 	allFastKnown := len(accountIDs) > 0
+	fastKnownIDs := make(map[int64]struct{}, len(accountIDs))
 	for index, accountID := range accountIDs {
 		stat, found := stats[accountID]
 		age := now.Sub(stat.UpdatedAt)
 		known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= firstTokenPriorityFreshFor && stat.PredictedMS > 0
 		if !known || stat.PredictedMS > firstTokenPriorityFastThreshold {
 			allFastKnown = false
+		} else {
+			fastKnownIDs[accountID] = struct{}{}
 		}
 		ranked = append(ranked, firstTokenRankedAccount{id: accountID, stats: stat, known: known, original: index})
+	}
+	// A reliable sub-10-second account is a separate fast pool. Keep the
+	// caller's baseline order inside that pool (the scheduler has already
+	// applied low-rate ordering), and put slower/unknown accounts behind it.
+	// This makes the 10-second rule useful even when one account remains slow.
+	if len(fastKnownIDs) > 0 && !allFastKnown {
+		fast := make([]int64, 0, len(fastKnownIDs))
+		slow := make([]firstTokenRankedAccount, 0, len(ranked))
+		for _, accountID := range accountIDs {
+			if _, ok := fastKnownIDs[accountID]; ok {
+				fast = append(fast, accountID)
+				continue
+			}
+			for _, item := range ranked {
+				if item.id == accountID {
+					slow = append(slow, item)
+					break
+				}
+			}
+		}
+		// Slow/unknown accounts still use TTFT ordering so the least-bad
+		// fallback remains first, while the fast pool retains low-rate order.
+		sort.SliceStable(slow, func(i, j int) bool {
+			if slow[i].known != slow[j].known {
+				return slow[i].known
+			}
+			left, right := slow[i].stats.PredictedMS, slow[j].stats.PredictedMS
+			if left > 0 && right > 0 && left != right {
+				return left < right
+			}
+			return slow[i].original < slow[j].original
+		})
+		if explore {
+			orderedRanked := make([]firstTokenRankedAccount, 0, len(ranked))
+			for _, accountID := range fast {
+				for _, item := range ranked {
+					if item.id == accountID {
+						orderedRanked = append(orderedRanked, item)
+						break
+					}
+				}
+			}
+			orderedRanked = append(orderedRanked, slow...)
+			fastestMS := orderedRanked[0].stats.PredictedMS
+			for _, item := range orderedRanked[1:] {
+				if item.stats.PredictedMS > 0 && item.stats.PredictedMS < fastestMS {
+					fastestMS = item.stats.PredictedMS
+				}
+			}
+			probeIndex := dynamicFirstTokenProbeIndex(orderedRanked, fastestMS, now)
+			if probeIndex > 0 {
+				probe := orderedRanked[probeIndex]
+				// A due probe is intentionally moved ahead of the fast pool for
+				// this request; the shared lease limits it to one gateway.
+				return promoteFirstTokenAccount(rankedIDs(orderedRanked), probe.id)
+			}
+		}
+		ordered := append(fast, rankedIDs(slow)...)
+		return ordered
 	}
 	// When every candidate is already reliably below 10 seconds, latency is no
 	// longer the scarce signal. Preserve the caller's low-rate/baseline order,
@@ -255,6 +317,14 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		ordered = append(ordered, item.id)
 	}
 	return ordered
+}
+
+func rankedIDs(ranked []firstTokenRankedAccount) []int64 {
+	ids := make([]int64, 0, len(ranked))
+	for _, item := range ranked {
+		ids = append(ids, item.id)
+	}
+	return ids
 }
 
 func firstTokenPriorityStatsReliable(stats FirstTokenLatencyStats) bool {

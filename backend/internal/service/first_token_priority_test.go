@@ -73,6 +73,16 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			expected: []int64{2, 1},
 		},
 		{
+			name: "fast pool keeps low rate order while slow account stays behind",
+			ids:  []int64{1, 2, 3},
+			stats: map[int64]FirstTokenLatencyStats{
+				1: stats(5_000, 5, time.Minute),
+				2: stats(8_000, 5, time.Minute),
+				3: stats(30_000, 5, time.Minute),
+			},
+			expected: []int64{1, 2, 3},
+		},
+		{
 			name: "all reliably fast preserves low rate baseline",
 			ids:  []int64{3, 1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
@@ -105,13 +115,13 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			expected: []int64{1, 3, 2},
 		},
 		{
-			name: "unknown account prevents fast bypass",
+			name: "unknown account stays behind the fast pool",
 			ids:  []int64{1, 2, 3},
 			stats: map[int64]FirstTokenLatencyStats{
 				1: stats(8_000, 5, time.Minute),
 				2: stats(2_000, 5, time.Minute),
 			},
-			expected: []int64{2, 1, 3},
+			expected: []int64{1, 2, 3},
 		},
 		{
 			name: "stale account prevents fast bypass",
@@ -269,6 +279,37 @@ func TestOpenAIFirstTokenPriorityFallsBackToLowRateWhenAllAccountsAreFast(t *tes
 	)
 
 	require.Equal(t, []int64{cheap.ID, expensive.ID}, []int64{got[0].account.ID, got[1].account.ID})
+}
+
+func TestOpenAIFirstTokenPriorityUsesLowRateWithinFastPool(t *testing.T) {
+	now := time.Now()
+	cheapFast := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.05, now.Add(-time.Minute), 30*time.Minute)
+	expensiveFast := upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.50, now.Add(-time.Minute), 30*time.Minute)
+	cheapSlow := upstreamCostTestAccount(3, UpstreamBillingProbeStatusOK, 0.04, now.Add(-time.Minute), 30*time.Minute)
+	for _, account := range []*Account{cheapFast, expensiveFast, cheapSlow} {
+		account.Status = StatusActive
+		account.Schedulable = true
+	}
+	order := []openAIAccountCandidateScore{{account: expensiveFast}, {account: cheapSlow}, {account: cheapFast}}
+	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		expensiveFast.ID: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
+		cheapFast.ID:     {PredictedMS: 9_000, SampleCount: 5, UpdatedAt: now},
+		cheapSlow.ID:     {PredictedMS: 30_000, SampleCount: 5, UpdatedAt: now},
+	}}
+
+	got := applyOpenAIFirstTokenPriorityOrder(
+		context.Background(),
+		OpenAIAccountScheduleRequest{UseUpstreamTokenCost: true},
+		order,
+		cache,
+		defaultOpenAIOAuthSchedulingRateMultiplier,
+	)
+
+	require.Equal(t, []int64{cheapFast.ID, expensiveFast.ID, cheapSlow.ID}, []int64{
+		got[0].account.ID,
+		got[1].account.ID,
+		got[2].account.ID,
+	})
 }
 
 func TestAccountFirstTokenLatencyMetricsOnlyIncludesEnabledOpenAIAPIKeys(t *testing.T) {
