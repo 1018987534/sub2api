@@ -153,6 +153,21 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			explore:  true,
 			expected: []int64{2, 1},
 		},
+		{
+			name: "unconfirmed recovery cannot enter baseline fast pool",
+			ids:  []int64{1, 2},
+			stats: map[int64]FirstTokenLatencyStats{
+				1: stats(18_000, 9, time.Minute),
+				2: {
+					PredictedMS:             7_000,
+					SampleCount:             9,
+					UpdatedAt:               now.Add(-time.Minute),
+					FastConfirmationTracked: true,
+					RecoveryFastStreak:      2,
+				},
+			},
+			expected: []int64{1, 2},
+		},
 	}
 
 	for _, tt := range tests {
@@ -170,6 +185,93 @@ func TestFirstTokenPriorityProbeIntervalBacksOffSlowAccounts(t *testing.T) {
 		FirstTokenLatencyStats{PredictedMS: 1_000_000, SampleCount: 5, SlowStreak: 20},
 		1_000,
 	))
+}
+
+func TestFirstTokenPriorityStatsFastRequiresTrackedConfirmation(t *testing.T) {
+	now := time.Now()
+	recovering := FirstTokenLatencyStats{
+		PredictedMS:             7_000,
+		SampleCount:             20,
+		UpdatedAt:               now,
+		FastConfirmationTracked: true,
+		RecoveryFastStreak:      2,
+	}
+	require.False(t, firstTokenPriorityStatsFast(recovering, now))
+	recovering.ReliableFast = true
+	recovering.RecoveryFastStreak = 0
+	require.True(t, firstTokenPriorityStatsFast(recovering, now))
+}
+
+func TestApplyOpenAIFirstTokenStickyOrderOnlyWithinMinimumFastRateTier(t *testing.T) {
+	now := time.Now()
+	cheap := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
+	equalSticky := upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
+	expensiveSticky := upstreamCostTestAccount(3, UpstreamBillingProbeStatusOK, 0.08, now.Add(-time.Minute), 30*time.Minute)
+	slowProbe := upstreamCostTestAccount(4, UpstreamBillingProbeStatusOK, 0.02, now.Add(-time.Minute), 30*time.Minute)
+	for _, account := range []*Account{cheap, equalSticky, expensiveSticky, slowProbe} {
+		account.Status = StatusActive
+		account.Schedulable = true
+	}
+	stats := map[int64]FirstTokenLatencyStats{
+		cheap.ID:           {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
+		equalSticky.ID:     {PredictedMS: 8_000, SampleCount: 5, UpdatedAt: now},
+		expensiveSticky.ID: {PredictedMS: 4_000, SampleCount: 5, UpdatedAt: now},
+		slowProbe.ID:       {PredictedMS: 30_000, SampleCount: 5, UpdatedAt: now},
+	}
+	cache := &staticFirstTokenLatencyStatsCache{stats: stats}
+	rateOrder := newOpenAILegacyUpstreamRateOrder([]*Account{cheap, equalSticky, expensiveSticky, slowProbe}, now, defaultOpenAIOAuthSchedulingRateMultiplier)
+
+	equalRate := []openAIAccountCandidateScore{{account: cheap}, {account: equalSticky}, {account: expensiveSticky}}
+	applyOpenAIFirstTokenStickyOrder(context.Background(), equalRate, equalSticky.ID, cache, rateOrder)
+	require.Equal(t, []int64{equalSticky.ID, cheap.ID, expensiveSticky.ID}, candidateAccountIDs(equalRate))
+
+	higherRate := []openAIAccountCandidateScore{{account: cheap}, {account: expensiveSticky}}
+	applyOpenAIFirstTokenStickyOrder(context.Background(), higherRate, expensiveSticky.ID, cache, rateOrder)
+	require.Equal(t, []int64{cheap.ID, expensiveSticky.ID}, candidateAccountIDs(higherRate))
+
+	probeFirst := []openAIAccountCandidateScore{{account: slowProbe}, {account: cheap}, {account: equalSticky}}
+	applyOpenAIFirstTokenStickyOrder(context.Background(), probeFirst, equalSticky.ID, cache, rateOrder)
+	require.Equal(t, []int64{slowProbe.ID, cheap.ID, equalSticky.ID}, candidateAccountIDs(probeFirst))
+}
+
+func TestFirstTokenProbePreservesHealthyFastStickyBinding(t *testing.T) {
+	now := time.Now()
+	probe := upstreamCostTestAccount(11, UpstreamBillingProbeStatusOK, 0.02, now.Add(-time.Minute), 30*time.Minute)
+	fast := upstreamCostTestAccount(12, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
+	for _, account := range []*Account{probe, fast} {
+		account.Status = StatusActive
+		account.Schedulable = true
+	}
+	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		probe.ID: {PredictedMS: 30_000, SampleCount: 5, UpdatedAt: now},
+		fast.ID:  {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
+	}}
+	scheduler := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
+		rateLimitService: &RateLimitService{
+			firstTokenLatencyStatsCache: stats,
+		},
+	}}
+	req := OpenAIAccountScheduleRequest{
+		FirstTokenPriority:   true,
+		UseUpstreamTokenCost: true,
+		StickyAccountID:      fast.ID,
+	}
+	ordered := []openAIAccountCandidateScore{{account: probe}, {account: fast}}
+
+	require.True(t, scheduler.shouldPreserveFirstTokenStickyBinding(context.Background(), req, probe.ID, ordered))
+
+	recoveredCheap := *probe
+	stats.stats[probe.ID] = FirstTokenLatencyStats{PredictedMS: 7_000, SampleCount: 5, UpdatedAt: now}
+	ordered[0].account = &recoveredCheap
+	require.False(t, scheduler.shouldPreserveFirstTokenStickyBinding(context.Background(), req, probe.ID, ordered))
+}
+
+func candidateAccountIDs(candidates []openAIAccountCandidateScore) []int64 {
+	ids := make([]int64, 0, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.account.ID)
+	}
+	return ids
 }
 
 func TestFirstTokenPriorityOrderUsesSharedLeaseForDueProbe(t *testing.T) {
@@ -193,12 +295,12 @@ func TestFirstTokenPriorityOrderUsesSharedLeaseForDueProbe(t *testing.T) {
 	require.Equal(t, []int64{1, 2}, firstTokenPriorityOrder(context.Background(), accounts, cache))
 }
 
-func TestFirstTokenPriorityOrderImmediatelyPromotesFirstReliableFastProbeFromSlowPool(t *testing.T) {
+func TestFirstTokenPriorityOrderPromotesConfirmedFastRecoveryFromSlowPool(t *testing.T) {
 	now := time.Now()
 	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
 		1: {PredictedMS: 18_000, SampleCount: 5, UpdatedAt: now},
 		2: {PredictedMS: 25_000, SampleCount: 5, UpdatedAt: now},
-		3: {PredictedMS: 7_500, SampleCount: 1, UpdatedAt: now, ReliableFast: true},
+		3: {PredictedMS: 7_500, SampleCount: 3, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
 	}}
 	accounts := []*Account{
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},

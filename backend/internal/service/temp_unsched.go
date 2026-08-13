@@ -56,6 +56,10 @@ type FirstTokenLatencyStats struct {
 	UpdatedAt    time.Time
 	SlowStreak   int
 	ReliableFast bool
+	// FastConfirmationTracked distinguishes new three-sample confirmation data
+	// from legacy Redis hashes created before confirmation was introduced.
+	FastConfirmationTracked bool
+	RecoveryFastStreak      int
 }
 
 // FirstTokenLatencyStatsCache is shared by every gateway so scheduling decisions

@@ -78,6 +78,7 @@ type OpenAIAccountScheduleRequest struct {
 	StickyAccountID         int64
 	StickyPreviousAccountID int64
 	StickyWeighted          bool
+	FirstTokenPriority      bool
 	SubscriptionPriority    bool
 	PreserveStickyBinding   bool
 	PreviousResponseID      string
@@ -1029,12 +1030,13 @@ func applyOpenAIFirstTokenPriorityOrder(
 	if len(selectionOrder) <= 1 {
 		return selectionOrder
 	}
+	rateOrder := openAILegacyUpstreamRateOrder{}
 	if req.UseUpstreamTokenCost {
 		accounts := make([]*Account, 0, len(selectionOrder))
 		for _, candidate := range selectionOrder {
 			accounts = append(accounts, candidate.account)
 		}
-		rateOrder := newOpenAILegacyUpstreamRateOrder(accounts, time.Now(), oauthSchedulingRateMultiplier)
+		rateOrder = newOpenAILegacyUpstreamRateOrder(accounts, time.Now(), oauthSchedulingRateMultiplier)
 		if rateOrder.enabled {
 			sort.SliceStable(selectionOrder, func(i, j int) bool {
 				if req.RequireCompact {
@@ -1066,6 +1068,7 @@ func applyOpenAIFirstTokenPriorityOrder(
 		sort.SliceStable(selectionOrder[start:end], func(i, j int) bool {
 			return ranks[selectionOrder[start+i].account.ID] < ranks[selectionOrder[start+j].account.ID]
 		})
+		applyOpenAIFirstTokenStickyOrder(ctx, selectionOrder[start:end], req.StickyAccountID, cache, rateOrder)
 		start = end
 	}
 	return selectionOrder
@@ -1255,7 +1258,11 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			}
 		}
 		if req.SessionHash != "" && !req.PreserveStickyBinding {
-			_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
+			if s.shouldPreserveFirstTokenStickyBinding(ctx, req, fresh.ID, selectionOrder) {
+				_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, req.SessionHash, s.service.openAIWSSessionStickyTTL())
+			} else {
+				_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
+			}
 		}
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account:     fresh,
@@ -1295,6 +1302,12 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 	}
 	for _, accountID := range []int64{req.StickyPreviousAccountID, req.StickyAccountID} {
 		if accountID <= 0 {
+			continue
+		}
+		// The first-token primary pass already checked the session account against
+		// the fast, minimum-rate pool. Do not reintroduce a slow or expensive
+		// session account through the generic weighted fallback.
+		if req.FirstTokenPriority && accountID == req.StickyAccountID {
 			continue
 		}
 		if req.ExcludedIDs != nil {
@@ -2354,16 +2367,11 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		}
 	}
 	stickyWeighted := s.isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx)
-	if s.isFirstTokenPriorityEnabled(ctx) {
-		// First-token mode is absolute: a recovered account must be selected on
-		// the request after its sub-10-second probe sample, not held back by an
-		// older session or movable previous-response preference. An immovable
-		// previous_response_id remains pinned because the upstream chain cannot
-		// be reconstructed on a different account.
-		if stickyAccountID > 0 && sessionHash != "" && s.cache != nil {
-			_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-		}
-		stickyAccountID = 0
+	firstTokenPriority := s.isFirstTokenPriorityEnabled(ctx)
+	if firstTokenPriority {
+		// Session affinity is applied only after capability, fast-pool and rate
+		// ordering. It therefore cannot hold back a recovered sub-10-second or
+		// lower-rate account, while equal-rate fast accounts keep cache locality.
 		stickyWeighted = true
 	}
 	subscriptionPriority := s.isOpenAIAdvancedSchedulerSubscriptionPriorityEnabled(ctx)
@@ -2379,6 +2387,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		StickyAccountID:         stickyAccountID,
 		StickyPreviousAccountID: stickyPreviousAccountID,
 		StickyWeighted:          stickyWeighted,
+		FirstTokenPriority:      firstTokenPriority,
 		SubscriptionPriority:    subscriptionPriority,
 		PreviousResponseID:      previousResponseID,
 		PreviousResponseCanMove: previousResponseCanMove,

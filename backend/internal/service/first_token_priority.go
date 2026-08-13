@@ -138,8 +138,7 @@ func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache F
 	allPriorityAccountsFast := true
 	for _, accountID := range priorityAccountIDs {
 		stat, found := stats[accountID]
-		age := now.Sub(stat.UpdatedAt)
-		if !found || !firstTokenPriorityStatsReliable(stat) || age < 0 || age > firstTokenPriorityFreshFor || stat.PredictedMS <= 0 || stat.PredictedMS > firstTokenPriorityFastThreshold {
+		if !found || !firstTokenPriorityStatsFast(stat, now) {
 			allPriorityAccountsFast = false
 			break
 		}
@@ -188,7 +187,10 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		stat, found := stats[accountID]
 		age := now.Sub(stat.UpdatedAt)
 		known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= firstTokenPriorityFreshFor && stat.PredictedMS > 0
-		if !known || stat.PredictedMS > firstTokenPriorityFastThreshold {
+		if stat.FastConfirmationTracked && stat.RecoveryFastStreak > 0 && !stat.ReliableFast {
+			known = false
+		}
+		if !known || !firstTokenPriorityStatsFast(stat, now) {
 			allFastKnown = false
 		} else {
 			fastKnownIDs[accountID] = struct{}{}
@@ -265,8 +267,8 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		}
 		left, right := ranked[i].stats.PredictedMS, ranked[j].stats.PredictedMS
 		if left > 0 && right > 0 && left != right {
-			leftFast := left <= firstTokenPriorityFastThreshold
-			rightFast := right <= firstTokenPriorityFastThreshold
+			leftFast := firstTokenPriorityStatsFast(ranked[i].stats, now)
+			rightFast := firstTokenPriorityStatsFast(ranked[j].stats, now)
 			if leftFast != rightFast {
 				return leftFast
 			}
@@ -312,6 +314,111 @@ func firstTokenPriorityStatsReliable(stats FirstTokenLatencyStats) bool {
 	return stats.SampleCount >= firstTokenPriorityMinimumSamples || (stats.ReliableFast && stats.PredictedMS > 0 && stats.PredictedMS <= firstTokenPriorityFastThreshold)
 }
 
+func firstTokenPriorityStatsFast(stats FirstTokenLatencyStats, now time.Time) bool {
+	age := now.Sub(stats.UpdatedAt)
+	confirmed := stats.ReliableFast
+	if !stats.FastConfirmationTracked {
+		confirmed = stats.SampleCount >= firstTokenPriorityMinimumSamples
+	}
+	return confirmed && age >= 0 && age <= firstTokenPriorityFreshFor && stats.PredictedMS > 0 && stats.PredictedMS <= firstTokenPriorityFastThreshold
+}
+
+// applyOpenAIFirstTokenStickyOrder promotes the current session only inside the
+// reliable fast pool's minimum effective-rate tier. A slow/unknown item at the
+// front is an adaptive probe and must retain its one-request promotion.
+func applyOpenAIFirstTokenStickyOrder(
+	ctx context.Context,
+	ordered []openAIAccountCandidateScore,
+	stickyAccountID int64,
+	cache FirstTokenLatencyStatsCache,
+	rateOrder openAILegacyUpstreamRateOrder,
+) {
+	if stickyAccountID <= 0 || cache == nil || len(ordered) <= 1 {
+		return
+	}
+	accountIDs := make([]int64, 0, len(ordered))
+	stickyIndex := -1
+	for index, candidate := range ordered {
+		if candidate.account == nil || !isFirstTokenPriorityAccount(candidate.account) {
+			continue
+		}
+		accountIDs = append(accountIDs, candidate.account.ID)
+		if candidate.account.ID == stickyAccountID {
+			stickyIndex = index
+		}
+	}
+	if stickyIndex <= 0 || len(accountIDs) == 0 {
+		return
+	}
+	stats, err := cache.GetStatsBatch(ctx, accountIDs)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	first := ordered[0].account
+	sticky := ordered[stickyIndex].account
+	if first == nil || sticky == nil || !firstTokenPriorityStatsFast(stats[first.ID], now) || !firstTokenPriorityStatsFast(stats[sticky.ID], now) {
+		return
+	}
+	for _, candidate := range ordered {
+		if candidate.account == nil || !firstTokenPriorityStatsFast(stats[candidate.account.ID], now) {
+			continue
+		}
+		if rateOrder.compare(candidate.account, sticky) < 0 {
+			return
+		}
+	}
+	stickyCandidate := ordered[stickyIndex]
+	copy(ordered[1:stickyIndex+1], ordered[:stickyIndex])
+	ordered[0] = stickyCandidate
+}
+
+func (s *defaultOpenAIAccountScheduler) shouldPreserveFirstTokenStickyBinding(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+	selectedAccountID int64,
+	ordered []openAIAccountCandidateScore,
+) bool {
+	if !req.FirstTokenPriority || req.StickyAccountID <= 0 || selectedAccountID <= 0 || selectedAccountID == req.StickyAccountID || s == nil || s.service == nil || s.service.rateLimitService == nil {
+		return false
+	}
+	cache := s.service.rateLimitService.firstTokenLatencyStatsCache
+	if cache == nil {
+		return false
+	}
+	accounts := make([]*Account, 0, len(ordered))
+	accountIDs := make([]int64, 0, len(ordered))
+	var sticky *Account
+	for _, candidate := range ordered {
+		if candidate.account == nil || !isFirstTokenPriorityAccount(candidate.account) {
+			continue
+		}
+		accounts = append(accounts, candidate.account)
+		accountIDs = append(accountIDs, candidate.account.ID)
+		if candidate.account.ID == req.StickyAccountID {
+			sticky = candidate.account
+		}
+	}
+	if sticky == nil {
+		return false
+	}
+	stats, err := cache.GetStatsBatch(ctx, accountIDs)
+	now := time.Now()
+	if err != nil || !firstTokenPriorityStatsFast(stats[sticky.ID], now) {
+		return false
+	}
+	if !req.UseUpstreamTokenCost {
+		return true
+	}
+	rateOrder := newOpenAILegacyUpstreamRateOrder(accounts, now, s.service.openAIOAuthSchedulingRateMultiplier(ctx))
+	for _, account := range accounts {
+		if firstTokenPriorityStatsFast(stats[account.ID], now) && rateOrder.compare(account, sticky) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func dynamicFirstTokenProbeIndex(ranked []firstTokenRankedAccount, fastestMS float64, now time.Time) int {
 	bestIndex := -1
 	bestOverdue := -1.0
@@ -337,6 +444,9 @@ func dynamicFirstTokenProbeIndex(ranked []firstTokenRankedAccount, fastestMS flo
 func firstTokenPriorityProbeInterval(stats FirstTokenLatencyStats, fastestMS float64) time.Duration {
 	if stats.SampleCount < firstTokenPriorityMinimumSamples {
 		return time.Duration(stats.SampleCount+1) * 30 * time.Second
+	}
+	if stats.RecoveryFastStreak > 0 {
+		return firstTokenPriorityProbeBase
 	}
 	ratio := 1.0
 	if fastestMS > 0 && stats.PredictedMS > fastestMS {
