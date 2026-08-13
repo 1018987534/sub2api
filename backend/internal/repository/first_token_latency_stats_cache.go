@@ -14,9 +14,9 @@ import (
 const firstTokenLatencyStatsPrefix = "scheduler:first_token:account:"
 const firstTokenLatencyProbePrefix = "scheduler:first_token:probe:"
 
-// The recent median protects the prediction from one-off tail latency. The
-// EWMA still moves on every observation and gives a recovered upstream more
-// influence when the previous observation is old.
+// The recent arithmetic average is the value used by scheduling. The EWMA is
+// retained as a change detector so a recovered upstream can immediately leave
+// the slow pool instead of waiting for the whole sample window to turn over.
 var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	local stats_key = KEYS[1]
 	local dedupe_key = KEYS[2]
@@ -32,21 +32,35 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	end
 
 	local old_ewma = tonumber(redis.call('HGET', stats_key, 'ewma_ms'))
-	local old_median = tonumber(redis.call('HGET', stats_key, 'median_ms'))
+	local old_average = tonumber(redis.call('HGET', stats_key, 'average_ms'))
 	local old_reliable_fast = tonumber(redis.call('HGET', stats_key, 'reliable_fast')) or 0
 	local old_updated = tonumber(redis.call('HGET', stats_key, 'updated_at_ms'))
+	local encoded = redis.call('HGET', stats_key, 'recent_samples')
 	local elapsed_seconds = 0
 	if old_updated and now_ms > old_updated then
 		elapsed_seconds = (now_ms - old_updated) / 1000
 	end
 
+	-- Older keys only have median_ms. Rebuild the previous arithmetic average
+	-- from the retained sample window before deciding whether this is recovery.
+	if not old_average and encoded then
+		local previous_sum = 0
+		local previous_count = 0
+		for value in string.gmatch(encoded, '[^,]+') do
+			local parsed = tonumber(value)
+			if parsed then
+				previous_sum = previous_sum + parsed
+				previous_count = previous_count + 1
+			end
+		end
+		if previous_count > 0 then old_average = previous_sum / previous_count end
+	end
 	local fast_recovery = latency_ms <= 10000 and (
 		not old_ewma or
-		not old_median or
+		not old_average or
 		elapsed_seconds > 1200 or
-		(0.30 * old_median + 0.70 * old_ewma) > 10000)
+		(0.30 * old_average + 0.70 * old_ewma) > 10000)
 	local samples = {}
-	local encoded = redis.call('HGET', stats_key, 'recent_samples')
 	if encoded and elapsed_seconds <= 1200 and not fast_recovery then
 		for value in string.gmatch(encoded, '[^,]+') do
 			table.insert(samples, tonumber(value))
@@ -57,15 +71,10 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 		table.remove(samples, 1)
 	end
 
-	local sorted = {}
-	for i, value in ipairs(samples) do sorted[i] = value end
-	table.sort(sorted)
-	local median = 0
-	if #sorted % 2 == 0 then
-		median = (sorted[#sorted / 2] + sorted[#sorted / 2 + 1]) / 2
-	else
-		median = sorted[math.floor((#sorted + 1) / 2)]
-	end
+	local sum = 0
+	for _, value in ipairs(samples) do sum = sum + value end
+	local average = 0
+	if #samples > 0 then average = sum / #samples end
 
 	local ewma = latency_ms
 	if old_ewma and not fast_recovery then
@@ -99,7 +108,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	for i, value in ipairs(samples) do parts[i] = tostring(value) end
 	redis.call('HSET', stats_key,
 		'ewma_ms', tostring(ewma),
-		'median_ms', tostring(median),
+		'average_ms', tostring(average),
 		'sample_count', tostring(sample_count),
 		'reliable_fast', tostring(reliable_fast),
 		'slow_streak', tostring(slow_streak),
@@ -156,27 +165,48 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		if accountID <= 0 {
 			continue
 		}
-		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID), "ewma_ms", "median_ms", "sample_count", "updated_at_ms", "slow_streak", "reliable_fast")
+		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID), "ewma_ms", "average_ms", "sample_count", "updated_at_ms", "slow_streak", "reliable_fast", "recent_samples")
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("get first-token latency stats: %w", err)
 	}
 	for accountID, cmd := range commands {
 		values, err := cmd.Result()
-		if err != nil || len(values) != 6 || values[0] == nil {
+		if err != nil || len(values) != 7 || values[0] == nil {
 			continue
 		}
-		ewma, ewmaErr := strconv.ParseFloat(fmt.Sprint(values[0]), 64)
-		median, medianErr := strconv.ParseFloat(fmt.Sprint(values[1]), 64)
+		_, ewmaErr := strconv.ParseFloat(fmt.Sprint(values[0]), 64)
+		var average float64
+		var averageErr error
+		if values[1] != nil {
+			average, averageErr = strconv.ParseFloat(fmt.Sprint(values[1]), 64)
+		} else if values[6] != nil {
+			var sum float64
+			var sampleCount int
+			for _, raw := range strings.Split(fmt.Sprint(values[6]), ",") {
+				value, parseErr := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+				if parseErr == nil {
+					sum += value
+					sampleCount++
+				}
+			}
+			if sampleCount > 0 {
+				average = sum / float64(sampleCount)
+			} else {
+				averageErr = fmt.Errorf("recent samples are empty")
+			}
+		} else {
+			averageErr = fmt.Errorf("average samples are missing")
+		}
 		count, countErr := strconv.ParseInt(fmt.Sprint(values[2]), 10, 64)
 		updatedAtMS, updatedErr := strconv.ParseInt(fmt.Sprint(values[3]), 10, 64)
 		slowStreak, streakErr := strconv.Atoi(fmt.Sprint(values[4]))
 		reliableFast := values[5] != nil && fmt.Sprint(values[5]) == "1"
-		if ewmaErr != nil || medianErr != nil || countErr != nil || updatedErr != nil || streakErr != nil || count <= 0 || updatedAtMS <= 0 {
+		if ewmaErr != nil || averageErr != nil || countErr != nil || updatedErr != nil || streakErr != nil || count <= 0 || updatedAtMS <= 0 {
 			continue
 		}
 		result[accountID] = service.FirstTokenLatencyStats{
-			PredictedMS:  0.30*median + 0.70*ewma,
+			PredictedMS:  average,
 			SampleCount:  count,
 			UpdatedAt:    time.UnixMilli(updatedAtMS),
 			SlowStreak:   slowStreak,

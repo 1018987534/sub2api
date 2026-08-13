@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFirstTokenLatencyStatsCacheRecordsRobustSharedPrediction(t *testing.T) {
+func TestFirstTokenLatencyStatsCacheRecordsRecentAverage(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -32,11 +32,33 @@ func TestFirstTokenLatencyStatsCacheRecordsRobustSharedPrediction(t *testing.T) 
 	require.NoError(t, err)
 	require.NotContains(t, stats, int64(99))
 	require.Equal(t, int64(4), stats[42].SampleCount)
-	require.Greater(t, stats[42].PredictedMS, float64(100))
-	require.Less(t, stats[42].PredictedMS, float64(2000), "one tail sample must not dominate the robust prediction")
+	require.InDelta(t, 2_582.5, stats[42].PredictedMS, 0.001)
+	require.Equal(t, "2582.5", mr.HGet(firstTokenLatencyStatsPrefix+"42", "average_ms"))
 	other, err := cache.GetStatsBatch(ctx, []int64{43})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), other[43].SampleCount)
+}
+
+func TestFirstTokenLatencyStatsCacheRebuildsAverageFromLegacySamples(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	cache := &firstTokenLatencyStatsCache{rdb: rdb}
+	ctx := context.Background()
+	key := firstTokenLatencyStatsPrefix + "44"
+	require.NoError(t, rdb.HSet(ctx, key,
+		"ewma_ms", "5000",
+		"median_ms", "1000",
+		"sample_count", "3",
+		"updated_at_ms", strconv.FormatInt(time.Now().UnixMilli(), 10),
+		"slow_streak", "0",
+		"reliable_fast", "1",
+		"recent_samples", "1000,5000,9000",
+	).Err())
+
+	stats, err := cache.GetStatsBatch(ctx, []int64{44})
+	require.NoError(t, err)
+	require.Equal(t, 5_000.0, stats[44].PredictedMS)
 }
 
 func TestFirstTokenLatencyStatsCacheSharesStatsAcrossInstancesAndResetsSlowStreak(t *testing.T) {
