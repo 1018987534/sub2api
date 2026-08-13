@@ -1854,16 +1854,27 @@ func (u *openAIHTTPPassthroughModelNotFoundFailoverUpstream) Do(_ *http.Request,
 	u.accountIDs = append(u.accountIDs, accountID)
 	u.mu.Unlock()
 	if accountID == 9911 {
+		body := strings.Join([]string{
+			"event: response.created",
+			`data: {"type":"response.created","response":{"id":"resp_healthy","model":"gpt-5.2","status":"in_progress"}}`,
+			"",
+			"event: response.output_text.delta",
+			`data: {"type":"response.output_text.delta","response_id":"resp_healthy","delta":"ok"}`,
+			"",
+			"event: response.completed",
+			`data: {"type":"response.completed","response":{"id":"resp_healthy","model":"gpt-5.2","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+			"",
+		}, "\n")
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Header:     http.Header{"Content-Type": []string{"application/json"}},
-			Body:       io.NopCloser(strings.NewReader(`{"id":"resp_healthy","object":"response","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)),
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
 		}, nil
 	}
 	return &http.Response{
 		StatusCode: http.StatusBadRequest,
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"model_not_found","message":"unknown provider for model gpt-5.6-sol","param":"model","type":"invalid_request_error"}}`)),
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"model_not_found","message":"unknown provider for model gpt-5.2","param":"model","type":"invalid_request_error"}}`)),
 	}, nil
 }
 
@@ -2195,7 +2206,7 @@ func TestOpenAIResponses_PassthroughModelNotFoundSwitchesToHealthyAccount(t *tes
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","input":"hello","stream":false}`))
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(`{"model":"gpt-5.2","input":"hello","stream":false}`))
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
 		ID: 1803, GroupID: &groupID,
@@ -2207,8 +2218,8 @@ func TestOpenAIResponses_PassthroughModelNotFoundSwitchesToHealthyAccount(t *tes
 	h.Responses(c)
 
 	require.Equal(t, []int64{9910, 9911}, upstream.calls())
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, "resp_healthy", gjson.GetBytes(rec.Body.Bytes(), "id").String())
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "resp_healthy")
 	require.NotContains(t, rec.Body.String(), "unknown provider")
 }
 
