@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -62,6 +63,33 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 				2: stats(12_000, 5, time.Minute),
 			},
 			expected: []int64{1, 2},
+		},
+		{
+			name: "slow pool needs material advantage before reranking",
+			ids:  []int64{1, 2},
+			stats: map[int64]FirstTokenLatencyStats{
+				1: stats(14_500, 5, time.Minute),
+				2: stats(12_000, 5, time.Minute),
+			},
+			expected: []int64{1, 2},
+		},
+		{
+			name: "slow pool near tie ignores caller sticky or rate order",
+			ids:  []int64{2, 1},
+			stats: map[int64]FirstTokenLatencyStats{
+				1: stats(14_500, 5, time.Minute),
+				2: stats(12_000, 5, time.Minute),
+			},
+			expected: []int64{1, 2},
+		},
+		{
+			name: "slow pool reranks on material advantage",
+			ids:  []int64{1, 2},
+			stats: map[int64]FirstTokenLatencyStats{
+				1: stats(15_500, 5, time.Minute),
+				2: stats(12_000, 5, time.Minute),
+			},
+			expected: []int64{2, 1},
 		},
 		{
 			name: "crossing ten seconds overrides near tie and baseline",
@@ -184,6 +212,10 @@ func TestFirstTokenPriorityProbeIntervalBacksOffSlowAccounts(t *testing.T) {
 		FirstTokenLatencyStats{PredictedMS: 1_000_000, SampleCount: 5, SlowStreak: 20},
 		1_000,
 	))
+	require.Equal(t, firstTokenPriorityRecoveryProbe, firstTokenPriorityProbeInterval(
+		FirstTokenLatencyStats{PredictedMS: 18_000, SampleCount: 5, RecoveryFastStreak: 1},
+		5_000,
+	))
 }
 
 func TestFirstTokenPriorityStatsFastRequiresTrackedConfirmation(t *testing.T) {
@@ -201,7 +233,7 @@ func TestFirstTokenPriorityStatsFastRequiresTrackedConfirmation(t *testing.T) {
 	require.True(t, firstTokenPriorityStatsFast(recovering, now))
 }
 
-func TestApplyOpenAIFirstTokenStickyOrderOnlyWithinMinimumFastRateTier(t *testing.T) {
+func TestApplyOpenAIFirstTokenStickyOrderReusesLegacyWeightedPolicy(t *testing.T) {
 	now := time.Now()
 	cheap := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
 	equalSticky := upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
@@ -220,17 +252,46 @@ func TestApplyOpenAIFirstTokenStickyOrderOnlyWithinMinimumFastRateTier(t *testin
 	cache := &staticFirstTokenLatencyStatsCache{stats: stats}
 	rateOrder := newOpenAILegacyUpstreamRateOrder([]*Account{cheap, equalSticky, expensiveSticky, slowProbe}, now, defaultOpenAIOAuthSchedulingRateMultiplier)
 
-	equalRate := []openAIAccountCandidateScore{{account: cheap}, {account: equalSticky}, {account: expensiveSticky}}
-	applyOpenAIFirstTokenStickyOrder(context.Background(), equalRate, equalSticky.ID, cache, rateOrder)
-	require.Equal(t, []int64{equalSticky.ID, cheap.ID, expensiveSticky.ID}, candidateAccountIDs(equalRate))
+	winsWithStickyWeight := 0
+	for seed := uint64(1); seed <= 1_000; seed++ {
+		req := OpenAIAccountScheduleRequest{StickyAccountID: equalSticky.ID, SessionHash: fmt.Sprintf("session-%d", seed), RequestedModel: "gpt-test"}
+		actual := []openAIAccountCandidateScore{{account: cheap}, {account: equalSticky}, {account: expensiveSticky}}
+		expected := append([]openAIAccountCandidateScore(nil), actual...)
+		applyOpenAIFirstTokenStickyOrder(context.Background(), actual, req, cache, rateOrder)
+		applyOpenAILegacySoftStickyOrder(
+			expected,
+			func(candidate openAIAccountCandidateScore) *Account { return candidate.account },
+			rateOrder,
+			openAILegacySoftStickyPolicy{
+				enabled:   true,
+				accountID: equalSticky.ID,
+				weight:    openAILegacySessionStickyWeight,
+				seed:      deriveOpenAISelectionSeed(req),
+			},
+			func(account *Account) int {
+				if account != nil && firstTokenPriorityStatsFast(stats[account.ID], now) {
+					return 1
+				}
+				return 0
+			},
+		)
+		require.Equal(t, candidateAccountIDs(expected), candidateAccountIDs(actual))
+		if actual[0].account.ID == equalSticky.ID {
+			winsWithStickyWeight++
+		}
+	}
+	require.Positive(t, winsWithStickyWeight)
+	require.Less(t, winsWithStickyWeight, 1_000)
 
 	higherRate := []openAIAccountCandidateScore{{account: cheap}, {account: expensiveSticky}}
-	applyOpenAIFirstTokenStickyOrder(context.Background(), higherRate, expensiveSticky.ID, cache, rateOrder)
+	applyOpenAIFirstTokenStickyOrder(context.Background(), higherRate, OpenAIAccountScheduleRequest{StickyAccountID: expensiveSticky.ID}, cache, rateOrder)
 	require.Equal(t, []int64{cheap.ID, expensiveSticky.ID}, candidateAccountIDs(higherRate))
 
 	probeFirst := []openAIAccountCandidateScore{{account: slowProbe}, {account: cheap}, {account: equalSticky}}
-	applyOpenAIFirstTokenStickyOrder(context.Background(), probeFirst, equalSticky.ID, cache, rateOrder)
-	require.Equal(t, []int64{slowProbe.ID, cheap.ID, equalSticky.ID}, candidateAccountIDs(probeFirst))
+	applyOpenAIFirstTokenStickyOrder(context.Background(), probeFirst, OpenAIAccountScheduleRequest{StickyAccountID: equalSticky.ID}, cache, rateOrder)
+	require.Equal(t, slowProbe.ID, probeFirst[0].account.ID)
+	require.ElementsMatch(t, []int64{cheap.ID, equalSticky.ID}, candidateAccountIDs(probeFirst[1:]))
+
 }
 
 func TestFirstTokenProbePreservesHealthyFastStickyBinding(t *testing.T) {
@@ -241,35 +302,14 @@ func TestFirstTokenProbePreservesHealthyFastStickyBinding(t *testing.T) {
 		account.Status = StatusActive
 		account.Schedulable = true
 	}
-	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
 		probe.ID: {PredictedMS: 30_000, SampleCount: 5, UpdatedAt: now},
 		fast.ID:  {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
 	}}
-	scheduler := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{
-		rateLimitService: &RateLimitService{
-			firstTokenLatencyStatsCache: stats,
-		},
-	}}
-	req := OpenAIAccountScheduleRequest{
-		FirstTokenPriority:   true,
-		UseUpstreamTokenCost: true,
-		StickyAccountID:      fast.ID,
-	}
+	rateOrder := newOpenAILegacyUpstreamRateOrder([]*Account{probe, fast}, now, defaultOpenAIOAuthSchedulingRateMultiplier)
 	ordered := []openAIAccountCandidateScore{{account: probe}, {account: fast}}
-
-	require.True(t, scheduler.shouldPreserveFirstTokenStickyBinding(context.Background(), req, probe.ID, ordered))
-
-	cheaperFast := upstreamCostTestAccount(13, UpstreamBillingProbeStatusOK, 0.02, now.Add(-time.Minute), 30*time.Minute)
-	cheaperFast.Status = StatusActive
-	cheaperFast.Schedulable = true
-	stats.stats[cheaperFast.ID] = FirstTokenLatencyStats{PredictedMS: 6_000, SampleCount: 5, UpdatedAt: now}
-	ordered = append(ordered, openAIAccountCandidateScore{account: cheaperFast})
-	require.True(t, scheduler.shouldPreserveFirstTokenStickyBinding(context.Background(), req, probe.ID, ordered))
-
-	recoveredCheap := *probe
-	stats.stats[probe.ID] = FirstTokenLatencyStats{PredictedMS: 7_000, SampleCount: 5, UpdatedAt: now}
-	ordered[0].account = &recoveredCheap
-	require.False(t, scheduler.shouldPreserveFirstTokenStickyBinding(context.Background(), req, probe.ID, ordered))
+	applyOpenAIFirstTokenStickyOrder(context.Background(), ordered, OpenAIAccountScheduleRequest{StickyAccountID: fast.ID}, cache, rateOrder)
+	require.Equal(t, []int64{probe.ID, fast.ID}, candidateAccountIDs(ordered))
 }
 
 func candidateAccountIDs(candidates []openAIAccountCandidateScore) []int64 {
@@ -398,6 +438,27 @@ func TestOpenAIFirstTokenPriorityFallsBackToLowRateWhenAllAccountsAreFast(t *tes
 	)
 
 	require.Equal(t, []int64{cheap.ID, expensive.ID}, []int64{got[0].account.ID, got[1].account.ID})
+}
+
+func TestOpenAIFirstTokenPriorityAlwaysUsesLowRateInsideFastPool(t *testing.T) {
+	now := time.Now()
+	cheap := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.05, now.Add(-time.Minute), 30*time.Minute)
+	expensive := upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.50, now.Add(-time.Minute), 30*time.Minute)
+	order := []openAIAccountCandidateScore{{account: expensive}, {account: cheap}}
+	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		expensive.ID: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
+		cheap.ID:     {PredictedMS: 8_000, SampleCount: 5, UpdatedAt: now},
+	}}
+
+	got := applyOpenAIFirstTokenPriorityOrder(
+		context.Background(),
+		OpenAIAccountScheduleRequest{UseUpstreamTokenCost: false},
+		order,
+		cache,
+		defaultOpenAIOAuthSchedulingRateMultiplier,
+	)
+
+	require.Equal(t, []int64{cheap.ID, expensive.ID}, candidateAccountIDs(got))
 }
 
 func TestOpenAIFirstTokenPriorityUsesLowRateWithinFastPool(t *testing.T) {

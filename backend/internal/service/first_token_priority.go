@@ -10,9 +10,11 @@ import (
 const (
 	firstTokenPriorityMinimumSamples = 3
 	firstTokenPriorityFreshFor       = 20 * time.Minute
-	firstTokenPriorityNearTieRatio   = 0.05
+	firstTokenPriorityNearTieRatio   = 0.20
+	firstTokenPriorityNearTieFloor   = 2_000.0
 	firstTokenPriorityFastThreshold  = 10_000.0
 	firstTokenPriorityProbeBase      = 2 * time.Minute
+	firstTokenPriorityRecoveryProbe  = 30 * time.Second
 	firstTokenPriorityProbeMax       = 6 * time.Hour
 	firstTokenPriorityProbeLease     = 10 * time.Minute
 )
@@ -220,19 +222,7 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		}
 		// Slow/unknown accounts still use TTFT ordering so the least-bad
 		// fallback remains first, while the fast pool retains low-rate order.
-		sort.SliceStable(slow, func(i, j int) bool {
-			if slow[i].known != slow[j].known {
-				return slow[i].known
-			}
-			if !slow[i].known {
-				return slow[i].original < slow[j].original
-			}
-			left, right := slow[i].stats.PredictedMS, slow[j].stats.PredictedMS
-			if left > 0 && right > 0 && left != right {
-				return left < right
-			}
-			return slow[i].original < slow[j].original
-		})
+		slow = stableFirstTokenRankedOrder(slow, now)
 		if explore && len(slow) > 0 {
 			fastestMS := fastRanked[0].stats.PredictedMS
 			for _, item := range fastRanked[1:] {
@@ -264,30 +254,7 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		return append([]int64(nil), accountIDs...)
 	}
 
-	sort.SliceStable(ranked, func(i, j int) bool {
-		if ranked[i].known != ranked[j].known {
-			return ranked[i].known
-		}
-		if !ranked[i].known {
-			return ranked[i].original < ranked[j].original
-		}
-		left, right := ranked[i].stats.PredictedMS, ranked[j].stats.PredictedMS
-		if left > 0 && right > 0 && left != right {
-			leftFast := firstTokenPriorityStatsFast(ranked[i].stats, now)
-			rightFast := firstTokenPriorityStatsFast(ranked[j].stats, now)
-			if leftFast != rightFast {
-				return leftFast
-			}
-			delta := left - right
-			if delta < 0 {
-				delta = -delta
-			}
-			if delta/minFloat64(left, right) > firstTokenPriorityNearTieRatio {
-				return left < right
-			}
-		}
-		return ranked[i].original < ranked[j].original
-	})
+	ranked = stableFirstTokenRankedOrder(ranked, now)
 
 	if explore {
 		fastestMS := 0.0
@@ -329,31 +296,72 @@ func firstTokenPriorityStatsFast(stats FirstTokenLatencyStats, now time.Time) bo
 	return confirmed && age >= 0 && age <= firstTokenPriorityFreshFor && stats.PredictedMS > 0 && stats.PredictedMS <= firstTokenPriorityFastThreshold
 }
 
-// applyOpenAIFirstTokenStickyOrder promotes the current session only inside the
-// reliable fast pool's minimum effective-rate tier. A slow/unknown item at the
-// front is an adaptive probe and must retain its one-request promotion.
+// firstTokenPriorityClearlyFaster is the ranking hysteresis gate. Crossing the
+// fast-pool boundary always wins; inside the slow pool, minor prediction
+// movement does not reshuffle accounts.
+func firstTokenPriorityClearlyFaster(left, right FirstTokenLatencyStats, now time.Time) bool {
+	leftFast := firstTokenPriorityStatsFast(left, now)
+	rightFast := firstTokenPriorityStatsFast(right, now)
+	if leftFast != rightFast {
+		return leftFast
+	}
+	if left.PredictedMS <= 0 || right.PredictedMS <= 0 || left.PredictedMS >= right.PredictedMS {
+		return false
+	}
+	delta := right.PredictedMS - left.PredictedMS
+	return delta >= firstTokenPriorityNearTieFloor && delta/right.PredictedMS >= firstTokenPriorityNearTieRatio
+}
+
+// stableFirstTokenRankedOrder uses account ID as a deterministic tie baseline,
+// rather than inheriting rate or session-sticky ordering from the caller. A
+// challenger replaces the current leader only after clearing the hysteresis
+// gate, so slow-pool ordering remains TTFT-only and stable across requests.
+func stableFirstTokenRankedOrder(ranked []firstTokenRankedAccount, now time.Time) []firstTokenRankedAccount {
+	known := make([]firstTokenRankedAccount, 0, len(ranked))
+	unknown := make([]firstTokenRankedAccount, 0, len(ranked))
+	for _, item := range ranked {
+		if item.known {
+			known = append(known, item)
+		} else {
+			unknown = append(unknown, item)
+		}
+	}
+	sort.Slice(known, func(i, j int) bool { return known[i].id < known[j].id })
+	ordered := make([]firstTokenRankedAccount, 0, len(ranked))
+	for len(known) > 0 {
+		winner := 0
+		for index := 1; index < len(known); index++ {
+			if firstTokenPriorityClearlyFaster(known[index].stats, known[winner].stats, now) {
+				winner = index
+			}
+		}
+		ordered = append(ordered, known[winner])
+		known = append(known[:winner], known[winner+1:]...)
+	}
+	return append(ordered, unknown...)
+}
+
+// applyOpenAIFirstTokenStickyOrder reuses the legacy low-rate weighted sticky
+// policy inside the reliable fast pool. It never crosses a rate tier and never
+// lets a slow sticky account override the TTFT ranking.
 func applyOpenAIFirstTokenStickyOrder(
 	ctx context.Context,
 	ordered []openAIAccountCandidateScore,
-	stickyAccountID int64,
+	req OpenAIAccountScheduleRequest,
 	cache FirstTokenLatencyStatsCache,
 	rateOrder openAILegacyUpstreamRateOrder,
 ) {
-	if stickyAccountID <= 0 || cache == nil || len(ordered) <= 1 {
+	if req.StickyAccountID <= 0 || cache == nil || len(ordered) <= 1 {
 		return
 	}
 	accountIDs := make([]int64, 0, len(ordered))
-	stickyIndex := -1
-	for index, candidate := range ordered {
+	for _, candidate := range ordered {
 		if candidate.account == nil || !isFirstTokenPriorityAccount(candidate.account) {
 			continue
 		}
 		accountIDs = append(accountIDs, candidate.account.ID)
-		if candidate.account.ID == stickyAccountID {
-			stickyIndex = index
-		}
 	}
-	if stickyIndex <= 0 || len(accountIDs) == 0 {
+	if len(accountIDs) == 0 {
 		return
 	}
 	stats, err := cache.GetStatsBatch(ctx, accountIDs)
@@ -361,71 +369,26 @@ func applyOpenAIFirstTokenStickyOrder(
 		return
 	}
 	now := time.Now()
-	first := ordered[0].account
-	sticky := ordered[stickyIndex].account
-	if first == nil || sticky == nil || !firstTokenPriorityStatsFast(stats[first.ID], now) || !firstTokenPriorityStatsFast(stats[sticky.ID], now) {
+	if !firstTokenPriorityStatsFast(stats[req.StickyAccountID], now) {
 		return
 	}
-	for _, candidate := range ordered {
-		if candidate.account == nil || !firstTokenPriorityStatsFast(stats[candidate.account.ID], now) {
-			continue
-		}
-		if rateOrder.compare(candidate.account, sticky) < 0 {
-			return
-		}
-	}
-	stickyCandidate := ordered[stickyIndex]
-	copy(ordered[1:stickyIndex+1], ordered[:stickyIndex])
-	ordered[0] = stickyCandidate
-}
-
-func (s *defaultOpenAIAccountScheduler) shouldPreserveFirstTokenStickyBinding(
-	ctx context.Context,
-	req OpenAIAccountScheduleRequest,
-	selectedAccountID int64,
-	ordered []openAIAccountCandidateScore,
-) bool {
-	if !req.FirstTokenPriority || req.StickyAccountID <= 0 || selectedAccountID <= 0 || selectedAccountID == req.StickyAccountID || s == nil || s.service == nil || s.service.rateLimitService == nil {
-		return false
-	}
-	cache := s.service.rateLimitService.firstTokenLatencyStatsCache
-	if cache == nil {
-		return false
-	}
-	accounts := make([]*Account, 0, len(ordered))
-	accountIDs := make([]int64, 0, len(ordered))
-	var sticky *Account
-	for _, candidate := range ordered {
-		if candidate.account == nil || !isFirstTokenPriorityAccount(candidate.account) {
-			continue
-		}
-		accounts = append(accounts, candidate.account)
-		accountIDs = append(accountIDs, candidate.account.ID)
-		if candidate.account.ID == req.StickyAccountID {
-			sticky = candidate.account
-		}
-	}
-	if sticky == nil {
-		return false
-	}
-	stats, err := cache.GetStatsBatch(ctx, accountIDs)
-	now := time.Now()
-	if err != nil || !firstTokenPriorityStatsFast(stats[sticky.ID], now) {
-		return false
-	}
-	if !firstTokenPriorityStatsFast(stats[selectedAccountID], now) {
-		return true
-	}
-	if !req.UseUpstreamTokenCost {
-		return true
-	}
-	rateOrder := newOpenAILegacyUpstreamRateOrder(accounts, now, s.service.openAIOAuthSchedulingRateMultiplier(ctx))
-	for _, account := range accounts {
-		if firstTokenPriorityStatsFast(stats[account.ID], now) && rateOrder.compare(account, sticky) < 0 {
-			return false
-		}
-	}
-	return true
+	applyOpenAILegacySoftStickyOrder(
+		ordered,
+		func(candidate openAIAccountCandidateScore) *Account { return candidate.account },
+		rateOrder,
+		openAILegacySoftStickyPolicy{
+			enabled:   true,
+			accountID: req.StickyAccountID,
+			weight:    openAILegacySessionStickyWeight,
+			seed:      deriveOpenAISelectionSeed(req),
+		},
+		func(account *Account) int {
+			if account != nil && firstTokenPriorityStatsFast(stats[account.ID], now) {
+				return 1
+			}
+			return 0
+		},
+	)
 }
 
 func dynamicFirstTokenProbeIndex(ranked []firstTokenRankedAccount, fastestMS float64, now time.Time) int {
@@ -455,7 +418,7 @@ func firstTokenPriorityProbeInterval(stats FirstTokenLatencyStats, fastestMS flo
 		return time.Duration(stats.SampleCount+1) * 30 * time.Second
 	}
 	if stats.RecoveryFastStreak > 0 {
-		return firstTokenPriorityProbeBase
+		return firstTokenPriorityRecoveryProbe
 	}
 	ratio := 1.0
 	if fastestMS > 0 && stats.PredictedMS > fastestMS {
@@ -480,11 +443,4 @@ func firstTokenPriorityRanks(ctx context.Context, candidates []*Account, cache F
 		ranks[accountID] = rank
 	}
 	return ranks
-}
-
-func minFloat64(left, right float64) float64 {
-	if left < right {
-		return left
-	}
-	return right
 }

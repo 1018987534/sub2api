@@ -1030,25 +1030,22 @@ func applyOpenAIFirstTokenPriorityOrder(
 	if len(selectionOrder) <= 1 {
 		return selectionOrder
 	}
-	rateOrder := openAILegacyUpstreamRateOrder{}
-	if req.UseUpstreamTokenCost {
-		accounts := make([]*Account, 0, len(selectionOrder))
-		for _, candidate := range selectionOrder {
-			accounts = append(accounts, candidate.account)
-		}
-		rateOrder = newOpenAILegacyUpstreamRateOrder(accounts, time.Now(), oauthSchedulingRateMultiplier)
-		if rateOrder.enabled {
-			sort.SliceStable(selectionOrder, func(i, j int) bool {
-				if req.RequireCompact {
-					leftTier := openAICompactSupportTier(selectionOrder[i].account)
-					rightTier := openAICompactSupportTier(selectionOrder[j].account)
-					if leftTier != rightTier {
-						return leftTier > rightTier
-					}
+	accounts := make([]*Account, 0, len(selectionOrder))
+	for _, candidate := range selectionOrder {
+		accounts = append(accounts, candidate.account)
+	}
+	rateOrder := newOpenAILegacyUpstreamRateOrder(accounts, time.Now(), oauthSchedulingRateMultiplier)
+	if rateOrder.enabled {
+		sort.SliceStable(selectionOrder, func(i, j int) bool {
+			if req.RequireCompact {
+				leftTier := openAICompactSupportTier(selectionOrder[i].account)
+				rightTier := openAICompactSupportTier(selectionOrder[j].account)
+				if leftTier != rightTier {
+					return leftTier > rightTier
 				}
-				return rateOrder.compare(selectionOrder[i].account, selectionOrder[j].account) < 0
-			})
-		}
+			}
+			return rateOrder.compare(selectionOrder[i].account, selectionOrder[j].account) < 0
+		})
 	}
 
 	for start := 0; start < len(selectionOrder); {
@@ -1068,7 +1065,7 @@ func applyOpenAIFirstTokenPriorityOrder(
 		sort.SliceStable(selectionOrder[start:end], func(i, j int) bool {
 			return ranks[selectionOrder[start+i].account.ID] < ranks[selectionOrder[start+j].account.ID]
 		})
-		applyOpenAIFirstTokenStickyOrder(ctx, selectionOrder[start:end], req.StickyAccountID, cache, rateOrder)
+		applyOpenAIFirstTokenStickyOrder(ctx, selectionOrder[start:end], req, cache, rateOrder)
 		start = end
 	}
 	return selectionOrder
@@ -1258,11 +1255,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			}
 		}
 		if req.SessionHash != "" && !req.PreserveStickyBinding {
-			if s.shouldPreserveFirstTokenStickyBinding(ctx, req, fresh.ID, selectionOrder) {
-				_ = s.service.refreshStickySessionTTL(ctx, req.GroupID, req.SessionHash, s.service.openAIWSSessionStickyTTL())
-			} else {
-				_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
-			}
+			_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
 		}
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account:     fresh,

@@ -32,7 +32,7 @@ func TestFirstTokenLatencyStatsCacheRecordsRecentMedian(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, stats, int64(99))
 	require.Equal(t, int64(4), stats[42].SampleCount)
-	require.InDelta(t, 115, stats[42].PredictedMS, 0.001)
+	require.InDelta(t, 110, stats[42].PredictedMS, 0.001)
 	require.Equal(t, "115", mr.HGet(firstTokenLatencyStatsPrefix+"42", "median_ms"))
 	other, err := cache.GetStatsBatch(ctx, []int64{43})
 	require.NoError(t, err)
@@ -238,6 +238,49 @@ func TestFirstTokenLatencyStatsCacheNewAccountNeedsThreeFastSamples(t *testing.T
 	require.Equal(t, 8_500.0, stats[15].PredictedMS)
 	require.Equal(t, int64(3), stats[15].SampleCount)
 	require.True(t, stats[15].ReliableFast)
+}
+
+func TestFirstTokenLatencyStatsCacheStableScoreIgnoresOrdinaryBurstNoise(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	cache := &firstTokenLatencyStatsCache{rdb: rdb}
+	ctx := context.Background()
+
+	for index := 0; index < 3; index++ {
+		require.NoError(t, cache.RecordSample(ctx, 17, fmt.Sprintf("stable-%d", index), 20_000))
+	}
+	before, err := cache.GetStatsBatch(ctx, []int64{17})
+	require.NoError(t, err)
+	require.Equal(t, 20_000.0, before[17].PredictedMS)
+
+	for index, latency := range []int{16_000, 24_000, 15_000, 25_000} {
+		require.NoError(t, cache.RecordSample(ctx, 17, fmt.Sprintf("noise-%d", index), latency))
+	}
+	after, err := cache.GetStatsBatch(ctx, []int64{17})
+	require.NoError(t, err)
+	require.InDelta(t, before[17].PredictedMS, after[17].PredictedMS, 10)
+}
+
+func TestFirstTokenLatencyStatsCacheSevereSlowdownImmediatelyLeavesFastPool(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	cache := &firstTokenLatencyStatsCache{rdb: rdb}
+	ctx := context.Background()
+
+	for index := 0; index < 3; index++ {
+		require.NoError(t, cache.RecordSample(ctx, 18, fmt.Sprintf("fast-%d", index), 6_000))
+	}
+	fast, err := cache.GetStatsBatch(ctx, []int64{18})
+	require.NoError(t, err)
+	require.True(t, fast[18].ReliableFast)
+
+	require.NoError(t, cache.RecordSample(ctx, 18, "abrupt-slow", 20_000))
+	slow, err := cache.GetStatsBatch(ctx, []int64{18})
+	require.NoError(t, err)
+	require.False(t, slow[18].ReliableFast)
+	require.Equal(t, 20_000.0, slow[18].PredictedMS)
 }
 
 func TestFirstTokenLatencyStatsCacheFastProbeAfterStaleHistoryNeedsConfirmation(t *testing.T) {

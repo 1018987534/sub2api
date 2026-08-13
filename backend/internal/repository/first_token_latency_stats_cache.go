@@ -15,9 +15,9 @@ import (
 const firstTokenLatencyStatsPrefix = "scheduler:first_token:account:"
 const firstTokenLatencyProbePrefix = "scheduler:first_token:probe:"
 
-// The recent median is the value used by scheduling. Accounts
-// outside the fast pool need three consecutive sub-10-second observations
-// before their recovery samples replace the old slow window.
+// Scheduling uses a time-smoothed robust score. The recent median absorbs
+// isolated samples, while explicit change detection reacts immediately to a
+// confirmed recovery or a severe regression.
 var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	local stats_key = KEYS[1]
 	local dedupe_key = KEYS[2]
@@ -35,6 +35,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	local old_ewma = tonumber(redis.call('HGET', stats_key, 'ewma_ms'))
 	local old_median = tonumber(redis.call('HGET', stats_key, 'median_ms'))
 	local old_reliable_fast = tonumber(redis.call('HGET', stats_key, 'reliable_fast')) or 0
+	local score_version = tonumber(redis.call('HGET', stats_key, 'score_version')) or 0
 	local old_confirmation_tracked = tonumber(redis.call('HGET', stats_key, 'fast_confirmation_tracked')) or 0
 	local recovery_fast_streak = tonumber(redis.call('HGET', stats_key, 'recovery_fast_streak')) or 0
 	local recovery_fast_samples = redis.call('HGET', stats_key, 'recovery_fast_samples')
@@ -65,6 +66,10 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 			end
 		end
 	end
+	if score_version < 2 and old_median then
+		-- Migrate the old per-sample EWMA without inheriting its volatile score.
+		old_ewma = old_median
+	end
 	local was_confirmed_fast = old_confirmation_tracked == 1 and old_reliable_fast == 1
 	-- Existing production hashes predate confirmation tracking. Preserve fast
 	-- state only when at least three retained observations support the median.
@@ -89,17 +94,18 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 		table.remove(samples, 1)
 	end
 
-	local ewma = latency_ms
-	if old_ewma then
-		local alpha = 0.25
-		if elapsed_seconds > 0 then
-			local time_alpha = 1 - math.exp(-elapsed_seconds / 900)
-			if time_alpha > alpha then alpha = time_alpha end
-		end
-		ewma = alpha * latency_ms + (1 - alpha) * old_ewma
-	end
-
 	sample_count = sample_count + 1
+	local abrupt_slowdown = false
+	if was_confirmed_fast and old_ewma and latency_ms > 10000 then
+		local slowdown_threshold = old_ewma * 1.8
+		if slowdown_threshold < old_ewma + 5000 then slowdown_threshold = old_ewma + 5000 end
+		if latency_ms >= slowdown_threshold then
+			abrupt_slowdown = true
+			was_confirmed_fast = false
+			recovery_fast_streak = 0
+			recovery_fast_samples = nil
+		end
+	end
 
 	local recovery_samples = {}
 	if recovery_fast_samples then
@@ -132,8 +138,19 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 			median = sorted[math.floor((#sorted + 1) / 2)]
 		end
 	end
+	local ewma = median
+	if old_ewma and not recovery_confirmed and not abrupt_slowdown then
+		-- Time-based EWMA avoids traffic volume changing the smoothing strength.
+		-- Busy and idle accounts converge on the same wall-clock horizon.
+		local alpha = 1 - math.exp(-elapsed_seconds / 900)
+		if alpha < 0 then alpha = 0 end
+		ewma = alpha * median + (1 - alpha) * old_ewma
+	elseif abrupt_slowdown then
+		-- A severe one-sample regression is a change point, not ordinary noise.
+		ewma = latency_ms
+	end
 	local reliable_fast = 0
-	if (was_confirmed_fast or recovery_confirmed) and median > 0 and median <= 10000 then reliable_fast = 1 end
+	if (was_confirmed_fast or recovery_confirmed) and ewma > 0 and ewma <= 10000 then reliable_fast = 1 end
 	if recovery_confirmed then
 		recovery_fast_streak = 0
 		recovery_samples = {}
@@ -158,6 +175,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 		'fast_confirmation_tracked', '1',
 		'recovery_fast_streak', tostring(recovery_fast_streak),
 		'recovery_fast_samples', table.concat(recovery_parts, ','),
+		'score_version', '2',
 		'slow_streak', tostring(slow_streak),
 		'updated_at_ms', tostring(now_ms),
 		'recent_samples', table.concat(parts, ','))
@@ -212,17 +230,17 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		if accountID <= 0 {
 			continue
 		}
-		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID), "ewma_ms", "median_ms", "sample_count", "updated_at_ms", "slow_streak", "reliable_fast", "recent_samples", "fast_confirmation_tracked", "recovery_fast_streak")
+		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID), "ewma_ms", "median_ms", "sample_count", "updated_at_ms", "slow_streak", "reliable_fast", "recent_samples", "fast_confirmation_tracked", "recovery_fast_streak", "score_version")
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("get first-token latency stats: %w", err)
 	}
 	for accountID, cmd := range commands {
 		values, err := cmd.Result()
-		if err != nil || len(values) != 9 || values[0] == nil {
+		if err != nil || len(values) != 10 || values[0] == nil {
 			continue
 		}
-		_, ewmaErr := strconv.ParseFloat(fmt.Sprint(values[0]), 64)
+		stablePrediction, ewmaErr := strconv.ParseFloat(fmt.Sprint(values[0]), 64)
 		var median float64
 		var medianErr error
 		recentSampleCount := 0
@@ -268,11 +286,18 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		if values[8] != nil {
 			recoveryFastStreak, _ = strconv.Atoi(fmt.Sprint(values[8]))
 		}
+		scoreVersion := 0
+		if values[9] != nil {
+			scoreVersion, _ = strconv.Atoi(fmt.Sprint(values[9]))
+		}
+		if scoreVersion < 2 {
+			stablePrediction = median
+		}
 		if ewmaErr != nil || medianErr != nil || countErr != nil || updatedErr != nil || streakErr != nil || count <= 0 || updatedAtMS <= 0 {
 			continue
 		}
 		result[accountID] = service.FirstTokenLatencyStats{
-			PredictedMS:             median,
+			PredictedMS:             stablePrediction,
 			SampleCount:             count,
 			UpdatedAt:               time.UnixMilli(updatedAtMS),
 			SlowStreak:              slowStreak,
