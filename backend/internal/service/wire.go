@@ -661,8 +661,11 @@ func ProvideBackupService(
 	encryptor SecretEncryptor,
 	storeFactory BackupObjectStoreFactory,
 	dumper DBDumper,
+	lockCache LeaderLockCache,
+	db *sql.DB,
 ) *BackupService {
 	svc := NewBackupService(settingRepo, cfg, encryptor, storeFactory, dumper)
+	svc.SetLeaderLock(lockCache, db)
 	if controlPlaneEnabled(cfg) {
 		svc.Start()
 	}
@@ -892,6 +895,7 @@ var ProviderSet = wire.NewSet(
 	ProvideScheduledTestRunnerService,
 	NewGroupCapacityService,
 	NewChannelService,
+	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
 	NewModelPricingResolver,
 	NewContentModerationService,
 	NewAffiliateService,
