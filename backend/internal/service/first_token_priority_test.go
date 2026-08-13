@@ -104,7 +104,7 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			expected: []int64{3, 1, 2},
 		},
 		{
-			name: "overdue fast alternative receives adaptive probe",
+			name: "overdue fast alternative does not displace low rate winner",
 			ids:  []int64{3, 1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
 				1: stats(1_000, 5, 5*time.Minute),
@@ -112,7 +112,18 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 				3: stats(8_000, 5, 10*time.Second),
 			},
 			explore:  true,
-			expected: []int64{1, 3, 2},
+			expected: []int64{3, 1, 2},
+		},
+		{
+			name: "probe skips overdue fast alternative and selects slow account",
+			ids:  []int64{1, 2, 3},
+			stats: map[int64]FirstTokenLatencyStats{
+				1: stats(5_000, 5, 10*time.Second),
+				2: stats(8_000, 5, 5*time.Minute),
+				3: stats(30_000, 5, 2*time.Hour),
+			},
+			explore:  true,
+			expected: []int64{3, 1, 2},
 		},
 		{
 			name: "unknown account stays behind the fast pool",
@@ -230,7 +241,7 @@ func TestFirstTokenPriorityOrderPreservesLowRateBaselineIncludingOAuthWhenAllRel
 	require.Equal(t, []int64{1, 2}, cache.fetchedIDs)
 }
 
-func TestFirstTokenPriorityOrderKeepsAdaptiveProbeWhenAllRelaysAreFast(t *testing.T) {
+func TestFirstTokenPriorityOrderDoesNotProbeHigherRateRelayWhenAllRelaysAreFast(t *testing.T) {
 	now := time.Now()
 	cache := &staticFirstTokenLatencyStatsCache{claimAllowed: true, stats: map[int64]FirstTokenLatencyStats{
 		1: {PredictedMS: 8_000, SampleCount: 5, UpdatedAt: now},
@@ -242,8 +253,8 @@ func TestFirstTokenPriorityOrderKeepsAdaptiveProbeWhenAllRelaysAreFast(t *testin
 		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
 	}
 
-	require.Equal(t, []int64{2, 3, 1}, firstTokenPriorityOrder(context.Background(), accounts, cache))
-	require.Equal(t, int64(2), cache.claimedID)
+	require.Equal(t, []int64{3, 1, 2}, firstTokenPriorityOrder(context.Background(), accounts, cache))
+	require.Zero(t, cache.claimedID)
 }
 
 func TestObserveFirstTokenLatencyOnlyRecordsEnabledOpenAIAPIKeys(t *testing.T) {

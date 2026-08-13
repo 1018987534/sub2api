@@ -201,15 +201,17 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 	// This makes the 10-second rule useful even when one account remains slow.
 	if len(fastKnownIDs) > 0 && !allFastKnown {
 		fast := make([]int64, 0, len(fastKnownIDs))
+		fastRanked := make([]firstTokenRankedAccount, 0, len(fastKnownIDs))
 		slow := make([]firstTokenRankedAccount, 0, len(ranked))
 		for _, accountID := range accountIDs {
-			if _, ok := fastKnownIDs[accountID]; ok {
-				fast = append(fast, accountID)
-				continue
-			}
 			for _, item := range ranked {
 				if item.id == accountID {
-					slow = append(slow, item)
+					if _, ok := fastKnownIDs[accountID]; ok {
+						fast = append(fast, accountID)
+						fastRanked = append(fastRanked, item)
+					} else {
+						slow = append(slow, item)
+					}
 					break
 				}
 			}
@@ -226,56 +228,35 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 			}
 			return slow[i].original < slow[j].original
 		})
-		if explore {
-			orderedRanked := make([]firstTokenRankedAccount, 0, len(ranked))
-			for _, accountID := range fast {
-				for _, item := range ranked {
-					if item.id == accountID {
-						orderedRanked = append(orderedRanked, item)
-						break
-					}
-				}
-			}
-			orderedRanked = append(orderedRanked, slow...)
-			fastestMS := orderedRanked[0].stats.PredictedMS
-			for _, item := range orderedRanked[1:] {
-				if item.stats.PredictedMS > 0 && item.stats.PredictedMS < fastestMS {
+		if explore && len(slow) > 0 {
+			fastestMS := fastRanked[0].stats.PredictedMS
+			for _, item := range fastRanked[1:] {
+				if item.stats.PredictedMS < fastestMS {
 					fastestMS = item.stats.PredictedMS
 				}
 			}
-			probeIndex := dynamicFirstTokenProbeIndex(orderedRanked, fastestMS, now)
+			// The first item is a sentinel for the active fast pool. Probe selection
+			// scans only the slow/unknown tail, so a higher-rate fast account can
+			// never displace the low-rate winner merely because its probe is due.
+			probeCandidates := append([]firstTokenRankedAccount{fastRanked[0]}, slow...)
+			probeIndex := dynamicFirstTokenProbeIndex(probeCandidates, fastestMS, now)
 			if probeIndex > 0 {
-				probe := orderedRanked[probeIndex]
+				probe := probeCandidates[probeIndex]
 				// A due probe is intentionally moved ahead of the fast pool for
 				// this request; the shared lease limits it to one gateway.
-				return promoteFirstTokenAccount(rankedIDs(orderedRanked), probe.id)
+				return promoteFirstTokenAccount(append(fast, rankedIDs(slow)...), probe.id)
 			}
 		}
 		ordered := append(fast, rankedIDs(slow)...)
 		return ordered
 	}
 	// When every candidate is already reliably below 10 seconds, latency is no
-	// longer the scarce signal. Preserve the caller's low-rate/baseline order,
-	// except for an alternative account whose adaptive probe interval is due.
+	// longer the scarce signal. Preserve the caller's low-rate/baseline order.
+	// Non-selected accounts become probe candidates only after their data ages
+	// out of the fast pool, avoiding unnecessary traffic to a higher-rate fast
+	// account while still guaranteeing eventual recovery checks.
 	if allFastKnown {
-		ordered := append([]int64(nil), accountIDs...)
-		if !explore {
-			return ordered
-		}
-		fastestMS := ranked[0].stats.PredictedMS
-		for _, item := range ranked[1:] {
-			if item.stats.PredictedMS < fastestMS {
-				fastestMS = item.stats.PredictedMS
-			}
-		}
-		probeIndex := dynamicFirstTokenProbeIndex(ranked, fastestMS, now)
-		if probeIndex <= 0 {
-			return ordered
-		}
-		probe := ordered[probeIndex]
-		copy(ordered[1:probeIndex+1], ordered[:probeIndex])
-		ordered[0] = probe
-		return ordered
+		return append([]int64(nil), accountIDs...)
 	}
 
 	sort.SliceStable(ranked, func(i, j int) bool {
