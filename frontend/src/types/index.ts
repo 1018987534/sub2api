@@ -906,6 +906,7 @@ export interface AccountFirstTokenLatencyMetric {
   sample_count: number
   updated_at: string
   slow_streak: number
+  recovery_fast_streak: number
   probe_interval_seconds: number
 }
 

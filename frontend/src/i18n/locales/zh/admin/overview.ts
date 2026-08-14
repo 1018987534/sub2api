@@ -87,6 +87,7 @@ export default {
       firstTokenPool: '调度池',
       firstTokenFastPool: '快池',
       firstTokenSlowPool: '慢池',
+      firstTokenSlowPoolRecovering: '慢池 · 待确认 {current}/{total}',
       firstTokenPendingSample: '待采样',
       firstTokenSchedulingRate: '调度倍率',
       firstTokenGroupFilter: '调度分组',

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -18,6 +19,8 @@ const (
 	firstTokenPriorityRecoveryProbe   = 30 * time.Second
 	firstTokenPriorityProbeMax        = 6 * time.Hour
 	firstTokenPriorityProbeLease      = 10 * time.Minute
+	firstTokenLatencyHiddenAccount    = "plus-xiaobaishu 生图"
+	firstTokenLatencyHiddenGroup      = "PRO 监控专用"
 )
 
 type firstTokenRankedAccount struct {
@@ -38,6 +41,7 @@ type AccountFirstTokenLatencyMetric struct {
 	SampleCount              int64                           `json:"sample_count"`
 	UpdatedAt                time.Time                       `json:"updated_at"`
 	SlowStreak               int                             `json:"slow_streak"`
+	RecoveryFastStreak       int                             `json:"recovery_fast_streak"`
 	ProbeIntervalSeconds     int64                           `json:"probe_interval_seconds"`
 }
 
@@ -76,7 +80,10 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 	}
 	metrics := make([]AccountFirstTokenLatencyMetric, 0, len(eligible))
 	for _, account := range eligible {
-		groups, belongsToSchedulableGroup := firstTokenLatencyMetricGroups(&account)
+		if strings.EqualFold(strings.TrimSpace(account.Name), firstTokenLatencyHiddenAccount) {
+			continue
+		}
+		groups, belongsToSchedulableGroup := firstTokenLatencyMetricGroups(&account, now)
 		if !belongsToSchedulableGroup {
 			continue
 		}
@@ -97,6 +104,7 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 			SampleCount:              stat.SampleCount,
 			UpdatedAt:                stat.UpdatedAt,
 			SlowStreak:               stat.SlowStreak,
+			RecoveryFastStreak:       stat.RecoveryFastStreak,
 			ProbeIntervalSeconds:     int64(firstTokenPriorityProbeInterval(stat, fastestMS).Seconds()),
 		})
 	}
@@ -112,16 +120,25 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 	return metrics, nil
 }
 
-func firstTokenLatencyMetricGroups(account *Account) ([]AccountFirstTokenLatencyGroup, bool) {
+func firstTokenLatencyMetricGroups(account *Account, now time.Time) ([]AccountFirstTokenLatencyGroup, bool) {
 	if account == nil {
 		return []AccountFirstTokenLatencyGroup{}, false
 	}
 	groupByID := make(map[int64]*Group, len(account.Groups)+len(account.AccountGroups))
 	membershipIDs := make(map[int64]struct{}, len(account.GroupIDs)+len(account.AccountGroups))
 	includeGroup := func(group *Group) bool {
-		return group != nil &&
-			(group.Status == "" || group.Status == StatusActive) &&
-			(group.Platform == "" || group.Platform == PlatformOpenAI)
+		if group == nil ||
+			strings.EqualFold(strings.TrimSpace(group.Name), firstTokenLatencyHiddenGroup) ||
+			!((group.Status == "" || group.Status == StatusActive) &&
+				(group.Platform == "" || group.Platform == PlatformOpenAI)) {
+			return false
+		}
+		reports := PreviewProfitAdmission([]ProfitPreviewGroupInput{{
+			Group:    group,
+			Accounts: []*Account{account},
+		}}, now)
+		return len(reports) == 1 && len(reports[0].Verdicts) == 1 &&
+			reports[0].Verdicts[0].Class == ProfitPreviewClassAdmitted
 	}
 	for _, group := range account.Groups {
 		if group == nil || group.ID <= 0 {
@@ -216,26 +233,20 @@ func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache F
 		}
 	}
 	if allPriorityAccountsFast {
-		withProbe := firstTokenPriorityOrderWithStats(priorityAccountIDs, stats, now, true)
-		if len(withProbe) == 0 || withProbe[0] == priorityAccountIDs[0] {
-			return accountIDs
-		}
-		claimed, claimErr := cache.TryClaimProbe(ctx, withProbe[0], firstTokenPriorityProbeLease)
-		if claimErr != nil || !claimed {
-			return accountIDs
-		}
-		return promoteFirstTokenAccount(accountIDs, withProbe[0])
+		return accountIDs
 	}
 	baseline := firstTokenPriorityOrderWithStats(priorityAccountIDs, stats, now, false)
-	withProbe := firstTokenPriorityOrderWithStats(priorityAccountIDs, stats, now, true)
-	if len(withProbe) == 0 || len(baseline) == 0 || withProbe[0] == baseline[0] {
-		return append(baseline, fallbackAccountIDs...)
+	ordered := append(baseline, fallbackAccountIDs...)
+	for _, probeAccountID := range firstTokenPriorityProbeAccountIDs(priorityAccountIDs, stats, now) {
+		claimed, err := cache.TryClaimProbe(ctx, probeAccountID, firstTokenPriorityProbeLease)
+		if err != nil {
+			return ordered
+		}
+		if claimed {
+			return promoteFirstTokenAccount(ordered, probeAccountID)
+		}
 	}
-	claimed, err := cache.TryClaimProbe(ctx, withProbe[0], firstTokenPriorityProbeLease)
-	if err != nil || !claimed {
-		return append(baseline, fallbackAccountIDs...)
-	}
-	return append(withProbe, fallbackAccountIDs...)
+	return ordered
 }
 
 func promoteFirstTokenAccount(accountIDs []int64, accountID int64) []int64 {
@@ -343,6 +354,61 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		ordered = append(ordered, item.id)
 	}
 	return ordered
+}
+
+func firstTokenPriorityProbeAccountIDs(accountIDs []int64, stats map[int64]FirstTokenLatencyStats, now time.Time) []int64 {
+	if len(accountIDs) <= 1 {
+		return nil
+	}
+	baseline := firstTokenPriorityOrderWithStats(accountIDs, stats, now, false)
+	fastIDs := make(map[int64]struct{}, len(accountIDs))
+	fastestMS := 0.0
+	for _, accountID := range accountIDs {
+		stat, found := stats[accountID]
+		if !found || !firstTokenPriorityStatsFast(stat, now) {
+			continue
+		}
+		fastIDs[accountID] = struct{}{}
+		if fastestMS == 0 || stat.PredictedMS < fastestMS {
+			fastestMS = stat.PredictedMS
+		}
+	}
+	if len(fastIDs) == len(accountIDs) {
+		return nil
+	}
+
+	probeRanked := make([]firstTokenRankedAccount, 0, len(baseline)+1)
+	if len(fastIDs) > 0 {
+		for _, accountID := range baseline {
+			if _, fast := fastIDs[accountID]; fast {
+				if len(probeRanked) == 0 {
+					probeRanked = append(probeRanked, firstTokenRankedAccount{id: accountID, stats: stats[accountID], known: true})
+				}
+				continue
+			}
+			probeRanked = append(probeRanked, firstTokenRankedAccount{id: accountID, stats: stats[accountID]})
+		}
+	} else {
+		for index, accountID := range baseline {
+			stat, found := stats[accountID]
+			age := now.Sub(stat.UpdatedAt)
+			known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= firstTokenPriorityFreshFor && stat.PredictedMS > 0
+			if stat.FastConfirmationTracked && !stat.ReliableFast && stat.PredictedMS <= firstTokenPriorityFastThreshold {
+				known = false
+			}
+			probeRanked = append(probeRanked, firstTokenRankedAccount{id: accountID, stats: stat, known: known, original: index})
+		}
+		if len(probeRanked) > 0 && probeRanked[0].known {
+			fastestMS = probeRanked[0].stats.PredictedMS
+		}
+	}
+
+	indexes := dynamicFirstTokenProbeIndexes(probeRanked, fastestMS, now)
+	result := make([]int64, 0, len(indexes))
+	for _, index := range indexes {
+		result = append(result, probeRanked[index].id)
+	}
+	return result
 }
 
 func rankedIDs(ranked []firstTokenRankedAccount) []int64 {
@@ -479,8 +545,20 @@ func applyOpenAIFirstTokenStickyOrder(
 }
 
 func dynamicFirstTokenProbeIndex(ranked []firstTokenRankedAccount, fastestMS float64, now time.Time) int {
-	bestIndex := -1
-	bestOverdue := -1.0
+	indexes := dynamicFirstTokenProbeIndexes(ranked, fastestMS, now)
+	if len(indexes) == 0 {
+		return -1
+	}
+	return indexes[0]
+}
+
+func dynamicFirstTokenProbeIndexes(ranked []firstTokenRankedAccount, fastestMS float64, now time.Time) []int {
+	type dueProbe struct {
+		index          int
+		recoveryStreak int
+		overdue        float64
+	}
+	due := make([]dueProbe, 0, len(ranked))
 	for index := 1; index < len(ranked); index++ {
 		item := ranked[index]
 		interval := firstTokenPriorityProbeInterval(item.stats, fastestMS)
@@ -491,21 +569,36 @@ func dynamicFirstTokenProbeIndex(ranked []firstTokenRankedAccount, fastestMS flo
 		if age < interval {
 			continue
 		}
-		overdue := float64(age) / float64(interval)
-		if bestIndex < 0 || overdue > bestOverdue {
-			bestIndex = index
-			bestOverdue = overdue
-		}
+		due = append(due, dueProbe{
+			index:          index,
+			recoveryStreak: item.stats.RecoveryFastStreak,
+			overdue:        float64(age) / float64(interval),
+		})
 	}
-	return bestIndex
+	sort.SliceStable(due, func(i, j int) bool {
+		leftRecovering := due[i].recoveryStreak > 0
+		rightRecovering := due[j].recoveryStreak > 0
+		if leftRecovering != rightRecovering {
+			return leftRecovering
+		}
+		if due[i].recoveryStreak != due[j].recoveryStreak {
+			return due[i].recoveryStreak > due[j].recoveryStreak
+		}
+		return due[i].overdue > due[j].overdue
+	})
+	indexes := make([]int, 0, len(due))
+	for _, probe := range due {
+		indexes = append(indexes, probe.index)
+	}
+	return indexes
 }
 
 func firstTokenPriorityProbeInterval(stats FirstTokenLatencyStats, fastestMS float64) time.Duration {
-	if stats.SampleCount < firstTokenPriorityMinimumSamples {
-		return time.Duration(stats.SampleCount+1) * 30 * time.Second
-	}
 	if stats.RecoveryFastStreak > 0 {
 		return firstTokenPriorityRecoveryProbe
+	}
+	if stats.SampleCount < firstTokenPriorityMinimumSamples {
+		return time.Duration(stats.SampleCount+1) * 30 * time.Second
 	}
 	ratio := 1.0
 	if fastestMS > 0 && stats.PredictedMS > fastestMS {

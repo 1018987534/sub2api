@@ -87,6 +87,7 @@ export default {
       firstTokenPool: 'Pool',
       firstTokenFastPool: 'Fast',
       firstTokenSlowPool: 'Slow',
+      firstTokenSlowPoolRecovering: 'Slow · confirming {current}/{total}',
       firstTokenPendingSample: 'Pending sample',
       firstTokenSchedulingRate: 'Scheduling rate',
       firstTokenGroupFilter: 'Scheduling group',

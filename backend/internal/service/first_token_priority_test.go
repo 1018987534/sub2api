@@ -12,7 +12,9 @@ import (
 type staticFirstTokenLatencyStatsCache struct {
 	stats        map[int64]FirstTokenLatencyStats
 	claimAllowed bool
+	claimResults map[int64]bool
 	claimedID    int64
+	claimedIDs   []int64
 	fetchedIDs   []int64
 	recordedID   int64
 }
@@ -29,6 +31,10 @@ func (c *staticFirstTokenLatencyStatsCache) GetStatsBatch(_ context.Context, acc
 
 func (c *staticFirstTokenLatencyStatsCache) TryClaimProbe(_ context.Context, accountID int64, _ time.Duration) (bool, error) {
 	c.claimedID = accountID
+	c.claimedIDs = append(c.claimedIDs, accountID)
+	if c.claimResults != nil {
+		return c.claimResults[accountID], nil
+	}
 	return c.claimAllowed, nil
 }
 
@@ -216,6 +222,10 @@ func TestFirstTokenPriorityProbeIntervalBacksOffSlowAccounts(t *testing.T) {
 		FirstTokenLatencyStats{PredictedMS: 18_000, SampleCount: 5, RecoveryFastStreak: 1},
 		5_000,
 	))
+	require.Equal(t, firstTokenPriorityRecoveryProbe, firstTokenPriorityProbeInterval(
+		FirstTokenLatencyStats{PredictedMS: 7_000, SampleCount: 1, RecoveryFastStreak: 1},
+		5_000,
+	))
 }
 
 func TestFirstTokenPriorityStatsFastRequiresTrackedConfirmation(t *testing.T) {
@@ -390,6 +400,46 @@ func TestFirstTokenPriorityOrderUsesSharedLeaseForDueProbe(t *testing.T) {
 
 	cache.claimAllowed = false
 	require.Equal(t, []int64{1, 2}, firstTokenPriorityOrder(context.Background(), accounts, cache))
+}
+
+func TestFirstTokenPriorityOrderTriesNextDueProbeWhenLeaseIsAlreadyClaimed(t *testing.T) {
+	now := time.Now()
+	cache := &staticFirstTokenLatencyStatsCache{
+		claimResults: map[int64]bool{2: false, 3: true},
+		stats: map[int64]FirstTokenLatencyStats{
+			1: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			2: {PredictedMS: 60_000, SampleCount: 5, SlowStreak: 8, UpdatedAt: now.Add(-firstTokenPriorityProbeMax)},
+			3: {PredictedMS: 40_000, SampleCount: 5, SlowStreak: 4, UpdatedAt: now.Add(-firstTokenPriorityProbeMax)},
+		},
+	}
+	accounts := []*Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+	}
+
+	require.Equal(t, []int64{3, 1, 2}, firstTokenPriorityOrder(context.Background(), accounts, cache))
+	require.Equal(t, []int64{2, 3}, cache.claimedIDs)
+}
+
+func TestFirstTokenPriorityOrderConfirmsRecoveringAccountBeforeGenericSlowProbe(t *testing.T) {
+	now := time.Now()
+	cache := &staticFirstTokenLatencyStatsCache{
+		claimAllowed: true,
+		stats: map[int64]FirstTokenLatencyStats{
+			1: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			2: {PredictedMS: 50_000, SampleCount: 1, UpdatedAt: now.Add(-3 * time.Hour), FastConfirmationTracked: true},
+			3: {PredictedMS: 7_000, SampleCount: 1, UpdatedAt: now.Add(-31 * time.Second), RecoveryFastStreak: 1, FastConfirmationTracked: true},
+		},
+	}
+	accounts := []*Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+	}
+
+	require.Equal(t, []int64{3, 1, 2}, firstTokenPriorityOrder(context.Background(), accounts, cache))
+	require.Equal(t, int64(3), cache.claimedID)
 }
 
 func TestFirstTokenPriorityOrderPromotesConfirmedFastRecoveryFromSlowPool(t *testing.T) {
@@ -631,11 +681,14 @@ func TestAccountFirstTokenLatencyMetricsReportsActualPoolMembership(t *testing.T
 	require.Len(t, metrics, 4)
 
 	poolByID := make(map[int64]bool, len(metrics))
+	recoveryByID := make(map[int64]int, len(metrics))
 	for _, metric := range metrics {
 		poolByID[metric.AccountID] = metric.IsFastPool
+		recoveryByID[metric.AccountID] = metric.RecoveryFastStreak
 	}
 	require.True(t, poolByID[1])
 	require.False(t, poolByID[2], "recovering account remains in the slow pool until confirmed")
+	require.Equal(t, 2, recoveryByID[2])
 	require.False(t, poolByID[3], "stale prediction is not eligible for the fast pool")
 	require.NotContains(t, poolByID, int64(4), "currently unschedulable account is excluded")
 	require.NotContains(t, poolByID, int64(6), "account assigned only to an inactive group is not mislabeled as ungrouped")
@@ -645,4 +698,110 @@ func TestAccountFirstTokenLatencyMetricsReportsActualPoolMembership(t *testing.T
 	require.NotNil(t, metrics[0].SchedulingRateMultiplier)
 	require.InDelta(t, 0.045, *metrics[0].SchedulingRateMultiplier, 1e-9)
 	require.Equal(t, []AccountFirstTokenLatencyGroup{{GroupID: 10, GroupName: "premium"}}, metrics[0].Groups)
+}
+
+func TestAccountFirstTokenLatencyMetricsFiltersGroupsByDefaultProfitAdmission(t *testing.T) {
+	now := time.Now()
+	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		1: {PredictedMS: 4_000, SampleCount: 5, UpdatedAt: now},
+		2: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
+		3: {PredictedMS: 6_000, SampleCount: 5, UpdatedAt: now},
+	}}
+	svc := &RateLimitService{firstTokenLatencyStatsCache: cache}
+	strict := &Group{
+		ID: 10, Name: "strict", Platform: PlatformOpenAI, Status: StatusActive,
+		RateMultiplier: 0.12, ProfitControlEnabled: true, ProfitMinMargin: 0.15,
+	}
+	permissive := &Group{
+		ID: 20, Name: "permissive", Platform: PlatformOpenAI, Status: StatusActive,
+		RateMultiplier: 0.20, ProfitControlEnabled: true, ProfitMinMargin: 0.15,
+	}
+	disabledGate := &Group{
+		ID: 30, Name: "disabled-gate", Platform: PlatformOpenAI, Status: StatusActive,
+		RateMultiplier: 0.01, ProfitControlEnabled: false,
+	}
+	rate006 := 0.06
+	rate011 := 0.11
+	rate100 := 1.0
+	accounts := []Account{
+		{
+			ID: 1, Name: "eligible", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, RateMultiplier: &rate006,
+			GroupIDs: []int64{strict.ID}, Groups: []*Group{strict},
+			AccountGroups: []AccountGroup{{AccountID: 1, GroupID: strict.ID, Group: strict}},
+		},
+		{
+			ID: 2, Name: "multi-group", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, RateMultiplier: &rate011,
+			GroupIDs: []int64{strict.ID, permissive.ID}, Groups: []*Group{strict, permissive},
+			AccountGroups: []AccountGroup{
+				{AccountID: 2, GroupID: strict.ID, Group: strict},
+				{AccountID: 2, GroupID: permissive.ID, Group: permissive},
+			},
+		},
+		{
+			ID: 3, Name: "profit-disabled", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, RateMultiplier: &rate100,
+			GroupIDs: []int64{disabledGate.ID}, Groups: []*Group{disabledGate},
+			AccountGroups: []AccountGroup{{AccountID: 3, GroupID: disabledGate.ID, Group: disabledGate}},
+		},
+	}
+
+	metrics, err := svc.AccountFirstTokenLatencyMetrics(context.Background(), accounts)
+	require.NoError(t, err)
+	require.Len(t, metrics, 3)
+	groupsByID := make(map[int64][]AccountFirstTokenLatencyGroup, len(metrics))
+	for _, metric := range metrics {
+		groupsByID[metric.AccountID] = metric.Groups
+	}
+	require.Equal(t, []AccountFirstTokenLatencyGroup{{GroupID: strict.ID, GroupName: strict.Name}}, groupsByID[1])
+	require.Equal(t, []AccountFirstTokenLatencyGroup{{GroupID: permissive.ID, GroupName: permissive.Name}}, groupsByID[2])
+	require.Equal(t, []AccountFirstTokenLatencyGroup{{GroupID: disabledGate.ID, GroupName: disabledGate.Name}}, groupsByID[3])
+
+	onlyRejected := accounts[1]
+	onlyRejected.GroupIDs = []int64{strict.ID}
+	onlyRejected.Groups = []*Group{strict}
+	onlyRejected.AccountGroups = []AccountGroup{{AccountID: 2, GroupID: strict.ID, Group: strict}}
+	metrics, err = svc.AccountFirstTokenLatencyMetrics(context.Background(), []Account{onlyRejected})
+	require.NoError(t, err)
+	require.Empty(t, metrics)
+}
+
+func TestAccountFirstTokenLatencyMetricsHidesDedicatedDashboardEntries(t *testing.T) {
+	now := time.Now()
+	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		1: {PredictedMS: 4_000, SampleCount: 5, UpdatedAt: now},
+		2: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
+		3: {PredictedMS: 6_000, SampleCount: 5, UpdatedAt: now},
+	}}
+	svc := &RateLimitService{firstTokenLatencyStatsCache: cache}
+	normal := &Group{ID: 10, Name: "PLUS分组", Platform: PlatformOpenAI, Status: StatusActive}
+	hidden := &Group{ID: 84, Name: firstTokenLatencyHiddenGroup, Platform: PlatformOpenAI, Status: StatusActive}
+	accounts := []Account{
+		{
+			ID: 1, Name: firstTokenLatencyHiddenAccount, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+			GroupIDs: []int64{normal.ID}, Groups: []*Group{normal},
+			AccountGroups: []AccountGroup{{AccountID: 1, GroupID: normal.ID, Group: normal}},
+		},
+		{
+			ID: 2, Name: "monitor-only", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+			GroupIDs: []int64{hidden.ID}, Groups: []*Group{hidden},
+			AccountGroups: []AccountGroup{{AccountID: 2, GroupID: hidden.ID, Group: hidden}},
+		},
+		{
+			ID: 3, Name: "shared", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+			GroupIDs: []int64{normal.ID, hidden.ID}, Groups: []*Group{normal, hidden},
+			AccountGroups: []AccountGroup{
+				{AccountID: 3, GroupID: normal.ID, Group: normal},
+				{AccountID: 3, GroupID: hidden.ID, Group: hidden},
+			},
+		},
+	}
+
+	metrics, err := svc.AccountFirstTokenLatencyMetrics(context.Background(), accounts)
+	require.NoError(t, err)
+	require.Len(t, metrics, 1)
+	require.Equal(t, int64(3), metrics[0].AccountID)
+	require.Equal(t, []AccountFirstTokenLatencyGroup{{GroupID: normal.ID, GroupName: normal.Name}}, metrics[0].Groups)
+
+	firstTokenMS := 4200
+	svc.ObserveFirstTokenLatency(context.Background(), &accounts[0], "hidden-dashboard-account", &firstTokenMS)
+	require.Equal(t, accounts[0].ID, cache.recordedID, "dashboard-only exclusion must not disable sampling")
 }

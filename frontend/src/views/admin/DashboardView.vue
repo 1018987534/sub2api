@@ -277,7 +277,7 @@
                     </div>
                     <span class="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
                       <span class="h-2 w-2 rounded-full" :class="metric.is_fast_pool ? 'bg-emerald-500' : 'bg-amber-500'" aria-hidden="true"></span>
-                      {{ t(metric.is_fast_pool ? 'admin.dashboard.firstTokenFastPool' : 'admin.dashboard.firstTokenSlowPool') }}
+                      {{ firstTokenPoolLabel(metric) }}
                     </span>
                   </div>
                   <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
@@ -329,7 +329,7 @@
                       <td class="px-4 py-3" data-testid="first-token-pool">
                         <span class="inline-flex items-center gap-1.5 font-medium" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
                           <span class="h-2 w-2 shrink-0 rounded-full" :class="metric.is_fast_pool ? 'bg-emerald-500' : 'bg-amber-500'" aria-hidden="true"></span>
-                          {{ t(metric.is_fast_pool ? 'admin.dashboard.firstTokenFastPool' : 'admin.dashboard.firstTokenSlowPool') }}
+                          {{ firstTokenPoolLabel(metric) }}
                         </span>
                       </td>
                       <td class="px-4 py-3 font-mono text-gray-700 dark:text-gray-300" data-testid="first-token-scheduling-rate">
@@ -589,6 +589,17 @@ const visibleFirstTokenGroups = computed(() => {
   if (firstTokenGroupFilter.value === 'all') return firstTokenGroupSections.value
   return firstTokenGroupSections.value.filter(group => group.id === Number(firstTokenGroupFilter.value))
 })
+
+const firstTokenPoolLabel = (metric: AccountFirstTokenLatencyMetric) => {
+  if (metric.is_fast_pool) return t('admin.dashboard.firstTokenFastPool')
+  if (metric.recovery_fast_streak > 0) {
+    return t('admin.dashboard.firstTokenSlowPoolRecovering', {
+      current: Math.min(metric.recovery_fast_streak, 2),
+      total: 3
+    })
+  }
+  return t('admin.dashboard.firstTokenSlowPool')
+}
 
 // Chart data
 const trendData = ref<TrendDataPoint[]>([])

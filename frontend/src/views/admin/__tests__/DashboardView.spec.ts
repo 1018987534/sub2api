@@ -163,6 +163,7 @@ describe('admin DashboardView', () => {
           sample_count: 8,
           updated_at: '2026-08-12T01:00:00Z',
           slow_streak: 0,
+          recovery_fast_streak: 0,
           probe_interval_seconds: 120
         },
         {
@@ -176,6 +177,7 @@ describe('admin DashboardView', () => {
           sample_count: 9,
           updated_at: '2026-08-12T01:00:00Z',
           slow_streak: 0,
+          recovery_fast_streak: 0,
           probe_interval_seconds: 120
         },
         {
@@ -189,6 +191,7 @@ describe('admin DashboardView', () => {
           sample_count: 10,
           updated_at: '2026-08-12T01:00:00Z',
           slow_streak: 0,
+          recovery_fast_streak: 1,
           probe_interval_seconds: 60
         }
       ],
@@ -226,7 +229,7 @@ describe('admin DashboardView', () => {
     const pools = wrapper.findAll('[data-testid="first-token-pool"]')
     expect(pools[0].text()).toContain('admin.dashboard.firstTokenFastPool')
     expect(pools[1].text()).toContain('admin.dashboard.firstTokenFastPool')
-    expect(pools[2].text()).toContain('admin.dashboard.firstTokenSlowPool')
+    expect(pools[2].text()).toContain('admin.dashboard.firstTokenSlowPoolRecovering')
     const predictions = wrapper.findAll('[data-testid="first-token-prediction"]')
     expect(predictions[0].classes()).toContain('text-emerald-600')
     expect(predictions[1].classes()).toContain('text-emerald-600')
