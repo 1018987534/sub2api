@@ -28,13 +28,22 @@ type firstTokenRankedAccount struct {
 }
 
 type AccountFirstTokenLatencyMetric struct {
-	AccountID            int64     `json:"account_id"`
-	AccountName          string    `json:"account_name"`
-	PredictedMS          float64   `json:"predicted_ms"`
-	SampleCount          int64     `json:"sample_count"`
-	UpdatedAt            time.Time `json:"updated_at"`
-	SlowStreak           int       `json:"slow_streak"`
-	ProbeIntervalSeconds int64     `json:"probe_interval_seconds"`
+	AccountID                int64                           `json:"account_id"`
+	AccountName              string                          `json:"account_name"`
+	PredictedMS              float64                         `json:"predicted_ms"`
+	HasPrediction            bool                            `json:"has_prediction"`
+	IsFastPool               bool                            `json:"is_fast_pool"`
+	SchedulingRateMultiplier *float64                        `json:"scheduling_rate_multiplier"`
+	Groups                   []AccountFirstTokenLatencyGroup `json:"groups"`
+	SampleCount              int64                           `json:"sample_count"`
+	UpdatedAt                time.Time                       `json:"updated_at"`
+	SlowStreak               int                             `json:"slow_streak"`
+	ProbeIntervalSeconds     int64                           `json:"probe_interval_seconds"`
+}
+
+type AccountFirstTokenLatencyGroup struct {
+	GroupID   int64  `json:"group_id"`
+	GroupName string `json:"group_name"`
 }
 
 func isFirstTokenPriorityAccount(account *Account) bool {
@@ -45,10 +54,11 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 	if s == nil || s.firstTokenLatencyStatsCache == nil || len(accounts) == 0 {
 		return []AccountFirstTokenLatencyMetric{}, nil
 	}
+	now := time.Now()
 	eligible := make([]Account, 0, len(accounts))
 	accountIDs := make([]int64, 0, len(accounts))
 	for _, account := range accounts {
-		if !isFirstTokenPriorityAccount(&account) {
+		if !isFirstTokenPriorityAccount(&account) || !account.IsSchedulableAt(now) {
 			continue
 		}
 		eligible = append(eligible, account)
@@ -64,29 +74,88 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 			fastestMS = stat.PredictedMS
 		}
 	}
-	metrics := make([]AccountFirstTokenLatencyMetric, 0, len(stats))
+	metrics := make([]AccountFirstTokenLatencyMetric, 0, len(eligible))
 	for _, account := range eligible {
-		stat, ok := stats[account.ID]
-		if !ok || stat.PredictedMS <= 0 {
+		groups, belongsToSchedulableGroup := firstTokenLatencyMetricGroups(&account)
+		if !belongsToSchedulableGroup {
 			continue
 		}
+		stat, ok := stats[account.ID]
+		hasPrediction := ok && stat.PredictedMS > 0
+		var schedulingRateMultiplier *float64
+		if rate, found := openAIFreshUpstreamBillingRate(&account, now); found {
+			schedulingRateMultiplier = &rate
+		}
 		metrics = append(metrics, AccountFirstTokenLatencyMetric{
-			AccountID:            account.ID,
-			AccountName:          account.Name,
-			PredictedMS:          stat.PredictedMS,
-			SampleCount:          stat.SampleCount,
-			UpdatedAt:            stat.UpdatedAt,
-			SlowStreak:           stat.SlowStreak,
-			ProbeIntervalSeconds: int64(firstTokenPriorityProbeInterval(stat, fastestMS).Seconds()),
+			AccountID:                account.ID,
+			AccountName:              account.Name,
+			PredictedMS:              stat.PredictedMS,
+			HasPrediction:            hasPrediction,
+			IsFastPool:               firstTokenPriorityStatsFast(stat, now),
+			SchedulingRateMultiplier: schedulingRateMultiplier,
+			Groups:                   groups,
+			SampleCount:              stat.SampleCount,
+			UpdatedAt:                stat.UpdatedAt,
+			SlowStreak:               stat.SlowStreak,
+			ProbeIntervalSeconds:     int64(firstTokenPriorityProbeInterval(stat, fastestMS).Seconds()),
 		})
 	}
 	sort.SliceStable(metrics, func(i, j int) bool {
+		if metrics[i].HasPrediction != metrics[j].HasPrediction {
+			return metrics[i].HasPrediction
+		}
 		if metrics[i].PredictedMS == metrics[j].PredictedMS {
 			return metrics[i].AccountID < metrics[j].AccountID
 		}
 		return metrics[i].PredictedMS < metrics[j].PredictedMS
 	})
 	return metrics, nil
+}
+
+func firstTokenLatencyMetricGroups(account *Account) ([]AccountFirstTokenLatencyGroup, bool) {
+	if account == nil {
+		return []AccountFirstTokenLatencyGroup{}, false
+	}
+	groupByID := make(map[int64]*Group, len(account.Groups)+len(account.AccountGroups))
+	membershipIDs := make(map[int64]struct{}, len(account.GroupIDs)+len(account.AccountGroups))
+	includeGroup := func(group *Group) bool {
+		return group != nil &&
+			(group.Status == "" || group.Status == StatusActive) &&
+			(group.Platform == "" || group.Platform == PlatformOpenAI)
+	}
+	for _, group := range account.Groups {
+		if group == nil || group.ID <= 0 {
+			continue
+		}
+		membershipIDs[group.ID] = struct{}{}
+		groupByID[group.ID] = group
+	}
+	for _, accountGroup := range account.AccountGroups {
+		if accountGroup.GroupID <= 0 {
+			continue
+		}
+		membershipIDs[accountGroup.GroupID] = struct{}{}
+		if accountGroup.Group != nil {
+			groupByID[accountGroup.GroupID] = accountGroup.Group
+		}
+	}
+	for _, groupID := range account.GroupIDs {
+		if groupID > 0 {
+			membershipIDs[groupID] = struct{}{}
+		}
+	}
+	if len(membershipIDs) == 0 {
+		return []AccountFirstTokenLatencyGroup{}, true
+	}
+	groups := make([]AccountFirstTokenLatencyGroup, 0, len(membershipIDs))
+	for groupID := range membershipIDs {
+		group := groupByID[groupID]
+		if includeGroup(group) {
+			groups = append(groups, AccountFirstTokenLatencyGroup{GroupID: groupID, GroupName: group.Name})
+		}
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].GroupID < groups[j].GroupID })
+	return groups, len(groups) > 0
 }
 
 func (s *RateLimitService) ObserveFirstTokenLatency(ctx context.Context, account *Account, requestID string, firstTokenMs *int) {

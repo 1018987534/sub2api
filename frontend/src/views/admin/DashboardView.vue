@@ -226,17 +226,27 @@
                 {{ t('admin.dashboard.firstTokenLatencyDescription') }}
               </p>
             </div>
-            <button
-              type="button"
-              class="btn btn-secondary inline-flex items-center gap-2 self-start"
-              :disabled="firstTokenLoading"
-              :title="t('common.refresh')"
-              data-testid="refresh-first-token-latencies"
-              @click="loadFirstTokenLatencies"
-            >
-              <Icon name="refresh" size="sm" />
-              {{ t('common.refresh') }}
-            </button>
+            <div class="flex w-full items-center gap-2 sm:w-auto">
+              <div class="min-w-0 flex-1 sm:w-52 sm:flex-none" data-testid="first-token-group-filter">
+                <Select
+                  v-model="firstTokenGroupFilter"
+                  :options="firstTokenGroupOptions"
+                  :aria-label="t('admin.dashboard.firstTokenGroupFilter')"
+                  :disabled="firstTokenLoading"
+                />
+              </div>
+              <button
+                type="button"
+                class="btn btn-secondary inline-flex shrink-0 items-center gap-2"
+                :disabled="firstTokenLoading"
+                :title="t('common.refresh')"
+                data-testid="refresh-first-token-latencies"
+                @click="loadFirstTokenLatencies"
+              >
+                <Icon name="refresh" size="sm" />
+                {{ t('common.refresh') }}
+              </button>
+            </div>
           </div>
           <div v-if="firstTokenLoading" class="flex min-h-32 items-center justify-center border-t border-gray-100 dark:border-dark-700">
             <LoadingSpinner size="md" />
@@ -247,32 +257,92 @@
           <div v-else-if="firstTokenMetrics.length === 0" class="border-t border-gray-100 px-4 py-8 text-center text-sm text-gray-500 dark:border-dark-700 dark:text-gray-400">
             {{ t('admin.dashboard.firstTokenLatencyEmpty') }}
           </div>
-          <div v-else class="overflow-x-auto border-t border-gray-100 dark:border-dark-700">
-            <table class="min-w-full table-fixed text-left text-sm">
-              <thead class="bg-gray-50 text-xs text-gray-500 dark:bg-dark-800 dark:text-gray-400">
-                <tr>
-                  <th class="w-2/5 px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
-                  <th class="w-1/5 px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
-                  <th class="w-1/5 px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSamples') }}</th>
-                  <th class="w-1/5 px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
-                  <th class="w-1/5 px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenProbeInterval') }}</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-                <tr v-for="metric in firstTokenMetrics" :key="metric.account_id" data-testid="first-token-latency-row">
-                  <td class="px-4 py-3">
-                    <div class="truncate font-medium text-gray-900 dark:text-white" :title="metric.account_name">{{ metric.account_name }}</div>
-                    <div class="text-xs text-gray-400">#{{ metric.account_id }}</div>
-                  </td>
-                  <td class="px-4 py-3 font-mono font-semibold" :class="metric.predicted_ms <= 10000 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
-                    {{ formatDuration(metric.predicted_ms) }}
-                  </td>
-                  <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ metric.sample_count }}</td>
-                  <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{{ formatFirstTokenUpdatedAt(metric.updated_at) }}</td>
-                  <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ formatProbeInterval(metric.probe_interval_seconds) }}</td>
-                </tr>
-              </tbody>
-            </table>
+          <div v-else class="border-t border-gray-100 dark:border-dark-700">
+            <section v-for="group in visibleFirstTokenGroups" :key="group.id" data-testid="first-token-group-section">
+              <div class="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2.5 dark:border-dark-700 dark:bg-dark-800">
+                <div class="min-w-0">
+                  <h3 class="truncate text-sm font-semibold text-gray-900 dark:text-white" :title="group.name">{{ group.name }}</h3>
+                  <span v-if="group.id > 0" class="text-xs text-gray-400">#{{ group.id }}</span>
+                </div>
+                <span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">
+                  {{ t('admin.dashboard.firstTokenPoolCounts', { total: group.metrics.length, fast: group.fastCount, slow: group.slowCount }) }}
+                </span>
+              </div>
+              <div class="divide-y divide-gray-100 md:hidden dark:divide-dark-700">
+                <div v-for="metric in group.metrics" :key="`mobile:${group.id}:${metric.account_id}`" class="px-4 py-3" data-testid="first-token-mobile-row">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="truncate font-medium text-gray-900 dark:text-white" :title="metric.account_name">{{ metric.account_name }}</div>
+                      <div class="text-xs text-gray-400">#{{ metric.account_id }}</div>
+                    </div>
+                    <span class="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
+                      <span class="h-2 w-2 rounded-full" :class="metric.is_fast_pool ? 'bg-emerald-500' : 'bg-amber-500'" aria-hidden="true"></span>
+                      {{ t(metric.is_fast_pool ? 'admin.dashboard.firstTokenFastPool' : 'admin.dashboard.firstTokenSlowPool') }}
+                    </span>
+                  </div>
+                  <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div>
+                      <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenPrediction') }}</dt>
+                      <dd class="mt-0.5 font-mono text-sm font-semibold" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
+                        {{ metric.has_prediction ? formatDuration(metric.predicted_ms) : t('admin.dashboard.firstTokenPendingSample') }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenSchedulingRate') }}</dt>
+                      <dd class="mt-0.5 font-mono text-sm text-gray-700 dark:text-gray-300">
+                        {{ metric.scheduling_rate_multiplier == null ? '-' : `${formatMultiplier(metric.scheduling_rate_multiplier)}x` }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenSamples') }}</dt>
+                      <dd class="mt-0.5 text-gray-700 dark:text-gray-300">{{ metric.sample_count }}</dd>
+                    </div>
+                    <div>
+                      <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenProbeInterval') }}</dt>
+                      <dd class="mt-0.5 text-gray-700 dark:text-gray-300">{{ formatProbeInterval(metric.probe_interval_seconds) }}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+              <div class="hidden overflow-x-auto md:block">
+                <table class="min-w-[860px] w-full table-fixed text-left text-sm">
+                  <thead class="text-xs text-gray-500 dark:text-gray-400">
+                    <tr>
+                      <th class="w-[24%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
+                      <th class="w-[15%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
+                      <th class="w-[12%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPool') }}</th>
+                      <th class="w-[13%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSchedulingRate') }}</th>
+                      <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSamples') }}</th>
+                      <th class="w-[14%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
+                      <th class="w-[12%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenProbeInterval') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
+                    <tr v-for="metric in group.metrics" :key="`${group.id}:${metric.account_id}`" data-testid="first-token-latency-row">
+                      <td class="px-4 py-3">
+                        <div class="truncate font-medium text-gray-900 dark:text-white" :title="metric.account_name">{{ metric.account_name }}</div>
+                        <div class="text-xs text-gray-400">#{{ metric.account_id }}</div>
+                      </td>
+                      <td data-testid="first-token-prediction" class="px-4 py-3 font-mono font-semibold" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
+                        {{ metric.has_prediction ? formatDuration(metric.predicted_ms) : t('admin.dashboard.firstTokenPendingSample') }}
+                      </td>
+                      <td class="px-4 py-3" data-testid="first-token-pool">
+                        <span class="inline-flex items-center gap-1.5 font-medium" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
+                          <span class="h-2 w-2 shrink-0 rounded-full" :class="metric.is_fast_pool ? 'bg-emerald-500' : 'bg-amber-500'" aria-hidden="true"></span>
+                          {{ t(metric.is_fast_pool ? 'admin.dashboard.firstTokenFastPool' : 'admin.dashboard.firstTokenSlowPool') }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3 font-mono text-gray-700 dark:text-gray-300" data-testid="first-token-scheduling-rate">
+                        {{ metric.scheduling_rate_multiplier == null ? '-' : `${formatMultiplier(metric.scheduling_rate_multiplier)}x` }}
+                      </td>
+                      <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ metric.sample_count }}</td>
+                      <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{{ metric.has_prediction ? formatFirstTokenUpdatedAt(metric.updated_at) : '-' }}</td>
+                      <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ formatProbeInterval(metric.probe_interval_seconds) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </div>
         </section>
 
@@ -424,6 +494,7 @@ import Select from '@/components/common/Select.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+import { formatMultiplier } from '@/utils/formatters'
 
 import {
   Chart as ChartJS,
@@ -460,6 +531,64 @@ const rankingError = ref(false)
 const firstTokenLoading = ref(false)
 const firstTokenError = ref(false)
 const firstTokenMetrics = ref<AccountFirstTokenLatencyMetric[]>([])
+const firstTokenGroupFilter = ref<string | number>('all')
+
+interface FirstTokenGroupSection {
+  id: number
+  name: string
+  metrics: AccountFirstTokenLatencyMetric[]
+  fastCount: number
+  slowCount: number
+}
+
+const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
+  const sections = new Map<number, FirstTokenGroupSection>()
+  for (const metric of firstTokenMetrics.value) {
+    const groups = metric.groups?.length
+      ? metric.groups
+      : [{ group_id: 0, group_name: t('admin.dashboard.firstTokenUngrouped') }]
+    for (const group of groups) {
+      const name = group.group_name || `#${group.group_id}`
+      const section = sections.get(group.group_id) ?? { id: group.group_id, name, metrics: [], fastCount: 0, slowCount: 0 }
+      section.metrics.push(metric)
+      if (metric.is_fast_pool) section.fastCount += 1
+      else section.slowCount += 1
+      sections.set(group.group_id, section)
+    }
+  }
+  const sorted = Array.from(sections.values()).sort((left, right) => {
+    if (left.id === 0) return 1
+    if (right.id === 0) return -1
+    return left.name.localeCompare(right.name, undefined, { numeric: true })
+  })
+  for (const section of sorted) {
+    section.metrics.sort((left, right) => {
+      if (left.is_fast_pool !== right.is_fast_pool) return left.is_fast_pool ? -1 : 1
+      if (left.is_fast_pool && right.is_fast_pool) {
+        const leftRate = left.scheduling_rate_multiplier ?? Number.POSITIVE_INFINITY
+        const rightRate = right.scheduling_rate_multiplier ?? Number.POSITIVE_INFINITY
+        if (leftRate !== rightRate) return leftRate - rightRate
+      }
+      if (left.has_prediction !== right.has_prediction) return left.has_prediction ? -1 : 1
+      if (left.predicted_ms !== right.predicted_ms) return left.predicted_ms - right.predicted_ms
+      return left.account_id - right.account_id
+    })
+  }
+  return sorted
+})
+
+const firstTokenGroupOptions = computed(() => [
+  { value: 'all', label: t('admin.dashboard.firstTokenAllGroups') },
+  ...firstTokenGroupSections.value.map(group => ({
+    value: group.id,
+    label: `${group.name} (${group.metrics.length})`
+  }))
+])
+
+const visibleFirstTokenGroups = computed(() => {
+  if (firstTokenGroupFilter.value === 'all') return firstTokenGroupSections.value
+  return firstTokenGroupSections.value.filter(group => group.id === Number(firstTokenGroupFilter.value))
+})
 
 // Chart data
 const trendData = ref<TrendDataPoint[]>([])
@@ -815,6 +944,9 @@ const loadFirstTokenLatencies = async () => {
   try {
     const response = await adminAPI.accounts.getFirstTokenLatencies()
     firstTokenMetrics.value = response.items || []
+    if (firstTokenGroupFilter.value !== 'all' && !firstTokenGroupSections.value.some(group => group.id === Number(firstTokenGroupFilter.value))) {
+      firstTokenGroupFilter.value = 'all'
+    }
   } catch (error) {
     console.error('Error loading account first-token latencies:', error)
     firstTokenMetrics.value = []

@@ -151,16 +151,48 @@ describe('admin DashboardView', () => {
 
   it('renders enabled API-key relay first-token predictions', async () => {
     getFirstTokenLatencies.mockResolvedValueOnce({
-      items: [{
-        account_id: 42,
-        account_name: 'relay-fast',
-        predicted_ms: 4321,
-        sample_count: 8,
-        updated_at: '2026-08-12T01:00:00Z',
-        slow_streak: 0,
-        probe_interval_seconds: 120
-      }],
-      total: 1
+      items: [
+        {
+          account_id: 42,
+          account_name: 'relay-fast',
+          predicted_ms: 4321,
+          has_prediction: true,
+          is_fast_pool: true,
+          scheduling_rate_multiplier: 0.045,
+          groups: [{ group_id: 10, group_name: 'Alpha' }],
+          sample_count: 8,
+          updated_at: '2026-08-12T01:00:00Z',
+          slow_streak: 0,
+          probe_interval_seconds: 120
+        },
+        {
+          account_id: 44,
+          account_name: 'relay-fast-expensive',
+          predicted_ms: 2100,
+          has_prediction: true,
+          is_fast_pool: true,
+          scheduling_rate_multiplier: 0.2,
+          groups: [{ group_id: 10, group_name: 'Alpha' }],
+          sample_count: 9,
+          updated_at: '2026-08-12T01:00:00Z',
+          slow_streak: 0,
+          probe_interval_seconds: 120
+        },
+        {
+          account_id: 43,
+          account_name: 'relay-recovering',
+          predicted_ms: 7000,
+          has_prediction: true,
+          is_fast_pool: false,
+          scheduling_rate_multiplier: 0.08,
+          groups: [{ group_id: 20, group_name: 'Beta' }],
+          sample_count: 10,
+          updated_at: '2026-08-12T01:00:00Z',
+          slow_streak: 0,
+          probe_interval_seconds: 60
+        }
+      ],
+      total: 3
     })
 
     const wrapper = mount(DashboardView, {
@@ -181,6 +213,27 @@ describe('admin DashboardView', () => {
 
     expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('relay-fast')
     expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('4.32s')
-    expect(wrapper.findAll('[data-testid="first-token-latency-row"]')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('Alpha')
+    expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('Beta')
+    expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('admin.dashboard.firstTokenPoolCounts')
+    expect(wrapper.findAll('[data-testid="first-token-group-section"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="first-token-latency-row"]')).toHaveLength(3)
+    expect(wrapper.findAll('[data-testid="first-token-mobile-row"]')).toHaveLength(3)
+    const rows = wrapper.findAll('[data-testid="first-token-latency-row"]')
+    expect(rows[0].text()).toContain('relay-fast')
+    expect(rows[1].text()).toContain('relay-fast-expensive')
+    expect(rows[2].text()).toContain('relay-recovering')
+    const pools = wrapper.findAll('[data-testid="first-token-pool"]')
+    expect(pools[0].text()).toContain('admin.dashboard.firstTokenFastPool')
+    expect(pools[1].text()).toContain('admin.dashboard.firstTokenFastPool')
+    expect(pools[2].text()).toContain('admin.dashboard.firstTokenSlowPool')
+    const predictions = wrapper.findAll('[data-testid="first-token-prediction"]')
+    expect(predictions[0].classes()).toContain('text-emerald-600')
+    expect(predictions[1].classes()).toContain('text-emerald-600')
+    expect(predictions[2].classes()).toContain('text-amber-600')
+    const rates = wrapper.findAll('[data-testid="first-token-scheduling-rate"]')
+    expect(rates[0].text()).toBe('0.045x')
+    expect(rates[1].text()).toBe('0.20x')
+    expect(rates[2].text()).toBe('0.08x')
   })
 })

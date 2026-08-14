@@ -890,10 +890,19 @@ export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bed
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
 
+export interface AccountFirstTokenLatencyGroup {
+  group_id: number
+  group_name: string
+}
+
 export interface AccountFirstTokenLatencyMetric {
   account_id: number
   account_name: string
   predicted_ms: number
+  has_prediction: boolean
+  is_fast_pool: boolean
+  scheduling_rate_multiplier: number | null
+  groups: AccountFirstTokenLatencyGroup[]
   sample_count: number
   updated_at: string
   slow_streak: number

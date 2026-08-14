@@ -565,3 +565,84 @@ func TestAccountFirstTokenLatencyMetricsOnlyIncludesEnabledOpenAIAPIKeys(t *test
 	require.Equal(t, int64(1), metrics[0].AccountID)
 	require.Equal(t, "relay", metrics[0].AccountName)
 }
+
+func TestAccountFirstTokenLatencyMetricsReportsActualPoolMembership(t *testing.T) {
+	now := time.Now()
+	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		1: {
+			PredictedMS:             4_000,
+			SampleCount:             5,
+			UpdatedAt:               now,
+			ReliableFast:            true,
+			FastConfirmationTracked: true,
+		},
+		2: {
+			PredictedMS:             7_000,
+			SampleCount:             20,
+			UpdatedAt:               now,
+			RecoveryFastStreak:      2,
+			FastConfirmationTracked: true,
+		},
+		3: {
+			PredictedMS:             5_000,
+			SampleCount:             5,
+			UpdatedAt:               now.Add(-firstTokenPriorityFreshFor - time.Minute),
+			ReliableFast:            true,
+			FastConfirmationTracked: true,
+		},
+		4: {
+			PredictedMS:             3_000,
+			SampleCount:             5,
+			UpdatedAt:               now,
+			ReliableFast:            true,
+			FastConfirmationTracked: true,
+		},
+	}}
+	svc := &RateLimitService{firstTokenLatencyStatsCache: cache}
+	group := &Group{ID: 10, Name: "premium", Platform: PlatformOpenAI, Status: StatusActive}
+	inactiveGroup := &Group{ID: 11, Name: "disabled", Platform: PlatformOpenAI, Status: StatusDisabled}
+	inactiveOnlyGroup := &Group{ID: 12, Name: "disabled-only", Platform: PlatformOpenAI, Status: StatusDisabled}
+	confirmedFast := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
+	confirmedFast.Name = "confirmed-fast"
+	confirmedFast.Status = StatusActive
+	confirmedFast.Schedulable = true
+	confirmedFast.AccountGroups = []AccountGroup{
+		{AccountID: 1, GroupID: group.ID, Group: group},
+		{AccountID: 1, GroupID: inactiveGroup.ID, Group: inactiveGroup},
+	}
+	confirmedFast.GroupIDs = []int64{group.ID, inactiveGroup.ID}
+	confirmedFast.Groups = []*Group{group, inactiveGroup}
+	rateLimitedUntil := now.Add(time.Hour)
+	accounts := []Account{
+		*confirmedFast,
+		{ID: 2, Name: "recovering", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{ID: 3, Name: "stale", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{ID: 4, Name: "rate-limited", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, RateLimitResetAt: &rateLimitedUntil},
+		{ID: 5, Name: "pending-sample", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{
+			ID: 6, Name: "inactive-group-only", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+			GroupIDs: []int64{inactiveOnlyGroup.ID}, Groups: []*Group{inactiveOnlyGroup},
+			AccountGroups: []AccountGroup{{AccountID: 6, GroupID: inactiveOnlyGroup.ID, Group: inactiveOnlyGroup}},
+		},
+	}
+
+	metrics, err := svc.AccountFirstTokenLatencyMetrics(context.Background(), accounts)
+	require.NoError(t, err)
+	require.Len(t, metrics, 4)
+
+	poolByID := make(map[int64]bool, len(metrics))
+	for _, metric := range metrics {
+		poolByID[metric.AccountID] = metric.IsFastPool
+	}
+	require.True(t, poolByID[1])
+	require.False(t, poolByID[2], "recovering account remains in the slow pool until confirmed")
+	require.False(t, poolByID[3], "stale prediction is not eligible for the fast pool")
+	require.NotContains(t, poolByID, int64(4), "currently unschedulable account is excluded")
+	require.NotContains(t, poolByID, int64(6), "account assigned only to an inactive group is not mislabeled as ungrouped")
+	require.False(t, poolByID[5], "account without samples remains in the slow pool")
+	require.False(t, metrics[3].HasPrediction)
+	require.Equal(t, int64(30), metrics[3].ProbeIntervalSeconds)
+	require.NotNil(t, metrics[0].SchedulingRateMultiplier)
+	require.InDelta(t, 0.045, *metrics[0].SchedulingRateMultiplier, 1e-9)
+	require.Equal(t, []AccountFirstTokenLatencyGroup{{GroupID: 10, GroupName: "premium"}}, metrics[0].Groups)
+}
