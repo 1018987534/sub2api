@@ -565,18 +565,62 @@ func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelP
 		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge parse skipped: %v", err)
 		return data
 	}
-	merged := 0
-	for modelName, pricing := range fallbackData {
-		if _, ok := data[modelName]; ok {
+	added := 0
+	uplifted := 0
+	for modelName, fallbackPricing := range fallbackData {
+		current, ok := data[modelName]
+		if !ok {
+			data[modelName] = fallbackPricing
+			added++
 			continue
 		}
-		data[modelName] = pricing
-		merged++
+		if merged, changed := mergeHighestPricing(current, fallbackPricing); changed {
+			data[modelName] = merged
+			uplifted++
+		}
 	}
-	if merged > 0 {
-		logger.LegacyPrintf("service.pricing", "[Pricing] Merged %d fallback-only models", merged)
+	if added > 0 || uplifted > 0 {
+		logger.LegacyPrintf(
+			"service.pricing",
+			"[Pricing] Merged %d fallback-only models and uplifted %d existing models to local maximums",
+			added,
+			uplifted,
+		)
 	}
 	return data
+}
+
+func mergeHighestPricing(current, fallback *LiteLLMModelPricing) (*LiteLLMModelPricing, bool) {
+	if current == nil || fallback == nil {
+		return current, false
+	}
+	merged := *current
+	changed := false
+	mergeMax := func(target *float64, candidate float64) {
+		if candidate > *target {
+			*target = candidate
+			changed = true
+		}
+	}
+
+	mergeMax(&merged.InputCostPerToken, fallback.InputCostPerToken)
+	mergeMax(&merged.InputCostPerTokenPriority, fallback.InputCostPerTokenPriority)
+	mergeMax(&merged.OutputCostPerToken, fallback.OutputCostPerToken)
+	mergeMax(&merged.OutputCostPerTokenPriority, fallback.OutputCostPerTokenPriority)
+	mergeMax(&merged.CacheCreationInputTokenCost, fallback.CacheCreationInputTokenCost)
+	mergeMax(&merged.CacheCreationInputTokenCostPriority, fallback.CacheCreationInputTokenCostPriority)
+	mergeMax(&merged.CacheCreationInputTokenCostAbove1hr, fallback.CacheCreationInputTokenCostAbove1hr)
+	mergeMax(&merged.CacheReadInputTokenCost, fallback.CacheReadInputTokenCost)
+	mergeMax(&merged.CacheReadInputTokenCostPriority, fallback.CacheReadInputTokenCostPriority)
+	mergeMax(&merged.OutputCostPerImage, fallback.OutputCostPerImage)
+	mergeMax(&merged.OutputCostPerImageToken, fallback.OutputCostPerImageToken)
+	mergeMax(&merged.InputCostPerImageToken, fallback.InputCostPerImageToken)
+
+	if merged.TokenPricingAbsent && (merged.InputCostPerToken > 0 || merged.OutputCostPerToken > 0) {
+		merged.TokenPricingAbsent = false
+		changed = true
+	}
+	return &merged, changed
 }
 
 // useFallbackPricing 使用回退价格文件
