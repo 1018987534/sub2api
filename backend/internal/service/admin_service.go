@@ -408,6 +408,7 @@ type UpdateAccountInput struct {
 	PeriodicSchedulePauseMinutes *int
 	ProbeEnabled                 *bool
 	RateSyncEnabled              *bool
+	PriceSyncEnabled             *bool
 	RateConversionRatio          *float64
 	SkipMixedChannelCheck        bool // 跳过混合渠道检查（用户已确认风险）
 }

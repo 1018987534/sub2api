@@ -940,6 +940,49 @@ export async function probeUpstreamBillingBatch(accountIds: number[]): Promise<U
   return data.results
 }
 
+export interface UpstreamBillingModelPrice {
+  input_price_per_token: number
+  output_price_per_token: number
+  cache_creation_price_per_token?: number
+  cache_read_price_per_token?: number
+}
+
+export interface UpstreamBillingInferredModelPrice extends UpstreamBillingModelPrice {
+  sample_count: number
+  input_sample_count?: number
+  output_sample_count?: number
+  cache_creation_sample_count?: number
+  cache_read_sample_count?: number
+  observed_at: string
+}
+
+export interface UpstreamBillingPriceDiscrepancy {
+  account_id: number
+  account_name: string
+  model: string
+  current_source: 'local' | 'upstream_sync' | 'upstream_manual'
+  current_price: UpstreamBillingModelPrice
+  inferred_price: UpstreamBillingInferredModelPrice
+}
+
+export async function listUpstreamBillingPriceDiscrepancies(): Promise<UpstreamBillingPriceDiscrepancy[]> {
+  const { data } = await apiClient.get<{ items: UpstreamBillingPriceDiscrepancy[] }>(
+    '/admin/accounts/upstream-billing-price-discrepancies'
+  )
+  return data.items
+}
+
+export async function confirmUpstreamBillingPrice(
+  accountId: number,
+  model: string
+): Promise<UpstreamBillingPriceDiscrepancy> {
+  const { data } = await apiClient.post<UpstreamBillingPriceDiscrepancy>(
+    `/admin/accounts/${accountId}/upstream-billing-price-confirm`,
+    { model }
+  )
+  return data
+}
+
 export async function getOllamaCloudUsageSettings(): Promise<OllamaCloudUsageSettings> {
   const { data } = await apiClient.get<OllamaCloudUsageSettings>('/admin/accounts/ollama-cloud-usage/settings')
   return data
@@ -1043,6 +1086,8 @@ export const accountsAPI = {
   setUpstreamBillingProbeEnabled,
   probeUpstreamBilling,
   probeUpstreamBillingBatch,
+  listUpstreamBillingPriceDiscrepancies,
+  confirmUpstreamBillingPrice,
   getOllamaCloudUsageSettings,
   updateOllamaCloudUsageSettings,
   getOllamaCloudUsage,

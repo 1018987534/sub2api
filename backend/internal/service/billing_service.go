@@ -165,6 +165,15 @@ type CostBreakdown struct {
 	ActualCost                float64 // 应用倍率后的实际费用
 	BillingMode               string  // 计费模式（"token"/"per_request"/"image"），由 CalculateCostUnified 填充
 	LongContextBillingApplied bool
+	// PricingSource/Model/Version identify an account-scoped upstream catalog
+	// selection. They are empty for the existing local pricing path.
+	PricingSource              string
+	PricingModel               string
+	PricingVersion             string
+	InputPricePerToken         float64
+	OutputPricePerToken        float64
+	CacheCreationPricePerToken float64
+	CacheReadPricePerToken     float64
 }
 
 // ErrModelPricingUnavailable indicates that none of the configured pricing
@@ -181,6 +190,31 @@ type BillingService struct {
 	// 让 "[Billing] Using fallback pricing" 每个模型每进程最多打一条,
 	// 避免热路径上每请求刷屏(issue #3394)。零值即可用,无需在构造函数初始化。
 	fallbackWarnSeen sync.Map
+}
+
+// ListKnownTokenPricingModels returns all exact model names that can seed an
+// out-of-band pricing catalog. Family guesses are intentionally excluded.
+func (s *BillingService) ListKnownTokenPricingModels() []string {
+	if s == nil {
+		return nil
+	}
+	models := make(map[string]struct{}, len(s.fallbackPrices))
+	for model := range s.fallbackPrices {
+		models[strings.ToLower(strings.TrimSpace(model))] = struct{}{}
+	}
+	if s.pricingService != nil {
+		for _, model := range s.pricingService.ListModelNames() {
+			model = strings.ToLower(strings.TrimSpace(model))
+			if model != "" {
+				models[model] = struct{}{}
+			}
+		}
+	}
+	result := make([]string, 0, len(models))
+	for model := range models {
+		result = append(result, model)
+	}
+	return result
 }
 
 // NewBillingService 创建计费服务实例
@@ -331,14 +365,14 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextOutputMultiplier:        openAIGPT54LongContextOutputMultiplier,
 	}
 	s.fallbackPrices["gpt-5.6-luna"] = &ModelPricing{
-		InputPricePerToken:                 0.2e-6,
-		InputPricePerTokenPriority:         0.4e-6,
-		OutputPricePerToken:                1.2e-6,
-		OutputPricePerTokenPriority:        2.4e-6,
-		CacheCreationPricePerToken:         0.25e-6,
-		CacheCreationPricePerTokenPriority: 0.5e-6,
-		CacheReadPricePerToken:             0.02e-6,
-		CacheReadPricePerTokenPriority:     0.04e-6,
+		InputPricePerToken:                 1e-6,
+		InputPricePerTokenPriority:         2e-6,
+		OutputPricePerToken:                6e-6,
+		OutputPricePerTokenPriority:        12e-6,
+		CacheCreationPricePerToken:         1.25e-6,
+		CacheCreationPricePerTokenPriority: 2.5e-6,
+		CacheReadPricePerToken:             0.1e-6,
+		CacheReadPricePerTokenPriority:     0.2e-6,
 		LongContextInputThreshold:          openAIGPT54LongContextInputThreshold,
 		LongContextInputMultiplier:         openAIGPT54LongContextInputMultiplier,
 		LongContextOutputMultiplier:        openAIGPT54LongContextOutputMultiplier,
@@ -1209,6 +1243,10 @@ func (s *BillingService) computeTokenBreakdown(
 		bd.CacheCreationCost *= tierMultiplier
 		bd.CacheReadCost *= tierMultiplier
 	}
+	bd.InputPricePerToken = inputPrice * tierMultiplier
+	bd.OutputPricePerToken = outputPrice * tierMultiplier
+	bd.CacheCreationPricePerToken = cacheCreationPrice * cacheCreationMultiplier * tierMultiplier
+	bd.CacheReadPricePerToken = cacheReadPrice * tierMultiplier
 
 	bd.TotalCost = bd.InputCost + bd.ImageInputCost + bd.OutputCost + bd.ImageOutputCost +
 		bd.CacheCreationCost + bd.CacheReadCost

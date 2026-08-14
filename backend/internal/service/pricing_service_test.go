@@ -89,7 +89,7 @@ func TestBillingService_GPT56CacheWritePricingUsesOfficialMultiplier(t *testing.
 	}{
 		{model: "gpt-5.6-sol", input: 5e-6, inputPriority: 10e-6, output: 30e-6, outputPriority: 60e-6, cacheRead: 0.5e-6, cacheReadPriority: 1e-6},
 		{model: "gpt-5.6-terra", input: 2e-6, inputPriority: 4e-6, output: 12e-6, outputPriority: 24e-6, cacheRead: 0.2e-6, cacheReadPriority: 0.4e-6},
-		{model: "gpt-5.6-luna", input: 0.2e-6, inputPriority: 0.4e-6, output: 1.2e-6, outputPriority: 2.4e-6, cacheRead: 0.02e-6, cacheReadPriority: 0.04e-6},
+		{model: "gpt-5.6-luna", input: 1e-6, inputPriority: 2e-6, output: 6e-6, outputPriority: 12e-6, cacheRead: 0.1e-6, cacheReadPriority: 0.2e-6},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
@@ -137,7 +137,7 @@ func TestBillingService_GPT56UsesLongContextPricingAcrossModelsAndTiers(t *testi
 	}{
 		{name: "gpt-5.6-sol", input: 5e-6, cached: 0.5e-6, cacheWrite: 6.25e-6, output: 30e-6},
 		{name: "gpt-5.6-terra", input: 2e-6, cached: 0.2e-6, cacheWrite: 2.5e-6, output: 12e-6},
-		{name: "gpt-5.6-luna", input: 0.2e-6, cached: 0.02e-6, cacheWrite: 0.25e-6, output: 1.2e-6},
+		{name: "gpt-5.6-luna", input: 1e-6, cached: 0.1e-6, cacheWrite: 1.25e-6, output: 6e-6},
 	}
 	tiers := []struct {
 		name       string
@@ -189,7 +189,7 @@ func TestPricingService_BareGPT56AliasDeterministicallyUsesSol(t *testing.T) {
 	pricingSvc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
 		"gpt-5.6-sol":   {InputCostPerToken: 5e-6},
 		"gpt-5.6-terra": {InputCostPerToken: 2e-6},
-		"gpt-5.6-luna":  {InputCostPerToken: 0.2e-6},
+		"gpt-5.6-luna":  {InputCostPerToken: 1e-6},
 		"gpt-5.4":       {InputCostPerToken: 2.5e-6},
 	}}
 
@@ -227,7 +227,7 @@ func TestDefaultPricingIncludesOfficialGPT56Rates(t *testing.T) {
 	}{
 		{model: "gpt-5.6-sol", input: 5e-6, cached: 0.5e-6, cacheWrite: 6.25e-6, output: 30e-6, inputPriority: 10e-6, cachedPriority: 1e-6, cacheWritePriority: 12.5e-6, outputPriority: 60e-6},
 		{model: "gpt-5.6-terra", input: 2e-6, cached: 0.2e-6, cacheWrite: 2.5e-6, output: 12e-6, inputPriority: 4e-6, cachedPriority: 0.4e-6, cacheWritePriority: 5e-6, outputPriority: 24e-6},
-		{model: "gpt-5.6-luna", input: 0.2e-6, cached: 0.02e-6, cacheWrite: 0.25e-6, output: 1.2e-6, inputPriority: 0.4e-6, cachedPriority: 0.04e-6, cacheWritePriority: 0.5e-6, outputPriority: 2.4e-6},
+		{model: "gpt-5.6-luna", input: 1e-6, cached: 0.1e-6, cacheWrite: 1.25e-6, output: 6e-6, inputPriority: 2e-6, cachedPriority: 0.2e-6, cacheWritePriority: 2.5e-6, outputPriority: 12e-6},
 	}
 	for _, tt := range tests {
 		t.Run(tt.model, func(t *testing.T) {
@@ -255,7 +255,7 @@ func TestGPT56DedicatedFallbacksUseOfficialRates(t *testing.T) {
 	}{
 		{model: "gpt-5.6-sol", input: 5e-6, cached: 0.5e-6, cacheWrite: 6.25e-6, output: 30e-6},
 		{model: "gpt-5.6-terra", input: 2e-6, cached: 0.2e-6, cacheWrite: 2.5e-6, output: 12e-6},
-		{model: "gpt-5.6-luna", input: 0.2e-6, cached: 0.02e-6, cacheWrite: 0.25e-6, output: 1.2e-6},
+		{model: "gpt-5.6-luna", input: 1e-6, cached: 0.1e-6, cacheWrite: 1.25e-6, output: 6e-6},
 	}
 
 	for _, tt := range tests {

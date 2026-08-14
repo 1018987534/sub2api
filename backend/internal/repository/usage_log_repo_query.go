@@ -75,6 +75,31 @@ func (r *usageLogRepository) ListByAPIKeyAndTimeRange(ctx context.Context, apiKe
 	return logs, nil, err
 }
 
+// ListRecentTokenPricingEvidence returns a bounded newest-first slice used by
+// the API-key billing metadata endpoint. The caller derives only sanitized
+// per-model unit-price summaries; raw usage rows never leave this process.
+func (r *usageLogRepository) ListRecentTokenPricingEvidence(
+	ctx context.Context,
+	apiKeyID int64,
+	since time.Time,
+	limit int,
+) ([]service.UsageLog, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	query := "SELECT " + usageLogSelectColumns + `
+		FROM usage_logs
+		WHERE api_key_id = $1
+		  AND created_at >= $2
+		  AND COALESCE(billing_mode, 'token') = 'token'
+		ORDER BY id DESC
+		LIMIT $3`
+	return r.queryUsageLogs(ctx, query, apiKeyID, since, limit)
+}
+
 func (r *usageLogRepository) ListByAccountAndTimeRange(ctx context.Context, accountID int64, startTime, endTime time.Time) ([]service.UsageLog, *pagination.PaginationResult, error) {
 	query := "SELECT " + usageLogSelectColumns + " FROM usage_logs WHERE account_id = $1 AND created_at >= $2 AND created_at < $3 ORDER BY id DESC LIMIT 10000"
 	logs, err := r.queryUsageLogs(ctx, query, accountID, startTime, endTime)

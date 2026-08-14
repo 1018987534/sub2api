@@ -741,6 +741,30 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.upstream_billing_probe_enabled).toBe(true)
   })
 
+  it('syncs upstream model prices only with automatic probing enabled', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const priceToggle = wrapper.get('[data-testid="upstream-billing-price-sync"]')
+    const probeToggle = wrapper.get('[data-testid="upstream-billing-auto-probe"]')
+    expect(priceToggle.attributes('aria-checked')).toBe('false')
+    expect(probeToggle.attributes('aria-checked')).toBe('false')
+
+    await priceToggle.trigger('click')
+    expect(priceToggle.attributes('aria-checked')).toBe('true')
+    expect(probeToggle.attributes('aria-checked')).toBe('true')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    const payload = updateAccountMock.mock.calls[0]?.[1]
+    expect(payload?.upstream_billing_probe_enabled).toBe(true)
+    expect(payload?.upstream_billing_price_sync_enabled).toBe(true)
+    expect(payload?.extra).not.toHaveProperty('upstream_billing_price_sync_enabled')
+  })
+
   it('enabling rate sync also enables probing and stops submitting a manual rate', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()
@@ -835,6 +859,7 @@ describe('EditAccountModal', () => {
     const payload = updateAccountMock.mock.calls[0]?.[1]
     expect(payload?.upstream_billing_probe_enabled).toBe(false)
     expect(payload?.upstream_billing_rate_sync_enabled).toBe(false)
+    expect(payload?.upstream_billing_price_sync_enabled).toBe(false)
     expect(payload).not.toHaveProperty('upstream_billing_rate_conversion_ratio')
     expect(payload?.rate_multiplier).toBe(1)
   })

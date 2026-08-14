@@ -151,6 +151,7 @@ type UpdateAccountRequest struct {
 	PeriodicSchedulePauseMinutes *int           `json:"periodic_schedule_pause_minutes"`
 	ProbeEnabled                 *bool          `json:"upstream_billing_probe_enabled"`
 	RateSyncEnabled              *bool          `json:"upstream_billing_rate_sync_enabled"`
+	PriceSyncEnabled             *bool          `json:"upstream_billing_price_sync_enabled"`
 	RateConversionRatio          *float64       `json:"upstream_billing_rate_conversion_ratio"`
 	ConfirmMixedChannelRisk      *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
@@ -1024,6 +1025,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		PeriodicSchedulePauseMinutes: req.PeriodicSchedulePauseMinutes,
 		ProbeEnabled:                 req.ProbeEnabled,
 		RateSyncEnabled:              req.RateSyncEnabled,
+		PriceSyncEnabled:             req.PriceSyncEnabled,
 		RateConversionRatio:          req.RateConversionRatio,
 		SkipMixedChannelCheck:        skipCheck,
 	})

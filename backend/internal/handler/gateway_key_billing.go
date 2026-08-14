@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -14,20 +15,24 @@ import (
 const keyBillingInfoSchemaVersion = 1
 
 type keyBillingInfoResponse struct {
-	Object                  string    `json:"object"`
-	SchemaVersion           int       `json:"schema_version"`
-	BillingScope            string    `json:"billing_scope"`
-	GroupRateMultiplier     float64   `json:"group_rate_multiplier"`
-	UserRateMultiplier      *float64  `json:"user_rate_multiplier,omitempty"`
-	ResolvedRateMultiplier  float64   `json:"resolved_rate_multiplier"`
-	PeakRateEnabled         bool      `json:"peak_rate_enabled"`
-	PeakStart               *string   `json:"peak_start,omitempty"`
-	PeakEnd                 *string   `json:"peak_end,omitempty"`
-	PeakRateMultiplier      *float64  `json:"peak_rate_multiplier,omitempty"`
-	AppliedPeakMultiplier   *float64  `json:"applied_peak_multiplier,omitempty"`
-	EffectiveRateMultiplier float64   `json:"effective_rate_multiplier"`
-	Timezone                *string   `json:"timezone,omitempty"`
-	ObservedAt              time.Time `json:"observed_at"`
+	Object                  string                                               `json:"object"`
+	SchemaVersion           int                                                  `json:"schema_version"`
+	BillingScope            string                                               `json:"billing_scope"`
+	GroupRateMultiplier     float64                                              `json:"group_rate_multiplier"`
+	UserRateMultiplier      *float64                                             `json:"user_rate_multiplier,omitempty"`
+	ResolvedRateMultiplier  float64                                              `json:"resolved_rate_multiplier"`
+	PeakRateEnabled         bool                                                 `json:"peak_rate_enabled"`
+	PeakStart               *string                                              `json:"peak_start,omitempty"`
+	PeakEnd                 *string                                              `json:"peak_end,omitempty"`
+	PeakRateMultiplier      *float64                                             `json:"peak_rate_multiplier,omitempty"`
+	AppliedPeakMultiplier   *float64                                             `json:"applied_peak_multiplier,omitempty"`
+	EffectiveRateMultiplier float64                                              `json:"effective_rate_multiplier"`
+	Timezone                *string                                              `json:"timezone,omitempty"`
+	ObservedAt              time.Time                                            `json:"observed_at"`
+	ModelPrices             map[string]service.UpstreamBillingModelPrice         `json:"model_prices,omitempty"`
+	PricingVersion          string                                               `json:"pricing_version,omitempty"`
+	PricingObservedAt       *time.Time                                           `json:"pricing_observed_at,omitempty"`
+	InferredModelPrices     map[string]service.UpstreamBillingInferredModelPrice `json:"inferred_model_prices,omitempty"`
 }
 
 // KeyBillingInfo returns the token billing multiplier effective for the authenticated API key.
@@ -57,8 +62,25 @@ func (h *GatewayHandler) KeyBillingInfo(c *gin.Context) {
 		return
 	}
 
+	now := timezone.Now()
+	response := buildKeyBillingInfo(apiKey, resolvedRate, now)
+	response.ModelPrices = h.resolveKeyBillingModelPrices(c, apiKey)
+	if len(response.ModelPrices) > 0 {
+		response.PricingVersion = service.UpstreamBillingModelPricesVersion(response.ModelPrices)
+		pricingObservedAt := now.UTC()
+		response.PricingObservedAt = &pricingObservedAt
+	}
+	if h.usageService != nil {
+		inferred, err := h.usageService.InferAPIKeyUpstreamBillingPrices(c.Request.Context(), apiKey.ID, now)
+		if err != nil {
+			slog.Warn("key_billing_price_inference_failed", "api_key_id", apiKey.ID, "error", err)
+		} else {
+			response.InferredModelPrices = inferred
+		}
+	}
+
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, buildKeyBillingInfo(apiKey, resolvedRate, timezone.Now()))
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *GatewayHandler) resolveKeyBillingRate(c *gin.Context, apiKey *service.APIKey) (float64, bool) {
@@ -74,6 +96,24 @@ func (h *GatewayHandler) resolveKeyBillingRate(c *gin.Context, apiKey *service.A
 			return 0, false
 		}
 		return h.gatewayService.ResolveUserGroupRateMultiplier(c.Request.Context(), apiKey.UserID, *apiKey.GroupID, groupRate), true
+	}
+}
+
+func (h *GatewayHandler) resolveKeyBillingModelPrices(c *gin.Context, apiKey *service.APIKey) map[string]service.UpstreamBillingModelPrice {
+	if apiKey == nil || apiKey.Group == nil {
+		return nil
+	}
+	switch apiKey.Group.Platform {
+	case service.PlatformOpenAI, service.PlatformGrok:
+		if h.openAIGatewayService == nil {
+			return nil
+		}
+		return h.openAIGatewayService.KeyBillingModelPrices(c.Request.Context(), apiKey)
+	default:
+		if h.gatewayService == nil {
+			return nil
+		}
+		return h.gatewayService.KeyBillingModelPrices(c.Request.Context(), apiKey)
 	}
 }
 

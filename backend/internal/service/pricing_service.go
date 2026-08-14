@@ -70,14 +70,14 @@ var (
 		SupportsPromptCaching:               true,
 	}
 	openAIGPT56LunaFallbackPricing = &LiteLLMModelPricing{
-		InputCostPerToken:                   2e-07,
-		InputCostPerTokenPriority:           4e-07,
-		OutputCostPerToken:                  1.2e-06,
-		OutputCostPerTokenPriority:          2.4e-06,
-		CacheCreationInputTokenCost:         2.5e-07,
-		CacheCreationInputTokenCostPriority: 5e-07,
-		CacheReadInputTokenCost:             2e-08,
-		CacheReadInputTokenCostPriority:     4e-08,
+		InputCostPerToken:                   1e-06,
+		InputCostPerTokenPriority:           2e-06,
+		OutputCostPerToken:                  6e-06,
+		OutputCostPerTokenPriority:          1.2e-05,
+		CacheCreationInputTokenCost:         1.25e-06,
+		CacheCreationInputTokenCostPriority: 2.5e-06,
+		CacheReadInputTokenCost:             1e-07,
+		CacheReadInputTokenCostPriority:     2e-07,
 		LongContextInputTokenThreshold:      openAIGPT54LongContextInputThreshold,
 		LongContextInputCostMultiplier:      openAIGPT54LongContextInputMultiplier,
 		LongContextOutputCostMultiplier:     openAIGPT54LongContextOutputMultiplier,
@@ -668,6 +668,22 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	}
 
 	return nil
+}
+
+// ListModelNames returns a point-in-time copy of all locally loaded pricing
+// keys. Callers can enumerate the result without observing a partial refresh.
+func (s *PricingService) ListModelNames() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	models := make([]string, 0, len(s.pricingData))
+	for model := range s.pricingData {
+		models = append(models, model)
+	}
+	return models
 }
 
 // lookupIdentifiedModelPricingLocked 只做"确定性识别"的三步查找：精确键、已知拼写

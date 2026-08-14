@@ -46,10 +46,13 @@ const (
 	upstreamBillingProbeMaxIntervalMinutes     = 24 * 60
 	upstreamBillingProbeCycleInterval          = time.Minute
 	upstreamBillingProbeRequestTimeout         = 10 * time.Second
-	upstreamBillingProbeMaxBodyBytes           = 64 * 1024
-	upstreamBillingProbeMaxPerCycle            = 20
-	upstreamBillingProbeConcurrency            = 4
-	upstreamBillingProbeMaxDelay               = 24 * time.Hour
+	// The optional account-scoped model catalog is fetched only by the periodic
+	// runner, never on a user request. One MiB comfortably covers hundreds of
+	// effective price cards while still bounding an untrusted upstream body.
+	upstreamBillingProbeMaxBodyBytes = 1 * 1024 * 1024
+	upstreamBillingProbeMaxPerCycle  = 20
+	upstreamBillingProbeConcurrency  = 4
+	upstreamBillingProbeMaxDelay     = 24 * time.Hour
 	// unsupported 账号的重探间隔倍数：上游不是 sub2api 中转就不会突然长出
 	// /v1/sub2api/billing，按常规 interval 重排只会持续占满每周期
 	// upstreamBillingProbeMaxPerCycle 个名额。
@@ -138,20 +141,24 @@ type UpstreamBillingProbeResult struct {
 }
 
 type upstreamBillingProbeResponse struct {
-	Object                  string   `json:"object"`
-	SchemaVersion           int      `json:"schema_version"`
-	BillingScope            string   `json:"billing_scope"`
-	GroupRateMultiplier     *float64 `json:"group_rate_multiplier"`
-	UserRateMultiplier      *float64 `json:"user_rate_multiplier"`
-	ResolvedRateMultiplier  *float64 `json:"resolved_rate_multiplier"`
-	PeakRateEnabled         *bool    `json:"peak_rate_enabled"`
-	PeakStart               *string  `json:"peak_start"`
-	PeakEnd                 *string  `json:"peak_end"`
-	PeakRateMultiplier      *float64 `json:"peak_rate_multiplier"`
-	AppliedPeakMultiplier   *float64 `json:"applied_peak_multiplier"`
-	EffectiveRateMultiplier *float64 `json:"effective_rate_multiplier"`
-	Timezone                *string  `json:"timezone"`
-	ObservedAt              string   `json:"observed_at"`
+	Object                  string                                       `json:"object"`
+	SchemaVersion           int                                          `json:"schema_version"`
+	BillingScope            string                                       `json:"billing_scope"`
+	GroupRateMultiplier     *float64                                     `json:"group_rate_multiplier"`
+	UserRateMultiplier      *float64                                     `json:"user_rate_multiplier"`
+	ResolvedRateMultiplier  *float64                                     `json:"resolved_rate_multiplier"`
+	PeakRateEnabled         *bool                                        `json:"peak_rate_enabled"`
+	PeakStart               *string                                      `json:"peak_start"`
+	PeakEnd                 *string                                      `json:"peak_end"`
+	PeakRateMultiplier      *float64                                     `json:"peak_rate_multiplier"`
+	AppliedPeakMultiplier   *float64                                     `json:"applied_peak_multiplier"`
+	EffectiveRateMultiplier *float64                                     `json:"effective_rate_multiplier"`
+	Timezone                *string                                      `json:"timezone"`
+	ObservedAt              string                                       `json:"observed_at"`
+	ModelPrices             map[string]UpstreamBillingModelPrice         `json:"model_prices"`
+	PricingVersion          string                                       `json:"pricing_version"`
+	PricingObservedAt       string                                       `json:"pricing_observed_at"`
+	InferredModelPrices     map[string]UpstreamBillingInferredModelPrice `json:"inferred_model_prices"`
 }
 
 // GetUpstreamBillingProbeSettings returns defaults when the setting is absent.
@@ -221,6 +228,7 @@ type UpstreamBillingProbeService struct {
 	accountRepo        AccountRepository
 	accountTestService *AccountTestService
 	settingService     *SettingService
+	billingService     *BillingService
 
 	parentCtx    context.Context
 	parentCancel context.CancelFunc
@@ -271,17 +279,25 @@ func (s *UpstreamBillingProbeService) SetLeaderLock(lockCache LeaderLockCache, d
 	s.db = db
 }
 
+func (s *UpstreamBillingProbeService) SetBillingService(billingService *BillingService) {
+	if s != nil {
+		s.billingService = billingService
+	}
+}
+
 // ProvideUpstreamBillingProbeService starts the process-wide periodic runner.
 func ProvideUpstreamBillingProbeService(
 	accountRepo AccountRepository,
 	accountTestService *AccountTestService,
 	settingService *SettingService,
+	billingService *BillingService,
 	lockCache LeaderLockCache,
 	db *sql.DB,
 	cfg *config.Config,
 ) *UpstreamBillingProbeService {
 	svc := NewUpstreamBillingProbeService(accountRepo, accountTestService, settingService)
 	svc.SetLeaderLock(lockCache, db)
+	svc.SetBillingService(billingService)
 	if controlPlaneEnabled(cfg) {
 		svc.Start()
 	}
@@ -828,6 +844,26 @@ func parseUpstreamBillingProbeResponse(body []byte) (map[string]any, error) {
 		"peak_rate_enabled":         *response.PeakRateEnabled,
 		"effective_rate_multiplier": *response.EffectiveRateMultiplier,
 		"observed_at":               observedAt.UTC().Format(time.RFC3339Nano),
+	}
+	if response.ModelPrices != nil {
+		prices, valid := normalizeUpstreamBillingModelPrices(response.ModelPrices)
+		if !valid || strings.TrimSpace(response.PricingVersion) == "" {
+			return nil, fmt.Errorf("invalid billing model prices")
+		}
+		pricingObservedAt, pricingErr := time.Parse(time.RFC3339Nano, response.PricingObservedAt)
+		if pricingErr != nil || pricingObservedAt.IsZero() {
+			return nil, fmt.Errorf("invalid pricing_observed_at")
+		}
+		data[upstreamBillingModelPricesDataKey] = prices
+		data[upstreamBillingPricingVersionDataKey] = strings.TrimSpace(response.PricingVersion)
+		data[upstreamBillingPricingObservedDataKey] = pricingObservedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if response.InferredModelPrices != nil {
+		inferred, valid := normalizeUpstreamBillingInferredModelPrices(response.InferredModelPrices)
+		if !valid {
+			return nil, fmt.Errorf("invalid inferred billing model prices")
+		}
+		data[upstreamBillingInferredModelPricesDataKey] = inferred
 	}
 	if response.UserRateMultiplier != nil {
 		data["user_rate_multiplier"] = *response.UserRateMultiplier

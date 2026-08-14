@@ -252,13 +252,36 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// + responseModelBillingAdoptable。任一条件不满足都静默回落基线，即开启本模式前的
 	// 既有行为。响应模型与基线同名时直接跳过：重算必然同价，白跑一次定价解析。
 	baselineBillingModel := firstUsageBillingModel(billingModels)
+	mediaBilled := result.ImageCount > 0 || result.VideoCount > 0 || result.WebSearchCalls > 0 ||
+		result.AudioUsage != nil || result.SearchCount > 0
+	upstreamSyncedPricingApplied := false
+	if !mediaBilled {
+		selection, selected := resolveSyncedUpstreamBillingModel(
+			billingAccount, baselineBillingModel, result.UpstreamResponseModel, result.UpstreamResponseModelConflict,
+			input.BillingModelSource == BillingModelSourceResponse,
+		)
+		if selected {
+			longContextEnabled := apiKey.Group == nil || apiKey.Group.LongContextPricingEnabled
+			if longContextBillingGate != nil {
+				longContextEnabled = longContextEnabled && *longContextBillingGate
+			}
+			upstreamCost, calculated := calculateSyncedUpstreamTokenCost(
+				s.billingService, selection, tokens, multiplier, serviceTier, longContextEnabled,
+			)
+			if calculated {
+				cost = upstreamCost
+				billingModels = usageBillingModelCandidates(selection.Model)
+				upstreamSyncedPricingApplied = true
+				logSyncedUpstreamPricingApplied("service.openai_gateway", billingAccount, result.RequestID, cost)
+			}
+		}
+	}
 	if responseModel := responseModelBillingDeclaration(
 		input.BillingModelSource,
 		result.UpstreamResponseModel,
 		result.UpstreamResponseModelConflict,
-		result.ImageCount > 0 || result.VideoCount > 0 || result.WebSearchCalls > 0 ||
-			result.AudioUsage != nil || result.SearchCount > 0,
-	); responseModel != "" && !strings.EqualFold(responseModel, baselineBillingModel) {
+		mediaBilled,
+	); !upstreamSyncedPricingApplied && responseModel != "" && !strings.EqualFold(responseModel, baselineBillingModel) {
 		if identified, responseChannelPriced := s.hasIdentifiedOpenAIResponsePricing(ctx, responseModel, apiKey); identified {
 			responseModels := usageBillingModelCandidates(responseModel)
 			responseCost, responseErr := s.calculateOpenAIRecordUsageCost(
