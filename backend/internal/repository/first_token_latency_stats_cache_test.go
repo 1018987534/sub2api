@@ -262,12 +262,14 @@ func TestFirstTokenLatencyStatsCacheStableScoreIgnoresOrdinaryBurstNoise(t *test
 	require.InDelta(t, before[17].PredictedMS, after[17].PredictedMS, 10)
 }
 
-func TestFirstTokenLatencyStatsCacheSevereSlowdownImmediatelyLeavesFastPool(t *testing.T) {
+func TestFirstTokenLatencyStatsCacheLeavesFastPoolOnlyAfterStablePredictionExceedsThreshold(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 	cache := &firstTokenLatencyStatsCache{rdb: rdb}
 	ctx := context.Background()
+	now := time.Unix(1_000, 0)
+	mr.SetTime(now)
 
 	for index := 0; index < 3; index++ {
 		require.NoError(t, cache.RecordSample(ctx, 18, fmt.Sprintf("fast-%d", index), 6_000))
@@ -276,11 +278,21 @@ func TestFirstTokenLatencyStatsCacheSevereSlowdownImmediatelyLeavesFastPool(t *t
 	require.NoError(t, err)
 	require.True(t, fast[18].ReliableFast)
 
-	require.NoError(t, cache.RecordSample(ctx, 18, "abrupt-slow", 20_000))
+	require.NoError(t, cache.RecordSample(ctx, 18, "isolated-slow", 60_000))
+	stillFast, err := cache.GetStatsBatch(ctx, []int64{18})
+	require.NoError(t, err)
+	require.True(t, stillFast[18].ReliableFast)
+	require.Equal(t, 6_000.0, stillFast[18].PredictedMS)
+
+	for index := 0; index < 3; index++ {
+		now = now.Add(5 * time.Minute)
+		mr.SetTime(now)
+		require.NoError(t, cache.RecordSample(ctx, 18, fmt.Sprintf("sustained-slow-%d", index), 20_000))
+	}
 	slow, err := cache.GetStatsBatch(ctx, []int64{18})
 	require.NoError(t, err)
+	require.Greater(t, slow[18].PredictedMS, 10_000.0)
 	require.False(t, slow[18].ReliableFast)
-	require.Equal(t, 20_000.0, slow[18].PredictedMS)
 }
 
 func TestFirstTokenLatencyStatsCacheFastProbeAfterStaleHistoryNeedsConfirmation(t *testing.T) {

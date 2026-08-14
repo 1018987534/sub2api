@@ -16,8 +16,8 @@ const firstTokenLatencyStatsPrefix = "scheduler:first_token:account:"
 const firstTokenLatencyProbePrefix = "scheduler:first_token:probe:"
 
 // Scheduling uses a time-smoothed robust score. The recent median absorbs
-// isolated samples, while explicit change detection reacts immediately to a
-// confirmed recovery or a severe regression.
+// isolated samples, while explicit confirmation lets recovered accounts return
+// to the fast pool without inheriting stale slow history.
 var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	local stats_key = KEYS[1]
 	local dedupe_key = KEYS[2]
@@ -95,17 +95,6 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	end
 
 	sample_count = sample_count + 1
-	local abrupt_slowdown = false
-	if was_confirmed_fast and old_ewma and latency_ms > 10000 then
-		local slowdown_threshold = old_ewma * 1.8
-		if slowdown_threshold < old_ewma + 5000 then slowdown_threshold = old_ewma + 5000 end
-		if latency_ms >= slowdown_threshold then
-			abrupt_slowdown = true
-			was_confirmed_fast = false
-			recovery_fast_streak = 0
-			recovery_fast_samples = nil
-		end
-	end
 
 	local recovery_samples = {}
 	if recovery_fast_samples then
@@ -139,15 +128,12 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 		end
 	end
 	local ewma = median
-	if old_ewma and not recovery_confirmed and not abrupt_slowdown then
+	if old_ewma and not recovery_confirmed then
 		-- Time-based EWMA avoids traffic volume changing the smoothing strength.
 		-- Busy and idle accounts converge on the same wall-clock horizon.
 		local alpha = 1 - math.exp(-elapsed_seconds / 900)
 		if alpha < 0 then alpha = 0 end
 		ewma = alpha * median + (1 - alpha) * old_ewma
-	elseif abrupt_slowdown then
-		-- A severe one-sample regression is a change point, not ordinary noise.
-		ewma = latency_ms
 	end
 	local reliable_fast = 0
 	if (was_confirmed_fast or recovery_confirmed) and ewma > 0 and ewma <= 10000 then reliable_fast = 1 end

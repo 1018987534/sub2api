@@ -79,7 +79,7 @@ export default {
       configureSystem: 'Configure system settings',
       failedToLoad: 'Failed to load dashboard statistics',
       firstTokenLatencyTitle: 'Relay Recent First Token',
-      firstTokenLatencyDescription: 'Only enabled OpenAI API-key relay accounts are included; OAuth is excluded. The stable prediction time-smooths the median of the latest 9 samples. A severe slowdown immediately leaves the fast pool; a slow account enters after 3 consecutive samples at or below 10 seconds.',
+      firstTokenLatencyDescription: 'Only enabled OpenAI API-key relay accounts are included; OAuth is excluded. The stable prediction time-smooths the median of the latest 9 samples. An account leaves the fast pool when its stable prediction exceeds 10 seconds; a slow account enters after 3 consecutive samples at or below 10 seconds.',
       firstTokenLatencyFailed: 'Failed to load first-token latency statistics',
       firstTokenLatencyEmpty: 'No first-token data for enabled relay accounts yet',
       firstTokenAccount: 'Account',

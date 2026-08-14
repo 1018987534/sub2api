@@ -79,7 +79,7 @@ export default {
       configureSystem: '配置系统设置',
       failedToLoad: '加载仪表盘数据失败',
       firstTokenLatencyTitle: '上游中转近期首字',
-      firstTokenLatencyDescription: '仅统计当前启用的 OpenAI API Key 上游账号，不含 OAuth。稳定预测由最近 9 个样本的中位数经时间平滑得出；显著变慢立即退出快池，慢账号连续 3 次不超过 10 秒后进入快池。',
+      firstTokenLatencyDescription: '仅统计当前启用的 OpenAI API Key 上游账号，不含 OAuth。稳定预测由最近 9 个样本的中位数经时间平滑得出；稳定预测超过 10 秒时退出快池，慢账号连续 3 次不超过 10 秒后进入快池。',
       firstTokenLatencyFailed: '首字统计加载失败',
       firstTokenLatencyEmpty: '当前启用的上游中转账号暂无首字统计',
       firstTokenAccount: '账号',
