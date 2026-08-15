@@ -341,6 +341,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", invalidStreamFieldTypeMessage)
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithFirstTokenProbeEligibility(c.Request.Context(), reqStream))
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 	if reqStream && slowTraceThreshold > 0 {
 		trace := service.NewOpenAILatencyTrace(requestStart, len(body), reqModel, reqStream)
@@ -1005,6 +1006,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	routingModel := service.NormalizeOpenAICompatRequestedModel(reqModel)
 	preferredMappedModel := resolveOpenAIMessagesDispatchMappedModel(apiKey, reqModel)
 	reqStream := gjson.GetBytes(body, "stream").Bool()
+	c.Request = c.Request.WithContext(service.WithFirstTokenProbeEligibility(c.Request.Context(), reqStream))
 
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
@@ -1923,7 +1925,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	// 继续按建连时刻的谷价计费。生图意图只影响能力路由与图片计费，不关门。
 	// 建连时刻只用于选号/准入，不作为任何 turn 的计费定价时刻。
 	wsPricingCtx, _ := h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
-	ctx = wsPricingCtx
+	ctx = service.WithFirstTokenProbeEligibility(wsPricingCtx, true)
 
 	for {
 		if ctx.Err() != nil {

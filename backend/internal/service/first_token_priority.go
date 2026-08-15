@@ -30,6 +30,26 @@ type firstTokenRankedAccount struct {
 	original int
 }
 
+type firstTokenProbeEligibilityContextKey struct{}
+
+// WithFirstTokenProbeEligibility marks whether the current request can produce
+// a first_token_ms sample. Non-stream requests must not consume the shared
+// probe lease because they cannot advance recovery confirmation.
+func WithFirstTokenProbeEligibility(ctx context.Context, eligible bool) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, firstTokenProbeEligibilityContextKey{}, eligible)
+}
+
+func firstTokenProbeEligible(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	eligible, ok := ctx.Value(firstTokenProbeEligibilityContextKey{}).(bool)
+	return ok && eligible
+}
+
 type AccountFirstTokenLatencyMetric struct {
 	AccountID                int64                           `json:"account_id"`
 	AccountName              string                          `json:"account_name"`
@@ -203,6 +223,10 @@ func (s *SettingService) FirstTokenPriorityEnabled(ctx context.Context) bool {
 // ordered by predicted TTFT for exploitation. When an adaptive probe is due,
 // a shared lease promotes exactly one account across all gateway instances.
 func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache) []int64 {
+	return firstTokenPriorityOrderWithProbe(ctx, candidates, cache, true)
+}
+
+func firstTokenPriorityOrderWithProbe(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache, allowProbe bool) []int64 {
 	accountIDs := make([]int64, 0, len(candidates))
 	priorityAccountIDs := make([]int64, 0, len(candidates))
 	fallbackAccountIDs := make([]int64, 0, len(candidates))
@@ -237,6 +261,9 @@ func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache F
 	}
 	baseline := firstTokenPriorityOrderWithStats(priorityAccountIDs, stats, now, false)
 	ordered := append(baseline, fallbackAccountIDs...)
+	if !allowProbe {
+		return ordered
+	}
 	for _, probeAccountID := range firstTokenPriorityProbeAccountIDs(priorityAccountIDs, stats, now) {
 		claimed, err := cache.TryClaimProbe(ctx, probeAccountID, firstTokenPriorityProbeLease)
 		if err != nil {
@@ -616,8 +643,8 @@ func firstTokenPriorityProbeInterval(stats FirstTokenLatencyStats, fastestMS flo
 	return interval
 }
 
-func firstTokenPriorityRanks(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache) map[int64]int {
-	ordered := firstTokenPriorityOrder(ctx, candidates, cache)
+func firstTokenPriorityRanks(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache, allowProbe bool) map[int64]int {
+	ordered := firstTokenPriorityOrderWithProbe(ctx, candidates, cache, allowProbe)
 	ranks := make(map[int64]int, len(ordered))
 	for rank, accountID := range ordered {
 		ranks[accountID] = rank

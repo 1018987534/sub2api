@@ -79,6 +79,7 @@ type OpenAIAccountScheduleRequest struct {
 	StickyPreviousAccountID int64
 	StickyWeighted          bool
 	FirstTokenPriority      bool
+	FirstTokenProbeEligible bool
 	SubscriptionPriority    bool
 	PreserveStickyBinding   bool
 	PreviousResponseID      string
@@ -1092,7 +1093,7 @@ func applyOpenAIFirstTokenPriorityOrder(
 		for _, candidate := range selectionOrder[start:end] {
 			accounts = append(accounts, candidate.account)
 		}
-		ranks := firstTokenPriorityRanks(ctx, accounts, cache)
+		ranks := firstTokenPriorityRanks(ctx, accounts, cache, req.FirstTokenProbeEligible)
 		sort.SliceStable(selectionOrder[start:end], func(i, j int) bool {
 			return ranks[selectionOrder[start+i].account.ID] < ranks[selectionOrder[start+j].account.ID]
 		})
@@ -2412,6 +2413,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		StickyPreviousAccountID: stickyPreviousAccountID,
 		StickyWeighted:          stickyWeighted,
 		FirstTokenPriority:      firstTokenPriority,
+		FirstTokenProbeEligible: firstTokenProbeEligible(ctx),
 		SubscriptionPriority:    subscriptionPriority,
 		PreviousResponseID:      previousResponseID,
 		PreviousResponseCanMove: previousResponseCanMove,

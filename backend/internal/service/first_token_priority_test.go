@@ -402,6 +402,32 @@ func TestFirstTokenPriorityOrderUsesSharedLeaseForDueProbe(t *testing.T) {
 	require.Equal(t, []int64{1, 2}, firstTokenPriorityOrder(context.Background(), accounts, cache))
 }
 
+func TestFirstTokenPriorityOrderSkipsProbeWhenRequestCannotProduceSample(t *testing.T) {
+	now := time.Now()
+	cache := &staticFirstTokenLatencyStatsCache{
+		claimAllowed: true,
+		stats: map[int64]FirstTokenLatencyStats{
+			1: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			2: {PredictedMS: 2_000, SampleCount: 1, UpdatedAt: now.Add(-time.Minute), RecoveryFastStreak: 1, FastConfirmationTracked: true},
+		},
+	}
+	accounts := []*Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+	}
+
+	require.Equal(t, []int64{1, 2}, firstTokenPriorityOrderWithProbe(context.Background(), accounts, cache, false))
+	require.Empty(t, cache.claimedIDs)
+	require.Equal(t, []int64{2, 1}, firstTokenPriorityOrderWithProbe(context.Background(), accounts, cache, true))
+	require.Equal(t, []int64{2}, cache.claimedIDs)
+}
+
+func TestFirstTokenProbeEligibilityRequiresExplicitStreamingMarker(t *testing.T) {
+	require.False(t, firstTokenProbeEligible(context.Background()))
+	require.False(t, firstTokenProbeEligible(WithFirstTokenProbeEligibility(context.Background(), false)))
+	require.True(t, firstTokenProbeEligible(WithFirstTokenProbeEligibility(context.Background(), true)))
+}
+
 func TestFirstTokenPriorityOrderTriesNextDueProbeWhenLeaseIsAlreadyClaimed(t *testing.T) {
 	now := time.Now()
 	cache := &staticFirstTokenLatencyStatsCache{
