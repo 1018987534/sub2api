@@ -61,8 +61,8 @@
 
         <template #cell-model="{ row }">
           <div class="space-y-0.5 text-xs">
-            <div v-if="row.model_mapping_chain && row.model_mapping_chain.includes('→')" class="space-y-0.5">
-              <div v-for="(step, i) in row.model_mapping_chain.split('→')" :key="i"
+            <div v-if="mappingChainSteps(row.model_mapping_chain).length > 1" class="space-y-0.5">
+              <div v-for="(step, i) in mappingChainSteps(row.model_mapping_chain)" :key="i"
                    class="break-all"
                    :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
                    :style="i > 0 ? `padding-left: ${i * 0.75}rem` : ''">
@@ -595,6 +595,13 @@ const ipGeoBatchLoading = ref(false)
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
 
 const sentUpstreamModel = (row: AdminUsageLog): string => row.upstream_model?.trim() || row.model?.trim() || ''
+
+// Older rows may contain an identity rule from a display-only channel. Collapse
+// repeated adjacent nodes so only real model transformations are shown.
+const mappingChainSteps = (chain: string | null | undefined): string[] => {
+  const steps = (chain || '').split('→').map((step) => step.trim()).filter(Boolean)
+  return steps.filter((step, index) => index === 0 || step !== steps[index - 1])
+}
 
 const normalizeModelVariant = (model: string): string => model
   .trim()

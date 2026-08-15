@@ -287,6 +287,32 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('claude-sonnet-4-20250514')
   })
 
+  it('hides identity-only mapping chains from historical rows', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [{
+          request_id: 'req-identity-mapping',
+          model: 'gpt-5.6-sol',
+          upstream_model: 'gpt-5.6-sol',
+          model_mapping_chain: 'gpt-5.6-sol→gpt-5.6-sol',
+        }],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('gpt-5.6-sol')
+    expect(wrapper.text()).not.toContain('↳')
+  })
+
 	it.each([
 		{
 			name: 'possible version variant',

@@ -578,7 +578,9 @@ func resolveMapping(lk *channelLookup, groupID int64, model string) ChannelMappi
 	modelLower := strings.ToLower(model)
 	if mapped := lookupMappingAcrossPlatforms(lk.cache, groupID, lk.platform, modelLower); mapped != "" {
 		result.MappedModel = mapped
-		result.Mapped = true
+		// A same-name rule is useful for plaza enumeration, but it is not a
+		// transformation and must not appear as a mapping chain in usage logs.
+		result.Mapped = !strings.EqualFold(strings.TrimSpace(mapped), strings.TrimSpace(model))
 	}
 
 	return result
