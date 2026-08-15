@@ -21,7 +21,7 @@ type ComponentImportFn = () => Promise<unknown>
  */
 const PREFETCH_ADJACENCY: Record<string, string[]> = {
   // Admin routes - 预加载最常访问的相邻页面
-  '/admin/dashboard': ['/admin/accounts', '/admin/users'],
+  '/admin/dashboard': ['/admin/accounts', '/admin/users', '/admin/channels/pricing'],
   '/admin/accounts': ['/admin/dashboard', '/admin/users'],
   '/admin/users': ['/admin/groups', '/admin/dashboard'],
   '/admin/groups': ['/admin/subscriptions', '/admin/users'],
@@ -103,14 +103,16 @@ export function useRoutePrefetch(router?: Router) {
   /**
    * 执行单个组件的预加载
    */
-  const prefetchComponent = async (importFn: ComponentImportFn): Promise<void> => {
+  const prefetchComponent = async (importFn: ComponentImportFn): Promise<boolean> => {
     try {
       await importFn()
+      return true
     } catch (error) {
       // 静默处理预加载错误
       if (import.meta.env.DEV) {
         console.debug('[Prefetch] Failed to prefetch component:', error)
       }
+      return false
     }
   }
 
@@ -150,8 +152,10 @@ export function useRoutePrefetch(router?: Router) {
         }
 
         if (importFns.length > 0) {
-          Promise.all(importFns.map(prefetchComponent)).then(() => {
-            prefetchedRoutes.value.add(routePath)
+          Promise.all(importFns.map(prefetchComponent)).then((results) => {
+            if (results.every(Boolean)) {
+              prefetchedRoutes.value.add(routePath)
+            }
           })
         }
       },

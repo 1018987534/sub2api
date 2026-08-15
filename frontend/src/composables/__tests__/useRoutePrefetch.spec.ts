@@ -27,6 +27,7 @@ const createMockRouter = (): Router => {
     { path: '/admin/dashboard', components: { default: mockImportFn } },
     { path: '/admin/accounts', components: { default: mockImportFn } },
     { path: '/admin/users', components: { default: mockImportFn } },
+    { path: '/admin/channels/pricing', components: { default: mockImportFn } },
     { path: '/admin/groups', components: { default: mockImportFn } },
     { path: '/admin/subscriptions', components: { default: mockImportFn } },
     { path: '/admin/redeem', components: { default: mockImportFn } },
@@ -91,7 +92,7 @@ describe('useRoutePrefetch', () => {
       const route = createMockRoute('/admin/dashboard')
       const config = _getPrefetchConfig(route)
 
-      expect(config).toHaveLength(2)
+      expect(config).toHaveLength(3)
     })
 
     it('普通用户 dashboard 应该返回正确的预加载配置', () => {
@@ -190,7 +191,7 @@ describe('useRoutePrefetch', () => {
   describe('预加载映射表', () => {
     it('管理员预加载映射表应该包含正确的路由', () => {
       expect(_adminPrefetchMap).toHaveProperty('/admin/dashboard')
-      expect(_adminPrefetchMap['/admin/dashboard']).toHaveLength(2)
+      expect(_adminPrefetchMap['/admin/dashboard']).toContain('/admin/channels/pricing')
     })
 
     it('用户预加载映射表应该包含正确的路由', () => {
@@ -220,12 +221,19 @@ describe('useRoutePrefetch', () => {
   })
 
   describe('预加载失败处理', () => {
-    it('预加载失败时应该静默处理不影响页面功能', async () => {
-      const { triggerPrefetch } = useRoutePrefetch(mockRouter)
+    it('预加载失败时应该静默处理且不标记路由成功', async () => {
+      const pricingRoute = mockRouter
+        .getRoutes()
+        .find((route) => route.path === '/admin/channels/pricing')
+      pricingRoute!.components!.default = vi.fn().mockRejectedValue(new Error('chunk unavailable'))
+
+      const { triggerPrefetch, prefetchedRoutes } = useRoutePrefetch(mockRouter)
       const route = createMockRoute('/admin/dashboard')
 
-      // 不应该抛出异常
       expect(() => triggerPrefetch(route)).not.toThrow()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+
+      expect(prefetchedRoutes.value.has('/admin/dashboard')).toBe(false)
     })
   })
 

@@ -13,6 +13,7 @@ import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import { recoverFromRouterError, stripChunkReloadMarker } from './chunkLoadRecovery'
 
 /**
  * Route definitions with lazy loading
@@ -981,6 +982,11 @@ router.afterEach((to) => {
   // 结束导航加载状态
   navigationLoading.endNavigation()
 
+  const cleanUrl = stripChunkReloadMarker(window.location.href)
+  if (cleanUrl) {
+    window.history.replaceState(window.history.state, '', cleanUrl)
+  }
+
   // 懒初始化预加载（首次导航时创建，传入 router 实例）
   if (!routePrefetch) {
     routePrefetch = useRoutePrefetch(router)
@@ -993,30 +999,20 @@ router.afterEach((to) => {
  * Navigation guard: Error handling
  * Handles dynamic import failures caused by deployment updates
  */
-router.onError((error) => {
+router.onError((error, to) => {
   console.error('Router error:', error)
 
-  // Check if this is a dynamic import failure (chunk loading error)
-  const isChunkLoadError =
-    error.message?.includes('Failed to fetch dynamically imported module') ||
-    error.message?.includes('Loading chunk') ||
-    error.message?.includes('Loading CSS chunk') ||
-    error.name === 'ChunkLoadError'
+  const result = recoverFromRouterError(error, to.fullPath, {
+    endNavigation: navigationLoading.endNavigation,
+    reload: (url) => window.location.replace(url),
+    storage: sessionStorage,
+    origin: window.location.origin,
+  })
 
-  if (isChunkLoadError) {
-    // Avoid infinite reload loop by checking sessionStorage
-    const reloadKey = 'chunk_reload_attempted'
-    const lastReload = sessionStorage.getItem(reloadKey)
-    const now = Date.now()
-
-    // Allow reload if never attempted or more than 10 seconds ago
-    if (!lastReload || now - parseInt(lastReload) > 10000) {
-      sessionStorage.setItem(reloadKey, now.toString())
-      console.warn('Chunk load error detected, reloading page to fetch latest version...')
-      window.location.reload()
-    } else {
-      console.error('Chunk load error persists after reload. Please clear browser cache.')
-    }
+  if (result === 'reloading') {
+    console.warn('Chunk load error detected, reloading the requested route with current assets...')
+  } else if (result === 'throttled') {
+    console.error('Chunk load error persisted after the automatic reload.')
   }
 })
 
