@@ -63,11 +63,28 @@ type AccountFirstTokenLatencyMetric struct {
 	SlowStreak               int                             `json:"slow_streak"`
 	RecoveryFastStreak       int                             `json:"recovery_fast_streak"`
 	ProbeIntervalSeconds     int64                           `json:"probe_interval_seconds"`
+	CacheRate                *float64                        `json:"cache_rate"`
+	CacheReadTokens          int64                           `json:"cache_read_tokens"`
+	CacheRateDenominator     int64                           `json:"cache_rate_denominator"`
 }
 
 type AccountFirstTokenLatencyGroup struct {
 	GroupID   int64  `json:"group_id"`
 	GroupName string `json:"group_name"`
+}
+
+// AccountCacheStats is the rolling cache-token aggregate used alongside the
+// account scheduling view. The denominator follows the channel monitor
+// convention: uncached input plus cache creation and cache reads.
+type AccountCacheStats struct {
+	CacheReadTokens      int64
+	CacheRateDenominator int64
+}
+
+// AccountCacheStatsProvider is optional so existing test doubles and other
+// UsageLogRepository implementations remain compatible.
+type AccountCacheStatsProvider interface {
+	GetAccountCacheStatsBatch(ctx context.Context, accountIDs []int64, startTime, endTime time.Time) (map[int64]AccountCacheStats, error)
 }
 
 func isFirstTokenPriorityAccount(account *Account) bool {
@@ -92,6 +109,13 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
+	cacheStats := make(map[int64]AccountCacheStats)
+	if provider, ok := s.usageRepo.(AccountCacheStatsProvider); ok {
+		cacheStats, err = provider.GetAccountCacheStatsBatch(ctx, accountIDs, now.Add(-24*time.Hour), now)
+		if err != nil {
+			return nil, err
+		}
+	}
 	fastestMS := 0.0
 	for _, stat := range stats {
 		if stat.PredictedMS > 0 && (fastestMS == 0 || stat.PredictedMS < fastestMS) {
@@ -113,6 +137,12 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 		if rate, found := openAIFreshUpstreamBillingRate(&account, now); found {
 			schedulingRateMultiplier = &rate
 		}
+		accountCache := cacheStats[account.ID]
+		var cacheRate *float64
+		if accountCache.CacheRateDenominator > 0 {
+			rate := float64(accountCache.CacheReadTokens) / float64(accountCache.CacheRateDenominator)
+			cacheRate = &rate
+		}
 		metrics = append(metrics, AccountFirstTokenLatencyMetric{
 			AccountID:                account.ID,
 			AccountName:              account.Name,
@@ -126,6 +156,9 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 			SlowStreak:               stat.SlowStreak,
 			RecoveryFastStreak:       stat.RecoveryFastStreak,
 			ProbeIntervalSeconds:     int64(firstTokenPriorityProbeInterval(stat, fastestMS).Seconds()),
+			CacheRate:                cacheRate,
+			CacheReadTokens:          accountCache.CacheReadTokens,
+			CacheRateDenominator:     accountCache.CacheRateDenominator,
 		})
 	}
 	sort.SliceStable(metrics, func(i, j int) bool {

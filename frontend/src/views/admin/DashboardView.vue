@@ -225,6 +225,9 @@
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.dashboard.firstTokenLatencyDescription') }}
               </p>
+              <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                {{ t('admin.dashboard.firstTokenCacheRateDescription') }}
+              </p>
             </div>
             <div class="flex w-full items-center gap-2 sm:w-auto">
               <div class="min-w-0 flex-1 sm:w-52 sm:flex-none" data-testid="first-token-group-filter">
@@ -294,6 +297,12 @@
                       </dd>
                     </div>
                     <div>
+                      <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenCacheRate') }}</dt>
+                      <dd class="mt-0.5 font-mono text-sm font-semibold text-cyan-600 dark:text-cyan-400" data-testid="first-token-cache-rate">
+                        {{ formatCacheRate(metric.cache_rate) }}
+                      </dd>
+                    </div>
+                    <div>
                       <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenSamples') }}</dt>
                       <dd class="mt-0.5 text-gray-700 dark:text-gray-300">{{ metric.sample_count }}</dd>
                     </div>
@@ -305,16 +314,17 @@
                 </div>
               </div>
               <div class="hidden overflow-x-auto md:block">
-                <table class="min-w-[860px] w-full table-fixed text-left text-sm">
+                <table class="min-w-[980px] w-full table-fixed text-left text-sm">
                   <thead class="text-xs text-gray-500 dark:text-gray-400">
                     <tr>
-                      <th class="w-[24%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
-                      <th class="w-[15%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
-                      <th class="w-[12%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPool') }}</th>
-                      <th class="w-[13%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSchedulingRate') }}</th>
-                      <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSamples') }}</th>
-                      <th class="w-[14%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
-                      <th class="w-[12%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenProbeInterval') }}</th>
+                      <th class="w-[22%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
+                      <th class="w-[14%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
+                      <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPool') }}</th>
+                      <th class="w-[11%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSchedulingRate') }}</th>
+                      <th class="w-[12%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenCacheRate') }}</th>
+                      <th class="w-[9%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSamples') }}</th>
+                      <th class="w-[11%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
+                      <th class="w-[11%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenProbeInterval') }}</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
@@ -334,6 +344,9 @@
                       </td>
                       <td class="px-4 py-3 font-mono text-gray-700 dark:text-gray-300" data-testid="first-token-scheduling-rate">
                         {{ metric.scheduling_rate_multiplier == null ? '-' : `${formatMultiplier(metric.scheduling_rate_multiplier)}x` }}
+                      </td>
+                      <td class="px-4 py-3 font-mono font-semibold text-cyan-600 dark:text-cyan-400" data-testid="first-token-cache-rate">
+                        {{ formatCacheRate(metric.cache_rate) }}
                       </td>
                       <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ metric.sample_count }}</td>
                       <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{{ metric.has_prediction ? formatFirstTokenUpdatedAt(metric.updated_at) : '-' }}</td>
@@ -809,6 +822,11 @@ const formatDuration = (ms: number): string => {
     return `${(ms / 1000).toFixed(2)}s`
   }
   return `${Math.round(ms)}ms`
+}
+
+const formatCacheRate = (rate: number | null | undefined): string => {
+  if (rate == null || !Number.isFinite(rate)) return '-'
+  return `${(rate * 100).toFixed(1)}%`
 }
 
 const formatFirstTokenUpdatedAt = (value: string): string => {

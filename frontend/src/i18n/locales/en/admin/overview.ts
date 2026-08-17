@@ -80,6 +80,7 @@ export default {
       failedToLoad: 'Failed to load dashboard statistics',
       firstTokenLatencyTitle: 'Relay Recent First Token',
       firstTokenLatencyDescription: 'Shows currently schedulable OpenAI API-key relay accounts by group; OAuth is excluded. Stable prediction time-smooths the median of the latest 9 samples; the fast pool prefers lower rates and the slow pool prefers lower stable TTFT.',
+      firstTokenCacheRateDescription: 'Cache rate covers the last 24 hours: cache-read tokens / (input + cache-creation + cache-read tokens). "-" means there is no valid sample.',
       firstTokenLatencyFailed: 'Failed to load first-token latency statistics',
       firstTokenLatencyEmpty: 'No first-token data for enabled relay accounts yet',
       firstTokenAccount: 'Account',
@@ -96,7 +97,8 @@ export default {
       firstTokenPoolCounts: 'Candidates {total} · Fast {fast} · Slow {slow}',
       firstTokenSamples: 'Samples',
       firstTokenUpdated: 'Updated',
-      firstTokenProbeInterval: 'Dynamic probe interval'
+      firstTokenProbeInterval: 'Dynamic probe interval',
+      firstTokenCacheRate: 'Cache rate'
     },
 
     backup: {

@@ -17,6 +17,57 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// GetAccountCacheStatsBatch returns cache-token aggregates for the supplied
+// accounts in one query. The denominator matches channel-monitor cache-rate
+// semantics and excludes failed, zero-cost usage-log placeholders.
+func (r *usageLogRepository) GetAccountCacheStatsBatch(ctx context.Context, accountIDs []int64, startTime, endTime time.Time) (map[int64]service.AccountCacheStats, error) {
+	result := make(map[int64]service.AccountCacheStats, len(accountIDs))
+	if len(accountIDs) == 0 {
+		return result, nil
+	}
+
+	placeholders := make([]string, len(accountIDs))
+	args := make([]any, 0, len(accountIDs)+2)
+	for i, accountID := range accountIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		args = append(args, accountID)
+	}
+	startPlaceholder := len(args) + 1
+	endPlaceholder := len(args) + 2
+	args = append(args, startTime, endTime)
+
+	query := fmt.Sprintf(`
+		SELECT
+			account_id,
+			COALESCE(SUM(cache_read_tokens), 0),
+			COALESCE(SUM(input_tokens + cache_creation_tokens + cache_read_tokens), 0)
+		FROM usage_logs
+		WHERE account_id IN (%s)
+		  AND created_at >= $%d
+		  AND created_at < $%d
+		  AND actual_cost > 0
+		GROUP BY account_id
+	`, strings.Join(placeholders, ", "), startPlaceholder, endPlaceholder)
+
+	rows, err := r.sql.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var accountID int64
+		var stats service.AccountCacheStats
+		if err := rows.Scan(&accountID, &stats.CacheReadTokens, &stats.CacheRateDenominator); err != nil {
+			return nil, err
+		}
+		result[accountID] = stats
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // GetUserStatsAggregated returns aggregated usage statistics for a user using database-level aggregation
 func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID int64, startTime, endTime time.Time) (*usagestats.UsageStats, error) {
 	query := `

@@ -164,7 +164,10 @@ describe('admin DashboardView', () => {
           updated_at: '2026-08-12T01:00:00Z',
           slow_streak: 0,
           recovery_fast_streak: 0,
-          probe_interval_seconds: 120
+          probe_interval_seconds: 120,
+          cache_rate: 0.25,
+          cache_read_tokens: 75,
+          cache_rate_denominator: 300
         },
         {
           account_id: 44,
@@ -178,7 +181,10 @@ describe('admin DashboardView', () => {
           updated_at: '2026-08-12T01:00:00Z',
           slow_streak: 0,
           recovery_fast_streak: 0,
-          probe_interval_seconds: 120
+          probe_interval_seconds: 120,
+          cache_rate: null,
+          cache_read_tokens: 0,
+          cache_rate_denominator: 0
         },
         {
           account_id: 43,
@@ -192,7 +198,10 @@ describe('admin DashboardView', () => {
           updated_at: '2026-08-12T01:00:00Z',
           slow_streak: 0,
           recovery_fast_streak: 1,
-          probe_interval_seconds: 60
+          probe_interval_seconds: 60,
+          cache_rate: 0,
+          cache_read_tokens: 0,
+          cache_rate_denominator: 100
         }
       ],
       total: 3
@@ -238,5 +247,10 @@ describe('admin DashboardView', () => {
     expect(rates[0].text()).toBe('0.045x')
     expect(rates[1].text()).toBe('0.20x')
     expect(rates[2].text()).toBe('0.08x')
+    const cacheRates = wrapper.findAll('[data-testid="first-token-cache-rate"]')
+    expect(cacheRates).toHaveLength(6)
+    expect(cacheRates.filter((item) => item.text() === '25.0%')).toHaveLength(2)
+    expect(cacheRates.filter((item) => item.text() === '-')).toHaveLength(2)
+    expect(cacheRates.filter((item) => item.text() === '0.0%')).toHaveLength(2)
   })
 })

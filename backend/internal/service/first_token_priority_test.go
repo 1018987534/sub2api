@@ -19,6 +19,15 @@ type staticFirstTokenLatencyStatsCache struct {
 	recordedID   int64
 }
 
+type accountCacheStatsUsageRepo struct {
+	UsageLogRepository
+	stats map[int64]AccountCacheStats
+}
+
+func (r accountCacheStatsUsageRepo) GetAccountCacheStatsBatch(_ context.Context, _ []int64, _, _ time.Time) (map[int64]AccountCacheStats, error) {
+	return r.stats, nil
+}
+
 func (c *staticFirstTokenLatencyStatsCache) RecordSample(_ context.Context, accountID int64, _ string, _ int) error {
 	c.recordedID = accountID
 	return nil
@@ -640,6 +649,34 @@ func TestAccountFirstTokenLatencyMetricsOnlyIncludesEnabledOpenAIAPIKeys(t *test
 	require.Len(t, metrics, 1)
 	require.Equal(t, int64(1), metrics[0].AccountID)
 	require.Equal(t, "relay", metrics[0].AccountName)
+}
+
+func TestAccountFirstTokenLatencyMetricsIncludesRollingCacheRate(t *testing.T) {
+	now := time.Now()
+	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		1: {PredictedMS: 4_000, SampleCount: 5, UpdatedAt: now},
+	}}
+	group := &Group{ID: 10, Name: "premium", Platform: PlatformOpenAI, Status: StatusActive}
+	account := Account{
+		ID: 1, Name: "relay", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+		GroupIDs: []int64{group.ID}, Groups: []*Group{group},
+		AccountGroups: []AccountGroup{{AccountID: 1, GroupID: group.ID, Group: group}},
+	}
+	svc := &RateLimitService{
+		firstTokenLatencyStatsCache: cache,
+		usageRepo: accountCacheStatsUsageRepo{stats: map[int64]AccountCacheStats{
+			1: {CacheReadTokens: 75, CacheRateDenominator: 300},
+		}},
+	}
+
+	metrics, err := svc.AccountFirstTokenLatencyMetrics(context.Background(), []Account{account})
+
+	require.NoError(t, err)
+	require.Len(t, metrics, 1)
+	require.NotNil(t, metrics[0].CacheRate)
+	require.InDelta(t, 0.25, *metrics[0].CacheRate, 1e-9)
+	require.Equal(t, int64(75), metrics[0].CacheReadTokens)
+	require.Equal(t, int64(300), metrics[0].CacheRateDenominator)
 }
 
 func TestAccountFirstTokenLatencyMetricsReportsActualPoolMembership(t *testing.T) {

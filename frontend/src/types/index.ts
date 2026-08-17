@@ -908,6 +908,9 @@ export interface AccountFirstTokenLatencyMetric {
   slow_streak: number
   recovery_fast_streak: number
   probe_interval_seconds: number
+  cache_rate: number | null
+  cache_read_tokens: number
+  cache_rate_denominator: number
 }
 
 export interface AccountFirstTokenLatencyResponse {
