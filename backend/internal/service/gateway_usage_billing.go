@@ -842,38 +842,6 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 
 	// 计算费用
 	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
-	mediaBilled := result.ImageCount > 0 || result.AudioUsage != nil || result.SearchCount > 0
-	upstreamSyncedPricingApplied := false
-	if !mediaBilled {
-		selection, selected := resolveSyncedUpstreamBillingModel(
-			account, concreteBillingModel, result.UpstreamResponseModel, result.UpstreamResponseModelConflict,
-			input.BillingModelSource == BillingModelSourceResponse,
-		)
-		if selected {
-			longContextEnabled := apiKey.Group == nil || apiKey.Group.LongContextPricingEnabled
-			upstreamCost, calculated := calculateSyncedUpstreamTokenCost(
-				s.billingService,
-				selection,
-				UsageTokens{
-					InputTokens:           result.Usage.InputTokens,
-					OutputTokens:          result.Usage.OutputTokens,
-					CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
-					CacheReadTokens:       result.Usage.CacheReadInputTokens,
-					CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
-					CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
-					ImageOutputTokens:     result.Usage.ImageOutputTokens,
-				},
-				multiplier,
-				"",
-				longContextEnabled,
-			)
-			if calculated {
-				cost = upstreamCost
-				upstreamSyncedPricingApplied = true
-				logSyncedUpstreamPricingApplied("service.gateway", account, result.RequestID, cost)
-			}
-		}
-	}
 	// response_model：按上游成功响应自报的模型计费（渠道显式开启才生效）。
 	// 采纳条件见 responseModelBillingDeclaration + hasIdentifiedResponseModelPricing
 	// + responseModelBillingAdoptable。任一条件不满足都静默回落基线，即开启本模式前的
@@ -882,8 +850,8 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		input.BillingModelSource,
 		result.UpstreamResponseModel,
 		result.UpstreamResponseModelConflict,
-		mediaBilled,
-	); !upstreamSyncedPricingApplied && responseModel != "" && !strings.EqualFold(responseModel, strings.TrimSpace(billingModel)) {
+		result.ImageCount > 0 || result.AudioUsage != nil || result.SearchCount > 0,
+	); responseModel != "" && !strings.EqualFold(responseModel, strings.TrimSpace(billingModel)) {
 		if identified, responseChannelPriced := s.hasIdentifiedResponseModelPricing(ctx, responseModel, apiKey); identified {
 			responseCost := s.calculateRecordUsageCost(ctx, result, apiKey, responseModel, multiplier, imageMultiplier, opts)
 			baselineChannelPriced := s.resolveChannelPricing(ctx, billingModel, apiKey) != nil

@@ -237,8 +237,6 @@ export default {
         autoProbeHint: 'Refresh the upstream declared rate on the global interval. This switch alone does not change the account rate.',
         syncRate: 'Sync upstream declared rate',
         syncRateHint: 'After each successful probe, derive one local upstream rate from declared base rate × conversion ratio and use it for the account rate, profit control, and low-rate scheduling. Failed probes or results outside the allowed range leave it unchanged. Enabling this also turns on "Automatically probe upstream declared rate".',
-        syncPrices: 'Sync upstream maximum model prices',
-        syncPricesHint: 'Periodically cache the complete upstream catalog and bill the response model at the published maximum price. Missing catalogs or models immediately fall back to local pricing. Enabling this also turns on automatic probing.',
         syncRateManagedHint: 'The account rate and local upstream rate are maintained together as declared base rate (excluding peak hours) × conversion ratio.',
         rateConversionRatio: 'Upstream Rate Conversion Ratio',
         rateConversionRatioHint: 'Local upstream rate = declared base rate × conversion ratio, and is used for account cost, profit control, and low-rate scheduling. For example, 2x × 0.05 is treated as 0.1x.',

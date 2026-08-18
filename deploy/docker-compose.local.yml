@@ -57,6 +57,7 @@ services:
       - RUN_MODE=${RUN_MODE:-standard}
       - INSTANCE_ROLE=${INSTANCE_ROLE:-control}
       - INSTANCE_ID=${INSTANCE_ID:-control}
+      - GATEWAY_ROUTING_RUNTIME_TOKEN=${GATEWAY_ROUTING_RUNTIME_TOKEN:-}
       - UPDATE_GITHUB_TOKEN=${UPDATE_GITHUB_TOKEN:-}
 
       # =======================================================================

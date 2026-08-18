@@ -908,11 +908,19 @@ export interface AccountFirstTokenLatencyMetric {
   slow_streak: number
   recovery_fast_streak: number
   probe_interval_seconds: number
+  cache_rate: number | null
+  cache_read_tokens: number
+  cache_rate_denominator: number
 }
 
 export interface AccountFirstTokenLatencyResponse {
   items: AccountFirstTokenLatencyMetric[]
   total: number
+}
+
+export interface AccountFirstTokenManualProbeResponse {
+  account_id: number
+  queued: boolean
 }
 
 // Claude Model type (returned by /v1/models and account models API)
@@ -1181,7 +1189,6 @@ export interface Account {
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
     upstream_billing_probe_enabled?: boolean
     upstream_billing_rate_sync_enabled?: boolean
-    upstream_billing_price_sync_enabled?: boolean
     upstream_billing_rate_conversion_ratio?: number
     upstream_billing_probe?: UpstreamBillingProbeSnapshot
     codex_reset_credit_snapshot?: {
@@ -1504,7 +1511,6 @@ export interface UpdateAccountRequest {
   periodic_schedule_pause_minutes?: number
   upstream_billing_probe_enabled?: boolean
   upstream_billing_rate_sync_enabled?: boolean
-  upstream_billing_price_sync_enabled?: boolean
   upstream_billing_rate_conversion_ratio?: number
   confirm_mixed_channel_risk?: boolean
 }

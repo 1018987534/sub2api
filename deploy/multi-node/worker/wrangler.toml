@@ -7,12 +7,6 @@ routes = [
   { pattern = "xiaohondou.com/v1/responses*", zone_name = "xiaohondou.com" },
   { pattern = "xiaohondou.com/responses*", zone_name = "xiaohondou.com" },
   { pattern = "xiaohondou.com/backend-api/codex/responses*", zone_name = "xiaohondou.com" },
-  { pattern = "nideyiyi.com/v1/responses*", zone_name = "nideyiyi.com" },
-  { pattern = "nideyiyi.com/responses*", zone_name = "nideyiyi.com" },
-  { pattern = "nideyiyi.com/backend-api/codex/responses*", zone_name = "nideyiyi.com" },
-  { pattern = "api.nideyiyi.com/v1/responses*", zone_name = "nideyiyi.com" },
-  { pattern = "api.nideyiyi.com/responses*", zone_name = "nideyiyi.com" },
-  { pattern = "api.nideyiyi.com/backend-api/codex/responses*", zone_name = "nideyiyi.com" },
 ]
 
 [vars]

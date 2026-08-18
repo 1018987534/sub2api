@@ -14,6 +14,7 @@ import (
 
 const firstTokenLatencyStatsPrefix = "scheduler:first_token:account:"
 const firstTokenLatencyProbePrefix = "scheduler:first_token:probe:"
+const firstTokenLatencyManualProbePrefix = "scheduler:first_token:manual_probe:"
 
 // Scheduling uses a time-smoothed robust score. The recent median absorbs
 // isolated samples, while explicit confirmation lets recovered accounts return
@@ -22,6 +23,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	local stats_key = KEYS[1]
 	local dedupe_key = KEYS[2]
 	local probe_key = KEYS[3]
+	local manual_probe_key = KEYS[4]
 	local latency_ms = tonumber(ARGV[1])
 	local stats_ttl_seconds = tonumber(ARGV[2])
 	local dedupe_ttl_seconds = tonumber(ARGV[3])
@@ -167,7 +169,21 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 		'recent_samples', table.concat(parts, ','))
 	redis.call('EXPIRE', stats_key, stats_ttl_seconds)
 	redis.call('DEL', probe_key)
+	redis.call('DEL', manual_probe_key)
 	return 1
+`)
+
+var firstTokenManualProbeClaimScript = redis.NewScript(`
+	local candidate_count = tonumber(ARGV[1])
+	local lease_seconds = tonumber(ARGV[2])
+	for index = 1, candidate_count do
+		if redis.call('GET', KEYS[index]) then
+			redis.call('DEL', KEYS[index])
+			redis.call('SET', KEYS[candidate_count + index], '1', 'EX', lease_seconds)
+			return index
+		end
+	end
+	return 0
 `)
 
 type firstTokenLatencyStatsCache struct {
@@ -188,10 +204,50 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 	statsKey := fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID)
 	dedupeKey := fmt.Sprintf("scheduler:first_token:event:%d:%s", accountID, requestID)
 	probeKey := fmt.Sprintf("%s%d", firstTokenLatencyProbePrefix, accountID)
-	if _, err := firstTokenLatencyStatsRecordScript.Run(ctx, c.rdb, []string{statsKey, dedupeKey, probeKey}, firstTokenMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds())).Result(); err != nil {
+	manualProbeKey := fmt.Sprintf("%s%d", firstTokenLatencyManualProbePrefix, accountID)
+	if _, err := firstTokenLatencyStatsRecordScript.Run(ctx, c.rdb, []string{statsKey, dedupeKey, probeKey, manualProbeKey}, firstTokenMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds())).Result(); err != nil {
 		return fmt.Errorf("record first-token latency stats: %w", err)
 	}
 	return nil
+}
+
+func (c *firstTokenLatencyStatsCache) RequestManualProbe(ctx context.Context, accountID int64, ttl time.Duration) error {
+	if accountID <= 0 || ttl <= 0 {
+		return nil
+	}
+	if err := c.rdb.Set(ctx, fmt.Sprintf("%s%d", firstTokenLatencyManualProbePrefix, accountID), "1", ttl).Err(); err != nil {
+		return fmt.Errorf("queue first-token manual probe: %w", err)
+	}
+	return nil
+}
+
+func (c *firstTokenLatencyStatsCache) TryClaimManualProbe(ctx context.Context, accountIDs []int64, lease time.Duration) (int64, bool, error) {
+	if len(accountIDs) == 0 || lease <= 0 {
+		return 0, false, nil
+	}
+	keys := make([]string, 0, len(accountIDs)*2)
+	validAccountIDs := make([]int64, 0, len(accountIDs))
+	for _, accountID := range accountIDs {
+		if accountID <= 0 {
+			continue
+		}
+		validAccountIDs = append(validAccountIDs, accountID)
+		keys = append(keys, fmt.Sprintf("%s%d", firstTokenLatencyManualProbePrefix, accountID))
+	}
+	if len(validAccountIDs) == 0 {
+		return 0, false, nil
+	}
+	for _, accountID := range validAccountIDs {
+		keys = append(keys, fmt.Sprintf("%s%d", firstTokenLatencyProbePrefix, accountID))
+	}
+	claimedIndex, err := firstTokenManualProbeClaimScript.Run(ctx, c.rdb, keys, len(validAccountIDs), int(lease.Seconds())).Int()
+	if err != nil {
+		return 0, false, fmt.Errorf("claim first-token manual probe: %w", err)
+	}
+	if claimedIndex <= 0 || claimedIndex > len(validAccountIDs) {
+		return 0, false, nil
+	}
+	return validAccountIDs[claimedIndex-1], true, nil
 }
 
 func (c *firstTokenLatencyStatsCache) TryClaimProbe(ctx context.Context, accountID int64, lease time.Duration) (bool, error) {

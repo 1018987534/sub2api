@@ -3,15 +3,24 @@
 > 状态：已上线。完整主站和数据层位于新 VPS `95.169.18.157`；旧 VPS
 > `38.47.117.85` 已降级为 Responses-only gateway；新增 VPS `154.23.243.26`、
 > `38.47.113.166` 和 `179.255.105.184` 已作为第二、第三、第四个 Responses-only
-> gateway 接入。Cloudflare Worker 当前按 `25% bwg-us-01 / 20% vmiss-us-01 /`
-> `40% yt-us-01 / 10% vmiss-us-02 / 5% dmit-us-01` 分配新 Responses 请求。
+> gateway 接入。2026-08-16 TLS 故障隔离期间曾临时摘除 `vmiss-us-01`；当前已恢复
+> 原五节点比例 `25% bwg-us-01 / 20% vmiss-us-01 / 40% yt-us-01 / 10% vmiss-us-02 /`
+> `5% dmit-us-01`。该节点已升级为 Nginx 1.28.3 + OpenSSL 3.5.7，IPv4 443 已恢复
+> `TLSv1.2 TLSv1.3`，Cloudflare AMS 定向握手和真实 Responses 流量验证通过。
 >
 > 数据迁移最终停机点：2026-07-31 00:02:36（Asia/Shanghai）。初始边缘 90/10
 > 分流启用日期：2026-07-31；gateway154 接入后曾为 90/5/5，历史四节点比例为
 > 50/10/30/10；2026-08-13 接入 `dmit-us-01` 后为 25/20/40/10/5。旧数据库和
 > 旧完整应用回滚容器仍保留，但不得和新主同时运行。
 >
-> 最后核验日期：2026-08-13（Asia/Shanghai）。
+> 最后核验日期：2026-08-16（Asia/Shanghai）。
+>
+> 2026-08-16：`vmiss-us-01` 的 Ubuntu OpenSSL 3.0.13 在 Cloudflare AMS 的
+> TLS 1.3 HelloRetryRequest 流程中返回 `illegal_parameter`，表现为边缘 `525`。
+> 节点现使用独立安装的 Nginx 1.28.3（静态链接 OpenSSL 3.5.7），systemd drop-in
+> 固定调用新版二进制；默认 IPv4 443 已恢复 TLS 1.2/TLS 1.3。动态路由 token 已在
+> control 和 Worker 两端启用，Cloudflare AMS 定向 401、真实 Responses 200、源站日志
+> 和 `instance_id` 用量四项验收均已完成。
 >
 > 2026-07-31 节点扩容：`154.23.243.26` 已完成 Debian 12、Docker、Nginx、
 > WireGuard、Certbot、Sub2API gateway 容器和 BBR/fq 网络参数配置。新增 origin
@@ -113,14 +122,14 @@ gateway VPS <-> WireGuard <-> 新 VPS PostgreSQL/Redis
 | 对象 | 当前值 |
 |---|---|
 | 主站域名 | `xiaohondou.com -> 95.169.18.157`，Cloudflare proxied |
-| 兼容域名 | `nideyiyi.com`、`api.nideyiyi.com -> 95.169.18.157`，Cloudflare proxied |
+| 旧应用域名 | `nideyiyi.com`、`api.nideyiyi.com` 已退役；不再配置应用 DNS 或 Worker 路由，源站旧 Host 固定返回 `410 Gone` |
 | control origin | `control-origin.xiaohondou.com -> 95.169.18.157`，DNS-only |
 | gateway origin | `gateway-origin.xiaohondou.com -> 38.47.117.85`，DNS-only |
 | gateway154 origin | `gateway154-origin.xiaohondou.com -> 154.23.243.26`，DNS-only |
 | gateway2 origin | `gateway2-origin.xiaohondou.com -> 38.47.113.166`，DNS-only |
 | gateway3 origin | `gateway3-origin.xiaohondou.com -> 179.255.105.184`，DNS-only |
 | Worker | `sub2api-responses-dispatcher`；兜底变量使用 `BWG_US_01_PERCENT=25`、`VMISS_US_01_PERCENT=20`、`YT_US_01_PERCENT=40`、`VMISS_US_02_PERCENT=10`、`DMIT_US_01_PERCENT=5`，变量名直接对应节点 |
-| Worker 路径 | `xiaohondou.com`、`nideyiyi.com`、`api.nideyiyi.com` 上的 `/v1/responses*`、`/responses*`、`/backend-api/codex/responses*` |
+| Worker 路径 | 仅 `xiaohondou.com` 上的 `/v1/responses*`、`/responses*`、`/backend-api/codex/responses*` |
 | 其他路径 | 不经过 Worker，固定由新主 control 处理 |
 | WireGuard | 新主 `10.20.0.1`，`vmiss-us-01=10.20.0.2/32`，`yt-us-01=10.20.1.2/32`，`vmiss-us-02=10.20.2.2/32`，`dmit-us-01=10.20.3.2/32` |
 | 共享数据 relay | 新主 `10.20.0.1:5432`、`10.20.0.1:6379`，仅绑定 `wg0` 地址 |
@@ -505,7 +514,7 @@ POST 自动转投，也不启用长时间 drain，固定按以下顺序执行：
   patched-binaries/
 
 /etc/nginx/sites-available/xiaohondou.com
-/etc/nginx/sites-available/api.nideyiyi.com
+/etc/nginx/sites-available/api.nideyiyi.com  # 旧应用 Host 退役占位，返回 410
 /etc/nginx/sites-available/control-origin.xiaohondou.com
 /etc/wireguard/wg0.conf
 ```
@@ -733,7 +742,7 @@ REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h 10.20.0.1 -p 6379 ping
 最终 dump：/tmp/sub2api-final.dump
 dump SHA256：cd94a22d13573774db9810050a5f0ca284167ff7f1dc15194659e64d0706852f
 主站 DNS：已切到 95.169.18.157
-兼容域名 DNS：已切到 95.169.18.157
+旧应用域名 DNS：2026-08-14 已删除应用 A 记录
 旧完整应用：已停止并重命名保留
 旧 gateway：healthy，数据库和 Redis 检查均为 ok
 初始边缘权重：control 90%，old-gateway 10%
@@ -806,10 +815,11 @@ PostgreSQL 是余额、用户、账号、用量和计费的权威数据，必须
 ### 9.5 切换主站
 
 1. [x] canonical `xiaohondou.com` A 记录切到 `95.169.18.157`。
-2. [x] `nideyiyi.com`、`api.nideyiyi.com` 兼容记录切到 `95.169.18.157`。
-3. [x] 非 Responses 路径固定新主。
-4. [x] 首页、公开设置、模型鉴权、Responses 鉴权和三个域名健康检查通过。
-5. [ ] 继续完成首个 24 小时的 502、数据库、Redis、费用和流量观察。
+2. [x] `nideyiyi.com`、`api.nideyiyi.com` 应用 A 记录和旧域 Worker 路由已删除。
+3. [x] 旧 Host 源站固定返回 `410 Gone`，不再重定向或代理到应用。
+4. [x] 非 Responses 路径固定新主。
+5. [x] 首页、公开设置、模型鉴权、Responses 鉴权仅从 canonical 域名验收。
+6. [ ] 继续完成首个 24 小时的 502、数据库、Redis、费用和流量观察。
 
 ### 9.6 旧节点降级
 
@@ -827,7 +837,7 @@ PostgreSQL 是余额、用户、账号、用量和计费的权威数据，必须
 
 ```text
 Worker：sub2api-responses-dispatcher
-版本：8b4ec4d9-cfa8-4032-ba3f-8e0cf15ba539
+版本：e3b05078-bd3b-4d25-b3b5-376cda9f821a
 配置：BWG_US_01_PERCENT=25, VMISS_US_01_PERCENT=20, YT_US_01_PERCENT=40, VMISS_US_02_PERCENT=10, DMIT_US_01_PERCENT=5
 源码：deploy/multi-node/worker/responses-dispatcher.mjs
 配置文件：deploy/multi-node/worker/wrangler.toml
@@ -838,7 +848,7 @@ Worker：sub2api-responses-dispatcher
 | 方案 | 结论 |
 |---|---|
 | Cloudflare Load Balancing + HTTP 路径规则 | API 可访问，但账户当前没有既有 LB/pool，本次未启用 |
-| Cloudflare Worker dispatcher | 当前生产方案，三个入口域名共九条 route，五 origin 权重为 25/20/40/10/5 |
+| Cloudflare Worker dispatcher | 当前生产方案，仅 canonical 入口三条 route；五 origin 权重为 25/20/40/10/5 |
 | DNS 多 A/轮询 | 不能按 `/v1/responses` 分流和按字节控量，不作为生产方案 |
 
 五个 origin：
@@ -854,7 +864,7 @@ ORIGIN_DMIT = https://gateway3-origin.xiaohondou.com -> 179.255.105.184
 边缘规则：
 
 ```text
-`xiaohondou.com`、`nideyiyi.com`、`api.nideyiyi.com` 的
+`xiaohondou.com` 的
 /v1/responses*、/responses*、/backend-api/codex/responses*：按 25/20/40/10/5 选择 origin
 其他所有路径：100% ORIGIN_NEW
 ```
@@ -905,7 +915,7 @@ POST 仍只发送一次，不能用 POST 自动重试代替摘流。
 
 动态发布后，普通节点故障应在系统设置中把对应目标权重改为 `0`；只有 control API 和
 上一份 Worker 缓存同时不可用时，才把静态兜底变量改为 `0` 并重新部署 Worker。全量
-边缘回滚仍可删除三个入口域名上的全部 Responses Worker route，让请求直接回落到主站。
+边缘回滚仍可删除 canonical 入口上的 Responses Worker route，让请求直接回落到主站；旧应用域名 route 已退役，不得恢复。
 
 权重推进：
 
@@ -1163,12 +1173,12 @@ wrangler deploy --config deploy/multi-node/worker/wrangler.toml
 - [x] control/gateway Compose、Nginx、WireGuard 和 env 模板已加入 `deploy/multi-node/`。
 - [x] 配置、路由、repository、service、server 和 Wire 定向测试通过；两套 Compose 模板展开通过。
 - [x] 最终 PostgreSQL 备份、SHA256 和新旧核心表计数核对完成。
-- [x] 主站与兼容域名已切到新主，公网健康检查通过。
+- [x] 主站已切到新主，旧应用域名曾完成兼容切换并于 2026-08-14 退役，公网健康检查通过。
 - [x] WireGuard、PostgreSQL relay 和 Redis relay 已建立并验证。
 - [x] 旧完整应用已停止保留，Responses-only gateway 已健康运行。
 - [x] 五个 origin DNS、TLS 和限制路径 Nginx vhost 已部署。
-- [x] Cloudflare Worker 已按 25/20/40/10/5 在三个入口域名绑定九条 Responses 路径。
-- [x] 兼容域名无 Key 分布探测、真实计费落库、路由边界和非 Responses 固定新主验证通过。
+- [x] Cloudflare Worker 曾按 25/20/40/10/5 在三个入口域名绑定九条 Responses 路径；当前仅 canonical 入口保留三条路径。
+- [x] 旧应用域名退役后，canonical 域名的路由边界和非 Responses 固定新主验证通过。
 
 ### 14.2 第一批代码任务
 
@@ -1183,7 +1193,7 @@ wrangler deploy --config deploy/multi-node/worker/wrangler.toml
 
 1. [x] 新 VPS 安装并运行 Docker、PostgreSQL、Redis、Nginx、WireGuard和 Certbot。
 2. [x] 迁移 PostgreSQL、应用 data、固定密钥和必要配置。
-3. [x] 新主验收后切换 canonical 与兼容域名。
+3. [x] 新主验收后切换 canonical；旧应用域名已完成退役收口。
 4. [x] 旧 VPS 安装 WireGuard 客户端和 gateway app-only 运行环境。
 5. [x] 旧 gateway 通过隧道访问新主数据层并完成路由/ready 验收。
 6. [x] 边缘先完成 `90% 新主 / 5% 旧 gateway / 5% gateway154` 灰度，随后扩为当前五节点比例。

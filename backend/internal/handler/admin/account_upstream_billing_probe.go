@@ -16,10 +16,6 @@ type upstreamBillingProbeBatchRequest struct {
 	AccountIDs []int64 `json:"account_ids" binding:"required"`
 }
 
-type upstreamBillingPriceConfirmRequest struct {
-	Model string `json:"model" binding:"required,max=200"`
-}
-
 func (h *AccountHandler) GetUpstreamBillingProbeSettings(c *gin.Context) {
 	if h.upstreamBillingProbe == nil {
 		response.ErrorFrom(c, service.ErrUpstreamBillingProbeUnavailable)
@@ -123,40 +119,4 @@ func (h *AccountHandler) ProbeUpstreamBillingBatch(c *gin.Context) {
 		accountIDs = append(accountIDs, accountID)
 	}
 	response.Success(c, gin.H{"results": h.upstreamBillingProbe.ProbeAccounts(c.Request.Context(), accountIDs)})
-}
-
-func (h *AccountHandler) ListUpstreamBillingPriceDiscrepancies(c *gin.Context) {
-	if h.upstreamBillingProbe == nil {
-		response.ErrorFrom(c, service.ErrUpstreamBillingProbeUnavailable)
-		return
-	}
-	items, err := h.upstreamBillingProbe.ListPriceDiscrepancies(c.Request.Context())
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, gin.H{"items": items})
-}
-
-func (h *AccountHandler) ConfirmUpstreamBillingPrice(c *gin.Context) {
-	if h.upstreamBillingProbe == nil {
-		response.ErrorFrom(c, service.ErrUpstreamBillingProbeUnavailable)
-		return
-	}
-	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil || accountID <= 0 {
-		response.BadRequest(c, "Invalid account ID")
-		return
-	}
-	var req upstreamBillingPriceConfirmRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
-		return
-	}
-	confirmed, err := h.upstreamBillingProbe.ConfirmInferredPrice(c.Request.Context(), accountID, req.Model)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, confirmed)
 }

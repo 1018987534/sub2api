@@ -80,6 +80,7 @@ export default {
       failedToLoad: '加载仪表盘数据失败',
       firstTokenLatencyTitle: '上游中转近期首字',
       firstTokenLatencyDescription: '按分组显示当前可调度的 OpenAI API Key 上游账号，不含 OAuth。稳定预测由最近 9 个样本的中位数经时间平滑得出；快池内低倍率优先，慢池按稳定首字优先。',
+      firstTokenCacheRateDescription: '缓存率统计近 24 小时缓存读取 token / 输入 token（输入 + 缓存创建 + 缓存读取），无有效样本显示“-”。',
       firstTokenLatencyFailed: '首字统计加载失败',
       firstTokenLatencyEmpty: '当前启用的上游中转账号暂无首字统计',
       firstTokenAccount: '账号',
@@ -96,7 +97,12 @@ export default {
       firstTokenPoolCounts: '候选 {total} · 快池 {fast} · 慢池 {slow}',
       firstTokenSamples: '样本数',
       firstTokenUpdated: '最近更新',
-      firstTokenProbeInterval: '动态探测间隔'
+      firstTokenProbeInterval: '动态探测间隔',
+      firstTokenCacheRate: '缓存率',
+      firstTokenActions: '操作',
+      firstTokenManualProbe: '立即探测 {account}',
+      firstTokenManualProbeQueued: '已安排 {account} 进入下一次首字探测',
+      firstTokenManualProbeFailed: '安排首字探测失败'
     },
 
     backup: {

@@ -496,36 +496,6 @@ func TestUpdateAccountRateSyncControlsProbeAndManualMode(t *testing.T) {
 	require.Equal(t, false, updated.Extra[UpstreamBillingRateSyncEnabledExtraKey])
 }
 
-func TestUpdateAccountPriceSyncControlsProbeAndFallbackMode(t *testing.T) {
-	accountID := int64(154)
-	repo := &upstreamBillingProbeAccountRepo{accounts: map[int64]*Account{
-		accountID: {
-			ID:       accountID,
-			Platform: PlatformOpenAI,
-			Type:     AccountTypeAPIKey,
-			Status:   StatusActive,
-			Extra:    map[string]any{},
-		},
-	}}
-	svc := &adminServiceImpl{accountRepo: repo}
-
-	priceSyncEnabled := true
-	updated, err := svc.UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
-		PriceSyncEnabled: &priceSyncEnabled,
-	})
-	require.NoError(t, err)
-	require.Equal(t, true, updated.Extra[UpstreamBillingProbeEnabledExtraKey])
-	require.Equal(t, true, updated.Extra[UpstreamBillingPriceSyncEnabledExtraKey])
-
-	probeEnabled := false
-	updated, err = svc.UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
-		ProbeEnabled: &probeEnabled,
-	})
-	require.NoError(t, err)
-	require.Equal(t, false, updated.Extra[UpstreamBillingProbeEnabledExtraKey])
-	require.Equal(t, false, updated.Extra[UpstreamBillingPriceSyncEnabledExtraKey])
-}
-
 // 单账号编辑必须和批量路径语义一致：同步开启时倍率归上游所有，手工值会在下一次
 // 成功探测时被覆盖，因此直接拒绝而不是静默接受。
 func TestUpdateAccountRejectsManualRateWhileRateSyncEnabled(t *testing.T) {
@@ -700,22 +670,16 @@ func TestUpdateAccountExtraDropsManagedBillingProbeFields(t *testing.T) {
 	}}
 
 	err := (&adminServiceImpl{accountRepo: repo}).UpdateAccountExtra(context.Background(), accountID, map[string]any{
-		"custom":                                "value",
-		UpstreamBillingProbeEnabledExtraKey:     true,
-		UpstreamBillingRateSyncEnabledExtraKey:  true,
-		UpstreamBillingPriceSyncEnabledExtraKey: true,
-		UpstreamBillingManualModelPricesExtraKey: map[string]any{
-			"gpt-5.6-luna": map[string]any{"input_price_per_token": 1e-6},
-		},
-		UpstreamBillingProbeExtraKey: map[string]any{"status": "ok"},
+		"custom":                               "value",
+		UpstreamBillingProbeEnabledExtraKey:    true,
+		UpstreamBillingRateSyncEnabledExtraKey: true,
+		UpstreamBillingProbeExtraKey:           map[string]any{"status": "ok"},
 	})
 
 	require.NoError(t, err)
 	require.Equal(t, "value", repo.accounts[accountID].Extra["custom"])
 	require.NotContains(t, repo.accounts[accountID].Extra, UpstreamBillingProbeEnabledExtraKey)
 	require.NotContains(t, repo.accounts[accountID].Extra, UpstreamBillingRateSyncEnabledExtraKey)
-	require.NotContains(t, repo.accounts[accountID].Extra, UpstreamBillingPriceSyncEnabledExtraKey)
-	require.NotContains(t, repo.accounts[accountID].Extra, UpstreamBillingManualModelPricesExtraKey)
 	require.NotContains(t, repo.accounts[accountID].Extra, UpstreamBillingProbeExtraKey)
 }
 
@@ -725,14 +689,10 @@ func TestBulkUpdateAccountsDropsManagedUpstreamBillingProbeState(t *testing.T) {
 	input := &BulkUpdateAccountsInput{
 		AccountIDs: []int64{1},
 		Extra: map[string]any{
-			"custom":                                "value",
-			UpstreamBillingProbeEnabledExtraKey:     true,
-			UpstreamBillingRateSyncEnabledExtraKey:  true,
-			UpstreamBillingPriceSyncEnabledExtraKey: true,
-			UpstreamBillingManualModelPricesExtraKey: map[string]any{
-				"gpt-5.6-luna": map[string]any{"input_price_per_token": 1e-6},
-			},
-			UpstreamBillingProbeExtraKey: map[string]any{"status": "ok"},
+			"custom":                               "value",
+			UpstreamBillingProbeEnabledExtraKey:    true,
+			UpstreamBillingRateSyncEnabledExtraKey: true,
+			UpstreamBillingProbeExtraKey:           map[string]any{"status": "ok"},
 		},
 	}
 
@@ -744,8 +704,6 @@ func TestBulkUpdateAccountsDropsManagedUpstreamBillingProbeState(t *testing.T) {
 	require.Equal(t, "value", repo.bulkUpdates[0].Extra["custom"])
 	require.NotContains(t, repo.bulkUpdates[0].Extra, UpstreamBillingProbeEnabledExtraKey)
 	require.NotContains(t, repo.bulkUpdates[0].Extra, UpstreamBillingRateSyncEnabledExtraKey)
-	require.NotContains(t, repo.bulkUpdates[0].Extra, UpstreamBillingPriceSyncEnabledExtraKey)
-	require.NotContains(t, repo.bulkUpdates[0].Extra, UpstreamBillingManualModelPricesExtraKey)
 	require.NotContains(t, repo.bulkUpdates[0].Extra, UpstreamBillingProbeExtraKey)
 }
 

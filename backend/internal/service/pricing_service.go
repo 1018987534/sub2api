@@ -553,74 +553,50 @@ func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelP
 		data = make(map[string]*LiteLLMModelPricing)
 	}
 	if s == nil || s.cfg == nil || strings.TrimSpace(s.cfg.Pricing.FallbackFile) == "" {
-		return data
+		return applyLunaManualPricing(data)
 	}
 	fallbackBody, err := os.ReadFile(s.cfg.Pricing.FallbackFile)
 	if err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge skipped: %v", err)
-		return data
+		return applyLunaManualPricing(data)
 	}
 	fallbackData, err := s.parsePricingData(fallbackBody)
 	if err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge parse skipped: %v", err)
-		return data
+		return applyLunaManualPricing(data)
 	}
-	added := 0
-	uplifted := 0
-	for modelName, fallbackPricing := range fallbackData {
-		current, ok := data[modelName]
-		if !ok {
-			data[modelName] = fallbackPricing
-			added++
+	merged := 0
+	for modelName, pricing := range fallbackData {
+		if _, ok := data[modelName]; ok {
 			continue
 		}
-		if merged, changed := mergeHighestPricing(current, fallbackPricing); changed {
-			data[modelName] = merged
-			uplifted++
-		}
+		data[modelName] = pricing
+		merged++
 	}
-	if added > 0 || uplifted > 0 {
-		logger.LegacyPrintf(
-			"service.pricing",
-			"[Pricing] Merged %d fallback-only models and uplifted %d existing models to local maximums",
-			added,
-			uplifted,
-		)
+	if merged > 0 {
+		logger.LegacyPrintf("service.pricing", "[Pricing] Merged %d fallback-only models", merged)
 	}
-	return data
+	return applyLunaManualPricing(data)
 }
 
-func mergeHighestPricing(current, fallback *LiteLLMModelPricing) (*LiteLLMModelPricing, bool) {
-	if current == nil || fallback == nil {
-		return current, false
-	}
-	merged := *current
-	changed := false
-	mergeMax := func(target *float64, candidate float64) {
-		if candidate > *target {
-			*target = candidate
-			changed = true
-		}
+func applyLunaManualPricing(data map[string]*LiteLLMModelPricing) map[string]*LiteLLMModelPricing {
+	const model = "gpt-5.6-luna"
+	current, ok := data[model]
+	if !ok || current == nil {
+		return data
 	}
 
-	mergeMax(&merged.InputCostPerToken, fallback.InputCostPerToken)
-	mergeMax(&merged.InputCostPerTokenPriority, fallback.InputCostPerTokenPriority)
-	mergeMax(&merged.OutputCostPerToken, fallback.OutputCostPerToken)
-	mergeMax(&merged.OutputCostPerTokenPriority, fallback.OutputCostPerTokenPriority)
-	mergeMax(&merged.CacheCreationInputTokenCost, fallback.CacheCreationInputTokenCost)
-	mergeMax(&merged.CacheCreationInputTokenCostPriority, fallback.CacheCreationInputTokenCostPriority)
-	mergeMax(&merged.CacheCreationInputTokenCostAbove1hr, fallback.CacheCreationInputTokenCostAbove1hr)
-	mergeMax(&merged.CacheReadInputTokenCost, fallback.CacheReadInputTokenCost)
-	mergeMax(&merged.CacheReadInputTokenCostPriority, fallback.CacheReadInputTokenCostPriority)
-	mergeMax(&merged.OutputCostPerImage, fallback.OutputCostPerImage)
-	mergeMax(&merged.OutputCostPerImageToken, fallback.OutputCostPerImageToken)
-	mergeMax(&merged.InputCostPerImageToken, fallback.InputCostPerImageToken)
-
-	if merged.TokenPricingAbsent && (merged.InputCostPerToken > 0 || merged.OutputCostPerToken > 0) {
-		merged.TokenPricingAbsent = false
-		changed = true
-	}
-	return &merged, changed
+	overridden := *current
+	overridden.InputCostPerToken = openAIGPT56LunaFallbackPricing.InputCostPerToken
+	overridden.InputCostPerTokenPriority = openAIGPT56LunaFallbackPricing.InputCostPerTokenPriority
+	overridden.OutputCostPerToken = openAIGPT56LunaFallbackPricing.OutputCostPerToken
+	overridden.OutputCostPerTokenPriority = openAIGPT56LunaFallbackPricing.OutputCostPerTokenPriority
+	overridden.CacheCreationInputTokenCost = openAIGPT56LunaFallbackPricing.CacheCreationInputTokenCost
+	overridden.CacheCreationInputTokenCostPriority = openAIGPT56LunaFallbackPricing.CacheCreationInputTokenCostPriority
+	overridden.CacheReadInputTokenCost = openAIGPT56LunaFallbackPricing.CacheReadInputTokenCost
+	overridden.CacheReadInputTokenCostPriority = openAIGPT56LunaFallbackPricing.CacheReadInputTokenCostPriority
+	data[model] = &overridden
+	return data
 }
 
 // useFallbackPricing 使用回退价格文件
@@ -712,22 +688,6 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	}
 
 	return nil
-}
-
-// ListModelNames returns a point-in-time copy of all locally loaded pricing
-// keys. Callers can enumerate the result without observing a partial refresh.
-func (s *PricingService) ListModelNames() []string {
-	if s == nil {
-		return nil
-	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	models := make([]string, 0, len(s.pricingData))
-	for model := range s.pricingData {
-		models = append(models, model)
-	}
-	return models
 }
 
 // lookupIdentifiedModelPricingLocked 只做"确定性识别"的三步查找：精确键、已知拼写

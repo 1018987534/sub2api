@@ -1899,24 +1899,6 @@
         />
       </div>
 
-      <div
-        v-if="account?.type === 'apikey'"
-        class="flex items-center justify-between gap-4"
-      >
-        <div>
-          <label class="input-label mb-0">{{ t('admin.accounts.upstreamBilling.syncPrices') }}</label>
-          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {{ t('admin.accounts.upstreamBilling.syncPricesHint') }}
-          </p>
-        </div>
-        <Toggle
-          :model-value="upstreamBillingPriceSyncEnabled"
-          data-testid="upstream-billing-price-sync"
-          :aria-label="t('admin.accounts.upstreamBilling.syncPrices')"
-          @update:model-value="handleUpstreamBillingPriceSyncChange"
-        />
-      </div>
-
       <OllamaCloudUsageSettings
         v-if="account?.ollama_cloud_usage?.eligible"
         :account="account"
@@ -3104,7 +3086,6 @@ const autoPause5hDisabled = ref(false)
 const autoPause7dDisabled = ref(false)
 const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)
-const upstreamBillingPriceSyncEnabled = ref(false)
 const upstreamBillingRateConversionRatio = ref(1)
 const mixedScheduling = ref(false) // For antigravity accounts: enable mixed scheduling
 const allowOverages = ref(false) // For antigravity accounts: enable AI Credits overages
@@ -3500,18 +3481,10 @@ const handleUpstreamBillingRateSyncChange = (enabled: boolean) => {
   }
 }
 
-const handleUpstreamBillingPriceSyncChange = (enabled: boolean) => {
-  upstreamBillingPriceSyncEnabled.value = enabled
-  if (enabled) {
-    upstreamBillingAutoProbeEnabled.value = true
-  }
-}
-
 const handleUpstreamBillingAutoProbeChange = (enabled: boolean) => {
   upstreamBillingAutoProbeEnabled.value = enabled
   if (!enabled) {
     upstreamBillingRateSyncEnabled.value = false
-    upstreamBillingPriceSyncEnabled.value = false
   }
 }
 
@@ -3640,8 +3613,6 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
   upstreamBillingRateSyncEnabled.value =
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
-  upstreamBillingPriceSyncEnabled.value =
-    upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_price_sync_enabled === true
   const savedRateConversionRatio = Number(extra?.upstream_billing_rate_conversion_ratio)
   upstreamBillingRateConversionRatio.value =
     Number.isFinite(savedRateConversionRatio) && savedRateConversionRatio > 0 && savedRateConversionRatio <= 100
@@ -4584,7 +4555,6 @@ const handleSubmit = async () => {
     if (props.account.type === 'apikey') {
       updatePayload.upstream_billing_probe_enabled = upstreamBillingAutoProbeEnabled.value
       updatePayload.upstream_billing_rate_sync_enabled = upstreamBillingRateSyncEnabled.value
-      updatePayload.upstream_billing_price_sync_enabled = upstreamBillingPriceSyncEnabled.value
       if (upstreamBillingRateSyncEnabled.value) {
         const rateConversionRatio = Number(upstreamBillingRateConversionRatio.value)
         if (!Number.isFinite(rateConversionRatio) || rateConversionRatio <= 0 || rateConversionRatio > 100) {
@@ -5176,7 +5146,6 @@ const handleSubmit = async () => {
       if (props.account.type === 'apikey') {
         delete newExtra.upstream_billing_probe_enabled
         delete newExtra.upstream_billing_rate_sync_enabled
-        delete newExtra.upstream_billing_price_sync_enabled
         delete newExtra.upstream_billing_rate_conversion_ratio
       }
       // Total quota

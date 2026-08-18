@@ -41,70 +41,6 @@ func TestPricingNonEmptyInvalidRemoteURLStillReturnsValidationError(t *testing.T
 	require.Contains(t, err.Error(), "invalid pricing url")
 }
 
-func TestPricingServiceFallbackUpliftsExistingRemoteModelToLocalMaximums(t *testing.T) {
-	fallbackFile := filepath.Join(t.TempDir(), "fallback.json")
-	require.NoError(t, os.WriteFile(fallbackFile, []byte(`{
-		"gpt-5.6-luna": {
-			"input_cost_per_token": 0.000001,
-			"input_cost_per_token_priority": 0.000002,
-			"output_cost_per_token": 0.000006,
-			"output_cost_per_token_priority": 0.000012,
-			"cache_creation_input_token_cost": 0.00000125,
-			"cache_read_input_token_cost": 0.0000001,
-			"long_context_input_token_threshold": 272000,
-			"long_context_input_cost_multiplier": 2,
-			"long_context_output_cost_multiplier": 1.5,
-			"supports_service_tier": true,
-			"supports_prompt_caching": true,
-			"litellm_provider": "openai",
-			"mode": "chat"
-		},
-		"fallback-only": {
-			"input_cost_per_token": 0.000003,
-			"output_cost_per_token": 0.000015
-		}
-	}`), 0o600))
-
-	remote := map[string]*LiteLLMModelPricing{
-		"gpt-5.6-luna": {
-			InputCostPerToken:               0.2e-6,
-			OutputCostPerToken:              1.2e-6,
-			LongContextInputTokenThreshold:  272000,
-			LongContextInputCostMultiplier:  2,
-			LongContextOutputCostMultiplier: 1.5,
-			SupportsServiceTier:             true,
-			SupportsPromptCaching:           true,
-			LiteLLMProvider:                 "remote-provider",
-			Mode:                            "chat",
-			TokenPricingAbsent:              false,
-		},
-		"remote-higher": {
-			InputCostPerToken:  4e-6,
-			OutputCostPerToken: 20e-6,
-		},
-	}
-	svc := &PricingService{cfg: &config.Config{Pricing: config.PricingConfig{FallbackFile: fallbackFile}}}
-
-	merged := svc.mergeFallbackPricingData(remote)
-
-	luna := merged["gpt-5.6-luna"]
-	require.InDelta(t, 1e-6, luna.InputCostPerToken, 1e-12)
-	require.InDelta(t, 2e-6, luna.InputCostPerTokenPriority, 1e-12)
-	require.InDelta(t, 6e-6, luna.OutputCostPerToken, 1e-12)
-	require.InDelta(t, 12e-6, luna.OutputCostPerTokenPriority, 1e-12)
-	require.InDelta(t, 1.25e-6, luna.CacheCreationInputTokenCost, 1e-12)
-	require.InDelta(t, 0.1e-6, luna.CacheReadInputTokenCost, 1e-12)
-	require.Equal(t, 272000, luna.LongContextInputTokenThreshold)
-	require.InDelta(t, 2.0, luna.LongContextInputCostMultiplier, 1e-12)
-	require.InDelta(t, 1.5, luna.LongContextOutputCostMultiplier, 1e-12)
-	require.True(t, luna.SupportsServiceTier)
-	require.True(t, luna.SupportsPromptCaching)
-	require.Equal(t, "remote-provider", luna.LiteLLMProvider)
-	require.NotNil(t, merged["fallback-only"])
-	require.InDelta(t, 4e-6, merged["remote-higher"].InputCostPerToken, 1e-12)
-	require.InDelta(t, 20e-6, merged["remote-higher"].OutputCostPerToken, 1e-12)
-}
-
 func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 	svc := &PricingService{}
 	body := []byte(`{
@@ -409,13 +345,19 @@ func TestBillingService_GetModelPricing_FailsClosedForImageOnlyEntries(t *testin
 	require.InDelta(t, 0.04, raw.OutputCostPerImage, 1e-12)
 }
 
-func TestPricingService_MergesFallbackOnlyModels(t *testing.T) {
+func TestPricingService_MergesFallbackOnlyModelsAndOnlyOverridesLuna(t *testing.T) {
 	dir := t.TempDir()
 	fallbackFile := filepath.Join(dir, "fallback.json")
 	require.NoError(t, os.WriteFile(fallbackFile, []byte(`{
 		"remote-model": {
 			"input_cost_per_token": 0.000001,
 			"litellm_provider": "test",
+			"mode": "chat"
+		},
+		"gpt-5.6-terra": {
+			"input_cost_per_token": 0.000004,
+			"output_cost_per_token": 0.000024,
+			"litellm_provider": "fallback-provider",
 			"mode": "chat"
 		},
 		"gemini-3.1-flash-lite-image": {
@@ -432,12 +374,40 @@ func TestPricingService_MergesFallbackOnlyModels(t *testing.T) {
 			"input_cost_per_token": 0.000002,
 			"litellm_provider": "test",
 			"mode": "chat"
+		},
+		"gpt-5.6-luna": {
+			"input_cost_per_token": 0.0000002,
+			"input_cost_per_token_priority": 0.0000004,
+			"output_cost_per_token": 0.0000012,
+			"output_cost_per_token_priority": 0.0000024,
+			"cache_creation_input_token_cost": 0.00000025,
+			"cache_creation_input_token_cost_priority": 0.0000005,
+			"cache_read_input_token_cost": 0.00000002,
+			"cache_read_input_token_cost_priority": 0.00000004,
+			"litellm_provider": "remote-provider",
+			"mode": "chat"
+		},
+		"gpt-5.6-terra": {
+			"input_cost_per_token": 0.0000003,
+			"output_cost_per_token": 0.0000018,
+			"litellm_provider": "remote-provider",
+			"mode": "chat"
 		}
 	}`))
 	require.NoError(t, err)
 
 	merged := svc.mergeFallbackPricingData(remoteData)
 	require.InDelta(t, 0.000002, merged["remote-model"].InputCostPerToken, 1e-12)
+	require.InDelta(t, 1e-6, merged["gpt-5.6-luna"].InputCostPerToken, 1e-12)
+	require.InDelta(t, 2e-6, merged["gpt-5.6-luna"].InputCostPerTokenPriority, 1e-12)
+	require.InDelta(t, 6e-6, merged["gpt-5.6-luna"].OutputCostPerToken, 1e-12)
+	require.InDelta(t, 12e-6, merged["gpt-5.6-luna"].OutputCostPerTokenPriority, 1e-12)
+	require.InDelta(t, 1.25e-6, merged["gpt-5.6-luna"].CacheCreationInputTokenCost, 1e-12)
+	require.InDelta(t, 0.1e-6, merged["gpt-5.6-luna"].CacheReadInputTokenCost, 1e-12)
+	require.Equal(t, "remote-provider", merged["gpt-5.6-luna"].LiteLLMProvider)
+	require.InDelta(t, 0.3e-6, merged["gpt-5.6-terra"].InputCostPerToken, 1e-12)
+	require.InDelta(t, 1.8e-6, merged["gpt-5.6-terra"].OutputCostPerToken, 1e-12)
+	require.Equal(t, "remote-provider", merged["gpt-5.6-terra"].LiteLLMProvider)
 	require.NotNil(t, merged["gemini-3.1-flash-lite-image"])
 	require.InDelta(t, 0.034, merged["gemini-3.1-flash-lite-image"].OutputCostPerImage, 1e-12)
 }

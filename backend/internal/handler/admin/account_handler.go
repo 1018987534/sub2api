@@ -151,7 +151,6 @@ type UpdateAccountRequest struct {
 	PeriodicSchedulePauseMinutes *int           `json:"periodic_schedule_pause_minutes"`
 	ProbeEnabled                 *bool          `json:"upstream_billing_probe_enabled"`
 	RateSyncEnabled              *bool          `json:"upstream_billing_rate_sync_enabled"`
-	PriceSyncEnabled             *bool          `json:"upstream_billing_price_sync_enabled"`
 	RateConversionRatio          *float64       `json:"upstream_billing_rate_conversion_ratio"`
 	ConfirmMixedChannelRisk      *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
@@ -728,6 +727,39 @@ func (h *AccountHandler) GetFirstTokenLatencies(c *gin.Context) {
 	response.Success(c, gin.H{"items": metrics, "total": len(metrics)})
 }
 
+// RequestFirstTokenManualProbe queues one account for the next streaming
+// request that can produce a first-token latency sample.
+func (h *AccountHandler) RequestFirstTokenManualProbe(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || accountID <= 0 {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if h.adminService == nil || h.rateLimitService == nil {
+		response.InternalError(c, "First-token probing is not configured")
+		return
+	}
+	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := h.rateLimitService.RequestFirstTokenManualProbe(c.Request.Context(), account); err != nil {
+		if errors.Is(err, service.ErrFirstTokenManualProbeIneligible) {
+			response.BadRequest(c, "Account is not eligible for first-token probing")
+			return
+		}
+		if errors.Is(err, service.ErrFirstTokenManualProbeUnavailable) {
+			response.InternalError(c, "First-token probing is not configured")
+			return
+		}
+		response.ErrorFrom(c, err)
+		return
+	}
+	slog.Info("first_token_manual_probe_requested", "account_id", account.ID, "account_name", account.Name)
+	response.Accepted(c, gin.H{"account_id": account.ID, "queued": true})
+}
+
 func buildAccountsListETag(
 	items []AccountWithConcurrency,
 	total int64,
@@ -1025,7 +1057,6 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		PeriodicSchedulePauseMinutes: req.PeriodicSchedulePauseMinutes,
 		ProbeEnabled:                 req.ProbeEnabled,
 		RateSyncEnabled:              req.RateSyncEnabled,
-		PriceSyncEnabled:             req.PriceSyncEnabled,
 		RateConversionRatio:          req.RateConversionRatio,
 		SkipMixedChannelCheck:        skipCheck,
 	})

@@ -2,57 +2,47 @@
   <AppLayout>
     <TablePageLayout>
       <template #filters>
-        <div class="space-y-4">
-          <UpstreamPriceDiscrepancies
-            :items="priceDiscrepancies"
-            :loading="priceDiscrepanciesLoading"
-            :syncing-key="priceDiscrepancySyncingKey"
-            @refresh="loadPriceDiscrepancies"
-            @confirm="confirmPriceDiscrepancy"
-          />
-
-          <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-            <!-- Left: Search + Filters -->
-            <div class="flex flex-1 flex-wrap items-center gap-3">
-              <div class="relative w-full sm:w-64">
-                <Icon
-                  name="search"
-                  size="md"
-                  class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-                />
-                <input
-                  v-model="searchQuery"
-                  type="text"
-                  :placeholder="t('admin.channels.searchChannels', 'Search channels...')"
-                  class="input pl-10"
-                  @input="handleSearch"
-                />
-              </div>
-
-              <Select
-                v-model="filters.status"
-                :options="statusFilterOptions"
-                :placeholder="t('admin.channels.allStatus', 'All Status')"
-                class="w-40"
-                @change="loadChannels"
+        <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+          <!-- Left: Search + Filters -->
+          <div class="flex flex-1 flex-wrap items-center gap-3">
+            <div class="relative w-full sm:w-64">
+              <Icon
+                name="search"
+                size="md"
+                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+              />
+              <input
+                v-model="searchQuery"
+                type="text"
+                :placeholder="t('admin.channels.searchChannels', 'Search channels...')"
+                class="input pl-10"
+                @input="handleSearch"
               />
             </div>
 
-            <!-- Right: Actions -->
-            <div class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
-              <button
-                @click="refreshPage"
-                :disabled="loading || priceDiscrepanciesLoading"
-                class="btn btn-secondary"
-                :title="t('common.refresh', 'Refresh')"
-              >
-                <Icon name="refresh" size="md" :class="loading || priceDiscrepanciesLoading ? 'animate-spin' : ''" />
-              </button>
-              <button @click="openCreateDialog" class="btn btn-primary">
-                <Icon name="plus" size="md" class="mr-2" />
-                {{ t('admin.channels.createChannel', 'Create Channel') }}
-              </button>
-            </div>
+            <Select
+              v-model="filters.status"
+              :options="statusFilterOptions"
+              :placeholder="t('admin.channels.allStatus', 'All Status')"
+              class="w-40"
+              @change="loadChannels"
+            />
+          </div>
+
+          <!-- Right: Actions -->
+          <div class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto">
+            <button
+              @click="loadChannels"
+              :disabled="loading"
+              class="btn btn-secondary"
+              :title="t('common.refresh', 'Refresh')"
+            >
+              <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+            </button>
+            <button @click="openCreateDialog" class="btn btn-primary">
+              <Icon name="plus" size="md" class="mr-2" />
+              {{ t('admin.channels.createChannel', 'Create Channel') }}
+            </button>
           </div>
         </div>
       </template>
@@ -641,7 +631,6 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { adminAPI } from '@/api/admin'
 import type { Channel, ChannelModelPricing, CreateChannelRequest, UpdateChannelRequest, AccountStatsPricingRule } from '@/api/admin/channels'
-import type { UpstreamBillingPriceDiscrepancy } from '@/api/admin/accounts'
 import type { PricingFormEntry } from '@/components/admin/channel/types'
 import { mTokToPerToken, perTokenToMTok, apiIntervalsToForm, formIntervalsToAPI, findModelConflict, validateIntervals } from '@/components/admin/channel/types'
 import type { AdminGroup, GroupPlatform } from '@/types'
@@ -659,7 +648,6 @@ import Icon from '@/components/icons/Icon.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import PricingEntryCard from '@/components/admin/channel/PricingEntryCard.vue'
-import UpstreamPriceDiscrepancies from '@/components/admin/channel/UpstreamPriceDiscrepancies.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useKeyedDebouncedSearch } from '@/composables/useKeyedDebouncedSearch'
 
@@ -732,9 +720,6 @@ const billingModelSourceOptions = computed(() => [
 // ── State ──
 const channels = ref<Channel[]>([])
 const loading = ref(false)
-const priceDiscrepancies = ref<UpstreamBillingPriceDiscrepancy[]>([])
-const priceDiscrepanciesLoading = ref(false)
-const priceDiscrepancySyncingKey = ref<string | null>(null)
 const searchQuery = ref('')
 const filters = reactive({ status: '' })
 const pagination = reactive({
@@ -1284,38 +1269,6 @@ async function loadChannels() {
   }
 }
 
-async function loadPriceDiscrepancies() {
-  if (priceDiscrepanciesLoading.value) return
-  priceDiscrepanciesLoading.value = true
-  try {
-    priceDiscrepancies.value = await adminAPI.accounts.listUpstreamBillingPriceDiscrepancies()
-  } catch (error: unknown) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.channels.upstreamPrice.loadError')))
-  } finally {
-    priceDiscrepanciesLoading.value = false
-  }
-}
-
-async function confirmPriceDiscrepancy(item: UpstreamBillingPriceDiscrepancy) {
-  const key = `${item.account_id}:${item.model}`
-  if (priceDiscrepancySyncingKey.value) return
-  priceDiscrepancySyncingKey.value = key
-  try {
-    await adminAPI.accounts.confirmUpstreamBillingPrice(item.account_id, item.model)
-    appStore.showSuccess(t('admin.channels.upstreamPrice.confirmSuccess', { model: item.model }))
-    await loadPriceDiscrepancies()
-  } catch (error: unknown) {
-    appStore.showError(extractApiErrorMessage(error, t('admin.channels.upstreamPrice.confirmError')))
-  } finally {
-    priceDiscrepancySyncingKey.value = null
-  }
-}
-
-function refreshPage() {
-  void loadChannels()
-  void loadPriceDiscrepancies()
-}
-
 async function loadGroups() {
   groupsLoading.value = true
   try {
@@ -1657,7 +1610,6 @@ async function confirmDelete() {
 // ── Lifecycle ──
 onMounted(() => {
   loadChannels()
-  loadPriceDiscrepancies()
   loadGroups()
   loadWebSearchGlobalState()
   document.addEventListener('click', handleRuleAccountClickOutside)
