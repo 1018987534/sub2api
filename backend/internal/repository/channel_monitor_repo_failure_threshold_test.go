@@ -40,8 +40,8 @@ func TestListLatestForMonitorIDsScansUnconfirmedFailure(t *testing.T) {
 	mock.ExpectQuery(`(?s)WITH latest AS \(.*failure_threshold_reached`).
 		WithArgs(sqlmock.AnyArg(), service.MonitorFailureConfirmationThreshold).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"monitor_id", "model", "status", "latency_ms", "ping_latency_ms", "checked_at", "failure_threshold_reached",
-		}).AddRow(int64(7), "gpt-5.6-sol", service.MonitorStatusFailed, 180, 20, checkedAt, false))
+			"monitor_id", "model", "status", "latency_ms", "ping_latency_ms", "checked_at", "quota", "failure_threshold_reached",
+		}).AddRow(int64(7), "gpt-5.6-sol", service.MonitorStatusFailed, 180, 20, checkedAt, nil, false))
 
 	repo := &channelMonitorRepository{db: db}
 	rows, err := repo.ListLatestForMonitorIDs(context.Background(), []int64{7})
