@@ -10,13 +10,15 @@ import (
 )
 
 type staticFirstTokenLatencyStatsCache struct {
-	stats        map[int64]FirstTokenLatencyStats
-	claimAllowed bool
-	claimResults map[int64]bool
-	claimedID    int64
-	claimedIDs   []int64
-	fetchedIDs   []int64
-	recordedID   int64
+	stats          map[int64]FirstTokenLatencyStats
+	claimAllowed   bool
+	claimResults   map[int64]bool
+	claimedID      int64
+	claimedIDs     []int64
+	fetchedIDs     []int64
+	recordedID     int64
+	manualProbeID  int64
+	manualRequests []int64
 }
 
 type accountCacheStatsUsageRepo struct {
@@ -45,6 +47,22 @@ func (c *staticFirstTokenLatencyStatsCache) TryClaimProbe(_ context.Context, acc
 		return c.claimResults[accountID], nil
 	}
 	return c.claimAllowed, nil
+}
+
+func (c *staticFirstTokenLatencyStatsCache) RequestManualProbe(_ context.Context, accountID int64, _ time.Duration) error {
+	c.manualRequests = append(c.manualRequests, accountID)
+	c.manualProbeID = accountID
+	return nil
+}
+
+func (c *staticFirstTokenLatencyStatsCache) TryClaimManualProbe(_ context.Context, accountIDs []int64, _ time.Duration) (int64, bool, error) {
+	for _, accountID := range accountIDs {
+		if accountID == c.manualProbeID {
+			c.manualProbeID = 0
+			return accountID, true, nil
+		}
+	}
+	return 0, false, nil
 }
 
 func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
@@ -409,6 +427,54 @@ func TestFirstTokenPriorityOrderUsesSharedLeaseForDueProbe(t *testing.T) {
 
 	cache.claimAllowed = false
 	require.Equal(t, []int64{1, 2}, firstTokenPriorityOrder(context.Background(), accounts, cache))
+}
+
+func TestFirstTokenPriorityOrderManualProbeOverridesAllFastPool(t *testing.T) {
+	now := time.Now()
+	cache := &staticFirstTokenLatencyStatsCache{
+		manualProbeID: 2,
+		stats: map[int64]FirstTokenLatencyStats{
+			1: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			2: {PredictedMS: 7_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+		},
+	}
+	accounts := []*Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+	}
+
+	require.Equal(t, []int64{2, 1}, firstTokenPriorityOrderWithProbe(context.Background(), accounts, cache, true))
+	require.Zero(t, cache.manualProbeID)
+}
+
+func TestFirstTokenPriorityOrderKeepsManualProbeQueuedForNonStreamingRequest(t *testing.T) {
+	now := time.Now()
+	cache := &staticFirstTokenLatencyStatsCache{
+		manualProbeID: 2,
+		stats: map[int64]FirstTokenLatencyStats{
+			1: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			2: {PredictedMS: 7_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+		},
+	}
+	accounts := []*Account{
+		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
+	}
+
+	require.Equal(t, []int64{1, 2}, firstTokenPriorityOrderWithProbe(context.Background(), accounts, cache, false))
+	require.Equal(t, int64(2), cache.manualProbeID)
+}
+
+func TestRequestFirstTokenManualProbeValidatesAccount(t *testing.T) {
+	cache := &staticFirstTokenLatencyStatsCache{}
+	svc := &RateLimitService{firstTokenLatencyStatsCache: cache}
+	eligible := &Account{ID: 7, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
+
+	require.NoError(t, svc.RequestFirstTokenManualProbe(context.Background(), eligible))
+	require.Equal(t, []int64{7}, cache.manualRequests)
+	require.ErrorIs(t, svc.RequestFirstTokenManualProbe(context.Background(), &Account{
+		ID: 8, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+	}), ErrFirstTokenManualProbeIneligible)
 }
 
 func TestFirstTokenPriorityOrderSkipsProbeWhenRequestCannotProduceSample(t *testing.T) {

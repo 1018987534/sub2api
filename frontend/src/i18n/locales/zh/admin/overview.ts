@@ -98,7 +98,11 @@ export default {
       firstTokenSamples: '样本数',
       firstTokenUpdated: '最近更新',
       firstTokenProbeInterval: '动态探测间隔',
-      firstTokenCacheRate: '缓存率'
+      firstTokenCacheRate: '缓存率',
+      firstTokenActions: '操作',
+      firstTokenManualProbe: '立即探测 {account}',
+      firstTokenManualProbeQueued: '已安排 {account} 进入下一次首字探测',
+      firstTokenManualProbeFailed: '安排首字探测失败'
     },
 
     backup: {

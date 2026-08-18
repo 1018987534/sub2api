@@ -14,7 +14,8 @@ import (
 )
 
 type accountFirstTokenStatsCache struct {
-	stats map[int64]service.FirstTokenLatencyStats
+	stats           map[int64]service.FirstTokenLatencyStats
+	manualRequested int64
 }
 
 func (c accountFirstTokenStatsCache) RecordSample(context.Context, int64, string, int) error {
@@ -27,6 +28,15 @@ func (c accountFirstTokenStatsCache) GetStatsBatch(context.Context, []int64) (ma
 
 func (c accountFirstTokenStatsCache) TryClaimProbe(context.Context, int64, time.Duration) (bool, error) {
 	return false, nil
+}
+
+func (c *accountFirstTokenStatsCache) RequestManualProbe(_ context.Context, accountID int64, _ time.Duration) error {
+	c.manualRequested = accountID
+	return nil
+}
+
+func (c *accountFirstTokenStatsCache) TryClaimManualProbe(context.Context, []int64, time.Duration) (int64, bool, error) {
+	return 0, false, nil
 }
 
 func TestAccountHandlerGetFirstTokenLatenciesExcludesOAuthDisabledAndUnschedulableAccounts(t *testing.T) {
@@ -66,4 +76,34 @@ func TestAccountHandlerGetFirstTokenLatenciesExcludesOAuthDisabledAndUnschedulab
 	require.Len(t, payload.Data.Items, 1)
 	require.Equal(t, int64(1), payload.Data.Items[0].AccountID)
 	require.Equal(t, "relay", payload.Data.Items[0].AccountName)
+}
+
+func TestAccountHandlerRequestsFirstTokenManualProbe(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	adminSvc := newStubAdminService()
+	adminSvc.getAccountResult = &service.Account{
+		ID: 42, Name: "relay", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true,
+	}
+	cache := &accountFirstTokenStatsCache{}
+	rateLimitService := service.NewRateLimitService(nil, nil, nil, nil, nil)
+	rateLimitService.SetFirstTokenLatencyStatsCache(cache)
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, rateLimitService, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.POST("/api/v1/admin/accounts/:id/first-token-probe", handler.RequestFirstTokenManualProbe)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/42/first-token-probe", nil))
+
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	require.Equal(t, int64(42), cache.manualRequested)
+	var payload struct {
+		Data struct {
+			AccountID int64 `json:"account_id"`
+			Queued    bool  `json:"queued"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Equal(t, int64(42), payload.Data.AccountID)
+	require.True(t, payload.Data.Queued)
 }

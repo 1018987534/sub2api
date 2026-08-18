@@ -278,10 +278,23 @@
                       <div class="truncate font-medium text-gray-900 dark:text-white" :title="metric.account_name">{{ metric.account_name }}</div>
                       <div class="text-xs text-gray-400">#{{ metric.account_id }}</div>
                     </div>
-                    <span class="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
-                      <span class="h-2 w-2 rounded-full" :class="metric.is_fast_pool ? 'bg-emerald-500' : 'bg-amber-500'" aria-hidden="true"></span>
-                      {{ firstTokenPoolLabel(metric) }}
-                    </span>
+                    <div class="flex shrink-0 items-center gap-2">
+                      <span class="inline-flex items-center gap-1.5 text-sm font-medium" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
+                        <span class="h-2 w-2 rounded-full" :class="metric.is_fast_pool ? 'bg-emerald-500' : 'bg-amber-500'" aria-hidden="true"></span>
+                        {{ firstTokenPoolLabel(metric) }}
+                      </span>
+                      <button
+                        type="button"
+                        class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-600 disabled:cursor-wait disabled:opacity-50 dark:border-dark-600 dark:text-gray-400 dark:hover:border-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-400"
+                        :disabled="isFirstTokenManualProbeLoading(metric.account_id)"
+                        :title="t('admin.dashboard.firstTokenManualProbe', { account: metric.account_name })"
+                        :aria-label="t('admin.dashboard.firstTokenManualProbe', { account: metric.account_name })"
+                        data-testid="first-token-manual-probe"
+                        @click="requestFirstTokenManualProbe(metric)"
+                      >
+                        <Icon :name="isFirstTokenManualProbeLoading(metric.account_id) ? 'refresh' : 'play'" size="sm" :class="{ 'animate-spin': isFirstTokenManualProbeLoading(metric.account_id) }" />
+                      </button>
+                    </div>
                   </div>
                   <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                     <div>
@@ -314,17 +327,18 @@
                 </div>
               </div>
               <div class="hidden overflow-x-auto md:block">
-                <table class="min-w-[980px] w-full table-fixed text-left text-sm">
+                <table class="min-w-[1080px] w-full table-fixed text-left text-sm">
                   <thead class="text-xs text-gray-500 dark:text-gray-400">
                     <tr>
-                      <th class="w-[22%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
-                      <th class="w-[14%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
+                      <th class="w-[20%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
+                      <th class="w-[13%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
                       <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPool') }}</th>
-                      <th class="w-[11%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSchedulingRate') }}</th>
-                      <th class="w-[12%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenCacheRate') }}</th>
-                      <th class="w-[9%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSamples') }}</th>
-                      <th class="w-[11%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
-                      <th class="w-[11%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenProbeInterval') }}</th>
+                      <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSchedulingRate') }}</th>
+                      <th class="w-[11%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenCacheRate') }}</th>
+                      <th class="w-[8%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSamples') }}</th>
+                      <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
+                      <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenProbeInterval') }}</th>
+                      <th class="w-[8%] px-4 py-2.5 text-center font-medium">{{ t('admin.dashboard.firstTokenActions') }}</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
@@ -351,6 +365,19 @@
                       <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ metric.sample_count }}</td>
                       <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{{ metric.has_prediction ? formatFirstTokenUpdatedAt(metric.updated_at) : '-' }}</td>
                       <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ formatProbeInterval(metric.probe_interval_seconds) }}</td>
+                      <td class="px-4 py-3 text-center">
+                        <button
+                          type="button"
+                          class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-600 disabled:cursor-wait disabled:opacity-50 dark:border-dark-600 dark:text-gray-400 dark:hover:border-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-400"
+                          :disabled="isFirstTokenManualProbeLoading(metric.account_id)"
+                          :title="t('admin.dashboard.firstTokenManualProbe', { account: metric.account_name })"
+                          :aria-label="t('admin.dashboard.firstTokenManualProbe', { account: metric.account_name })"
+                          data-testid="first-token-manual-probe"
+                          @click="requestFirstTokenManualProbe(metric)"
+                        >
+                          <Icon :name="isFirstTokenManualProbeLoading(metric.account_id) ? 'refresh' : 'play'" size="sm" :class="{ 'animate-spin': isFirstTokenManualProbeLoading(metric.account_id) }" />
+                        </button>
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -545,6 +572,7 @@ const firstTokenLoading = ref(false)
 const firstTokenError = ref(false)
 const firstTokenMetrics = ref<AccountFirstTokenLatencyMetric[]>([])
 const firstTokenGroupFilter = ref<string | number>('all')
+const firstTokenManualProbeLoading = ref<Set<number>>(new Set())
 
 interface FirstTokenGroupSection {
   id: number
@@ -612,6 +640,29 @@ const firstTokenPoolLabel = (metric: AccountFirstTokenLatencyMetric) => {
     })
   }
   return t('admin.dashboard.firstTokenSlowPool')
+}
+
+const isFirstTokenManualProbeLoading = (accountID: number): boolean => firstTokenManualProbeLoading.value.has(accountID)
+
+const setFirstTokenManualProbeLoading = (accountID: number, loading: boolean) => {
+  const next = new Set(firstTokenManualProbeLoading.value)
+  if (loading) next.add(accountID)
+  else next.delete(accountID)
+  firstTokenManualProbeLoading.value = next
+}
+
+const requestFirstTokenManualProbe = async (metric: AccountFirstTokenLatencyMetric) => {
+  if (isFirstTokenManualProbeLoading(metric.account_id)) return
+  setFirstTokenManualProbeLoading(metric.account_id, true)
+  try {
+    await adminAPI.accounts.requestFirstTokenManualProbe(metric.account_id)
+    appStore.showSuccess(t('admin.dashboard.firstTokenManualProbeQueued', { account: metric.account_name }))
+  } catch (error) {
+    console.error('Error requesting account first-token probe:', error)
+    appStore.showError(t('admin.dashboard.firstTokenManualProbeFailed'))
+  } finally {
+    setFirstTokenManualProbeLoading(metric.account_id, false)
+  }
 }
 
 // Chart data

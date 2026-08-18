@@ -98,7 +98,11 @@ export default {
       firstTokenSamples: 'Samples',
       firstTokenUpdated: 'Updated',
       firstTokenProbeInterval: 'Dynamic probe interval',
-      firstTokenCacheRate: 'Cache rate'
+      firstTokenCacheRate: 'Cache rate',
+      firstTokenActions: 'Actions',
+      firstTokenManualProbe: 'Probe {account} now',
+      firstTokenManualProbeQueued: '{account} is queued for the next first-token probe',
+      firstTokenManualProbeFailed: 'Failed to queue first-token probe'
     },
 
     backup: {

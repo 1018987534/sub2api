@@ -164,6 +164,34 @@ func TestFirstTokenLatencyStatsCacheProbeLeaseClearsAfterSample(t *testing.T) {
 	require.True(t, claimed)
 }
 
+func TestFirstTokenLatencyStatsCacheQueuesAndAtomicallyClaimsManualProbe(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	writer := &firstTokenLatencyStatsCache{rdb: rdb}
+	reader := &firstTokenLatencyStatsCache{rdb: rdb}
+	ctx := context.Background()
+
+	require.NoError(t, writer.RequestManualProbe(ctx, 12, 10*time.Minute))
+	accountID, claimed, err := reader.TryClaimManualProbe(ctx, []int64{11, 12}, 10*time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.Equal(t, int64(12), accountID)
+	require.True(t, mr.Exists(firstTokenLatencyProbePrefix+"12"))
+
+	accountID, claimed, err = writer.TryClaimManualProbe(ctx, []int64{11, 12}, 10*time.Minute)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.Zero(t, accountID)
+
+	// A real sample also clears a manual request that was queued while another
+	// probe lease was active, avoiding an unnecessary second forced probe.
+	require.NoError(t, writer.RequestManualProbe(ctx, 12, 10*time.Minute))
+	require.NoError(t, reader.RecordSample(ctx, 12, "manual-probe-complete", 4_000))
+	require.False(t, mr.Exists(firstTokenLatencyProbePrefix+"12"))
+	require.False(t, mr.Exists(firstTokenLatencyManualProbePrefix+"12"))
+}
+
 func TestFirstTokenLatencyStatsCacheRequiresThreeConsecutiveFastRecoverySamples(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})

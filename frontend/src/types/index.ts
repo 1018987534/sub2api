@@ -918,6 +918,11 @@ export interface AccountFirstTokenLatencyResponse {
   total: number
 }
 
+export interface AccountFirstTokenManualProbeResponse {
+  account_id: number
+  queued: boolean
+}
+
 // Claude Model type (returned by /v1/models and account models API)
 export interface ClaudeModel {
   id: string

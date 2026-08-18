@@ -25,7 +25,8 @@ import type {
   UpstreamBillingProbeSettings,
   OllamaCloudUsageSettings,
   OllamaCloudUsageState,
-  AccountFirstTokenLatencyResponse
+  AccountFirstTokenLatencyResponse,
+  AccountFirstTokenManualProbeResponse
 } from '@/types'
 
 /**
@@ -1032,6 +1033,11 @@ export async function getFirstTokenLatencies(): Promise<AccountFirstTokenLatency
   return data
 }
 
+export async function requestFirstTokenManualProbe(id: number): Promise<AccountFirstTokenManualProbeResponse> {
+  const { data } = await apiClient.post<AccountFirstTokenManualProbeResponse>(`/admin/accounts/${id}/first-token-probe`)
+  return data
+}
+
 export const accountsAPI = {
   list,
   listWithEtag,
@@ -1095,7 +1101,8 @@ export const accountsAPI = {
   deleteOllamaCloudUsageSession,
   setOllamaCloudUsageAutoRefresh,
   refreshOllamaCloudUsage,
-  getFirstTokenLatencies
+  getFirstTokenLatencies,
+  requestFirstTokenManualProbe
 }
 
 export default accountsAPI
