@@ -520,10 +520,9 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
 
-	// DeepSeek's native Responses endpoint is stateless; normalize before
-	// applying the optional account-level gzip request-body wrapper.
+	// DeepSeek's native Responses endpoint is stateless.
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
-	requestBody, err := buildOpenAIUpstreamRequestBody(ctx, c, account, body)
+	requestBody, err := buildOpenAIUpstreamRequestBody(c, account, body)
 	if err != nil {
 		return nil, err
 	}

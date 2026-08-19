@@ -53,11 +53,6 @@ type openAILatencyAttempt struct {
 	reused                 bool
 	wasIdle                bool
 	wroteRequestError      bool
-	upstreamBodyBytes      int
-	upstreamWireBytes      int64
-	upstreamGzipStreamMs   int64
-	upstreamGzipEnabled    bool
-	upstreamGzipError      bool
 	failed                 bool
 	preamblePendingLines   int
 }
@@ -282,16 +277,6 @@ func (t *OpenAILatencyTrace) MarkClientAcquireStart(at time.Time) {
 		if a.clientAcquireStart.IsZero() {
 			a.clientAcquireStart = at
 		}
-	})
-}
-
-func (t *OpenAILatencyTrace) MarkUpstreamRequestGzip(bodyBytes int, wireBytes int64, elapsed time.Duration, err error) {
-	t.markAttempt(func(a *openAILatencyAttempt) {
-		a.upstreamBodyBytes = bodyBytes
-		a.upstreamWireBytes = wireBytes
-		a.upstreamGzipStreamMs = nonNegativeMillis(elapsed)
-		a.upstreamGzipEnabled = true
-		a.upstreamGzipError = err != nil
 	})
 }
 
@@ -593,11 +578,6 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		zap.Bool("conn_reused", attempt.reused),
 		zap.Bool("conn_was_idle", attempt.wasIdle),
 		zap.Bool("request_write_error", attempt.wroteRequestError),
-		zap.Bool("upstream_request_gzip", attempt.upstreamGzipEnabled),
-		zap.Int("upstream_request_body_bytes", attempt.upstreamBodyBytes),
-		zap.Int64("upstream_request_wire_bytes", attempt.upstreamWireBytes),
-		zap.Int64("upstream_request_gzip_stream_ms", attempt.upstreamGzipStreamMs),
-		zap.Bool("upstream_request_gzip_error", attempt.upstreamGzipError),
 		zap.String("protocol", attempt.protocol),
 		zap.String("upstream_host", attempt.upstreamHost),
 		zap.String("upstream_remote_addr", attempt.upstreamRemoteAddr),
