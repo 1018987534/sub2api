@@ -522,18 +522,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 
 	// DeepSeek's native Responses endpoint is stateless.
 	body = normalizeDeepSeekResponsesRequestBody(account, body)
-	requestBody, err := buildOpenAIUpstreamRequestBody(c, account, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, requestBody.body)
-	if err != nil {
-		_ = requestBody.body.Close()
-		return nil, err
-	}
-	req.ContentLength = requestBody.contentLength
-	req.GetBody = requestBody.getBody
 	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
 
 	// 透传客户端请求头（安全白名单）。
@@ -641,9 +633,6 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
 	account.ApplyHeaderOverrides(req.Header)
-	if requestBody.gzipped {
-		req.Header.Set("Content-Encoding", "gzip")
-	}
 	// x-codex-beta-features：按真实 Codex 的会话级行为补注（在账号级覆写之后，
 	// 保证不被覆盖丢失）。
 	applyOpenAICodexBetaFeatures(c, account, req.Header)

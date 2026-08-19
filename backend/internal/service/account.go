@@ -87,12 +87,6 @@ type OpenAIEndpointCapability string
 
 const openAILongContextBillingEnabledKey = "openai_long_context_billing_enabled"
 
-// OpenAIUpstreamRequestGzipEnabledExtraKey controls opt-in gzip compression for
-// large JSON request bodies sent from Sub2API to an OpenAI-compatible API-key
-// upstream. It is intentionally disabled by default because not every
-// compatible upstream accepts compressed request bodies.
-const OpenAIUpstreamRequestGzipEnabledExtraKey = "openai_upstream_request_gzip_enabled"
-
 const (
 	OpenAIEndpointCapabilityChatCompletions OpenAIEndpointCapability = "chat_completions"
 	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
@@ -1492,12 +1486,6 @@ func (a *Account) IsOpenAIPersonalAccessToken() bool {
 
 func (a *Account) IsOpenAIApiKey() bool {
 	return a.IsOpenAI() && a.Type == AccountTypeAPIKey
-}
-
-// IsOpenAIUpstreamRequestGzipEnabled reports whether the API-key account has
-// explicitly opted in to gzip-compressed upstream request bodies.
-func (a *Account) IsOpenAIUpstreamRequestGzipEnabled() bool {
-	return a != nil && a.IsOpenAIApiKey() && a.getExtraBool(OpenAIUpstreamRequestGzipEnabledExtraKey)
 }
 
 // GetOpenAIBaseURL 解析 OpenAI 协议族账号的上游 base_url。
