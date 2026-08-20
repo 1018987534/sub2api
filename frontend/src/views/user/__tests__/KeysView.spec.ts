@@ -35,8 +35,11 @@ const {
 
 const messages: Record<string, string> = {
   'common.actions': 'Actions',
+  'common.cancel': 'Cancel',
+  'common.edit': 'Edit',
   'common.name': 'Name',
   'common.refresh': 'Refresh',
+  'common.save': 'Save',
   'common.status': 'Status',
   'keys.apiKey': 'API Key',
   'keys.allGroups': 'All Groups',
@@ -46,6 +49,18 @@ const messages: Record<string, string> = {
   'keys.created': 'Created',
   'keys.expiresAt': 'Expires',
   'keys.group': 'Group',
+  'keys.groupLabel': 'Group',
+  'keys.groupRoutesHint': 'Try available groups in order.',
+  'keys.groupRoutesLabel': 'Group routing',
+  'keys.manage': 'Manage',
+  'keys.manageGroupRoutes': 'Manage ordered group routing',
+  'keys.manageGroupRoutesFor': 'Only change routes for “{name}”.',
+  'keys.manageGroupRoutesTitle': 'Manage group routing',
+  'keys.maxAcceptedMultiplier': 'Highest accepted multiplier',
+  'keys.maxMultiplierHint': 'Leave empty for no cap. Groups above the cap are skipped.',
+  'keys.primaryGroup': 'Primary',
+  'keys.selectGroup': 'Select a group',
+  'keys.unlimitedMultiplier': 'No limit',
   'keys.id': 'ID',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.lastUsedAt': 'Last Used',
@@ -174,6 +189,9 @@ const DataTableStub = {
           <slot name="cell-id" :value="row.id" :row="row" />
         </div>
         <slot name="cell-name" :value="row.name" :row="row" />
+        <div data-test="group-cell">
+          <slot name="cell-group" :value="row.group" :row="row" />
+        </div>
         <div data-test="current-concurrency">
           <slot name="cell-current_concurrency" :value="row.current_concurrency" :row="row" />
         </div>
@@ -182,6 +200,9 @@ const DataTableStub = {
           data-test="last-used-ip"
         >
           <slot name="cell-last_used_ip" :value="row.last_used_ip" :row="row" />
+        </div>
+        <div data-test="actions-cell">
+          <slot name="cell-actions" :row="row" />
         </div>
       </div>
       <slot name="empty" />
@@ -219,6 +240,18 @@ const IconStub = {
   template: '<span data-test="icon">{{ name }}</span>',
 }
 
+const BaseDialogStub = {
+  name: 'BaseDialog',
+  props: ['show', 'title', 'width'],
+  template: `
+    <section v-if="show" data-test="base-dialog" :data-title="title" :data-width="width">
+      <h2>{{ title }}</h2>
+      <slot />
+      <slot name="footer" />
+    </section>
+  `,
+}
+
 const mountView = async () => {
   const wrapper = mount(KeysView, {
     global: {
@@ -227,7 +260,7 @@ const mountView = async () => {
         TablePageLayout: TablePageLayoutStub,
         DataTable: DataTableStub,
         Pagination: PaginationStub,
-        BaseDialog: true,
+        BaseDialog: BaseDialogStub,
         ConfirmDialog: true,
         EmptyState: true,
         Select: SelectStub,
@@ -480,6 +513,66 @@ describe('user KeysView column settings', () => {
         ],
       })
     )
+    expect(showError).not.toHaveBeenCalled()
+  })
+
+  it('opens a focused routing dialog from the group column and keeps full edit separate', async () => {
+    const key = {
+      ...createApiKey(),
+      group_id: 11,
+      group_routes: [{ group_id: 11, max_rate_multiplier: null }],
+    }
+    listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = await mountView()
+
+    await wrapper.get('[data-testid="group-route-manage-1"]').trigger('click')
+    await nextTick()
+
+    const routingDialog = wrapper.get('[data-testid="group-routes-dialog"]')
+    expect(wrapper.get('[data-test="base-dialog"][data-title="Manage group routing"]').exists()).toBe(true)
+    expect(routingDialog.text()).toContain('Highest accepted multiplier')
+    expect(routingDialog.text()).toContain('Leave empty for no cap')
+    expect(wrapper.find('#key-form').exists()).toBe(false)
+
+    await getButtonByText(wrapper, 'Cancel').trigger('click')
+    await wrapper.get('[data-testid="edit-key-1"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('#key-form').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="group-routes-dialog"]').exists()).toBe(false)
+  })
+
+  it('submits only group routing fields from the focused dialog', async () => {
+    const key = {
+      ...createApiKey(),
+      name: 'focused-key',
+      group_id: 11,
+      group_routes: [{ group_id: 11, max_rate_multiplier: null }],
+    }
+    listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = await mountView()
+    const vm = wrapper.vm as unknown as {
+      formData: Record<string, any>
+      handleGroupRoutesSubmit: () => Promise<void>
+    }
+
+    await wrapper.get('[data-testid="group-route-manage-1"]').trigger('click')
+    vm.formData.group_id = 11
+    vm.formData.group_routes = [
+      { group_id: 11, max_rate_multiplier: 0.2 },
+      { group_id: 12, max_rate_multiplier: null },
+    ]
+    await vm.handleGroupRoutesSubmit()
+    await flushPromises()
+
+    expect(updateKey).toHaveBeenCalledWith(key.id, {
+      group_id: 11,
+      group_routes: [
+        { group_id: 11, max_rate_multiplier: 0.2 },
+        { group_id: 12, max_rate_multiplier: null },
+      ],
+    })
+    expect(updateKey.mock.calls[0]?.[1]).not.toHaveProperty('name')
     expect(showError).not.toHaveBeenCalled()
   })
 })
