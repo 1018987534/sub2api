@@ -8,7 +8,7 @@ import (
 )
 
 func TestAPIKeyGroupRoutesMigration(t *testing.T) {
-	content, err := FS.ReadFile("227_api_key_group_routes.sql")
+	content, err := FS.ReadFile("229_api_key_group_routes.sql")
 	require.NoError(t, err)
 
 	sql := strings.Join(strings.Fields(string(content)), " ")
