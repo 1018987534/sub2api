@@ -137,9 +137,9 @@
             <div class="group/dropdown relative">
               <button
                 :ref="(el) => setGroupButtonRef(row.id, el)"
-                @click="openGroupSelector(row)"
+                @click="editKey(row)"
                 class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
-                :title="t('keys.clickToChangeGroup')"
+                :title="t('keys.manageGroupRoutes')"
               >
                 <GroupBadge
                   v-if="row.group"
@@ -156,7 +156,10 @@
                 <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
                   t('keys.noGroup')
                 }}</span>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.manage') }}</span>
+                <span v-if="row.group_routes?.length > 1" class="text-[11px] text-primary-600 dark:text-primary-400">
+                  +{{ row.group_routes.length - 1 }} {{ t('keys.backupShort') }}
+                </span>
                 <svg
                   class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
                   fill="none"
@@ -505,6 +508,31 @@
               />
             </template>
           </Select>
+        </div>
+
+        <div class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-testid="api-key-group-routes">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <label class="input-label mb-0">{{ t('keys.groupRoutesLabel') }}</label>
+              <p class="input-hint">{{ t('keys.groupRoutesHint') }}</p>
+            </div>
+            <button type="button" class="btn btn-secondary px-2 py-1.5 text-xs" :disabled="!canAddGroupRoute" :title="t('keys.addBackupGroup')" @click="addGroupRoute">
+              <Icon name="plus" size="sm" class="mr-1" />{{ t('keys.addBackupGroup') }}
+            </button>
+          </div>
+          <div v-if="formData.group_routes.length > 0" class="space-y-2">
+            <div v-for="(route, index) in formData.group_routes" :key="`${index}-${route.group_id}`" class="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-gray-50 p-2 sm:grid-cols-[3.5rem_minmax(0,1fr)_8rem_auto] dark:bg-dark-700/60">
+              <span class="w-14 text-xs font-medium text-gray-500 dark:text-gray-400">{{ index === 0 ? t('keys.primaryGroup') : t('keys.backupGroup', { index }) }}</span>
+              <Select v-model="route.group_id" :options="routeOptionsFor(index)" :searchable="true" :search-placeholder="t('keys.searchGroup')" :disabled="index === 0" />
+              <input v-model.number="route.max_rate_multiplier" type="number" min="0.000001" step="0.01" class="input col-start-2 row-start-2 h-9 text-xs sm:col-start-3 sm:row-start-1" :placeholder="t('keys.unlimitedMultiplier')" :aria-label="t('keys.maxMultiplier')" />
+              <div class="col-start-3 row-start-1 flex items-center justify-end sm:col-start-4">
+                <button v-if="index > 0" type="button" class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30 dark:hover:bg-dark-600 dark:hover:text-gray-200" :disabled="index === 1" :title="t('keys.moveBackupUp')" @click="moveGroupRoute(index, -1)"><Icon name="arrowUp" size="xs" /></button>
+                <button v-if="index > 0" type="button" class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30 dark:hover:bg-dark-600 dark:hover:text-gray-200" :disabled="index === formData.group_routes.length - 1" :title="t('keys.moveBackupDown')" @click="moveGroupRoute(index, 1)"><Icon name="arrowDown" size="xs" /></button>
+                <button v-if="index > 0" type="button" class="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" :title="t('keys.removeBackupGroup')" @click="removeGroupRoute(index)"><Icon name="trash" size="xs" /></button>
+              </div>
+            </div>
+          </div>
+          <p v-else class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.groupRoutesEmpty') }}</p>
         </div>
 
         <!-- Custom Key Section (only for create) -->
@@ -1117,7 +1145,7 @@
 </template>
 
 <script setup lang="ts">
-	import { ref, reactive, computed, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
+	import { ref, reactive, computed, onMounted, onUnmounted, watch, type ComponentPublicInstance } from 'vue'
 	import { useI18n } from 'vue-i18n'
 	import { useAppStore } from '@/stores/app'
 	import { useOnboardingStore } from '@/stores/onboarding'
@@ -1140,7 +1168,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
-	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
+import type { ApiKey, ApiKeyGroupRoute, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatDateTime } from '@/utils/format'
@@ -1330,6 +1358,7 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
 const formData = ref({
   name: '',
   group_id: null as number | null,
+  group_routes: [] as ApiKeyGroupRoute[],
   status: 'active' as 'active' | 'inactive',
   use_custom_key: false,
   custom_key: '',
@@ -1423,6 +1452,57 @@ const groupOptions = computed(() =>
     platform: group.platform
   }))
 )
+
+const routeOptionsFor = (index: number) => {
+  const primary = formData.value.group_id
+  const primaryGroup = groups.value.find((group) => group.id === primary)
+  const selected = new Set(formData.value.group_routes.map((route) => route.group_id))
+  return groupOptions.value.filter((option) => {
+    if (index === 0) return option.value === primary
+    if (option.value === primary || (selected.has(option.value) && option.value !== formData.value.group_routes[index]?.group_id)) return false
+    return !primaryGroup || option.platform === primaryGroup.platform
+  })
+}
+
+const canAddGroupRoute = computed(() => formData.value.group_routes.length < 10 && routeOptionsFor(formData.value.group_routes.length).length > 0)
+
+const syncPrimaryRoute = () => {
+  if (formData.value.group_id === null) {
+    formData.value.group_routes = []
+    return
+  }
+
+  const currentPrimary = formData.value.group_routes[0]?.group_id === formData.value.group_id
+    ? formData.value.group_routes[0]
+    : null
+  formData.value.group_routes = [
+    {
+      group_id: formData.value.group_id,
+      max_rate_multiplier: currentPrimary?.max_rate_multiplier ?? null
+    },
+    ...formData.value.group_routes.slice(1).filter((route) => route.group_id !== formData.value.group_id)
+  ]
+}
+
+const addGroupRoute = () => {
+  const option = routeOptionsFor(formData.value.group_routes.length)[0]
+  if (option) formData.value.group_routes.push({ group_id: option.value, max_rate_multiplier: null })
+}
+
+const removeGroupRoute = (index: number) => {
+  formData.value.group_routes.splice(index, 1)
+}
+
+const moveGroupRoute = (index: number, delta: -1 | 1) => {
+  const target = index + delta
+  if (index <= 0 || target <= 0 || target >= formData.value.group_routes.length) return
+  const [route] = formData.value.group_routes.splice(index, 1)
+  formData.value.group_routes.splice(target, 0, route)
+}
+
+watch(() => formData.value.group_id, (groupId) => {
+  if (groupId !== null && (formData.value.group_routes.length === 0 || formData.value.group_routes[0]?.group_id !== groupId)) syncPrimaryRoute()
+})
 
 // Group dropdown search
 const groupSearchQuery = ref('')
@@ -1564,6 +1644,7 @@ const editKey = (key: ApiKey) => {
   formData.value = {
     name: key.name,
     group_id: key.group_id,
+    group_routes: (key.group_routes?.length ? key.group_routes : key.group_id ? [{ group_id: key.group_id }] : []).map((route) => ({ ...route })),
     status: key.status === 'quota_exhausted' || key.status === 'expired' ? 'inactive' : key.status,
     use_custom_key: false,
     custom_key: '',
@@ -1593,40 +1674,6 @@ const toggleKeyStatus = async (key: ApiKey) => {
     loadApiKeys()
   } catch (error) {
     appStore.showError(t('keys.failedToUpdateStatus'))
-  }
-}
-
-const openGroupSelector = (key: ApiKey) => {
-  if (groupSelectorKeyId.value === key.id) {
-    groupSelectorKeyId.value = null
-    dropdownPosition.value = null
-  } else {
-    const buttonEl = groupButtonRefs.value.get(key.id)
-    if (buttonEl) {
-      const rect = buttonEl.getBoundingClientRect()
-      const dropdownEstHeight = 400 // estimated max dropdown height
-      const dropdownEstWidth = Math.min(380, window.innerWidth - 16)
-      const spaceBelow = window.innerHeight - rect.bottom
-      const spaceAbove = rect.top
-      // 夹取 left，避免窄屏下浮层超出视口右缘
-      const left = Math.max(8, Math.min(rect.left, window.innerWidth - dropdownEstWidth - 8))
-
-      if (spaceBelow < dropdownEstHeight && spaceAbove > spaceBelow) {
-        // Not enough space below, pop upward
-        dropdownPosition.value = {
-          bottom: window.innerHeight - rect.top + 4,
-          left
-        }
-      } else {
-        // Default: pop downward
-        dropdownPosition.value = {
-          top: rect.bottom + 4,
-          left
-        }
-      }
-    }
-    groupSelectorKeyId.value = key.id
-    groupSearchQuery.value = ''
   }
 }
 
@@ -1665,6 +1712,18 @@ const handleSubmit = async () => {
   // Validate group_id is required
   if (formData.value.group_id === null) {
     appStore.showError(t('keys.groupRequired'))
+    return
+  }
+  syncPrimaryRoute()
+  const groupRoutes = formData.value.group_routes.map((route) => {
+    const rawCap = route.max_rate_multiplier as number | string | null | undefined
+    return {
+      group_id: route.group_id,
+      max_rate_multiplier: rawCap === '' || rawCap == null ? null : Number(rawCap)
+    }
+  })
+  if (groupRoutes.some((route) => route.group_id <= 0 || (route.max_rate_multiplier != null && (!Number.isFinite(route.max_rate_multiplier) || route.max_rate_multiplier <= 0)))) {
+    appStore.showError(t('keys.invalidGroupRoutes'))
     return
   }
 
@@ -1721,6 +1780,7 @@ const handleSubmit = async () => {
       const updates: UpdateApiKeyRequest = {
         name: formData.value.name,
         group_id: formData.value.group_id,
+        group_routes: groupRoutes,
         ip_whitelist: ipWhitelist,
         ip_blacklist: ipBlacklist,
         quota: quota,
@@ -1744,7 +1804,8 @@ const handleSubmit = async () => {
         ipBlacklist,
         quota,
         expiresInDays,
-        rateLimitData
+        rateLimitData,
+        groupRoutes
       )
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded
@@ -1790,6 +1851,7 @@ const closeModals = () => {
   formData.value = {
     name: '',
     group_id: null,
+    group_routes: [],
     status: 'active',
     use_custom_key: false,
     custom_key: '',

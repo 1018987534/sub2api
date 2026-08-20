@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/gin-gonic/gin"
@@ -999,11 +1000,83 @@ func (s *OpenAIGatewayService) isBetterAccount(candidate, current *Account) bool
 
 // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
 func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
-	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
-	// 分组利润控制：legacy 公共入口同样装门，保证不经
-	// selectAccountWithScheduler 的调用方也无法绕过利润准入。
-	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
-	return s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
+	routing, ok := apiKeyGroupRoutesFromContext(ctx, groupID)
+	if !ok {
+		ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
+		return s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
+	}
+
+	var firstWait *AccountSelectionResult
+	var lastNoAccount error
+	for index, route := range routing.routes {
+		group, err := s.resolveOpenAIAPIKeyRouteGroup(ctx, route.GroupID)
+		if err != nil {
+			if errors.Is(err, ErrGroupNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		if !apiKeyRouteAllowedForUser(routing.user, group) ||
+			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, true) {
+			continue
+		}
+		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
+		if err != nil {
+			return nil, err
+		}
+		if !eligible {
+			continue
+		}
+
+		candidateID := route.GroupID
+		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
+		attemptCtx = s.withOpenAIQuotaAutoPauseContext(attemptCtx)
+		attemptCtx = s.withOpenAIProfitControlGate(attemptCtx, &candidateID)
+		selection, err := s.selectAccountWithLoadAwareness(attemptCtx, &candidateID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
+		if err != nil {
+			if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts) {
+				lastNoAccount = err
+				continue
+			}
+			return nil, err
+		}
+		if selection == nil || selection.Account == nil {
+			lastNoAccount = ErrNoAvailableAccounts
+			continue
+		}
+		selection.attachAPIKeyRoute(group, subscription, index)
+		if selection.Acquired || selection.WaitPlan == nil {
+			return selection, nil
+		}
+		if firstWait == nil {
+			firstWait = selection
+		}
+	}
+	if firstWait != nil {
+		return firstWait, nil
+	}
+	if lastNoAccount != nil {
+		return nil, lastNoAccount
+	}
+	return nil, ErrNoAvailableAccounts
+}
+
+func (s *OpenAIGatewayService) resolveOpenAIAPIKeyRouteGroup(ctx context.Context, groupID int64) (*Group, error) {
+	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(group) && group.ID == groupID {
+		return group, nil
+	}
+	if s.schedulerSnapshot == nil {
+		return nil, ErrGroupNotFound
+	}
+	group, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	if group == nil {
+		return nil, ErrGroupNotFound
+	}
+	return group, nil
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (*AccountSelectionResult, error) {

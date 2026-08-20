@@ -2277,6 +2277,83 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
 ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+	routing, ok := apiKeyGroupRoutesFromContext(ctx, groupID)
+	if !ok {
+		return s.selectAccountWithSchedulerSingleGroup(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+	}
+
+	var firstWait *AccountSelectionResult
+	var firstWaitDecision OpenAIAccountScheduleDecision
+	var lastDecision OpenAIAccountScheduleDecision
+	var lastNoAccount error
+	for index, route := range routing.routes {
+		group, err := s.resolveOpenAIAPIKeyRouteGroup(ctx, route.GroupID)
+		if err != nil {
+			if errors.Is(err, ErrGroupNotFound) {
+				continue
+			}
+			return nil, lastDecision, err
+		}
+		if !apiKeyRouteAllowedForUser(routing.user, group) ||
+			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, true) {
+			continue
+		}
+		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
+		if err != nil {
+			return nil, lastDecision, err
+		}
+		if !eligible {
+			continue
+		}
+
+		candidateID := route.GroupID
+		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
+		selection, decision, err := s.selectAccountWithSchedulerSingleGroup(attemptCtx, &candidateID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+		lastDecision = decision
+		if err != nil {
+			if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts) {
+				lastNoAccount = err
+				continue
+			}
+			return nil, decision, err
+		}
+		if selection == nil || selection.Account == nil {
+			lastNoAccount = ErrNoAvailableAccounts
+			continue
+		}
+		selection.attachAPIKeyRoute(group, subscription, index)
+		if selection.Acquired || selection.WaitPlan == nil {
+			return selection, decision, nil
+		}
+		if firstWait == nil {
+			firstWait = selection
+			firstWaitDecision = decision
+		}
+	}
+	if firstWait != nil {
+		return firstWait, firstWaitDecision, nil
+	}
+	if lastNoAccount != nil {
+		return nil, lastDecision, lastNoAccount
+	}
+	return nil, lastDecision, ErrNoAvailableAccounts
+}
+
+func (s *OpenAIGatewayService) selectAccountWithSchedulerSingleGroup(
+	ctx context.Context,
+	groupID *int64,
+	previousResponseID string,
+	sessionHash string,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requiredTransport OpenAIUpstreamTransport,
+	requiredCapability OpenAIEndpointCapability,
+	requiredImageCapability OpenAIImagesCapability,
+	requireCompact bool,
+	platform string,
+	previousResponseCanMove bool,
+	useUpstreamTokenCost bool,
+) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
 	selection, decision, err := s.selectAccountWithSchedulerOnce(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 	if err == nil || openAIProxyStreamQuarantineBypassed(ctx) {
 		return selection, decision, err

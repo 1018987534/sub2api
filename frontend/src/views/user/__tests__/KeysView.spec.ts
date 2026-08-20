@@ -7,6 +7,8 @@ import KeysView from '../KeysView.vue'
 
 const {
   listKeys,
+  createKey,
+  updateKey,
   getPublicSettings,
   getDashboardApiKeysUsage,
   getAvailableGroups,
@@ -18,6 +20,8 @@ const {
   nextStep,
 } = vi.hoisted(() => ({
   listKeys: vi.fn(),
+  createKey: vi.fn(),
+  updateKey: vi.fn(),
   getPublicSettings: vi.fn(),
   getDashboardApiKeysUsage: vi.fn(),
   getAvailableGroups: vi.fn(),
@@ -58,8 +62,8 @@ const messages: Record<string, string> = {
 vi.mock('@/api', () => ({
   keysAPI: {
     list: listKeys,
-    create: vi.fn(),
-    update: vi.fn(),
+    create: createKey,
+    update: updateKey,
     delete: vi.fn(),
     toggleStatus: vi.fn(),
   },
@@ -261,6 +265,8 @@ describe('user KeysView column settings', () => {
     localStorage.clear()
 
     listKeys.mockReset()
+    createKey.mockReset()
+    updateKey.mockReset()
     getPublicSettings.mockReset()
     getDashboardApiKeysUsage.mockReset()
     getAvailableGroups.mockReset()
@@ -278,6 +284,8 @@ describe('user KeysView column settings', () => {
       page_size: 20,
       pages: 1,
     })
+    createKey.mockResolvedValue(createApiKey())
+    updateKey.mockResolvedValue(createApiKey())
     getPublicSettings.mockResolvedValue({})
     getDashboardApiKeysUsage.mockResolvedValue({ stats: {} })
     getAvailableGroups.mockResolvedValue([])
@@ -437,5 +445,41 @@ describe('user KeysView column settings', () => {
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
+  })
+
+  it('preserves the primary rate cap and normalizes an empty backup cap on update', async () => {
+    const key = { ...createApiKey(), group_id: 11 }
+    listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
+    const wrapper = await mountView()
+    const vm = wrapper.vm as unknown as {
+      showEditModal: boolean
+      selectedKey: ApiKey | null
+      formData: Record<string, any>
+      handleSubmit: () => Promise<void>
+    }
+
+    vm.showEditModal = true
+    vm.selectedKey = key
+    vm.formData.name = key.name
+    vm.formData.group_id = 11
+    vm.formData.group_routes = [
+      { group_id: 11, max_rate_multiplier: 1.25 },
+      { group_id: 12, max_rate_multiplier: '' },
+    ]
+
+    await vm.handleSubmit()
+    await flushPromises()
+
+    expect(updateKey).toHaveBeenCalledWith(
+      key.id,
+      expect.objectContaining({
+        group_id: 11,
+        group_routes: [
+          { group_id: 11, max_rate_multiplier: 1.25 },
+          { group_id: 12, max_rate_multiplier: null },
+        ],
+      })
+    )
+    expect(showError).not.toHaveBeenCalled()
   })
 })

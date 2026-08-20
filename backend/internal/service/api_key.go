@@ -3,8 +3,11 @@ package service
 import (
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 )
+
+type APIKeyGroupRoute = domain.APIKeyGroupRoute
 
 // API Key status constants
 const (
@@ -33,6 +36,7 @@ type APIKey struct {
 	Key         string
 	Name        string
 	GroupID     *int64
+	GroupRoutes []APIKeyGroupRoute
 	Status      string
 	IPWhitelist []string
 	IPBlacklist []string
@@ -62,6 +66,21 @@ type APIKey struct {
 	Window5hStart *time.Time // Start of current 5h window
 	Window1dStart *time.Time // Start of current 1d window
 	Window7dStart *time.Time // Start of current 7d window
+}
+
+// EffectiveGroupRoutes preserves the legacy group_id behavior until a key has
+// an explicit ordered route configuration.
+func (k *APIKey) EffectiveGroupRoutes() []APIKeyGroupRoute {
+	if k == nil {
+		return nil
+	}
+	if len(k.GroupRoutes) > 0 {
+		return append([]APIKeyGroupRoute(nil), k.GroupRoutes...)
+	}
+	if k.GroupID == nil || *k.GroupID <= 0 {
+		return nil
+	}
+	return []APIKeyGroupRoute{{GroupID: *k.GroupID}}
 }
 
 func (k *APIKey) IsActive() bool {

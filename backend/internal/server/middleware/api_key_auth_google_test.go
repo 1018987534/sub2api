@@ -526,6 +526,41 @@ func TestApiKeyAuthWithSubscriptionGoogle_MarksUnavailableGroupBusinessLimited(t
 	require.Equal(t, IngressRejectGroupDeleted, rejectReason)
 }
 
+func TestApiKeyAuthWithSubscriptionGoogle_DefersPrimaryChecksForOrderedFallbackRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	primaryID := int64(101)
+	apiKey := &service.APIKey{
+		ID:          100,
+		UserID:      7,
+		GroupID:     &primaryID,
+		GroupRoutes: []service.APIKeyGroupRoute{{GroupID: primaryID}, {GroupID: 102}},
+		Key:         "google-fallback-key",
+		Status:      service.StatusActive,
+		User:        &service.User{ID: 7, Role: service.RoleUser, Status: service.StatusActive, Balance: 0},
+		Group: &service.Group{
+			ID: primaryID, Name: "disabled-primary", Status: service.StatusDisabled,
+			Platform: service.PlatformGemini, Hydrated: true,
+		},
+	}
+	svc := newTestAPIKeyService(fakeAPIKeyRepo{getByKey: func(_ context.Context, key string) (*service.APIKey, error) {
+		if key != apiKey.Key {
+			return nil, service.ErrAPIKeyNotFound
+		}
+		clone := *apiKey
+		return &clone, nil
+	}})
+	router := gin.New()
+	router.Use(APIKeyAuthWithSubscriptionGoogle(svc, nil, &config.Config{RunMode: config.RunModeStandard}))
+	router.GET("/v1beta/test", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1beta/test", nil)
+	req.Header.Set("x-goog-api-key", apiKey.Key)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestApiKeyAuthWithSubscriptionGoogle_RepoError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

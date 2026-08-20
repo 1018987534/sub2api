@@ -241,7 +241,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			continue
 		}
 		account = latest
-		selection.Account = latest
+		selection.Account = selection.AccountForSelectedRoute(latest)
 		if selection.ProfitGateActive() {
 			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, selectionSessionHash, account.ID); err != nil {
 				reqLog.Warn("gateway.cc.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))

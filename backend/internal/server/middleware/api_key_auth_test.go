@@ -577,6 +577,43 @@ func TestAPIKeyAuthRejectsUnavailableGroup(t *testing.T) {
 	}
 }
 
+func TestAPIKeyAuthDefersPrimaryGroupChecksForOrderedFallbackRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	primaryID := int64(101)
+	apiKey := &service.APIKey{
+		ID:          100,
+		UserID:      7,
+		GroupID:     &primaryID,
+		GroupRoutes: []service.APIKeyGroupRoute{{GroupID: primaryID}, {GroupID: 102}},
+		Key:         "fallback-key",
+		Status:      service.StatusActive,
+		User:        &service.User{ID: 7, Role: service.RoleUser, Status: service.StatusActive, Balance: 0},
+		Group: &service.Group{
+			ID: primaryID, Name: "disabled-primary", Status: service.StatusDisabled,
+			Platform: service.PlatformAnthropic, Hydrated: true,
+		},
+	}
+	repo := &stubApiKeyRepo{getByKey: func(_ context.Context, key string) (*service.APIKey, error) {
+		if key != apiKey.Key {
+			return nil, service.ErrAPIKeyNotFound
+		}
+		clone := *apiKey
+		return &clone, nil
+	}}
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(svc, nil, cfg)))
+	router.GET("/t", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestAPIKeyAuthMarksOnlyExpectedIngressRejections(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

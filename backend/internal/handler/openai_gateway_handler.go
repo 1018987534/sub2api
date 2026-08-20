@@ -1581,7 +1581,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 			return nil, openAISlotAcquireProfitVetoed
 		}
 		account = latest
-		selection.Account = latest
+		selection.Account = selection.AccountForSelectedRoute(latest)
 		// 调度器已抢槽路径无门时由选号内部完成 eager 绑定；门下选号内部
 		// 推迟绑定，这里在终检通过后补准入后绑定。
 		if selection.ProfitGateActive() {
@@ -1619,7 +1619,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 			return nil, openAISlotAcquireProfitVetoed
 		}
 		account = latest
-		selection.Account = latest
+		selection.Account = selection.AccountForSelectedRoute(latest)
 		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 			reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
@@ -1674,7 +1674,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 		return nil, openAISlotAcquireProfitVetoed
 	}
 	account = latest
-	selection.Account = latest
+	selection.Account = selection.AccountForSelectedRoute(latest)
 	if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
 		reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 	}
@@ -2040,7 +2040,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				continue
 			}
 			account = latest
-			selection.Account = latest
+			selection.Account = selection.AccountForSelectedRoute(latest)
 		}
 		if !selection.Acquired {
 			if selection.WaitPlan == nil {
@@ -2077,7 +2077,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				continue
 			}
 			account = latest
-			selection.Account = latest
+			selection.Account = selection.AccountForSelectedRoute(latest)
 			accountReleaseFunc = fastReleaseFunc
 		}
 		// 准入完成：门并入连接 ctx，turn 级复核与 failover 重选共用。

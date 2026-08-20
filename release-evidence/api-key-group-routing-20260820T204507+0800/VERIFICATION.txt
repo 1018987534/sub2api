@@ -1,0 +1,61 @@
+branch=cdy/api-key-group-routing-20260820
+base_commit=5a4910a1cb08424112d1bce634abcc234d511078
+changed_branch=api_key.group_routes ordered candidate routing
+changed_field=group_routes[].max_rate_multiplier
+original_source_path=backend/internal/service/gateway_scheduling.go
+original_source_sha256=0e09bf772dff7b79be6fa547cf445b059039e8e351f30461c767b07918f55e89
+modified_source_sha256=b99bc3d16d6d115cc6bd82619aa275dd475bb8f38c5030b642444a012c8639e2
+
+MODIFIED_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/api-key-group-routing-20260820T204507+0800/MODIFIED_FILE
+DIFF_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/api-key-group-routing-20260820T204507+0800/DIFF_FILE
+VERIFICATION=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/api-key-group-routing-20260820T204507+0800/VERIFICATION.txt
+ROLLBACK=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/api-key-group-routing-20260820T204507+0800/ROLLBACK.sh
+MODIFIED_FILE_SHA256=b306e731ee095262b73c09fd9248395ba80723408383ce648fc28d1633725bc7
+DIFF_FILE_SHA256=479f5417452ef55cfa740d37f2587270717dc9a6828987ec61acf5f8c967ee6a
+ROLLBACK_SHA256=a7048740b8caa3205c43d93753c0b6f63a0f8077ac10a5b1d86244f85efca40c
+
+BASELINE_COMMAND=(cd /tmp/sub2api-api-key-baseline/backend && go test ./internal/service -count=1)
+BASELINE_INPUT=git_worktree_at_5a4910a1cb08424112d1bce634abcc234d511078
+BASELINE_OUTPUT=ok github.com/Wei-Shaw/sub2api/internal/service 109.433s
+BASELINE_RESULT=legacy single-group routing; no new group_routes field
+BASELINE_EXIT_STATUS=0
+
+MODIFIED_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/backend && go test -tags=unit ./internal/service -run 'Test(APIKeyRoute|APIKeyGroupRouteContext|APIKeyServiceValidateGroupRoutes|APIKeyAuthSnapshotRoundTrip|OpenAIGatewayOrderedRoutes|OpenAIGatewayServiceRecordUsage_UsesActuallySelectedAPIKeyRoute)' -count=1)
+MODIFIED_INPUT=working_tree_at_cdy/api-key-group-routing-20260820
+MODIFIED_OUTPUT=ok github.com/Wei-Shaw/sub2api/internal/service 1.132s
+MODIFIED_RESULT=rate-cap checks and ordered fallback tests passed
+MODIFIED_EXIT_STATUS=0
+
+ROLLBACK_COMMAND=./ROLLBACK.sh /tmp/api-key-group-routing-rollback-copy
+ROLLBACK_INPUT=/tmp/api-key-group-routing-rollback-copy copied from MODIFIED_FILE
+ROLLBACK_OUTPUT=ROLLBACK_OK restored_legacy_single_group_routing
+ROLLBACK_RESULT=copy restored to baseline routing fields
+ROLLBACK_EXIT_STATUS=0
+ROLLBACK_COMPARE_COMMAND=cmp BASELINE_FILE /tmp/api-key-group-routing-rollback-copy
+ROLLBACK_COMPARE_OUTPUT=<empty>
+ROLLBACK_COMPARE_EXIT_STATUS=0
+RESTORED_BEHAVIOR=/tmp/api-key-group-routing-rollback-copy has primary-only routing, unlimited multiplier, and no fallback; MODIFIED_FILE remains changed.
+ROLLBACK_COPY_SHA256=44de0af1303aea4e36f48556fb1d23f0e95d395c39ff136d453cb7e60e05fd60
+
+BACKEND_FULL_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/backend && go test ./...)
+BACKEND_FULL_OUTPUT=all packages passed; internal/service 114.906s; migrations 0.414s
+BACKEND_FULL_EXIT_STATUS=0
+BACKEND_UNIT_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/backend && go test -tags=unit ./internal/service ./internal/server/middleware ./internal/handler)
+BACKEND_UNIT_OUTPUT=internal/service 157.290s; internal/server/middleware 1.560s; internal/handler 41.009s; all passed
+BACKEND_UNIT_EXIT_STATUS=0
+FRONTEND_TYPECHECK_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/frontend && pnpm run typecheck)
+FRONTEND_TYPECHECK_RESULT=passed
+FRONTEND_TYPECHECK_EXIT_STATUS=0
+FRONTEND_TEST_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/frontend && pnpm exec vitest run src/views/user/__tests__/KeysView.spec.ts)
+FRONTEND_TEST_OUTPUT=1 file passed; 10 tests passed
+FRONTEND_TEST_EXIT_STATUS=0
+FRONTEND_BUILD_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/frontend && pnpm run build)
+FRONTEND_BUILD_RESULT=passed
+FRONTEND_BUILD_EXIT_STATUS=0
+UI_DESKTOP_RESULT=Local modified frontend at 1440x1000 showed primary multiplier cap 0.75, ordered backup selector, add, move, and remove controls without overlap.
+UI_MOBILE_RESULT=Local modified frontend at 390x844 reported document scrollWidth=390 and clientWidth=390; route fields and actions did not overlap.
+UI_ORDER_RESULT=Initial Primary Route, Backup Route A, Backup Route B; moving the last route up produced Primary Route, Backup Route B, Backup Route A; deleting the last produced Primary Route, Backup Route B.
+UI_DESKTOP_SCREENSHOT=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/api-key-group-routing-20260820T204507+0800/ui-desktop.jpg
+UI_DESKTOP_SCREENSHOT_SHA256=bab9a36d30392e6021d18621af5fd6bc9f047e440fc02c22a57926bbb5fe47b2
+UI_MOBILE_SCREENSHOT=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/api-key-group-routing-20260820T204507+0800/ui-mobile.jpg
+UI_MOBILE_SCREENSHOT_SHA256=a1070e3859996ccc9e03be2a57b4bb71a3dde54d40d6158909a54061fab34151

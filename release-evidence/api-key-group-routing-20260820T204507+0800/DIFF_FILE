@@ -1,0 +1,2373 @@
+diff --git a/backend/ent/apikey.go b/backend/ent/apikey.go
+index 9ee660c2d..4914c3d72 100644
+--- a/backend/ent/apikey.go
++++ b/backend/ent/apikey.go
+@@ -13,6 +13,7 @@ import (
+ 	"github.com/Wei-Shaw/sub2api/ent/apikey"
+ 	"github.com/Wei-Shaw/sub2api/ent/group"
+ 	"github.com/Wei-Shaw/sub2api/ent/user"
++	"github.com/Wei-Shaw/sub2api/internal/domain"
+ )
+ 
+ // APIKey is the model entity for the APIKey schema.
+@@ -34,6 +35,8 @@ type APIKey struct {
+ 	Name string `json:"name,omitempty"`
+ 	// GroupID holds the value of the "group_id" field.
+ 	GroupID *int64 `json:"group_id,omitempty"`
++	// API Key ordered group routes; first item is primary and each item may cap the accepted effective multiplier
++	GroupRoutes []domain.APIKeyGroupRoute `json:"group_routes,omitempty"`
+ 	// Status holds the value of the "status" field.
+ 	Status string `json:"status,omitempty"`
+ 	// Last usage time of this API key
+@@ -121,7 +124,7 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
+ 	values := make([]any, len(columns))
+ 	for i := range columns {
+ 		switch columns[i] {
+-		case apikey.FieldIPWhitelist, apikey.FieldIPBlacklist:
++		case apikey.FieldGroupRoutes, apikey.FieldIPWhitelist, apikey.FieldIPBlacklist:
+ 			values[i] = new([]byte)
+ 		case apikey.FieldQuota, apikey.FieldQuotaUsed, apikey.FieldRateLimit5h, apikey.FieldRateLimit1d, apikey.FieldRateLimit7d, apikey.FieldUsage5h, apikey.FieldUsage1d, apikey.FieldUsage7d:
+ 			values[i] = new(sql.NullFloat64)
+@@ -196,6 +199,14 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
+ 				_m.GroupID = new(int64)
+ 				*_m.GroupID = value.Int64
+ 			}
++		case apikey.FieldGroupRoutes:
++			if value, ok := values[i].(*[]byte); !ok {
++				return fmt.Errorf("unexpected type %T for field group_routes", values[i])
++			} else if value != nil && len(*value) > 0 {
++				if err := json.Unmarshal(*value, &_m.GroupRoutes); err != nil {
++					return fmt.Errorf("unmarshal field group_routes: %w", err)
++				}
++			}
+ 		case apikey.FieldStatus:
+ 			if value, ok := values[i].(*sql.NullString); !ok {
+ 				return fmt.Errorf("unexpected type %T for field status", values[i])
+@@ -377,6 +388,9 @@ func (_m *APIKey) String() string {
+ 		builder.WriteString(fmt.Sprintf("%v", *v))
+ 	}
+ 	builder.WriteString(", ")
++	builder.WriteString("group_routes=")
++	builder.WriteString(fmt.Sprintf("%v", _m.GroupRoutes))
++	builder.WriteString(", ")
+ 	builder.WriteString("status=")
+ 	builder.WriteString(_m.Status)
+ 	builder.WriteString(", ")
+diff --git a/backend/ent/apikey/apikey.go b/backend/ent/apikey/apikey.go
+index d398a027b..491808684 100644
+--- a/backend/ent/apikey/apikey.go
++++ b/backend/ent/apikey/apikey.go
+@@ -8,6 +8,7 @@ import (
+ 	"entgo.io/ent"
+ 	"entgo.io/ent/dialect/sql"
+ 	"entgo.io/ent/dialect/sql/sqlgraph"
++	"github.com/Wei-Shaw/sub2api/internal/domain"
+ )
+ 
+ const (
+@@ -29,6 +30,8 @@ const (
+ 	FieldName = "name"
+ 	// FieldGroupID holds the string denoting the group_id field in the database.
+ 	FieldGroupID = "group_id"
++	// FieldGroupRoutes holds the string denoting the group_routes field in the database.
++	FieldGroupRoutes = "group_routes"
+ 	// FieldStatus holds the string denoting the status field in the database.
+ 	FieldStatus = "status"
+ 	// FieldLastUsedAt holds the string denoting the last_used_at field in the database.
+@@ -102,6 +105,7 @@ var Columns = []string{
+ 	FieldKey,
+ 	FieldName,
+ 	FieldGroupID,
++	FieldGroupRoutes,
+ 	FieldStatus,
+ 	FieldLastUsedAt,
+ 	FieldIPWhitelist,
+@@ -148,6 +152,8 @@ var (
+ 	KeyValidator func(string) error
+ 	// NameValidator is a validator for the "name" field. It is called by the builders before save.
+ 	NameValidator func(string) error
++	// DefaultGroupRoutes holds the default value on creation for the "group_routes" field.
++	DefaultGroupRoutes []domain.APIKeyGroupRoute
+ 	// DefaultStatus holds the default value on creation for the "status" field.
+ 	DefaultStatus string
+ 	// StatusValidator is a validator for the "status" field. It is called by the builders before save.
+diff --git a/backend/ent/apikey_create.go b/backend/ent/apikey_create.go
+index 4ec8aeaae..4d60f4379 100644
+--- a/backend/ent/apikey_create.go
++++ b/backend/ent/apikey_create.go
+@@ -15,6 +15,7 @@ import (
+ 	"github.com/Wei-Shaw/sub2api/ent/group"
+ 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+ 	"github.com/Wei-Shaw/sub2api/ent/user"
++	"github.com/Wei-Shaw/sub2api/internal/domain"
+ )
+ 
+ // APIKeyCreate is the builder for creating a APIKey entity.
+@@ -99,6 +100,12 @@ func (_c *APIKeyCreate) SetNillableGroupID(v *int64) *APIKeyCreate {
+ 	return _c
+ }
+ 
++// SetGroupRoutes sets the "group_routes" field.
++func (_c *APIKeyCreate) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyCreate {
++	_c.mutation.SetGroupRoutes(v)
++	return _c
++}
++
+ // SetStatus sets the "status" field.
+ func (_c *APIKeyCreate) SetStatus(v string) *APIKeyCreate {
+ 	_c.mutation.SetStatus(v)
+@@ -383,6 +390,10 @@ func (_c *APIKeyCreate) defaults() error {
+ 		v := apikey.DefaultUpdatedAt()
+ 		_c.mutation.SetUpdatedAt(v)
+ 	}
++	if _, ok := _c.mutation.GroupRoutes(); !ok {
++		v := apikey.DefaultGroupRoutes
++		_c.mutation.SetGroupRoutes(v)
++	}
+ 	if _, ok := _c.mutation.Status(); !ok {
+ 		v := apikey.DefaultStatus
+ 		_c.mutation.SetStatus(v)
+@@ -449,6 +460,9 @@ func (_c *APIKeyCreate) check() error {
+ 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "APIKey.name": %w`, err)}
+ 		}
+ 	}
++	if _, ok := _c.mutation.GroupRoutes(); !ok {
++		return &ValidationError{Name: "group_routes", err: errors.New(`ent: missing required field "APIKey.group_routes"`)}
++	}
+ 	if _, ok := _c.mutation.Status(); !ok {
+ 		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "APIKey.status"`)}
+ 	}
+@@ -531,6 +545,10 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
+ 		_spec.SetField(apikey.FieldName, field.TypeString, value)
+ 		_node.Name = value
+ 	}
++	if value, ok := _c.mutation.GroupRoutes(); ok {
++		_spec.SetField(apikey.FieldGroupRoutes, field.TypeJSON, value)
++		_node.GroupRoutes = value
++	}
+ 	if value, ok := _c.mutation.Status(); ok {
+ 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
+ 		_node.Status = value
+@@ -781,6 +799,18 @@ func (u *APIKeyUpsert) ClearGroupID() *APIKeyUpsert {
+ 	return u
+ }
+ 
++// SetGroupRoutes sets the "group_routes" field.
++func (u *APIKeyUpsert) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpsert {
++	u.Set(apikey.FieldGroupRoutes, v)
++	return u
++}
++
++// UpdateGroupRoutes sets the "group_routes" field to the value that was provided on create.
++func (u *APIKeyUpsert) UpdateGroupRoutes() *APIKeyUpsert {
++	u.SetExcluded(apikey.FieldGroupRoutes)
++	return u
++}
++
+ // SetStatus sets the "status" field.
+ func (u *APIKeyUpsert) SetStatus(v string) *APIKeyUpsert {
+ 	u.Set(apikey.FieldStatus, v)
+@@ -1206,6 +1236,20 @@ func (u *APIKeyUpsertOne) ClearGroupID() *APIKeyUpsertOne {
+ 	})
+ }
+ 
++// SetGroupRoutes sets the "group_routes" field.
++func (u *APIKeyUpsertOne) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpsertOne {
++	return u.Update(func(s *APIKeyUpsert) {
++		s.SetGroupRoutes(v)
++	})
++}
++
++// UpdateGroupRoutes sets the "group_routes" field to the value that was provided on create.
++func (u *APIKeyUpsertOne) UpdateGroupRoutes() *APIKeyUpsertOne {
++	return u.Update(func(s *APIKeyUpsert) {
++		s.UpdateGroupRoutes()
++	})
++}
++
+ // SetStatus sets the "status" field.
+ func (u *APIKeyUpsertOne) SetStatus(v string) *APIKeyUpsertOne {
+ 	return u.Update(func(s *APIKeyUpsert) {
+@@ -1844,6 +1888,20 @@ func (u *APIKeyUpsertBulk) ClearGroupID() *APIKeyUpsertBulk {
+ 	})
+ }
+ 
++// SetGroupRoutes sets the "group_routes" field.
++func (u *APIKeyUpsertBulk) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpsertBulk {
++	return u.Update(func(s *APIKeyUpsert) {
++		s.SetGroupRoutes(v)
++	})
++}
++
++// UpdateGroupRoutes sets the "group_routes" field to the value that was provided on create.
++func (u *APIKeyUpsertBulk) UpdateGroupRoutes() *APIKeyUpsertBulk {
++	return u.Update(func(s *APIKeyUpsert) {
++		s.UpdateGroupRoutes()
++	})
++}
++
+ // SetStatus sets the "status" field.
+ func (u *APIKeyUpsertBulk) SetStatus(v string) *APIKeyUpsertBulk {
+ 	return u.Update(func(s *APIKeyUpsert) {
+diff --git a/backend/ent/apikey_update.go b/backend/ent/apikey_update.go
+index db341e4c9..7f23b15ce 100644
+--- a/backend/ent/apikey_update.go
++++ b/backend/ent/apikey_update.go
+@@ -17,6 +17,7 @@ import (
+ 	"github.com/Wei-Shaw/sub2api/ent/predicate"
+ 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+ 	"github.com/Wei-Shaw/sub2api/ent/user"
++	"github.com/Wei-Shaw/sub2api/internal/domain"
+ )
+ 
+ // APIKeyUpdate is the builder for updating APIKey entities.
+@@ -120,6 +121,18 @@ func (_u *APIKeyUpdate) ClearGroupID() *APIKeyUpdate {
+ 	return _u
+ }
+ 
++// SetGroupRoutes sets the "group_routes" field.
++func (_u *APIKeyUpdate) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpdate {
++	_u.mutation.SetGroupRoutes(v)
++	return _u
++}
++
++// AppendGroupRoutes appends value to the "group_routes" field.
++func (_u *APIKeyUpdate) AppendGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpdate {
++	_u.mutation.AppendGroupRoutes(v)
++	return _u
++}
++
+ // SetStatus sets the "status" field.
+ func (_u *APIKeyUpdate) SetStatus(v string) *APIKeyUpdate {
+ 	_u.mutation.SetStatus(v)
+@@ -593,6 +606,14 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
+ 	if value, ok := _u.mutation.Name(); ok {
+ 		_spec.SetField(apikey.FieldName, field.TypeString, value)
+ 	}
++	if value, ok := _u.mutation.GroupRoutes(); ok {
++		_spec.SetField(apikey.FieldGroupRoutes, field.TypeJSON, value)
++	}
++	if value, ok := _u.mutation.AppendedGroupRoutes(); ok {
++		_spec.AddModifier(func(u *sql.UpdateBuilder) {
++			sqljson.Append(u, apikey.FieldGroupRoutes, value)
++		})
++	}
+ 	if value, ok := _u.mutation.Status(); ok {
+ 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
+ 	}
+@@ -907,6 +928,18 @@ func (_u *APIKeyUpdateOne) ClearGroupID() *APIKeyUpdateOne {
+ 	return _u
+ }
+ 
++// SetGroupRoutes sets the "group_routes" field.
++func (_u *APIKeyUpdateOne) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpdateOne {
++	_u.mutation.SetGroupRoutes(v)
++	return _u
++}
++
++// AppendGroupRoutes appends value to the "group_routes" field.
++func (_u *APIKeyUpdateOne) AppendGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpdateOne {
++	_u.mutation.AppendGroupRoutes(v)
++	return _u
++}
++
+ // SetStatus sets the "status" field.
+ func (_u *APIKeyUpdateOne) SetStatus(v string) *APIKeyUpdateOne {
+ 	_u.mutation.SetStatus(v)
+@@ -1410,6 +1443,14 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
+ 	if value, ok := _u.mutation.Name(); ok {
+ 		_spec.SetField(apikey.FieldName, field.TypeString, value)
+ 	}
++	if value, ok := _u.mutation.GroupRoutes(); ok {
++		_spec.SetField(apikey.FieldGroupRoutes, field.TypeJSON, value)
++	}
++	if value, ok := _u.mutation.AppendedGroupRoutes(); ok {
++		_spec.AddModifier(func(u *sql.UpdateBuilder) {
++			sqljson.Append(u, apikey.FieldGroupRoutes, value)
++		})
++	}
+ 	if value, ok := _u.mutation.Status(); ok {
+ 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
+ 	}
+diff --git a/backend/ent/migrate/schema.go b/backend/ent/migrate/schema.go
+index f8a5ce5cb..c944eb8e3 100644
+--- a/backend/ent/migrate/schema.go
++++ b/backend/ent/migrate/schema.go
+@@ -17,6 +17,7 @@ var (
+ 		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+ 		{Name: "key", Type: field.TypeString, Unique: true, Size: 128},
+ 		{Name: "name", Type: field.TypeString, Size: 100},
++		{Name: "group_routes", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+ 		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
+ 		{Name: "last_used_at", Type: field.TypeTime, Nullable: true},
+ 		{Name: "ip_whitelist", Type: field.TypeJSON, Nullable: true},
+@@ -44,13 +45,13 @@ var (
+ 		ForeignKeys: []*schema.ForeignKey{
+ 			{
+ 				Symbol:     "api_keys_groups_api_keys",
+-				Columns:    []*schema.Column{APIKeysColumns[22]},
++				Columns:    []*schema.Column{APIKeysColumns[23]},
+ 				RefColumns: []*schema.Column{GroupsColumns[0]},
+ 				OnDelete:   schema.SetNull,
+ 			},
+ 			{
+ 				Symbol:     "api_keys_users_api_keys",
+-				Columns:    []*schema.Column{APIKeysColumns[23]},
++				Columns:    []*schema.Column{APIKeysColumns[24]},
+ 				RefColumns: []*schema.Column{UsersColumns[0]},
+ 				OnDelete:   schema.NoAction,
+ 			},
+@@ -59,17 +60,17 @@ var (
+ 			{
+ 				Name:    "apikey_user_id",
+ 				Unique:  false,
+-				Columns: []*schema.Column{APIKeysColumns[23]},
++				Columns: []*schema.Column{APIKeysColumns[24]},
+ 			},
+ 			{
+ 				Name:    "apikey_group_id",
+ 				Unique:  false,
+-				Columns: []*schema.Column{APIKeysColumns[22]},
++				Columns: []*schema.Column{APIKeysColumns[23]},
+ 			},
+ 			{
+ 				Name:    "apikey_status",
+ 				Unique:  false,
+-				Columns: []*schema.Column{APIKeysColumns[6]},
++				Columns: []*schema.Column{APIKeysColumns[7]},
+ 			},
+ 			{
+ 				Name:    "apikey_deleted_at",
+@@ -79,17 +80,17 @@ var (
+ 			{
+ 				Name:    "apikey_last_used_at",
+ 				Unique:  false,
+-				Columns: []*schema.Column{APIKeysColumns[7]},
++				Columns: []*schema.Column{APIKeysColumns[8]},
+ 			},
+ 			{
+ 				Name:    "apikey_quota_quota_used",
+ 				Unique:  false,
+-				Columns: []*schema.Column{APIKeysColumns[10], APIKeysColumns[11]},
++				Columns: []*schema.Column{APIKeysColumns[11], APIKeysColumns[12]},
+ 			},
+ 			{
+ 				Name:    "apikey_expires_at",
+ 				Unique:  false,
+-				Columns: []*schema.Column{APIKeysColumns[12]},
++				Columns: []*schema.Column{APIKeysColumns[13]},
+ 			},
+ 		},
+ 	}
+diff --git a/backend/ent/mutation.go b/backend/ent/mutation.go
+index aac84a3be..17790a8b5 100644
+--- a/backend/ent/mutation.go
++++ b/backend/ent/mutation.go
+@@ -116,6 +116,8 @@ type APIKeyMutation struct {
+ 	deleted_at         *time.Time
+ 	key                *string
+ 	name               *string
++	group_routes       *[]domain.APIKeyGroupRoute
++	appendgroup_routes []domain.APIKeyGroupRoute
+ 	status             *string
+ 	last_used_at       *time.Time
+ 	ip_whitelist       *[]string
+@@ -531,6 +533,57 @@ func (m *APIKeyMutation) ResetGroupID() {
+ 	delete(m.clearedFields, apikey.FieldGroupID)
+ }
+ 
++// SetGroupRoutes sets the "group_routes" field.
++func (m *APIKeyMutation) SetGroupRoutes(dkgr []domain.APIKeyGroupRoute) {
++	m.group_routes = &dkgr
++	m.appendgroup_routes = nil
++}
++
++// GroupRoutes returns the value of the "group_routes" field in the mutation.
++func (m *APIKeyMutation) GroupRoutes() (r []domain.APIKeyGroupRoute, exists bool) {
++	v := m.group_routes
++	if v == nil {
++		return
++	}
++	return *v, true
++}
++
++// OldGroupRoutes returns the old "group_routes" field's value of the APIKey entity.
++// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
++// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
++func (m *APIKeyMutation) OldGroupRoutes(ctx context.Context) (v []domain.APIKeyGroupRoute, err error) {
++	if !m.op.Is(OpUpdateOne) {
++		return v, errors.New("OldGroupRoutes is only allowed on UpdateOne operations")
++	}
++	if m.id == nil || m.oldValue == nil {
++		return v, errors.New("OldGroupRoutes requires an ID field in the mutation")
++	}
++	oldValue, err := m.oldValue(ctx)
++	if err != nil {
++		return v, fmt.Errorf("querying old value for OldGroupRoutes: %w", err)
++	}
++	return oldValue.GroupRoutes, nil
++}
++
++// AppendGroupRoutes adds dkgr to the "group_routes" field.
++func (m *APIKeyMutation) AppendGroupRoutes(dkgr []domain.APIKeyGroupRoute) {
++	m.appendgroup_routes = append(m.appendgroup_routes, dkgr...)
++}
++
++// AppendedGroupRoutes returns the list of values that were appended to the "group_routes" field in this mutation.
++func (m *APIKeyMutation) AppendedGroupRoutes() ([]domain.APIKeyGroupRoute, bool) {
++	if len(m.appendgroup_routes) == 0 {
++		return nil, false
++	}
++	return m.appendgroup_routes, true
++}
++
++// ResetGroupRoutes resets all changes to the "group_routes" field.
++func (m *APIKeyMutation) ResetGroupRoutes() {
++	m.group_routes = nil
++	m.appendgroup_routes = nil
++}
++
+ // SetStatus sets the "status" field.
+ func (m *APIKeyMutation) SetStatus(s string) {
+ 	m.status = &s
+@@ -1532,7 +1585,7 @@ func (m *APIKeyMutation) Type() string {
+ // order to get all numeric fields that were incremented/decremented, call
+ // AddedFields().
+ func (m *APIKeyMutation) Fields() []string {
+-	fields := make([]string, 0, 23)
++	fields := make([]string, 0, 24)
+ 	if m.created_at != nil {
+ 		fields = append(fields, apikey.FieldCreatedAt)
+ 	}
+@@ -1554,6 +1607,9 @@ func (m *APIKeyMutation) Fields() []string {
+ 	if m.group != nil {
+ 		fields = append(fields, apikey.FieldGroupID)
+ 	}
++	if m.group_routes != nil {
++		fields = append(fields, apikey.FieldGroupRoutes)
++	}
+ 	if m.status != nil {
+ 		fields = append(fields, apikey.FieldStatus)
+ 	}
+@@ -1624,6 +1680,8 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
+ 		return m.Name()
+ 	case apikey.FieldGroupID:
+ 		return m.GroupID()
++	case apikey.FieldGroupRoutes:
++		return m.GroupRoutes()
+ 	case apikey.FieldStatus:
+ 		return m.Status()
+ 	case apikey.FieldLastUsedAt:
+@@ -1679,6 +1737,8 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value,
+ 		return m.OldName(ctx)
+ 	case apikey.FieldGroupID:
+ 		return m.OldGroupID(ctx)
++	case apikey.FieldGroupRoutes:
++		return m.OldGroupRoutes(ctx)
+ 	case apikey.FieldStatus:
+ 		return m.OldStatus(ctx)
+ 	case apikey.FieldLastUsedAt:
+@@ -1769,6 +1829,13 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
+ 		}
+ 		m.SetGroupID(v)
+ 		return nil
++	case apikey.FieldGroupRoutes:
++		v, ok := value.([]domain.APIKeyGroupRoute)
++		if !ok {
++			return fmt.Errorf("unexpected type %T for field %s", value, name)
++		}
++		m.SetGroupRoutes(v)
++		return nil
+ 	case apikey.FieldStatus:
+ 		v, ok := value.(string)
+ 		if !ok {
+@@ -2107,6 +2174,9 @@ func (m *APIKeyMutation) ResetField(name string) error {
+ 	case apikey.FieldGroupID:
+ 		m.ResetGroupID()
+ 		return nil
++	case apikey.FieldGroupRoutes:
++		m.ResetGroupRoutes()
++		return nil
+ 	case apikey.FieldStatus:
+ 		m.ResetStatus()
+ 		return nil
+diff --git a/backend/ent/runtime/runtime.go b/backend/ent/runtime/runtime.go
+index 3e450ca31..b68a1f51b 100644
+--- a/backend/ent/runtime/runtime.go
++++ b/backend/ent/runtime/runtime.go
+@@ -107,42 +107,46 @@ func init() {
+ 			return nil
+ 		}
+ 	}()
++	// apikeyDescGroupRoutes is the schema descriptor for group_routes field.
++	apikeyDescGroupRoutes := apikeyFields[4].Descriptor()
++	// apikey.DefaultGroupRoutes holds the default value on creation for the group_routes field.
++	apikey.DefaultGroupRoutes = apikeyDescGroupRoutes.Default.([]domain.APIKeyGroupRoute)
+ 	// apikeyDescStatus is the schema descriptor for status field.
+-	apikeyDescStatus := apikeyFields[4].Descriptor()
++	apikeyDescStatus := apikeyFields[5].Descriptor()
+ 	// apikey.DefaultStatus holds the default value on creation for the status field.
+ 	apikey.DefaultStatus = apikeyDescStatus.Default.(string)
+ 	// apikey.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+ 	apikey.StatusValidator = apikeyDescStatus.Validators[0].(func(string) error)
+ 	// apikeyDescQuota is the schema descriptor for quota field.
+-	apikeyDescQuota := apikeyFields[8].Descriptor()
++	apikeyDescQuota := apikeyFields[9].Descriptor()
+ 	// apikey.DefaultQuota holds the default value on creation for the quota field.
+ 	apikey.DefaultQuota = apikeyDescQuota.Default.(float64)
+ 	// apikeyDescQuotaUsed is the schema descriptor for quota_used field.
+-	apikeyDescQuotaUsed := apikeyFields[9].Descriptor()
++	apikeyDescQuotaUsed := apikeyFields[10].Descriptor()
+ 	// apikey.DefaultQuotaUsed holds the default value on creation for the quota_used field.
+ 	apikey.DefaultQuotaUsed = apikeyDescQuotaUsed.Default.(float64)
+ 	// apikeyDescRateLimit5h is the schema descriptor for rate_limit_5h field.
+-	apikeyDescRateLimit5h := apikeyFields[11].Descriptor()
++	apikeyDescRateLimit5h := apikeyFields[12].Descriptor()
+ 	// apikey.DefaultRateLimit5h holds the default value on creation for the rate_limit_5h field.
+ 	apikey.DefaultRateLimit5h = apikeyDescRateLimit5h.Default.(float64)
+ 	// apikeyDescRateLimit1d is the schema descriptor for rate_limit_1d field.
+-	apikeyDescRateLimit1d := apikeyFields[12].Descriptor()
++	apikeyDescRateLimit1d := apikeyFields[13].Descriptor()
+ 	// apikey.DefaultRateLimit1d holds the default value on creation for the rate_limit_1d field.
+ 	apikey.DefaultRateLimit1d = apikeyDescRateLimit1d.Default.(float64)
+ 	// apikeyDescRateLimit7d is the schema descriptor for rate_limit_7d field.
+-	apikeyDescRateLimit7d := apikeyFields[13].Descriptor()
++	apikeyDescRateLimit7d := apikeyFields[14].Descriptor()
+ 	// apikey.DefaultRateLimit7d holds the default value on creation for the rate_limit_7d field.
+ 	apikey.DefaultRateLimit7d = apikeyDescRateLimit7d.Default.(float64)
+ 	// apikeyDescUsage5h is the schema descriptor for usage_5h field.
+-	apikeyDescUsage5h := apikeyFields[14].Descriptor()
++	apikeyDescUsage5h := apikeyFields[15].Descriptor()
+ 	// apikey.DefaultUsage5h holds the default value on creation for the usage_5h field.
+ 	apikey.DefaultUsage5h = apikeyDescUsage5h.Default.(float64)
+ 	// apikeyDescUsage1d is the schema descriptor for usage_1d field.
+-	apikeyDescUsage1d := apikeyFields[15].Descriptor()
++	apikeyDescUsage1d := apikeyFields[16].Descriptor()
+ 	// apikey.DefaultUsage1d holds the default value on creation for the usage_1d field.
+ 	apikey.DefaultUsage1d = apikeyDescUsage1d.Default.(float64)
+ 	// apikeyDescUsage7d is the schema descriptor for usage_7d field.
+-	apikeyDescUsage7d := apikeyFields[16].Descriptor()
++	apikeyDescUsage7d := apikeyFields[17].Descriptor()
+ 	// apikey.DefaultUsage7d holds the default value on creation for the usage_7d field.
+ 	apikey.DefaultUsage7d = apikeyDescUsage7d.Default.(float64)
+ 	accountMixin := schema.Account{}.Mixin()
+diff --git a/backend/ent/schema/api_key.go b/backend/ent/schema/api_key.go
+index 5db51270b..11cdaf16c 100644
+--- a/backend/ent/schema/api_key.go
++++ b/backend/ent/schema/api_key.go
+@@ -44,6 +44,10 @@ func (APIKey) Fields() []ent.Field {
+ 		field.Int64("group_id").
+ 			Optional().
+ 			Nillable(),
++		field.JSON("group_routes", []domain.APIKeyGroupRoute{}).
++			Default([]domain.APIKeyGroupRoute{}).
++			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
++			Comment("API Key ordered group routes; first item is primary and each item may cap the accepted effective multiplier"),
+ 		field.String("status").
+ 			MaxLen(20).
+ 			Default(domain.StatusActive),
+diff --git a/backend/internal/handler/api_key_handler.go b/backend/internal/handler/api_key_handler.go
+index 6361b97dd..bebb51873 100644
+--- a/backend/internal/handler/api_key_handler.go
++++ b/backend/internal/handler/api_key_handler.go
+@@ -32,13 +32,14 @@ func NewAPIKeyHandler(apiKeyService *service.APIKeyService) *APIKeyHandler {
+ 
+ // CreateAPIKeyRequest represents the create API key request payload
+ type CreateAPIKeyRequest struct {
+-	Name          string   `json:"name" binding:"required"`
+-	GroupID       *int64   `json:"group_id"`        // nullable
+-	CustomKey     *string  `json:"custom_key"`      // 可选的自定义key
+-	IPWhitelist   []string `json:"ip_whitelist"`    // IP 白名单
+-	IPBlacklist   []string `json:"ip_blacklist"`    // IP 黑名单
+-	Quota         *float64 `json:"quota"`           // 配额限制 (USD)
+-	ExpiresInDays *int     `json:"expires_in_days"` // 过期天数
++	Name          string                     `json:"name" binding:"required"`
++	GroupID       *int64                     `json:"group_id"` // nullable
++	GroupRoutes   []service.APIKeyGroupRoute `json:"group_routes"`
++	CustomKey     *string                    `json:"custom_key"`      // 可选的自定义key
++	IPWhitelist   []string                   `json:"ip_whitelist"`    // IP 白名单
++	IPBlacklist   []string                   `json:"ip_blacklist"`    // IP 黑名单
++	Quota         *float64                   `json:"quota"`           // 配额限制 (USD)
++	ExpiresInDays *int                       `json:"expires_in_days"` // 过期天数
+ 
+ 	// Rate limit fields (0 = unlimited)
+ 	RateLimit5h *float64 `json:"rate_limit_5h"`
+@@ -48,14 +49,15 @@ type CreateAPIKeyRequest struct {
+ 
+ // UpdateAPIKeyRequest represents the update API key request payload
+ type UpdateAPIKeyRequest struct {
+-	Name        string    `json:"name"`
+-	GroupID     *int64    `json:"group_id"`
+-	Status      string    `json:"status" binding:"omitempty,oneof=active inactive"`
+-	IPWhitelist *[]string `json:"ip_whitelist"` // IP 白名单（nil 不修改，空数组清空）
+-	IPBlacklist *[]string `json:"ip_blacklist"` // IP 黑名单（nil 不修改，空数组清空）
+-	Quota       *float64  `json:"quota"`        // 配额限制 (USD), 0=无限制
+-	ExpiresAt   *string   `json:"expires_at"`   // 过期时间 (ISO 8601)
+-	ResetQuota  *bool     `json:"reset_quota"`  // 重置已用配额
++	Name        string                      `json:"name"`
++	GroupID     *int64                      `json:"group_id"`
++	GroupRoutes *[]service.APIKeyGroupRoute `json:"group_routes"`
++	Status      string                      `json:"status" binding:"omitempty,oneof=active inactive"`
++	IPWhitelist *[]string                   `json:"ip_whitelist"` // IP 白名单（nil 不修改，空数组清空）
++	IPBlacklist *[]string                   `json:"ip_blacklist"` // IP 黑名单（nil 不修改，空数组清空）
++	Quota       *float64                    `json:"quota"`        // 配额限制 (USD), 0=无限制
++	ExpiresAt   *string                     `json:"expires_at"`   // 过期时间 (ISO 8601)
++	ResetQuota  *bool                       `json:"reset_quota"`  // 重置已用配额
+ 
+ 	// Rate limit fields (nil = no change, 0 = unlimited)
+ 	RateLimit5h         *float64 `json:"rate_limit_5h"`
+@@ -199,6 +201,7 @@ func (h *APIKeyHandler) Create(c *gin.Context) {
+ 	svcReq := service.CreateAPIKeyRequest{
+ 		Name:          req.Name,
+ 		GroupID:       req.GroupID,
++		GroupRoutes:   req.GroupRoutes,
+ 		CustomKey:     req.CustomKey,
+ 		IPWhitelist:   req.IPWhitelist,
+ 		IPBlacklist:   req.IPBlacklist,
+@@ -252,6 +255,7 @@ func (h *APIKeyHandler) Update(c *gin.Context) {
+ 	}
+ 
+ 	svcReq := service.UpdateAPIKeyRequest{
++		GroupRoutes:         req.GroupRoutes,
+ 		IPWhitelist:         req.IPWhitelist,
+ 		IPBlacklist:         req.IPBlacklist,
+ 		Quota:               req.Quota,
+diff --git a/backend/internal/handler/dto/mappers.go b/backend/internal/handler/dto/mappers.go
+index 769e13371..01222051e 100644
+--- a/backend/internal/handler/dto/mappers.go
++++ b/backend/internal/handler/dto/mappers.go
+@@ -85,6 +85,7 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
+ 		Key:                k.Key,
+ 		Name:               k.Name,
+ 		GroupID:            k.GroupID,
++		GroupRoutes:        k.EffectiveGroupRoutes(),
+ 		Status:             k.Status,
+ 		IPWhitelist:        k.IPWhitelist,
+ 		IPBlacklist:        k.IPBlacklist,
+diff --git a/backend/internal/handler/dto/types.go b/backend/internal/handler/dto/types.go
+index 88695b9cd..fbfd3972a 100644
+--- a/backend/internal/handler/dto/types.go
++++ b/backend/internal/handler/dto/types.go
+@@ -51,21 +51,22 @@ type AdminUser struct {
+ }
+ 
+ type APIKey struct {
+-	ID          int64      `json:"id"`
+-	UserID      int64      `json:"user_id"`
+-	Key         string     `json:"key"`
+-	Name        string     `json:"name"`
+-	GroupID     *int64     `json:"group_id"`
+-	Status      string     `json:"status"`
+-	IPWhitelist []string   `json:"ip_whitelist"`
+-	IPBlacklist []string   `json:"ip_blacklist"`
+-	LastUsedAt  *time.Time `json:"last_used_at"`
+-	LastUsedIP  *string    `json:"last_used_ip"`
+-	Quota       float64    `json:"quota"`      // Quota limit in USD (0 = unlimited)
+-	QuotaUsed   float64    `json:"quota_used"` // Used quota amount in USD
+-	ExpiresAt   *time.Time `json:"expires_at"` // Expiration time (nil = never expires)
+-	CreatedAt   time.Time  `json:"created_at"`
+-	UpdatedAt   time.Time  `json:"updated_at"`
++	ID          int64                      `json:"id"`
++	UserID      int64                      `json:"user_id"`
++	Key         string                     `json:"key"`
++	Name        string                     `json:"name"`
++	GroupID     *int64                     `json:"group_id"`
++	GroupRoutes []service.APIKeyGroupRoute `json:"group_routes"`
++	Status      string                     `json:"status"`
++	IPWhitelist []string                   `json:"ip_whitelist"`
++	IPBlacklist []string                   `json:"ip_blacklist"`
++	LastUsedAt  *time.Time                 `json:"last_used_at"`
++	LastUsedIP  *string                    `json:"last_used_ip"`
++	Quota       float64                    `json:"quota"`      // Quota limit in USD (0 = unlimited)
++	QuotaUsed   float64                    `json:"quota_used"` // Used quota amount in USD
++	ExpiresAt   *time.Time                 `json:"expires_at"` // Expiration time (nil = never expires)
++	CreatedAt   time.Time                  `json:"created_at"`
++	UpdatedAt   time.Time                  `json:"updated_at"`
+ 	// CurrentConcurrency is the real-time active request count for this API key.
+ 	CurrentConcurrency int `json:"current_concurrency"`
+ 
+diff --git a/backend/internal/handler/gateway_handler.go b/backend/internal/handler/gateway_handler.go
+index 499b6ed79..fccca2116 100644
+--- a/backend/internal/handler/gateway_handler.go
++++ b/backend/internal/handler/gateway_handler.go
+@@ -442,7 +442,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
+ 				continue
+ 			}
+ 			account = latest
+-			selection.Account = latest
++			selection.Account = selection.AccountForSelectedRoute(latest)
+ 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
+ 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
+ 			if selection.ProfitGateActive() || !selection.Acquired {
+@@ -765,7 +765,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
+ 				continue
+ 			}
+ 			account = latest
+-			selection.Account = latest
++			selection.Account = selection.AccountForSelectedRoute(latest)
+ 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
+ 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
+ 			if selection.ProfitGateActive() || !selection.Acquired {
+diff --git a/backend/internal/handler/gateway_handler_chat_completions.go b/backend/internal/handler/gateway_handler_chat_completions.go
+index 827d369a7..53acd38f8 100644
+--- a/backend/internal/handler/gateway_handler_chat_completions.go
++++ b/backend/internal/handler/gateway_handler_chat_completions.go
+@@ -241,7 +241,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
+ 			continue
+ 		}
+ 		account = latest
+-		selection.Account = latest
++		selection.Account = selection.AccountForSelectedRoute(latest)
+ 		if selection.ProfitGateActive() {
+ 			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, selectionSessionHash, account.ID); err != nil {
+ 				reqLog.Warn("gateway.cc.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+diff --git a/backend/internal/handler/gateway_handler_responses.go b/backend/internal/handler/gateway_handler_responses.go
+index 74e6b9ac2..0cee2779b 100644
+--- a/backend/internal/handler/gateway_handler_responses.go
++++ b/backend/internal/handler/gateway_handler_responses.go
+@@ -245,7 +245,7 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
+ 			continue
+ 		}
+ 		account = latest
+-		selection.Account = latest
++		selection.Account = selection.AccountForSelectedRoute(latest)
+ 		if selection.ProfitGateActive() {
+ 			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionHash, account.ID); err != nil {
+ 				reqLog.Warn("gateway.responses.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+diff --git a/backend/internal/handler/gemini_v1beta_handler.go b/backend/internal/handler/gemini_v1beta_handler.go
+index 2a270d3a0..d137ce5d2 100644
+--- a/backend/internal/handler/gemini_v1beta_handler.go
++++ b/backend/internal/handler/gemini_v1beta_handler.go
+@@ -486,7 +486,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
+ 			continue
+ 		}
+ 		account = latest
+-		selection.Account = latest
++		selection.Account = selection.AccountForSelectedRoute(latest)
+ 		// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已抢槽
+ 		// 的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
+ 		if selection.ProfitGateActive() || !selection.Acquired {
+diff --git a/backend/internal/handler/openai_gateway_handler.go b/backend/internal/handler/openai_gateway_handler.go
+index f589f42d6..646eefa77 100644
+--- a/backend/internal/handler/openai_gateway_handler.go
++++ b/backend/internal/handler/openai_gateway_handler.go
+@@ -1581,7 +1581,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
+ 			return nil, openAISlotAcquireProfitVetoed
+ 		}
+ 		account = latest
+-		selection.Account = latest
++		selection.Account = selection.AccountForSelectedRoute(latest)
+ 		// 调度器已抢槽路径无门时由选号内部完成 eager 绑定；门下选号内部
+ 		// 推迟绑定，这里在终检通过后补准入后绑定。
+ 		if selection.ProfitGateActive() {
+@@ -1619,7 +1619,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
+ 			return nil, openAISlotAcquireProfitVetoed
+ 		}
+ 		account = latest
+-		selection.Account = latest
++		selection.Account = selection.AccountForSelectedRoute(latest)
+ 		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
+ 			reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+ 		}
+@@ -1674,7 +1674,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
+ 		return nil, openAISlotAcquireProfitVetoed
+ 	}
+ 	account = latest
+-	selection.Account = latest
++	selection.Account = selection.AccountForSelectedRoute(latest)
+ 	if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
+ 		reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+ 	}
+@@ -2040,7 +2040,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
+ 				continue
+ 			}
+ 			account = latest
+-			selection.Account = latest
++			selection.Account = selection.AccountForSelectedRoute(latest)
+ 		}
+ 		if !selection.Acquired {
+ 			if selection.WaitPlan == nil {
+@@ -2077,7 +2077,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
+ 				continue
+ 			}
+ 			account = latest
+-			selection.Account = latest
++			selection.Account = selection.AccountForSelectedRoute(latest)
+ 			accountReleaseFunc = fastReleaseFunc
+ 		}
+ 		// 准入完成：门并入连接 ctx，turn 级复核与 failover 重选共用。
+diff --git a/backend/internal/repository/api_key_repo.go b/backend/internal/repository/api_key_repo.go
+index 388562fae..505de80ec 100644
+--- a/backend/internal/repository/api_key_repo.go
++++ b/backend/internal/repository/api_key_repo.go
+@@ -49,6 +49,7 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
+ 		SetName(key.Name).
+ 		SetStatus(key.Status).
+ 		SetNillableGroupID(key.GroupID).
++		SetGroupRoutes(key.GroupRoutes).
+ 		SetNillableLastUsedAt(key.LastUsedAt).
+ 		SetQuota(key.Quota).
+ 		SetQuotaUsed(key.QuotaUsed).
+@@ -134,6 +135,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
+ 			apikey.FieldID,
+ 			apikey.FieldUserID,
+ 			apikey.FieldGroupID,
++			apikey.FieldGroupRoutes,
+ 			apikey.FieldName,
+ 			apikey.FieldStatus,
+ 			apikey.FieldIPWhitelist,
+@@ -301,6 +303,9 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey, fiel
+ 			builder.ClearGroupID()
+ 		}
+ 	}
++	if fields.GroupRoutes {
++		builder.SetGroupRoutes(key.GroupRoutes)
++	}
+ 
+ 	// Expiration time
+ 	if fields.ExpiresAt {
+@@ -879,6 +884,7 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
+ 		CreatedAt:     m.CreatedAt,
+ 		UpdatedAt:     m.UpdatedAt,
+ 		GroupID:       m.GroupID,
++		GroupRoutes:   m.GroupRoutes,
+ 		Quota:         m.Quota,
+ 		QuotaUsed:     m.QuotaUsed,
+ 		ExpiresAt:     m.ExpiresAt,
+diff --git a/backend/internal/server/middleware/api_key_auth.go b/backend/internal/server/middleware/api_key_auth.go
+index b53dc4c20..67a0f23ef 100644
+--- a/backend/internal/server/middleware/api_key_auth.go
++++ b/backend/internal/server/middleware/api_key_auth.go
+@@ -157,11 +157,14 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
+ 			AbortWithError(c, 401, "USER_INACTIVE", "User account is not active")
+ 			return
+ 		}
+-		if abortIfAPIKeyGroupUnavailable(c, apiKey) {
+-			return
+-		}
+-		if abortIfAPIKeyGroupNotAllowed(c, apiKey) {
+-			return
++		hasFallbackRoutes := len(apiKey.GroupRoutes) > 1
++		if !hasFallbackRoutes {
++			if abortIfAPIKeyGroupUnavailable(c, apiKey) {
++				return
++			}
++			if abortIfAPIKeyGroupNotAllowed(c, apiKey) {
++				return
++			}
+ 		}
+ 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
+ 		c.Request = c.Request.WithContext(ctx)
+@@ -180,6 +183,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
+ 				Concurrency: apiKey.User.Concurrency,
+ 			})
+ 			c.Set(string(ContextKeyUserRole), apiKey.User.Role)
++			setAPIKeyGroupRoutesContext(c, apiKey)
+ 			setGroupContext(c, apiKey.Group)
+ 			if !billingInfoRequest {
+ 				_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
+@@ -191,7 +195,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
+ 		// ── 5. 按端点需要加载订阅 ───────────────────────────────────
+ 
+ 		var subscription *service.UserSubscription
+-		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
++		isSubscriptionType := !hasFallbackRoutes && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+ 
+ 		// 倍率自省不需要订阅数据；/v1/usage 仍保留原有订阅读取行为。
+ 		if isSubscriptionType && subscriptionService != nil && !billingInfoRequest {
+@@ -258,7 +262,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
+ 					AbortWithError(c, status, code, validateErr.Error())
+ 					return
+ 				}
+-			} else {
++			} else if !hasFallbackRoutes {
+ 				// 非订阅模式 或 订阅模式但 subscriptionService 未注入：回退到余额检查
+ 				if apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
+ 					AbortWithError(c, 403, "INSUFFICIENT_BALANCE", "Insufficient account balance")
+@@ -278,6 +282,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
+ 			Concurrency: apiKey.User.Concurrency,
+ 		})
+ 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
++		setAPIKeyGroupRoutesContext(c, apiKey)
+ 		setGroupContext(c, apiKey.Group)
+ 		if !billingInfoRequest {
+ 			_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
+@@ -392,6 +397,13 @@ func setGroupContext(c *gin.Context, group *service.Group) {
+ 	c.Request = c.Request.WithContext(ctx)
+ }
+ 
++func setAPIKeyGroupRoutesContext(c *gin.Context, apiKey *service.APIKey) {
++	if c == nil || c.Request == nil || apiKey == nil {
++		return
++	}
++	c.Request = c.Request.WithContext(service.ContextWithAPIKeyGroupRoutes(c.Request.Context(), apiKey))
++}
++
+ // apiKeyBalanceBelowAuthThreshold 保持鉴权层的历史语义：仅在余额耗尽（<=0）时拒绝。
+ // MinimumBalanceReserve 只作为 billing-cache 预检的保守下限，不得复用为鉴权硬门槛，
+ // 否则已配置该值的存量部署升级后，0 < balance < reserve 的用户会在所有端点被静默 403。
+diff --git a/backend/internal/server/middleware/api_key_auth_google.go b/backend/internal/server/middleware/api_key_auth_google.go
+index 9efbbcb2c..6e6845854 100644
+--- a/backend/internal/server/middleware/api_key_auth_google.go
++++ b/backend/internal/server/middleware/api_key_auth_google.go
+@@ -113,22 +113,25 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
+ 			abortWithGoogleError(c, 401, "User account is not active")
+ 			return
+ 		}
+-		if code, message, ok := validateAPIKeyGroupAvailable(apiKey); !ok {
+-			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
+-			if code == "GROUP_DELETED" {
+-				MarkIngressRejected(c, IngressRejectGroupDeleted)
+-			} else {
+-				MarkIngressRejected(c, IngressRejectGroupDisabled)
++		hasFallbackRoutes := len(apiKey.GroupRoutes) > 1
++		if !hasFallbackRoutes {
++			if code, message, ok := validateAPIKeyGroupAvailable(apiKey); !ok {
++				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
++				if code == "GROUP_DELETED" {
++					MarkIngressRejected(c, IngressRejectGroupDeleted)
++				} else {
++					MarkIngressRejected(c, IngressRejectGroupDisabled)
++				}
++				abortWithGoogleError(c, 403, message)
++				return
++			}
++			// 专属分组授权校验：用户对该专属分组的授权被撤销后应拒绝（与主中间件一致，防止越权）。
++			if !validateAPIKeyGroupAllowed(apiKey) {
++				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
++				MarkIngressRejected(c, IngressRejectGroupNotAllowed)
++				abortWithGoogleError(c, 403, "API Key 所属专属分组不再允许当前用户使用")
++				return
+ 			}
+-			abortWithGoogleError(c, 403, message)
+-			return
+-		}
+-		// 专属分组授权校验：用户对该专属分组的授权被撤销后应拒绝（与主中间件一致，防止越权）。
+-		if !validateAPIKeyGroupAllowed(apiKey) {
+-			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonAPIKeyGroupUnavailable)
+-			MarkIngressRejected(c, IngressRejectGroupNotAllowed)
+-			abortWithGoogleError(c, 403, "API Key 所属专属分组不再允许当前用户使用")
+-			return
+ 		}
+ 
+ 		// 简易模式：跳过余额和订阅检查
+@@ -139,6 +142,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
+ 				Concurrency: apiKey.User.Concurrency,
+ 			})
+ 			c.Set(string(ContextKeyUserRole), apiKey.User.Role)
++			setAPIKeyGroupRoutesContext(c, apiKey)
+ 			setGroupContext(c, apiKey.Group)
+ 			_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
+ 			c.Next()
+@@ -165,7 +169,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
+ 			return
+ 		}
+ 
+-		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
++		isSubscriptionType := !hasFallbackRoutes && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+ 		if isSubscriptionType && subscriptionService != nil {
+ 			subscription, err := subscriptionService.GetActiveSubscription(
+ 				c.Request.Context(),
+@@ -199,7 +203,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
+ 			}
+ 
+ 			c.Set(string(ContextKeySubscription), subscription)
+-		} else {
++		} else if !hasFallbackRoutes {
+ 			if apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
+ 				abortWithGoogleError(c, 403, "Insufficient account balance")
+ 				return
+@@ -212,6 +216,7 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
+ 			Concurrency: apiKey.User.Concurrency,
+ 		})
+ 		c.Set(string(ContextKeyUserRole), apiKey.User.Role)
++		setAPIKeyGroupRoutesContext(c, apiKey)
+ 		setGroupContext(c, apiKey.Group)
+ 		_ = apiKeyService.TouchLastUsed(c.Request.Context(), apiKey.ID)
+ 		c.Next()
+diff --git a/backend/internal/server/middleware/api_key_auth_google_test.go b/backend/internal/server/middleware/api_key_auth_google_test.go
+index 6b5f10d48..3a86ecc1b 100644
+--- a/backend/internal/server/middleware/api_key_auth_google_test.go
++++ b/backend/internal/server/middleware/api_key_auth_google_test.go
+@@ -526,6 +526,41 @@ func TestApiKeyAuthWithSubscriptionGoogle_MarksUnavailableGroupBusinessLimited(t
+ 	require.Equal(t, IngressRejectGroupDeleted, rejectReason)
+ }
+ 
++func TestApiKeyAuthWithSubscriptionGoogle_DefersPrimaryChecksForOrderedFallbackRoutes(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	primaryID := int64(101)
++	apiKey := &service.APIKey{
++		ID:          100,
++		UserID:      7,
++		GroupID:     &primaryID,
++		GroupRoutes: []service.APIKeyGroupRoute{{GroupID: primaryID}, {GroupID: 102}},
++		Key:         "google-fallback-key",
++		Status:      service.StatusActive,
++		User:        &service.User{ID: 7, Role: service.RoleUser, Status: service.StatusActive, Balance: 0},
++		Group: &service.Group{
++			ID: primaryID, Name: "disabled-primary", Status: service.StatusDisabled,
++			Platform: service.PlatformGemini, Hydrated: true,
++		},
++	}
++	svc := newTestAPIKeyService(fakeAPIKeyRepo{getByKey: func(_ context.Context, key string) (*service.APIKey, error) {
++		if key != apiKey.Key {
++			return nil, service.ErrAPIKeyNotFound
++		}
++		clone := *apiKey
++		return &clone, nil
++	}})
++	router := gin.New()
++	router.Use(APIKeyAuthWithSubscriptionGoogle(svc, nil, &config.Config{RunMode: config.RunModeStandard}))
++	router.GET("/v1beta/test", func(c *gin.Context) { c.Status(http.StatusOK) })
++
++	w := httptest.NewRecorder()
++	req := httptest.NewRequest(http.MethodGet, "/v1beta/test", nil)
++	req.Header.Set("x-goog-api-key", apiKey.Key)
++	router.ServeHTTP(w, req)
++
++	require.Equal(t, http.StatusOK, w.Code)
++}
++
+ func TestApiKeyAuthWithSubscriptionGoogle_RepoError(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+ 
+diff --git a/backend/internal/server/middleware/api_key_auth_test.go b/backend/internal/server/middleware/api_key_auth_test.go
+index 964fe8041..2a8ca9db3 100644
+--- a/backend/internal/server/middleware/api_key_auth_test.go
++++ b/backend/internal/server/middleware/api_key_auth_test.go
+@@ -577,6 +577,43 @@ func TestAPIKeyAuthRejectsUnavailableGroup(t *testing.T) {
+ 	}
+ }
+ 
++func TestAPIKeyAuthDefersPrimaryGroupChecksForOrderedFallbackRoutes(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	primaryID := int64(101)
++	apiKey := &service.APIKey{
++		ID:          100,
++		UserID:      7,
++		GroupID:     &primaryID,
++		GroupRoutes: []service.APIKeyGroupRoute{{GroupID: primaryID}, {GroupID: 102}},
++		Key:         "fallback-key",
++		Status:      service.StatusActive,
++		User:        &service.User{ID: 7, Role: service.RoleUser, Status: service.StatusActive, Balance: 0},
++		Group: &service.Group{
++			ID: primaryID, Name: "disabled-primary", Status: service.StatusDisabled,
++			Platform: service.PlatformAnthropic, Hydrated: true,
++		},
++	}
++	repo := &stubApiKeyRepo{getByKey: func(_ context.Context, key string) (*service.APIKey, error) {
++		if key != apiKey.Key {
++			return nil, service.ErrAPIKeyNotFound
++		}
++		clone := *apiKey
++		return &clone, nil
++	}}
++	cfg := &config.Config{RunMode: config.RunModeStandard}
++	svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
++	router := gin.New()
++	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(svc, nil, cfg)))
++	router.GET("/t", func(c *gin.Context) { c.Status(http.StatusOK) })
++
++	w := httptest.NewRecorder()
++	req := httptest.NewRequest(http.MethodGet, "/t", nil)
++	req.Header.Set("x-api-key", apiKey.Key)
++	router.ServeHTTP(w, req)
++
++	require.Equal(t, http.StatusOK, w.Code)
++}
++
+ func TestAPIKeyAuthMarksOnlyExpectedIngressRejections(t *testing.T) {
+ 	gin.SetMode(gin.TestMode)
+ 
+diff --git a/backend/internal/service/account.go b/backend/internal/service/account.go
+index 6fa6d9295..0fcb9b577 100644
+--- a/backend/internal/service/account.go
++++ b/backend/internal/service/account.go
+@@ -65,6 +65,11 @@ type Account struct {
+ 	GroupIDs      []int64
+ 	Groups        []*Group
+ 
++	// SelectedAPIKeyGroup is request-local routing metadata. It is attached to
++	// a cloned account after ordered API-key route selection and is never stored.
++	SelectedAPIKeyGroup        *Group
++	SelectedAPIKeySubscription *UserSubscription
++
+ 	// model_mapping 热路径缓存（非持久化字段）
+ 	modelMappingCache               map[string]string
+ 	modelMappingCacheReady          bool
+diff --git a/backend/internal/service/api_key.go b/backend/internal/service/api_key.go
+index b92a84818..44e92a71c 100644
+--- a/backend/internal/service/api_key.go
++++ b/backend/internal/service/api_key.go
+@@ -3,9 +3,12 @@ package service
+ import (
+ 	"time"
+ 
++	"github.com/Wei-Shaw/sub2api/internal/domain"
+ 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
+ )
+ 
++type APIKeyGroupRoute = domain.APIKeyGroupRoute
++
+ // API Key status constants
+ const (
+ 	StatusAPIKeyActive         = "active"
+@@ -33,6 +36,7 @@ type APIKey struct {
+ 	Key         string
+ 	Name        string
+ 	GroupID     *int64
++	GroupRoutes []APIKeyGroupRoute
+ 	Status      string
+ 	IPWhitelist []string
+ 	IPBlacklist []string
+@@ -64,6 +68,21 @@ type APIKey struct {
+ 	Window7dStart *time.Time // Start of current 7d window
+ }
+ 
++// EffectiveGroupRoutes preserves the legacy group_id behavior until a key has
++// an explicit ordered route configuration.
++func (k *APIKey) EffectiveGroupRoutes() []APIKeyGroupRoute {
++	if k == nil {
++		return nil
++	}
++	if len(k.GroupRoutes) > 0 {
++		return append([]APIKeyGroupRoute(nil), k.GroupRoutes...)
++	}
++	if k.GroupID == nil || *k.GroupID <= 0 {
++		return nil
++	}
++	return []APIKeyGroupRoute{{GroupID: *k.GroupID}}
++}
++
+ func (k *APIKey) IsActive() bool {
+ 	return k.Status == StatusActive
+ }
+diff --git a/backend/internal/service/api_key_auth_cache.go b/backend/internal/service/api_key_auth_cache.go
+index 30a41eece..dea330ac7 100644
+--- a/backend/internal/service/api_key_auth_cache.go
++++ b/backend/internal/service/api_key_auth_cache.go
+@@ -8,6 +8,7 @@ type APIKeyAuthSnapshot struct {
+ 	APIKeyID    int64                    `json:"api_key_id"`
+ 	UserID      int64                    `json:"user_id"`
+ 	GroupID     *int64                   `json:"group_id,omitempty"`
++	GroupRoutes []APIKeyGroupRoute       `json:"group_routes,omitempty"`
+ 	Name        string                   `json:"name"`
+ 	Status      string                   `json:"status"`
+ 	IPWhitelist []string                 `json:"ip_whitelist,omitempty"`
+diff --git a/backend/internal/service/api_key_auth_cache_impl.go b/backend/internal/service/api_key_auth_cache_impl.go
+index 7cb37baf4..a0650ef80 100644
+--- a/backend/internal/service/api_key_auth_cache_impl.go
++++ b/backend/internal/service/api_key_auth_cache_impl.go
+@@ -14,7 +14,7 @@ import (
+ 	"github.com/dgraph-io/ristretto"
+ )
+ 
+-const apiKeyAuthSnapshotVersion = 20 // v20: group long-context and model pricing fields (force refresh of pre-fix snapshots)
++const apiKeyAuthSnapshotVersion = 21 // v21: ordered API key group routes
+ 
+ type apiKeyAuthCacheConfig struct {
+ 	l1Size        int
+@@ -340,6 +340,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey)
+ 		APIKeyID:    apiKey.ID,
+ 		UserID:      apiKey.UserID,
+ 		GroupID:     apiKey.GroupID,
++		GroupRoutes: append([]APIKeyGroupRoute(nil), apiKey.GroupRoutes...),
+ 		Name:        apiKey.Name,
+ 		Status:      apiKey.Status,
+ 		IPWhitelist: apiKey.IPWhitelist,
+@@ -443,6 +444,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
+ 		ID:          snapshot.APIKeyID,
+ 		UserID:      snapshot.UserID,
+ 		GroupID:     snapshot.GroupID,
++		GroupRoutes: append([]APIKeyGroupRoute(nil), snapshot.GroupRoutes...),
+ 		Key:         key,
+ 		Name:        snapshot.Name,
+ 		Status:      snapshot.Status,
+diff --git a/backend/internal/service/api_key_auth_cache_profit_test.go b/backend/internal/service/api_key_auth_cache_profit_test.go
+index fbcd96a42..f27fd8d2c 100644
+--- a/backend/internal/service/api_key_auth_cache_profit_test.go
++++ b/backend/internal/service/api_key_auth_cache_profit_test.go
+@@ -53,7 +53,7 @@ func TestAPIKeyAuthSnapshotProfitControlRoundtrip(t *testing.T) {
+ 	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
+ 	require.NotNil(t, snapshot)
+ 	require.Equal(t, apiKeyAuthSnapshotVersion, snapshot.Version)
+-	require.Equal(t, 20, snapshot.Version, "v20 起认证快照携带分组长上下文与模型定价字段")
++	require.Equal(t, 21, snapshot.Version, "v21 起认证快照携带 API Key 分组路由")
+ 
+ 	// 模拟 L2 缓存的完整 JSON 往返（与 apiKeyCache.SetAuthCache/GetAuthCache 同构）。
+ 	payload, err := json.Marshal(&APIKeyAuthCacheEntry{Snapshot: snapshot})
+diff --git a/backend/internal/service/api_key_service.go b/backend/internal/service/api_key_service.go
+index 8ce62a688..5daf6c75a 100644
+--- a/backend/internal/service/api_key_service.go
++++ b/backend/internal/service/api_key_service.go
+@@ -24,14 +24,15 @@ import (
+ )
+ 
+ var (
+-	ErrAPIKeyNotFound       = infraerrors.NotFound("API_KEY_NOT_FOUND", "api key not found")
+-	ErrGroupNotAllowed      = infraerrors.Forbidden("GROUP_NOT_ALLOWED", "user is not allowed to bind this group")
+-	ErrAPIKeyExists         = infraerrors.Conflict("API_KEY_EXISTS", "api key already exists")
+-	ErrAPIKeyTooShort       = infraerrors.BadRequest("API_KEY_TOO_SHORT", "api key must be at least 16 characters")
+-	ErrAPIKeyInvalidChars   = infraerrors.BadRequest("API_KEY_INVALID_CHARS", "api key can only contain letters, numbers, underscores, and hyphens")
+-	ErrAPIKeyRateLimited    = infraerrors.TooManyRequests("API_KEY_RATE_LIMITED", "too many failed attempts, please try again later")
+-	ErrAPIKeyAuthOverloaded = infraerrors.ServiceUnavailable("API_KEY_AUTH_OVERLOADED", "api key authentication is temporarily overloaded")
+-	ErrInvalidIPPattern     = infraerrors.BadRequest("INVALID_IP_PATTERN", "invalid IP or CIDR pattern")
++	ErrAPIKeyNotFound           = infraerrors.NotFound("API_KEY_NOT_FOUND", "api key not found")
++	ErrGroupNotAllowed          = infraerrors.Forbidden("GROUP_NOT_ALLOWED", "user is not allowed to bind this group")
++	ErrAPIKeyExists             = infraerrors.Conflict("API_KEY_EXISTS", "api key already exists")
++	ErrAPIKeyTooShort           = infraerrors.BadRequest("API_KEY_TOO_SHORT", "api key must be at least 16 characters")
++	ErrAPIKeyInvalidChars       = infraerrors.BadRequest("API_KEY_INVALID_CHARS", "api key can only contain letters, numbers, underscores, and hyphens")
++	ErrAPIKeyRateLimited        = infraerrors.TooManyRequests("API_KEY_RATE_LIMITED", "too many failed attempts, please try again later")
++	ErrAPIKeyAuthOverloaded     = infraerrors.ServiceUnavailable("API_KEY_AUTH_OVERLOADED", "api key authentication is temporarily overloaded")
++	ErrInvalidIPPattern         = infraerrors.BadRequest("INVALID_IP_PATTERN", "invalid IP or CIDR pattern")
++	ErrAPIKeyGroupRoutesInvalid = infraerrors.BadRequest("API_KEY_GROUP_ROUTES_INVALID", "invalid API key group routes")
+ 	// ErrAPIKeyExpired        = infraerrors.Forbidden("API_KEY_EXPIRED", "api key has expired")
+ 	ErrAPIKeyExpired = infraerrors.Forbidden("API_KEY_EXPIRED", "api key 已过期")
+ 	// ErrAPIKeyQuotaExhausted = infraerrors.TooManyRequests("API_KEY_QUOTA_EXHAUSTED", "api key quota exhausted")
+@@ -52,6 +53,7 @@ const (
+ 	apiKeySortCurrentConcurrency = "current_concurrency"
+ 	// DB 写失败后的短退避，避免请求路径持续同步重试造成写风暴与高延迟。
+ 	apiKeyLastUsedFailBackoff = 5 * time.Second
++	maxAPIKeyGroupRoutes      = 10
+ )
+ 
+ // APIKeyUpdateFields 声明 APIKeyRepository.Update 允许写回的列。
+@@ -61,11 +63,12 @@ const (
+ // 若编辑 Key 时无条件整行回写，并发累计的配额与限流计数就会被旧快照覆盖。
+ // 因此调用方必须显式声明要改的列。
+ type APIKeyUpdateFields struct {
+-	Name      bool
+-	Status    bool
+-	Quota     bool
+-	GroupID   bool
+-	ExpiresAt bool
++	Name        bool
++	Status      bool
++	Quota       bool
++	GroupID     bool
++	GroupRoutes bool
++	ExpiresAt   bool
+ 	// QuotaUsed 仅供"重置配额用量"路径声明；常规计费走 IncrementQuotaUsed。
+ 	QuotaUsed bool
+ 	// RateLimits 覆盖 rate_limit_5h / _1d / _7d 三个阈值。
+@@ -209,11 +212,12 @@ type APIKeyAuthCacheInvalidator interface {
+ 
+ // CreateAPIKeyRequest 创建API Key请求
+ type CreateAPIKeyRequest struct {
+-	Name        string   `json:"name"`
+-	GroupID     *int64   `json:"group_id"`
+-	CustomKey   *string  `json:"custom_key"`   // 可选的自定义key
+-	IPWhitelist []string `json:"ip_whitelist"` // IP 白名单
+-	IPBlacklist []string `json:"ip_blacklist"` // IP 黑名单
++	Name        string             `json:"name"`
++	GroupID     *int64             `json:"group_id"`
++	GroupRoutes []APIKeyGroupRoute `json:"group_routes"`
++	CustomKey   *string            `json:"custom_key"`   // 可选的自定义key
++	IPWhitelist []string           `json:"ip_whitelist"` // IP 白名单
++	IPBlacklist []string           `json:"ip_blacklist"` // IP 黑名单
+ 
+ 	// Quota fields
+ 	Quota         float64 `json:"quota"`           // Quota limit in USD (0 = unlimited)
+@@ -227,11 +231,12 @@ type CreateAPIKeyRequest struct {
+ 
+ // UpdateAPIKeyRequest 更新API Key请求
+ type UpdateAPIKeyRequest struct {
+-	Name        *string   `json:"name"`
+-	GroupID     *int64    `json:"group_id"`
+-	Status      *string   `json:"status"`
+-	IPWhitelist *[]string `json:"ip_whitelist"` // IP 白名单（nil 不修改，空数组清空）
+-	IPBlacklist *[]string `json:"ip_blacklist"` // IP 黑名单（nil 不修改，空数组清空）
++	Name        *string             `json:"name"`
++	GroupID     *int64              `json:"group_id"`
++	GroupRoutes *[]APIKeyGroupRoute `json:"group_routes"`
++	Status      *string             `json:"status"`
++	IPWhitelist *[]string           `json:"ip_whitelist"` // IP 白名单（nil 不修改，空数组清空）
++	IPBlacklist *[]string           `json:"ip_blacklist"` // IP 黑名单（nil 不修改，空数组清空）
+ 
+ 	// Quota fields
+ 	Quota           *float64   `json:"quota"`       // Quota limit in USD (nil = no change, 0 = unlimited)
+@@ -457,6 +462,51 @@ func (s *APIKeyService) canUserBindGroup(ctx context.Context, user *User, group
+ 	return user.CanBindGroup(group.ID, group.IsExclusive)
+ }
+ 
++func (s *APIKeyService) validateAPIKeyGroupRoutes(ctx context.Context, user *User, routes []APIKeyGroupRoute) ([]APIKeyGroupRoute, *Group, error) {
++	if len(routes) == 0 {
++		return []APIKeyGroupRoute{}, nil, nil
++	}
++	if len(routes) > maxAPIKeyGroupRoutes {
++		return nil, nil, fmt.Errorf("%w: at most %d groups are allowed", ErrAPIKeyGroupRoutesInvalid, maxAPIKeyGroupRoutes)
++	}
++
++	normalized := make([]APIKeyGroupRoute, 0, len(routes))
++	seen := make(map[int64]struct{}, len(routes))
++	var primary *Group
++	for i, route := range routes {
++		if route.GroupID <= 0 {
++			return nil, nil, fmt.Errorf("%w: group_id must be positive", ErrAPIKeyGroupRoutesInvalid)
++		}
++		if _, ok := seen[route.GroupID]; ok {
++			return nil, nil, fmt.Errorf("%w: duplicate group_id %d", ErrAPIKeyGroupRoutesInvalid, route.GroupID)
++		}
++		seen[route.GroupID] = struct{}{}
++		if route.MaxRateMultiplier != nil {
++			v := *route.MaxRateMultiplier
++			if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
++				return nil, nil, fmt.Errorf("%w: max_rate_multiplier must be a finite positive number", ErrAPIKeyGroupRoutesInvalid)
++			}
++			copyValue := v
++			route.MaxRateMultiplier = &copyValue
++		}
++
++		group, err := s.groupRepo.GetByID(ctx, route.GroupID)
++		if err != nil {
++			return nil, nil, fmt.Errorf("get route group %d: %w", route.GroupID, err)
++		}
++		if !group.IsActive() || !s.canUserBindGroup(ctx, user, group) {
++			return nil, nil, ErrGroupNotAllowed
++		}
++		if i == 0 {
++			primary = group
++		} else if primary != nil && group.Platform != primary.Platform {
++			return nil, nil, fmt.Errorf("%w: all groups must use platform %s", ErrAPIKeyGroupRoutesInvalid, primary.Platform)
++		}
++		normalized = append(normalized, route)
++	}
++	return normalized, primary, nil
++}
++
+ // Create 创建API Key
+ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIKeyRequest) (*APIKey, error) {
+ 	if err := validateCreateAPIKeyRequest(req); err != nil {
+@@ -482,8 +532,19 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
+ 		}
+ 	}
+ 
+-	// 验证分组权限（如果指定了分组）
+-	if req.GroupID != nil {
++	if len(req.GroupRoutes) > 0 {
++		routes, primary, err := s.validateAPIKeyGroupRoutes(ctx, user, req.GroupRoutes)
++		if err != nil {
++			return nil, err
++		}
++		if req.GroupID != nil && *req.GroupID != routes[0].GroupID {
++			return nil, fmt.Errorf("%w: group_id must match the first route", ErrAPIKeyGroupRoutesInvalid)
++		}
++		req.GroupRoutes = routes
++		primaryID := primary.ID
++		req.GroupID = &primaryID
++	} else if req.GroupID != nil {
++		// 验证分组权限（如果指定了分组）
+ 		group, err := s.groupRepo.GetByID(ctx, *req.GroupID)
+ 		if err != nil {
+ 			return nil, fmt.Errorf("get group: %w", err)
+@@ -536,6 +597,7 @@ func (s *APIKeyService) Create(ctx context.Context, userID int64, req CreateAPIK
+ 		Key:         key,
+ 		Name:        html.EscapeString(req.Name),
+ 		GroupID:     req.GroupID,
++		GroupRoutes: req.GroupRoutes,
+ 		Status:      StatusActive,
+ 		IPWhitelist: req.IPWhitelist,
+ 		IPBlacklist: req.IPBlacklist,
+@@ -797,24 +859,42 @@ func (s *APIKeyService) Update(ctx context.Context, id int64, userID int64, req
+ 		fields.Name = true
+ 	}
+ 
+-	if req.GroupID != nil {
+-		// 验证分组权限
++	if req.GroupRoutes != nil || req.GroupID != nil {
+ 		user, err := s.userRepo.GetByID(ctx, userID)
+ 		if err != nil {
+ 			return nil, fmt.Errorf("get user: %w", err)
+ 		}
+ 
+-		group, err := s.groupRepo.GetByID(ctx, *req.GroupID)
+-		if err != nil {
+-			return nil, fmt.Errorf("get group: %w", err)
+-		}
+-
+-		if !s.canUserBindGroup(ctx, user, group) {
+-			return nil, ErrGroupNotAllowed
++		if req.GroupRoutes != nil {
++			routes, primary, err := s.validateAPIKeyGroupRoutes(ctx, user, *req.GroupRoutes)
++			if err != nil {
++				return nil, err
++			}
++			if len(routes) == 0 {
++				apiKey.GroupRoutes = []APIKeyGroupRoute{}
++				fields.GroupRoutes = true
++			} else {
++				primaryID := primary.ID
++				apiKey.GroupID = &primaryID
++				apiKey.Group = primary
++				apiKey.GroupRoutes = routes
++				fields.GroupID = true
++				fields.GroupRoutes = true
++			}
++		} else {
++			group, err := s.groupRepo.GetByID(ctx, *req.GroupID)
++			if err != nil {
++				return nil, fmt.Errorf("get group: %w", err)
++			}
++			if !s.canUserBindGroup(ctx, user, group) {
++				return nil, ErrGroupNotAllowed
++			}
++			apiKey.GroupID = req.GroupID
++			apiKey.Group = group
++			apiKey.GroupRoutes = []APIKeyGroupRoute{}
++			fields.GroupID = true
++			fields.GroupRoutes = true
+ 		}
+-
+-		apiKey.GroupID = req.GroupID
+-		fields.GroupID = true
+ 	}
+ 
+ 	if req.Status != nil {
+diff --git a/backend/internal/service/gateway_request_pricing.go b/backend/internal/service/gateway_request_pricing.go
+index d86d9b8bd..59cb94dcb 100644
+--- a/backend/internal/service/gateway_request_pricing.go
++++ b/backend/internal/service/gateway_request_pricing.go
+@@ -53,3 +53,10 @@ func gatewayTokenRequestBillingGroupFromContext(ctx context.Context) *Group {
+ 	}
+ 	return nil
+ }
++
++func withGatewayTokenRequestBillingGroup(ctx context.Context, group *Group) context.Context {
++	if ctx == nil || !IsGroupContextValid(group) {
++		return ctx
++	}
++	return context.WithValue(ctx, gatewayTokenRequestBillingGroupCtxKey{}, group)
++}
+diff --git a/backend/internal/service/gateway_scheduling.go b/backend/internal/service/gateway_scheduling.go
+index 992f0936c..2b14b0358 100644
+--- a/backend/internal/service/gateway_scheduling.go
++++ b/backend/internal/service/gateway_scheduling.go
+@@ -6,6 +6,7 @@ package service
+ 
+ import (
+ 	"context"
++	"errors"
+ 	"fmt"
+ 	"log/slog"
+ 	mathrand "math/rand"
+@@ -32,6 +33,48 @@ func (s *GatewayService) SelectAccountForModel(ctx context.Context, groupID *int
+ 
+ // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
+ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
++	routing, ok := apiKeyGroupRoutesFromContext(ctx, groupID)
++	if ok {
++		var lastErr error
++		for _, route := range routing.routes {
++			group, err := s.resolveGroupByID(ctx, route.GroupID)
++			if err != nil {
++				if errors.Is(err, ErrGroupNotFound) {
++					lastErr = err
++					continue
++				}
++				return nil, err
++			}
++			if !apiKeyRouteAllowedForUser(routing.user, group) || !apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, false) {
++				continue
++			}
++			subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
++			if err != nil {
++				return nil, err
++			}
++			if !eligible {
++				continue
++			}
++			candidateID := route.GroupID
++			attemptCtx := withAPIKeyGroupRouteAttempt(contextWithSelectedAPIKeyGroup(ctx, group))
++			account, err := s.selectAccountForModelWithExclusions(attemptCtx, &candidateID, sessionHash, requestedModel, excludedIDs)
++			if err == nil && account != nil {
++				clone := *account
++				clone.SelectedAPIKeyGroup = group
++				clone.SelectedAPIKeySubscription = subscription
++				return &clone, nil
++			}
++			lastErr = err
++		}
++		if lastErr != nil {
++			return nil, lastErr
++		}
++		return nil, ErrNoAvailableAccounts
++	}
++	return s.selectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, excludedIDs)
++}
++
++func (s *GatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
+ 	// 优先检查 context 中的强制平台（/antigravity 路由）
+ 	var platform string
+ 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
+@@ -98,6 +141,67 @@ func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context
+ // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
+ // sub2apiUserID: 系统用户 ID，用于二维亲和调度
+ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
++	routing, ok := apiKeyGroupRoutesFromContext(ctx, groupID)
++	if !ok {
++		return s.selectAccountWithLoadAwarenessSingleGroup(ctx, groupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
++	}
++
++	var firstWait *AccountSelectionResult
++	var lastNoAccount error
++	for index, route := range routing.routes {
++		group, err := s.resolveGroupByID(ctx, route.GroupID)
++		if err != nil {
++			if errors.Is(err, ErrGroupNotFound) {
++				continue
++			}
++			return nil, err
++		}
++		if !apiKeyRouteAllowedForUser(routing.user, group) ||
++			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, false) {
++			continue
++		}
++		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
++		if err != nil {
++			return nil, err
++		}
++		if !eligible {
++			continue
++		}
++
++		candidateID := route.GroupID
++		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
++		attemptCtx = withGatewayTokenRequestBillingGroup(attemptCtx, group)
++		attemptCtx = withAPIKeyGroupRouteAttempt(attemptCtx)
++		selection, err := s.selectAccountWithLoadAwarenessSingleGroup(attemptCtx, &candidateID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
++		if err != nil {
++			if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrClaudeCodeOnly) || errors.Is(err, ErrGroupNotFound) {
++				lastNoAccount = err
++				continue
++			}
++			return nil, err
++		}
++		if selection == nil || selection.Account == nil {
++			lastNoAccount = ErrNoAvailableAccounts
++			continue
++		}
++		selection.attachAPIKeyRoute(group, subscription, index)
++		if selection.Acquired || selection.WaitPlan == nil {
++			return selection, nil
++		}
++		if firstWait == nil {
++			firstWait = selection
++		}
++	}
++	if firstWait != nil {
++		return firstWait, nil
++	}
++	if lastNoAccount != nil {
++		return nil, lastNoAccount
++	}
++	return nil, ErrNoAvailableAccounts
++}
++
++func (s *GatewayService) selectAccountWithLoadAwarenessSingleGroup(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
+ 	// 调试日志：记录调度入口参数
+ 	excludedIDsList := make([]int64, 0, len(excludedIDs))
+ 	for id := range excludedIDs {
+diff --git a/backend/internal/service/gateway_service.go b/backend/internal/service/gateway_service.go
+index 7e42a74cb..b8444a7e8 100644
+--- a/backend/internal/service/gateway_service.go
++++ b/backend/internal/service/gateway_service.go
+@@ -557,10 +557,13 @@ type AccountWaitPlan struct {
+ }
+ 
+ type AccountSelectionResult struct {
+-	Account     *Account
+-	Acquired    bool
+-	ReleaseFunc func()
+-	WaitPlan    *AccountWaitPlan // nil means no wait allowed
++	Account         *Account
++	Group           *Group
++	Subscription    *UserSubscription
++	GroupRouteIndex int
++	Acquired        bool
++	ReleaseFunc     func()
++	WaitPlan        *AccountWaitPlan // nil means no wait allowed
+ 	// profitGate 携带本次选号真实生效的利润门（无门为 nil）。门安装在调度栈的
+ 	// 局部 ctx 上，handler 必须经 ContextWithSelectionProfitGate 重放后才能在
+ 	// 调度栈之外做抢槽后终检与准入后粘性绑定。
+diff --git a/backend/internal/service/gateway_usage_billing.go b/backend/internal/service/gateway_usage_billing.go
+index 5f0a7dcf0..4d4b6ceb2 100644
+--- a/backend/internal/service/gateway_usage_billing.go
++++ b/backend/internal/service/gateway_usage_billing.go
+@@ -777,7 +777,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
+ 	if s.rateLimitService != nil && account != nil {
+ 		s.rateLimitService.ResetTempUnschedulableFailureCounters(ctx, account.ID)
+ 	}
+-	subscription := input.Subscription
++	apiKey, subscription := apiKeyAndSubscriptionForSelectedAccount(apiKey, input.Subscription, account)
+ 	ApplyForwardImageBillingResolution(result)
+ 
+ 	// 强制缓存计费：将 input_tokens 转为 cache_read_input_tokens
+diff --git a/backend/internal/service/openai_account_scheduler.go b/backend/internal/service/openai_account_scheduler.go
+index 2d1ff96c0..fe7535d5f 100644
+--- a/backend/internal/service/openai_account_scheduler.go
++++ b/backend/internal/service/openai_account_scheduler.go
+@@ -2276,6 +2276,83 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
+ 	platform string,
+ 	previousResponseCanMove bool,
+ 	useUpstreamTokenCost bool,
++) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
++	routing, ok := apiKeyGroupRoutesFromContext(ctx, groupID)
++	if !ok {
++		return s.selectAccountWithSchedulerSingleGroup(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
++	}
++
++	var firstWait *AccountSelectionResult
++	var firstWaitDecision OpenAIAccountScheduleDecision
++	var lastDecision OpenAIAccountScheduleDecision
++	var lastNoAccount error
++	for index, route := range routing.routes {
++		group, err := s.resolveOpenAIAPIKeyRouteGroup(ctx, route.GroupID)
++		if err != nil {
++			if errors.Is(err, ErrGroupNotFound) {
++				continue
++			}
++			return nil, lastDecision, err
++		}
++		if !apiKeyRouteAllowedForUser(routing.user, group) ||
++			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, true) {
++			continue
++		}
++		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
++		if err != nil {
++			return nil, lastDecision, err
++		}
++		if !eligible {
++			continue
++		}
++
++		candidateID := route.GroupID
++		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
++		selection, decision, err := s.selectAccountWithSchedulerSingleGroup(attemptCtx, &candidateID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
++		lastDecision = decision
++		if err != nil {
++			if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts) {
++				lastNoAccount = err
++				continue
++			}
++			return nil, decision, err
++		}
++		if selection == nil || selection.Account == nil {
++			lastNoAccount = ErrNoAvailableAccounts
++			continue
++		}
++		selection.attachAPIKeyRoute(group, subscription, index)
++		if selection.Acquired || selection.WaitPlan == nil {
++			return selection, decision, nil
++		}
++		if firstWait == nil {
++			firstWait = selection
++			firstWaitDecision = decision
++		}
++	}
++	if firstWait != nil {
++		return firstWait, firstWaitDecision, nil
++	}
++	if lastNoAccount != nil {
++		return nil, lastDecision, lastNoAccount
++	}
++	return nil, lastDecision, ErrNoAvailableAccounts
++}
++
++func (s *OpenAIGatewayService) selectAccountWithSchedulerSingleGroup(
++	ctx context.Context,
++	groupID *int64,
++	previousResponseID string,
++	sessionHash string,
++	requestedModel string,
++	excludedIDs map[int64]struct{},
++	requiredTransport OpenAIUpstreamTransport,
++	requiredCapability OpenAIEndpointCapability,
++	requiredImageCapability OpenAIImagesCapability,
++	requireCompact bool,
++	platform string,
++	previousResponseCanMove bool,
++	useUpstreamTokenCost bool,
+ ) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+ 	selection, decision, err := s.selectAccountWithSchedulerOnce(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
+ 	if err == nil || openAIProxyStreamQuarantineBypassed(ctx) {
+diff --git a/backend/internal/service/openai_gateway_record_usage_test.go b/backend/internal/service/openai_gateway_record_usage_test.go
+index 21e5cd409..61bf616f9 100644
+--- a/backend/internal/service/openai_gateway_record_usage_test.go
++++ b/backend/internal/service/openai_gateway_record_usage_test.go
+@@ -438,6 +438,49 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
+ 	require.Equal(t, 1, userRepo.deductCalls)
+ }
+ 
++func TestOpenAIGatewayServiceRecordUsage_UsesActuallySelectedAPIKeyRoute(t *testing.T) {
++	primaryGroupID := int64(11)
++	backupGroupID := int64(22)
++	usage := OpenAIUsage{InputTokens: 15, OutputTokens: 4}
++	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
++	userRepo := &openAIRecordUsageUserRepoStub{}
++	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
++
++	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
++		Result: &OpenAIForwardResult{
++			RequestID: "resp_backup_group_billing",
++			Usage:     usage,
++			Model:     "gpt-5.1",
++			Duration:  time.Second,
++		},
++		APIKey: &APIKey{
++			ID:      1008,
++			GroupID: &primaryGroupID,
++			Group:   &Group{ID: primaryGroupID, RateMultiplier: 1.1},
++		},
++		User: &User{ID: 2008},
++		Account: &Account{
++			ID: 3008,
++			SelectedAPIKeyGroup: &Group{
++				ID:             backupGroupID,
++				Platform:       PlatformOpenAI,
++				Status:         StatusActive,
++				Hydrated:       true,
++				RateMultiplier: 1.7,
++			},
++		},
++	})
++
++	require.NoError(t, err)
++	require.NotNil(t, usageRepo.lastLog)
++	require.NotNil(t, usageRepo.lastLog.GroupID)
++	require.Equal(t, backupGroupID, *usageRepo.lastLog.GroupID)
++	require.Equal(t, 1.7, usageRepo.lastLog.RateMultiplier)
++	expected := expectedOpenAICost(t, svc, "gpt-5.1", usage, 1.7)
++	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
++	require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
++}
++
+ func TestOpenAIGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *testing.T) {
+ 	groupID := int64(14)
+ 	groupRate := 1.0
+diff --git a/backend/internal/service/openai_gateway_scheduling.go b/backend/internal/service/openai_gateway_scheduling.go
+index 341688aad..5ef1fbaae 100644
+--- a/backend/internal/service/openai_gateway_scheduling.go
++++ b/backend/internal/service/openai_gateway_scheduling.go
+@@ -15,6 +15,7 @@ import (
+ 	"time"
+ 
+ 	"github.com/Wei-Shaw/sub2api/internal/config"
++	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+ 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+ 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+ 	"github.com/gin-gonic/gin"
+@@ -999,11 +1000,83 @@ func (s *OpenAIGatewayService) isBetterAccount(candidate, current *Account) bool
+ 
+ // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
+ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
+-	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+-	// 分组利润控制：legacy 公共入口同样装门，保证不经
+-	// selectAccountWithScheduler 的调用方也无法绕过利润准入。
+-	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
+-	return s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
++	routing, ok := apiKeyGroupRoutesFromContext(ctx, groupID)
++	if !ok {
++		ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
++		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
++		return s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
++	}
++
++	var firstWait *AccountSelectionResult
++	var lastNoAccount error
++	for index, route := range routing.routes {
++		group, err := s.resolveOpenAIAPIKeyRouteGroup(ctx, route.GroupID)
++		if err != nil {
++			if errors.Is(err, ErrGroupNotFound) {
++				continue
++			}
++			return nil, err
++		}
++		if !apiKeyRouteAllowedForUser(routing.user, group) ||
++			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, true) {
++			continue
++		}
++		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
++		if err != nil {
++			return nil, err
++		}
++		if !eligible {
++			continue
++		}
++
++		candidateID := route.GroupID
++		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
++		attemptCtx = s.withOpenAIQuotaAutoPauseContext(attemptCtx)
++		attemptCtx = s.withOpenAIProfitControlGate(attemptCtx, &candidateID)
++		selection, err := s.selectAccountWithLoadAwareness(attemptCtx, &candidateID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
++		if err != nil {
++			if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts) {
++				lastNoAccount = err
++				continue
++			}
++			return nil, err
++		}
++		if selection == nil || selection.Account == nil {
++			lastNoAccount = ErrNoAvailableAccounts
++			continue
++		}
++		selection.attachAPIKeyRoute(group, subscription, index)
++		if selection.Acquired || selection.WaitPlan == nil {
++			return selection, nil
++		}
++		if firstWait == nil {
++			firstWait = selection
++		}
++	}
++	if firstWait != nil {
++		return firstWait, nil
++	}
++	if lastNoAccount != nil {
++		return nil, lastNoAccount
++	}
++	return nil, ErrNoAvailableAccounts
++}
++
++func (s *OpenAIGatewayService) resolveOpenAIAPIKeyRouteGroup(ctx context.Context, groupID int64) (*Group, error) {
++	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(group) && group.ID == groupID {
++		return group, nil
++	}
++	if s.schedulerSnapshot == nil {
++		return nil, ErrGroupNotFound
++	}
++	group, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, groupID)
++	if err != nil {
++		return nil, err
++	}
++	if group == nil {
++		return nil, ErrGroupNotFound
++	}
++	return group, nil
+ }
+ 
+ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (*AccountSelectionResult, error) {
+diff --git a/backend/internal/service/openai_gateway_usage.go b/backend/internal/service/openai_gateway_usage.go
+index ebb8427ef..00a528127 100644
+--- a/backend/internal/service/openai_gateway_usage.go
++++ b/backend/internal/service/openai_gateway_usage.go
+@@ -149,7 +149,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
+ 	apiKey := input.APIKey
+ 	user := input.User
+ 	account := input.Account
+-	subscription := input.Subscription
++	apiKey, subscription := apiKeyAndSubscriptionForSelectedAccount(apiKey, input.Subscription, account)
+ 	if !isGrokVideoUsageResult(result, nil) {
+ 		ApplyOpenAIImageBillingResolution(result)
+ 	}
+diff --git a/frontend/src/api/keys.ts b/frontend/src/api/keys.ts
+index 34dd5b4b7..a71548aa5 100644
+--- a/frontend/src/api/keys.ts
++++ b/frontend/src/api/keys.ts
+@@ -4,7 +4,7 @@
+  */
+ 
+ import { apiClient } from './client'
+-import type { ApiKey, CreateApiKeyRequest, UpdateApiKeyRequest, PaginatedResponse } from '@/types'
++import type { ApiKey, ApiKeyGroupRoute, CreateApiKeyRequest, UpdateApiKeyRequest, PaginatedResponse } from '@/types'
+ 
+ /**
+  * List all API keys for current user
+@@ -65,9 +65,11 @@ export async function create(
+   ipBlacklist?: string[],
+   quota?: number,
+   expiresInDays?: number,
+-  rateLimitData?: { rate_limit_5h?: number; rate_limit_1d?: number; rate_limit_7d?: number }
++  rateLimitData?: { rate_limit_5h?: number; rate_limit_1d?: number; rate_limit_7d?: number },
++  groupRoutes?: ApiKeyGroupRoute[]
+ ): Promise<ApiKey> {
+   const payload: CreateApiKeyRequest = { name }
++  if (groupRoutes && groupRoutes.length > 0) payload.group_routes = groupRoutes
+   if (groupId !== undefined) {
+     payload.group_id = groupId
+   }
+diff --git a/frontend/src/i18n/locales/en/dashboard.ts b/frontend/src/i18n/locales/en/dashboard.ts
+index 7f6a8bdc8..239bda690 100644
+--- a/frontend/src/i18n/locales/en/dashboard.ts
++++ b/frontend/src/i18n/locales/en/dashboard.ts
+@@ -102,6 +102,19 @@ export default {
+     namePlaceholder: 'My API Key',
+     groupLabel: 'Group',
+     selectGroup: 'Select a group',
++    groupRoutesLabel: 'Group routing',
++    groupRoutesHint: 'Try groups in order. A backup is skipped when its effective multiplier exceeds the cap.',
++    groupRoutesEmpty: 'Select a primary group to configure ordered fallback groups.',
++    primaryGroup: 'Primary',
++    backupGroup: 'Backup {index}',
++    backupShort: 'backup',
++    addBackupGroup: 'Add backup',
++    removeBackupGroup: 'Remove backup group',
++    moveBackupUp: 'Move backup up',
++    moveBackupDown: 'Move backup down',
++    maxMultiplier: 'Maximum multiplier',
++    unlimitedMultiplier: 'No limit',
++    invalidGroupRoutes: 'Each group route must have a positive group and multiplier cap.',
+     statusLabel: 'Status',
+     selectStatus: 'Select status',
+     saving: 'Saving...',
+@@ -117,6 +130,8 @@ export default {
+     failedToDelete: 'Failed to delete API key',
+     failedToUpdateStatus: 'Failed to update API key status',
+     clickToChangeGroup: 'Click to change group',
++    manageGroupRoutes: 'Manage ordered group routing',
++    manage: 'Manage',
+     groupChangedSuccess: 'Group changed successfully',
+     failedToChangeGroup: 'Failed to change group',
+     groupRequired: 'Please select a group',
+diff --git a/frontend/src/i18n/locales/zh/dashboard.ts b/frontend/src/i18n/locales/zh/dashboard.ts
+index 9fe72e601..b2d1b6a0e 100644
+--- a/frontend/src/i18n/locales/zh/dashboard.ts
++++ b/frontend/src/i18n/locales/zh/dashboard.ts
+@@ -102,6 +102,19 @@ export default {
+     namePlaceholder: '我的 API 密钥',
+     groupLabel: '分组',
+     selectGroup: '选择分组',
++    groupRoutesLabel: '分组路由',
++    groupRoutesHint: '按排列顺序依次尝试。实际倍率超过上限的分组会被跳过。',
++    groupRoutesEmpty: '请选择首选分组后，再配置有序备用分组。',
++    primaryGroup: '首选',
++    backupGroup: '备用 {index}',
++    backupShort: '备用',
++    addBackupGroup: '添加备用',
++    removeBackupGroup: '移除备用分组',
++    moveBackupUp: '上移备用分组',
++    moveBackupDown: '下移备用分组',
++    maxMultiplier: '倍率上限',
++    unlimitedMultiplier: '不限制',
++    invalidGroupRoutes: '每个分组路由都必须设置有效分组，倍率上限必须大于 0。',
+     statusLabel: '状态',
+     selectStatus: '选择状态',
+     saving: '保存中...',
+@@ -117,6 +130,8 @@ export default {
+     failedToDelete: '删除 API 密钥失败',
+     failedToUpdateStatus: '更新 API 密钥状态失败',
+     clickToChangeGroup: '点击更换分组',
++    manageGroupRoutes: '管理有序分组路由',
++    manage: '管理',
+     groupChangedSuccess: '分组更换成功',
+     failedToChangeGroup: '更换分组失败',
+     groupRequired: '请选择分组',
+diff --git a/frontend/src/types/index.ts b/frontend/src/types/index.ts
+index da1eeb73d..d028fe696 100644
+--- a/frontend/src/types/index.ts
++++ b/frontend/src/types/index.ts
+@@ -709,6 +709,7 @@ export interface ApiKey {
+   key: string
+   name: string
+   group_id: number | null
++  group_routes?: ApiKeyGroupRoute[]
+   status: 'active' | 'inactive' | 'quota_exhausted' | 'expired'
+   ip_whitelist: string[]
+   ip_blacklist: string[]
+@@ -735,9 +736,15 @@ export interface ApiKey {
+   reset_7d_at: string | null
+ }
+ 
++export interface ApiKeyGroupRoute {
++  group_id: number
++  max_rate_multiplier?: number | null
++}
++
+ export interface CreateApiKeyRequest {
+   name: string
+   group_id?: number | null
++  group_routes?: ApiKeyGroupRoute[]
+   custom_key?: string // Optional custom API Key
+   ip_whitelist?: string[]
+   ip_blacklist?: string[]
+@@ -751,6 +758,7 @@ export interface CreateApiKeyRequest {
+ export interface UpdateApiKeyRequest {
+   name?: string
+   group_id?: number | null
++  group_routes?: ApiKeyGroupRoute[]
+   status?: 'active' | 'inactive'
+   ip_whitelist?: string[]
+   ip_blacklist?: string[]
+diff --git a/frontend/src/views/user/KeysView.vue b/frontend/src/views/user/KeysView.vue
+index 023757650..309f012a2 100644
+--- a/frontend/src/views/user/KeysView.vue
++++ b/frontend/src/views/user/KeysView.vue
+@@ -137,9 +137,9 @@
+             <div class="group/dropdown relative">
+               <button
+                 :ref="(el) => setGroupButtonRef(row.id, el)"
+-                @click="openGroupSelector(row)"
++                @click="editKey(row)"
+                 class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
+-                :title="t('keys.clickToChangeGroup')"
++                :title="t('keys.manageGroupRoutes')"
+               >
+                 <GroupBadge
+                   v-if="row.group"
+@@ -156,7 +156,10 @@
+                 <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
+                   t('keys.noGroup')
+                 }}</span>
+-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
++                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.manage') }}</span>
++                <span v-if="row.group_routes?.length > 1" class="text-[11px] text-primary-600 dark:text-primary-400">
++                  +{{ row.group_routes.length - 1 }} {{ t('keys.backupShort') }}
++                </span>
+                 <svg
+                   class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
+                   fill="none"
+@@ -507,6 +510,31 @@
+           </Select>
+         </div>
+ 
++        <div class="space-y-3 rounded-lg border border-gray-200 p-3 dark:border-dark-600" data-testid="api-key-group-routes">
++          <div class="flex items-start justify-between gap-3">
++            <div>
++              <label class="input-label mb-0">{{ t('keys.groupRoutesLabel') }}</label>
++              <p class="input-hint">{{ t('keys.groupRoutesHint') }}</p>
++            </div>
++            <button type="button" class="btn btn-secondary px-2 py-1.5 text-xs" :disabled="!canAddGroupRoute" :title="t('keys.addBackupGroup')" @click="addGroupRoute">
++              <Icon name="plus" size="sm" class="mr-1" />{{ t('keys.addBackupGroup') }}
++            </button>
++          </div>
++          <div v-if="formData.group_routes.length > 0" class="space-y-2">
++            <div v-for="(route, index) in formData.group_routes" :key="`${index}-${route.group_id}`" class="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-2 rounded-md bg-gray-50 p-2 sm:grid-cols-[3.5rem_minmax(0,1fr)_8rem_auto] dark:bg-dark-700/60">
++              <span class="w-14 text-xs font-medium text-gray-500 dark:text-gray-400">{{ index === 0 ? t('keys.primaryGroup') : t('keys.backupGroup', { index }) }}</span>
++              <Select v-model="route.group_id" :options="routeOptionsFor(index)" :searchable="true" :search-placeholder="t('keys.searchGroup')" :disabled="index === 0" />
++              <input v-model.number="route.max_rate_multiplier" type="number" min="0.000001" step="0.01" class="input col-start-2 row-start-2 h-9 text-xs sm:col-start-3 sm:row-start-1" :placeholder="t('keys.unlimitedMultiplier')" :aria-label="t('keys.maxMultiplier')" />
++              <div class="col-start-3 row-start-1 flex items-center justify-end sm:col-start-4">
++                <button v-if="index > 0" type="button" class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30 dark:hover:bg-dark-600 dark:hover:text-gray-200" :disabled="index === 1" :title="t('keys.moveBackupUp')" @click="moveGroupRoute(index, -1)"><Icon name="arrowUp" size="xs" /></button>
++                <button v-if="index > 0" type="button" class="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-30 dark:hover:bg-dark-600 dark:hover:text-gray-200" :disabled="index === formData.group_routes.length - 1" :title="t('keys.moveBackupDown')" @click="moveGroupRoute(index, 1)"><Icon name="arrowDown" size="xs" /></button>
++                <button v-if="index > 0" type="button" class="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20" :title="t('keys.removeBackupGroup')" @click="removeGroupRoute(index)"><Icon name="trash" size="xs" /></button>
++              </div>
++            </div>
++          </div>
++          <p v-else class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.groupRoutesEmpty') }}</p>
++        </div>
++
+         <!-- Custom Key Section (only for create) -->
+         <div v-if="!showEditModal" class="space-y-3">
+           <div class="flex items-center justify-between">
+@@ -1117,7 +1145,7 @@
+ </template>
+ 
+ <script setup lang="ts">
+-	import { ref, reactive, computed, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
++	import { ref, reactive, computed, onMounted, onUnmounted, watch, type ComponentPublicInstance } from 'vue'
+ 	import { useI18n } from 'vue-i18n'
+ 	import { useAppStore } from '@/stores/app'
+ 	import { useOnboardingStore } from '@/stores/onboarding'
+@@ -1140,7 +1168,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
+ 	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
+ 	import GroupBadge from '@/components/common/GroupBadge.vue'
+ 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+-	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
++import type { ApiKey, ApiKeyGroupRoute, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
+ import type { Column } from '@/components/common/types'
+ import type { BatchApiKeyUsageStats } from '@/api/usage'
+ import { formatDateTime } from '@/utils/format'
+@@ -1330,6 +1358,7 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance
+ const formData = ref({
+   name: '',
+   group_id: null as number | null,
++  group_routes: [] as ApiKeyGroupRoute[],
+   status: 'active' as 'active' | 'inactive',
+   use_custom_key: false,
+   custom_key: '',
+@@ -1424,6 +1453,57 @@ const groupOptions = computed(() =>
+   }))
+ )
+ 
++const routeOptionsFor = (index: number) => {
++  const primary = formData.value.group_id
++  const primaryGroup = groups.value.find((group) => group.id === primary)
++  const selected = new Set(formData.value.group_routes.map((route) => route.group_id))
++  return groupOptions.value.filter((option) => {
++    if (index === 0) return option.value === primary
++    if (option.value === primary || (selected.has(option.value) && option.value !== formData.value.group_routes[index]?.group_id)) return false
++    return !primaryGroup || option.platform === primaryGroup.platform
++  })
++}
++
++const canAddGroupRoute = computed(() => formData.value.group_routes.length < 10 && routeOptionsFor(formData.value.group_routes.length).length > 0)
++
++const syncPrimaryRoute = () => {
++  if (formData.value.group_id === null) {
++    formData.value.group_routes = []
++    return
++  }
++
++  const currentPrimary = formData.value.group_routes[0]?.group_id === formData.value.group_id
++    ? formData.value.group_routes[0]
++    : null
++  formData.value.group_routes = [
++    {
++      group_id: formData.value.group_id,
++      max_rate_multiplier: currentPrimary?.max_rate_multiplier ?? null
++    },
++    ...formData.value.group_routes.slice(1).filter((route) => route.group_id !== formData.value.group_id)
++  ]
++}
++
++const addGroupRoute = () => {
++  const option = routeOptionsFor(formData.value.group_routes.length)[0]
++  if (option) formData.value.group_routes.push({ group_id: option.value, max_rate_multiplier: null })
++}
++
++const removeGroupRoute = (index: number) => {
++  formData.value.group_routes.splice(index, 1)
++}
++
++const moveGroupRoute = (index: number, delta: -1 | 1) => {
++  const target = index + delta
++  if (index <= 0 || target <= 0 || target >= formData.value.group_routes.length) return
++  const [route] = formData.value.group_routes.splice(index, 1)
++  formData.value.group_routes.splice(target, 0, route)
++}
++
++watch(() => formData.value.group_id, (groupId) => {
++  if (groupId !== null && (formData.value.group_routes.length === 0 || formData.value.group_routes[0]?.group_id !== groupId)) syncPrimaryRoute()
++})
++
+ // Group dropdown search
+ const groupSearchQuery = ref('')
+ const filteredGroupOptions = computed(() => {
+@@ -1564,6 +1644,7 @@ const editKey = (key: ApiKey) => {
+   formData.value = {
+     name: key.name,
+     group_id: key.group_id,
++    group_routes: (key.group_routes?.length ? key.group_routes : key.group_id ? [{ group_id: key.group_id }] : []).map((route) => ({ ...route })),
+     status: key.status === 'quota_exhausted' || key.status === 'expired' ? 'inactive' : key.status,
+     use_custom_key: false,
+     custom_key: '',
+@@ -1596,40 +1677,6 @@ const toggleKeyStatus = async (key: ApiKey) => {
+   }
+ }
+ 
+-const openGroupSelector = (key: ApiKey) => {
+-  if (groupSelectorKeyId.value === key.id) {
+-    groupSelectorKeyId.value = null
+-    dropdownPosition.value = null
+-  } else {
+-    const buttonEl = groupButtonRefs.value.get(key.id)
+-    if (buttonEl) {
+-      const rect = buttonEl.getBoundingClientRect()
+-      const dropdownEstHeight = 400 // estimated max dropdown height
+-      const dropdownEstWidth = Math.min(380, window.innerWidth - 16)
+-      const spaceBelow = window.innerHeight - rect.bottom
+-      const spaceAbove = rect.top
+-      // 夹取 left，避免窄屏下浮层超出视口右缘
+-      const left = Math.max(8, Math.min(rect.left, window.innerWidth - dropdownEstWidth - 8))
+-
+-      if (spaceBelow < dropdownEstHeight && spaceAbove > spaceBelow) {
+-        // Not enough space below, pop upward
+-        dropdownPosition.value = {
+-          bottom: window.innerHeight - rect.top + 4,
+-          left
+-        }
+-      } else {
+-        // Default: pop downward
+-        dropdownPosition.value = {
+-          top: rect.bottom + 4,
+-          left
+-        }
+-      }
+-    }
+-    groupSelectorKeyId.value = key.id
+-    groupSearchQuery.value = ''
+-  }
+-}
+-
+ const changeGroup = async (key: ApiKey, newGroupId: number | null) => {
+   groupSelectorKeyId.value = null
+   dropdownPosition.value = null
+@@ -1667,6 +1714,18 @@ const handleSubmit = async () => {
+     appStore.showError(t('keys.groupRequired'))
+     return
+   }
++  syncPrimaryRoute()
++  const groupRoutes = formData.value.group_routes.map((route) => {
++    const rawCap = route.max_rate_multiplier as number | string | null | undefined
++    return {
++      group_id: route.group_id,
++      max_rate_multiplier: rawCap === '' || rawCap == null ? null : Number(rawCap)
++    }
++  })
++  if (groupRoutes.some((route) => route.group_id <= 0 || (route.max_rate_multiplier != null && (!Number.isFinite(route.max_rate_multiplier) || route.max_rate_multiplier <= 0)))) {
++    appStore.showError(t('keys.invalidGroupRoutes'))
++    return
++  }
+ 
+   // Validate custom key if enabled
+   if (!showEditModal.value && formData.value.use_custom_key) {
+@@ -1721,6 +1780,7 @@ const handleSubmit = async () => {
+       const updates: UpdateApiKeyRequest = {
+         name: formData.value.name,
+         group_id: formData.value.group_id,
++        group_routes: groupRoutes,
+         ip_whitelist: ipWhitelist,
+         ip_blacklist: ipBlacklist,
+         quota: quota,
+@@ -1744,7 +1804,8 @@ const handleSubmit = async () => {
+         ipBlacklist,
+         quota,
+         expiresInDays,
+-        rateLimitData
++        rateLimitData,
++        groupRoutes
+       )
+       appStore.showSuccess(t('keys.keyCreatedSuccess'))
+       // Only advance tour if active, on submit step, and creation succeeded
+@@ -1790,6 +1851,7 @@ const closeModals = () => {
+   formData.value = {
+     name: '',
+     group_id: null,
++    group_routes: [],
+     status: 'active',
+     use_custom_key: false,
+     custom_key: '',
+diff --git a/frontend/src/views/user/__tests__/KeysView.spec.ts b/frontend/src/views/user/__tests__/KeysView.spec.ts
+index b66072e94..f09176287 100644
+--- a/frontend/src/views/user/__tests__/KeysView.spec.ts
++++ b/frontend/src/views/user/__tests__/KeysView.spec.ts
+@@ -7,6 +7,8 @@ import KeysView from '../KeysView.vue'
+ 
+ const {
+   listKeys,
++  createKey,
++  updateKey,
+   getPublicSettings,
+   getDashboardApiKeysUsage,
+   getAvailableGroups,
+@@ -18,6 +20,8 @@ const {
+   nextStep,
+ } = vi.hoisted(() => ({
+   listKeys: vi.fn(),
++  createKey: vi.fn(),
++  updateKey: vi.fn(),
+   getPublicSettings: vi.fn(),
+   getDashboardApiKeysUsage: vi.fn(),
+   getAvailableGroups: vi.fn(),
+@@ -58,8 +62,8 @@ const messages: Record<string, string> = {
+ vi.mock('@/api', () => ({
+   keysAPI: {
+     list: listKeys,
+-    create: vi.fn(),
+-    update: vi.fn(),
++    create: createKey,
++    update: updateKey,
+     delete: vi.fn(),
+     toggleStatus: vi.fn(),
+   },
+@@ -261,6 +265,8 @@ describe('user KeysView column settings', () => {
+     localStorage.clear()
+ 
+     listKeys.mockReset()
++    createKey.mockReset()
++    updateKey.mockReset()
+     getPublicSettings.mockReset()
+     getDashboardApiKeysUsage.mockReset()
+     getAvailableGroups.mockReset()
+@@ -278,6 +284,8 @@ describe('user KeysView column settings', () => {
+       page_size: 20,
+       pages: 1,
+     })
++    createKey.mockResolvedValue(createApiKey())
++    updateKey.mockResolvedValue(createApiKey())
+     getPublicSettings.mockResolvedValue({})
+     getDashboardApiKeysUsage.mockResolvedValue({ stats: {} })
+     getAvailableGroups.mockResolvedValue([])
+@@ -438,4 +446,40 @@ describe('user KeysView column settings', () => {
+       expect.objectContaining({ signal: expect.any(AbortSignal) })
+     )
+   })
++
++  it('preserves the primary rate cap and normalizes an empty backup cap on update', async () => {
++    const key = { ...createApiKey(), group_id: 11 }
++    listKeys.mockResolvedValueOnce({ items: [key], total: 1, page: 1, page_size: 20, pages: 1 })
++    const wrapper = await mountView()
++    const vm = wrapper.vm as unknown as {
++      showEditModal: boolean
++      selectedKey: ApiKey | null
++      formData: Record<string, any>
++      handleSubmit: () => Promise<void>
++    }
++
++    vm.showEditModal = true
++    vm.selectedKey = key
++    vm.formData.name = key.name
++    vm.formData.group_id = 11
++    vm.formData.group_routes = [
++      { group_id: 11, max_rate_multiplier: 1.25 },
++      { group_id: 12, max_rate_multiplier: '' },
++    ]
++
++    await vm.handleSubmit()
++    await flushPromises()
++
++    expect(updateKey).toHaveBeenCalledWith(
++      key.id,
++      expect.objectContaining({
++        group_id: 11,
++        group_routes: [
++          { group_id: 11, max_rate_multiplier: 1.25 },
++          { group_id: 12, max_rate_multiplier: null },
++        ],
++      })
++    )
++    expect(showError).not.toHaveBeenCalled()
++  })
+ })
+
+--- UNTRACKED FILES ---
+.codex-import/
+.wrangler/
+1
+2
+backend/internal/domain/api_key_group_route.go
+backend/internal/service/api_key_group_routing.go
+backend/internal/service/api_key_group_routing_test.go
+backend/migrations/227_api_key_group_routes.sql
+backend/migrations/api_key_group_routes_migration_test.go
+
+--- DIFF STAT ---
+ backend/ent/apikey.go                              |  16 ++-
+ backend/ent/apikey/apikey.go                       |   6 +
+ backend/ent/apikey_create.go                       |  58 ++++++++
+ backend/ent/apikey_update.go                       |  41 ++++++
+ backend/ent/migrate/schema.go                      |  17 +--
+ backend/ent/mutation.go                            |  72 +++++++++-
+ backend/ent/runtime/runtime.go                     |  22 +--
+ backend/ent/schema/api_key.go                      |   4 +
+ backend/internal/handler/api_key_handler.go        |  34 +++--
+ backend/internal/handler/dto/mappers.go            |   1 +
+ backend/internal/handler/dto/types.go              |  31 +++--
+ backend/internal/handler/gateway_handler.go        |   4 +-
+ .../handler/gateway_handler_chat_completions.go    |   2 +-
+ .../internal/handler/gateway_handler_responses.go  |   2 +-
+ backend/internal/handler/gemini_v1beta_handler.go  |   2 +-
+ backend/internal/handler/openai_gateway_handler.go |  10 +-
+ backend/internal/repository/api_key_repo.go        |   6 +
+ backend/internal/server/middleware/api_key_auth.go |  26 +++-
+ .../server/middleware/api_key_auth_google.go       |  39 +++---
+ .../server/middleware/api_key_auth_google_test.go  |  35 +++++
+ .../server/middleware/api_key_auth_test.go         |  37 +++++
+ backend/internal/service/account.go                |   5 +
+ backend/internal/service/api_key.go                |  19 +++
+ backend/internal/service/api_key_auth_cache.go     |   1 +
+ .../internal/service/api_key_auth_cache_impl.go    |   4 +-
+ .../service/api_key_auth_cache_profit_test.go      |   2 +-
+ backend/internal/service/api_key_service.go        | 154 ++++++++++++++++-----
+ .../internal/service/gateway_request_pricing.go    |   7 +
+ backend/internal/service/gateway_scheduling.go     | 104 ++++++++++++++
+ backend/internal/service/gateway_service.go        |  11 +-
+ backend/internal/service/gateway_usage_billing.go  |   2 +-
+ .../internal/service/openai_account_scheduler.go   |  77 +++++++++++
+ .../service/openai_gateway_record_usage_test.go    |  43 ++++++
+ .../internal/service/openai_gateway_scheduling.go  |  83 ++++++++++-
+ backend/internal/service/openai_gateway_usage.go   |   2 +-
+ frontend/src/api/keys.ts                           |   6 +-
+ frontend/src/i18n/locales/en/dashboard.ts          |  15 ++
+ frontend/src/i18n/locales/zh/dashboard.ts          |  15 ++
+ frontend/src/types/index.ts                        |   8 ++
+ frontend/src/views/user/KeysView.vue               | 142 +++++++++++++------
+ frontend/src/views/user/__tests__/KeysView.spec.ts |  48 ++++++-
+ 41 files changed, 1036 insertions(+), 177 deletions(-)

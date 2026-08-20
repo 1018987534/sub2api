@@ -44,6 +44,10 @@ func (APIKey) Fields() []ent.Field {
 		field.Int64("group_id").
 			Optional().
 			Nillable(),
+		field.JSON("group_routes", []domain.APIKeyGroupRoute{}).
+			Default([]domain.APIKeyGroupRoute{}).
+			SchemaType(map[string]string{dialect.Postgres: "jsonb"}).
+			Comment("API Key ordered group routes; first item is primary and each item may cap the accepted effective multiplier"),
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),

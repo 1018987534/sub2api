@@ -1,0 +1,7 @@
+branch=cdy/api-key-group-routing-20260820
+base_commit=5a4910a1cb08424112d1bce634abcc234d511078
+changed_branch=api_key.group_routes ordered candidate routing
+changed_field=group_routes[].max_rate_multiplier
+route_order=primary,backup-1,backup-2
+max_rate_multiplier=0.20
+fallback_policy=ordered

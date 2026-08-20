@@ -1,0 +1,7 @@
+branch=cdy/api-key-group-routing-20260820
+base_commit=5a4910a1cb08424112d1bce634abcc234d511078
+changed_branch=legacy_single_group
+changed_field=group_id
+route_order=primary
+max_rate_multiplier=unlimited
+fallback_policy=none

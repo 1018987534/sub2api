@@ -53,3 +53,10 @@ func gatewayTokenRequestBillingGroupFromContext(ctx context.Context) *Group {
 	}
 	return nil
 }
+
+func withGatewayTokenRequestBillingGroup(ctx context.Context, group *Group) context.Context {
+	if ctx == nil || !IsGroupContextValid(group) {
+		return ctx
+	}
+	return context.WithValue(ctx, gatewayTokenRequestBillingGroupCtxKey{}, group)
+}

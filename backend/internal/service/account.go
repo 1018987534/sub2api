@@ -65,6 +65,11 @@ type Account struct {
 	GroupIDs      []int64
 	Groups        []*Group
 
+	// SelectedAPIKeyGroup is request-local routing metadata. It is attached to
+	// a cloned account after ordered API-key route selection and is never stored.
+	SelectedAPIKeyGroup        *Group
+	SelectedAPIKeySubscription *UserSubscription
+
 	// model_mapping 热路径缓存（非持久化字段）
 	modelMappingCache               map[string]string
 	modelMappingCacheReady          bool

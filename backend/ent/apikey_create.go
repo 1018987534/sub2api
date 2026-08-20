@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // APIKeyCreate is the builder for creating a APIKey entity.
@@ -96,6 +97,12 @@ func (_c *APIKeyCreate) SetNillableGroupID(v *int64) *APIKeyCreate {
 	if v != nil {
 		_c.SetGroupID(*v)
 	}
+	return _c
+}
+
+// SetGroupRoutes sets the "group_routes" field.
+func (_c *APIKeyCreate) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyCreate {
+	_c.mutation.SetGroupRoutes(v)
 	return _c
 }
 
@@ -383,6 +390,10 @@ func (_c *APIKeyCreate) defaults() error {
 		v := apikey.DefaultUpdatedAt()
 		_c.mutation.SetUpdatedAt(v)
 	}
+	if _, ok := _c.mutation.GroupRoutes(); !ok {
+		v := apikey.DefaultGroupRoutes
+		_c.mutation.SetGroupRoutes(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := apikey.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -448,6 +459,9 @@ func (_c *APIKeyCreate) check() error {
 		if err := apikey.NameValidator(v); err != nil {
 			return &ValidationError{Name: "name", err: fmt.Errorf(`ent: validator failed for field "APIKey.name": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.GroupRoutes(); !ok {
+		return &ValidationError{Name: "group_routes", err: errors.New(`ent: missing required field "APIKey.group_routes"`)}
 	}
 	if _, ok := _c.mutation.Status(); !ok {
 		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "APIKey.status"`)}
@@ -530,6 +544,10 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
 		_node.Name = value
+	}
+	if value, ok := _c.mutation.GroupRoutes(); ok {
+		_spec.SetField(apikey.FieldGroupRoutes, field.TypeJSON, value)
+		_node.GroupRoutes = value
 	}
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
@@ -778,6 +796,18 @@ func (u *APIKeyUpsert) UpdateGroupID() *APIKeyUpsert {
 // ClearGroupID clears the value of the "group_id" field.
 func (u *APIKeyUpsert) ClearGroupID() *APIKeyUpsert {
 	u.SetNull(apikey.FieldGroupID)
+	return u
+}
+
+// SetGroupRoutes sets the "group_routes" field.
+func (u *APIKeyUpsert) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpsert {
+	u.Set(apikey.FieldGroupRoutes, v)
+	return u
+}
+
+// UpdateGroupRoutes sets the "group_routes" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateGroupRoutes() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldGroupRoutes)
 	return u
 }
 
@@ -1203,6 +1233,20 @@ func (u *APIKeyUpsertOne) UpdateGroupID() *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) ClearGroupID() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearGroupID()
+	})
+}
+
+// SetGroupRoutes sets the "group_routes" field.
+func (u *APIKeyUpsertOne) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetGroupRoutes(v)
+	})
+}
+
+// UpdateGroupRoutes sets the "group_routes" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateGroupRoutes() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateGroupRoutes()
 	})
 }
 
@@ -1841,6 +1885,20 @@ func (u *APIKeyUpsertBulk) UpdateGroupID() *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) ClearGroupID() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.ClearGroupID()
+	})
+}
+
+// SetGroupRoutes sets the "group_routes" field.
+func (u *APIKeyUpsertBulk) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetGroupRoutes(v)
+	})
+}
+
+// UpdateGroupRoutes sets the "group_routes" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateGroupRoutes() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateGroupRoutes()
 	})
 }
 
