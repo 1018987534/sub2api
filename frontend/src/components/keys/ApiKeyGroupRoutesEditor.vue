@@ -123,7 +123,7 @@
                 :value="route.max_rate_multiplier ?? ''"
                 type="number"
                 min="0.000001"
-                step="0.01"
+                step="any"
                 class="input h-[42px] pr-7 text-sm"
                 :placeholder="t('keys.unlimitedMultiplier')"
                 :aria-label="t('keys.maxAcceptedMultiplier')"

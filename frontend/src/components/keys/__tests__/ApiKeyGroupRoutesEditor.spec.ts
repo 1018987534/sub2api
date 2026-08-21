@@ -68,6 +68,26 @@ describe('ApiKeyGroupRoutesEditor', () => {
     ])
   })
 
+  it('accepts arbitrary positive multiplier caps without a browser step mismatch', async () => {
+    const wrapper = mountEditor()
+    const cap = wrapper.get('[data-testid="group-route-cap-0"]')
+    const input = cap.element as HTMLInputElement
+
+    await cap.setValue('0.09')
+    expect(input.validity.valid).toBe(true)
+    expect(input.validity.stepMismatch).toBe(false)
+    expect(wrapper.emitted('update:routes')?.at(-1)?.[0]).toEqual([
+      { group_id: 11, max_rate_multiplier: 0.09 },
+      { group_id: 12, max_rate_multiplier: null }
+    ])
+
+    await cap.setValue('0')
+    expect(input.validity.rangeUnderflow).toBe(true)
+
+    await cap.setValue('-0.01')
+    expect(input.validity.rangeUnderflow).toBe(true)
+  })
+
   it('drops incompatible backups when the primary platform changes', async () => {
     const wrapper = mountEditor()
     const primarySelect = wrapper.findAllComponents({ name: 'Select' })[0]
