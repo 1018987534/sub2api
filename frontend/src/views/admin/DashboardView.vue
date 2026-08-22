@@ -244,7 +244,7 @@
                 :disabled="firstTokenLoading"
                 :title="t('common.refresh')"
                 data-testid="refresh-first-token-latencies"
-                @click="loadFirstTokenLatencies"
+                @click="loadFirstTokenLatencies()"
               >
                 <Icon name="refresh" size="sm" />
                 {{ t('common.refresh') }}
@@ -511,7 +511,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
@@ -573,6 +573,8 @@ const firstTokenError = ref(false)
 const firstTokenMetrics = ref<AccountFirstTokenLatencyMetric[]>([])
 const firstTokenGroupFilter = ref<string | number>('all')
 const firstTokenManualProbeLoading = ref<Set<number>>(new Set())
+let firstTokenRefreshInFlight = false
+let firstTokenRefreshTimer: ReturnType<typeof setInterval> | null = null
 
 interface FirstTokenGroupSection {
   id: number
@@ -656,6 +658,7 @@ const requestFirstTokenManualProbe = async (metric: AccountFirstTokenLatencyMetr
   setFirstTokenManualProbeLoading(metric.account_id, true)
   try {
     await adminAPI.accounts.requestFirstTokenManualProbe(metric.account_id)
+    await loadFirstTokenLatencies(true)
     appStore.showSuccess(t('admin.dashboard.firstTokenManualProbeQueued', { account: metric.account_name }))
   } catch (error) {
     console.error('Error requesting account first-token probe:', error)
@@ -1018,21 +1021,29 @@ const loadUserSpendingRanking = async () => {
   }
 }
 
-const loadFirstTokenLatencies = async () => {
-  firstTokenLoading.value = true
-  firstTokenError.value = false
+const loadFirstTokenLatencies = async (background = false) => {
+  if (firstTokenRefreshInFlight) return
+  firstTokenRefreshInFlight = true
+  if (!background) {
+    firstTokenLoading.value = true
+    firstTokenError.value = false
+  }
   try {
     const response = await adminAPI.accounts.getFirstTokenLatencies()
     firstTokenMetrics.value = response.items || []
+    firstTokenError.value = false
     if (firstTokenGroupFilter.value !== 'all' && !firstTokenGroupSections.value.some(group => group.id === Number(firstTokenGroupFilter.value))) {
       firstTokenGroupFilter.value = 'all'
     }
   } catch (error) {
     console.error('Error loading account first-token latencies:', error)
-    firstTokenMetrics.value = []
-    firstTokenError.value = true
+    if (!background) {
+      firstTokenMetrics.value = []
+      firstTokenError.value = true
+    }
   } finally {
-    firstTokenLoading.value = false
+    firstTokenRefreshInFlight = false
+    if (!background) firstTokenLoading.value = false
   }
 }
 
@@ -1055,6 +1066,16 @@ const loadChartData = async () => {
 onMounted(() => {
   void refreshBatchImageAccess()
   void Promise.all([loadDashboardStats(), loadFirstTokenLatencies()])
+  firstTokenRefreshTimer = setInterval(() => {
+    void loadFirstTokenLatencies(true)
+  }, 30_000)
+})
+
+onBeforeUnmount(() => {
+  if (firstTokenRefreshTimer) {
+    clearInterval(firstTokenRefreshTimer)
+    firstTokenRefreshTimer = null
+  }
 })
 </script>
 

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 
-import type { DashboardStats } from '@/types'
+import type { AccountFirstTokenLatencyMetric, DashboardStats } from '@/types'
 import DashboardView from '../DashboardView.vue'
 
 const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, showSuccess, showError } = vi.hoisted(() => ({
@@ -92,6 +92,27 @@ const createDashboardStats = (): DashboardStats => ({
   tpm: 0
 })
 
+const createFirstTokenMetric = (
+  overrides: Partial<AccountFirstTokenLatencyMetric> = {}
+): AccountFirstTokenLatencyMetric => ({
+  account_id: 42,
+  account_name: 'relay-fast',
+  predicted_ms: 4321,
+  has_prediction: true,
+  is_fast_pool: true,
+  scheduling_rate_multiplier: 0.045,
+  groups: [{ group_id: 10, group_name: 'Alpha' }],
+  sample_count: 8,
+  updated_at: '2026-08-12T01:00:00Z',
+  slow_streak: 0,
+  recovery_fast_streak: 0,
+  probe_interval_seconds: 120,
+  cache_rate: 0.25,
+  cache_read_tokens: 75,
+  cache_rate_denominator: 300,
+  ...overrides
+})
+
 describe('admin DashboardView', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
@@ -128,7 +149,7 @@ describe('admin DashboardView', () => {
   })
 
   it('uses today as default dashboard range', async () => {
-    mount(DashboardView, {
+    const wrapper = mount(DashboardView, {
       global: {
         stubs: {
           AppLayout: { template: '<div><slot /></div>' },
@@ -155,6 +176,7 @@ describe('admin DashboardView', () => {
       granularity: 'hour'
     }))
     expect(getFirstTokenLatencies).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 
   it('renders enabled API-key relay first-token predictions', async () => {
@@ -266,6 +288,212 @@ describe('admin DashboardView', () => {
     await manualProbeButtons[0].trigger('click')
     await flushPromises()
     expect(requestFirstTokenManualProbe).toHaveBeenCalledWith(42)
+    expect(getFirstTokenLatencies).toHaveBeenCalledTimes(2)
     expect(showSuccess).toHaveBeenCalledWith('admin.dashboard.firstTokenManualProbeQueued')
+    wrapper.unmount()
+  })
+
+  it('refreshes first-token metrics periodically and stops after unmount', async () => {
+    vi.useFakeTimers()
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    try {
+      await flushPromises()
+      expect(getFirstTokenLatencies).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushPromises()
+      expect(getFirstTokenLatencies).toHaveBeenCalledTimes(2)
+
+      wrapper.unmount()
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(getFirstTokenLatencies).toHaveBeenCalledTimes(2)
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('preserves existing metrics when a background refresh fails', async () => {
+    vi.useFakeTimers()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    getFirstTokenLatencies
+      .mockResolvedValueOnce({ items: [createFirstTokenMetric()], total: 1 })
+      .mockRejectedValueOnce(new Error('temporary refresh failure'))
+
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    try {
+      await flushPromises()
+      expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('relay-fast')
+
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushPromises()
+      expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('relay-fast')
+      expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).not.toContain('admin.dashboard.firstTokenLatencyFailed')
+    } finally {
+      wrapper.unmount()
+      consoleError.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not overlap periodic refresh requests', async () => {
+    vi.useFakeTimers()
+    let finishRefresh: ((value: { items: AccountFirstTokenLatencyMetric[]; total: number }) => void) | undefined
+    const pendingRefresh = new Promise<{ items: AccountFirstTokenLatencyMetric[]; total: number }>((resolve) => {
+      finishRefresh = resolve
+    })
+    getFirstTokenLatencies
+      .mockResolvedValueOnce({ items: [createFirstTokenMetric()], total: 1 })
+      .mockReturnValueOnce(pendingRefresh)
+
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    try {
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(getFirstTokenLatencies).toHaveBeenCalledTimes(2)
+      finishRefresh?.({ items: [createFirstTokenMetric()], total: 1 })
+      await flushPromises()
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows an error when a manual first-token probe cannot be queued', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    getFirstTokenLatencies.mockResolvedValueOnce({ items: [createFirstTokenMetric()], total: 1 })
+    requestFirstTokenManualProbe.mockRejectedValueOnce(new Error('probe unavailable'))
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    try {
+      await flushPromises()
+      await wrapper.findAll('[data-testid="first-token-manual-probe"]')[0].trigger('click')
+      await flushPromises()
+      expect(requestFirstTokenManualProbe).toHaveBeenCalledTimes(1)
+      expect(getFirstTokenLatencies).toHaveBeenCalledTimes(1)
+      expect(showError).toHaveBeenCalledWith('admin.dashboard.firstTokenManualProbeFailed')
+    } finally {
+      wrapper.unmount()
+      consoleError.mockRestore()
+    }
+  })
+
+  it('renders the first-token error state when the initial request fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    getFirstTokenLatencies.mockRejectedValueOnce(new Error('metrics unavailable'))
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    try {
+      await flushPromises()
+      expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('admin.dashboard.firstTokenLatencyFailed')
+    } finally {
+      wrapper.unmount()
+      consoleError.mockRestore()
+    }
+  })
+
+  it('ignores repeated manual probe clicks while the first request is pending', async () => {
+    let finishProbe: ((value: { account_id: number; queued: boolean }) => void) | undefined
+    const pendingProbe = new Promise<{ account_id: number; queued: boolean }>((resolve) => {
+      finishProbe = resolve
+    })
+    getFirstTokenLatencies.mockResolvedValue({ items: [createFirstTokenMetric()], total: 1 })
+    requestFirstTokenManualProbe.mockReturnValueOnce(pendingProbe)
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          LoadingSpinner: true,
+          Icon: true,
+          DateRangePicker: true,
+          Select: true,
+          ModelDistributionChart: true,
+          TokenUsageTrend: true,
+          Line: true
+        }
+      }
+    })
+
+    try {
+      await flushPromises()
+      const probeButton = wrapper.findAll('[data-testid="first-token-manual-probe"]')[0]
+      await probeButton.trigger('click')
+      await probeButton.trigger('click')
+      expect(requestFirstTokenManualProbe).toHaveBeenCalledTimes(1)
+
+      finishProbe?.({ account_id: 42, queued: true })
+      await flushPromises()
+      expect(showSuccess).toHaveBeenCalledWith('admin.dashboard.firstTokenManualProbeQueued')
+    } finally {
+      wrapper.unmount()
+    }
   })
 })
