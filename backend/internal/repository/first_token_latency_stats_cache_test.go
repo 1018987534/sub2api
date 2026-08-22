@@ -323,6 +323,45 @@ func TestFirstTokenLatencyStatsCacheLeavesFastPoolOnlyAfterStablePredictionExcee
 	require.False(t, slow[18].ReliableFast)
 }
 
+func TestFirstTokenLatencyStatsCacheCircuitBreaksAboveTwoMinutes(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	cache := &firstTokenLatencyStatsCache{rdb: rdb}
+	ctx := context.Background()
+
+	for index := 0; index < 3; index++ {
+		require.NoError(t, cache.RecordSample(ctx, 19, fmt.Sprintf("fast-%d", index), 6_000))
+	}
+
+	// The threshold is strict: exactly two minutes remains ordinary robust
+	// smoothing, while the first millisecond above it opens the circuit.
+	require.NoError(t, cache.RecordSample(ctx, 19, "at-threshold", firstTokenLatencyCircuitBreakThresholdMS))
+	stats, err := cache.GetStatsBatch(ctx, []int64{19})
+	require.NoError(t, err)
+	require.True(t, stats[19].ReliableFast)
+	require.False(t, stats[19].CircuitBroken)
+	require.Equal(t, 6_000.0, stats[19].PredictedMS)
+
+	require.NoError(t, cache.RecordSample(ctx, 19, "over-threshold", firstTokenLatencyCircuitBreakThresholdMS+1))
+	stats, err = cache.GetStatsBatch(ctx, []int64{19})
+	require.NoError(t, err)
+	require.False(t, stats[19].ReliableFast)
+	require.True(t, stats[19].CircuitBroken)
+	require.Equal(t, 6_000.0, stats[19].PredictedMS, "circuit state must override a still-fast robust prediction")
+	require.Zero(t, stats[19].RecoveryFastStreak)
+
+	for index, latency := range []int{5_000, 7_000, 9_000} {
+		require.NoError(t, cache.RecordSample(ctx, 19, fmt.Sprintf("recovery-%d", index), latency))
+	}
+	stats, err = cache.GetStatsBatch(ctx, []int64{19})
+	require.NoError(t, err)
+	require.True(t, stats[19].ReliableFast)
+	require.False(t, stats[19].CircuitBroken)
+	require.Equal(t, 7_000.0, stats[19].PredictedMS)
+	require.Zero(t, stats[19].RecoveryFastStreak)
+}
+
 func TestFirstTokenLatencyStatsCacheFastProbeAfterStaleHistoryNeedsConfirmation(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})

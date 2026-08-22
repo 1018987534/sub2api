@@ -60,6 +60,7 @@ type FirstTokenLatencyStats struct {
 	// from legacy Redis hashes created before confirmation was introduced.
 	FastConfirmationTracked bool
 	RecoveryFastStreak      int
+	CircuitBroken           bool
 }
 
 // FirstTokenLatencyStatsCache is shared by every gateway so scheduling decisions

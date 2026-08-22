@@ -253,6 +253,10 @@ func TestFirstTokenPriorityProbeIntervalBacksOffSlowAccounts(t *testing.T) {
 		FirstTokenLatencyStats{PredictedMS: 7_000, SampleCount: 1, RecoveryFastStreak: 1},
 		5_000,
 	))
+	require.Equal(t, firstTokenPriorityRecoveryProbe, firstTokenPriorityProbeInterval(
+		FirstTokenLatencyStats{PredictedMS: 7_000, SampleCount: 20, CircuitBroken: true},
+		5_000,
+	))
 }
 
 func TestFirstTokenPriorityStatsFastRequiresTrackedConfirmation(t *testing.T) {
@@ -268,6 +272,30 @@ func TestFirstTokenPriorityStatsFastRequiresTrackedConfirmation(t *testing.T) {
 	recovering.ReliableFast = true
 	recovering.RecoveryFastStreak = 0
 	require.True(t, firstTokenPriorityStatsFast(recovering, now))
+	recovering.CircuitBroken = true
+	require.False(t, firstTokenPriorityStatsFast(recovering, now))
+}
+
+func TestFirstTokenPriorityCircuitBrokenAccountEntersSlowPool(t *testing.T) {
+	now := time.Now()
+	stats := map[int64]FirstTokenLatencyStats{
+		1: {
+			PredictedMS:             6_000,
+			SampleCount:             20,
+			UpdatedAt:               now,
+			FastConfirmationTracked: true,
+			CircuitBroken:           true,
+		},
+		2: {
+			PredictedMS:             8_000,
+			SampleCount:             20,
+			UpdatedAt:               now,
+			ReliableFast:            true,
+			FastConfirmationTracked: true,
+		},
+	}
+
+	require.Equal(t, []int64{2, 1}, firstTokenPriorityOrderWithStats([]int64{1, 2}, stats, now, false))
 }
 
 func TestFirstTokenPriorityDefaultStickyEligible(t *testing.T) {
@@ -277,6 +305,16 @@ func TestFirstTokenPriorityDefaultStickyEligible(t *testing.T) {
 
 	reliable.PredictedMS = 15_001
 	require.False(t, firstTokenPriorityDefaultStickyEligible(reliable, now))
+
+	circuitBroken := FirstTokenLatencyStats{
+		PredictedMS:   12_000,
+		SampleCount:   20,
+		UpdatedAt:     now,
+		CircuitBroken: true,
+	}
+	require.False(t, firstTokenPriorityDefaultStickyEligible(circuitBroken, now), "circuit-broken account must not bypass the slow pool through hard session affinity")
+	circuitBroken.CircuitBroken = false
+	require.True(t, firstTokenPriorityDefaultStickyEligible(circuitBroken, now))
 
 	reliable.PredictedMS = 12_000
 	reliable.SampleCount = 2

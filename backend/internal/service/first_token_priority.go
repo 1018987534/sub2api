@@ -526,6 +526,9 @@ func firstTokenPriorityStatsReliable(stats FirstTokenLatencyStats) bool {
 }
 
 func firstTokenPriorityStatsFast(stats FirstTokenLatencyStats, now time.Time) bool {
+	if stats.CircuitBroken {
+		return false
+	}
 	age := now.Sub(stats.UpdatedAt)
 	confirmed := stats.ReliableFast
 	if !stats.FastConfirmationTracked {
@@ -539,6 +542,9 @@ func firstTokenPriorityStatsFast(stats FirstTokenLatencyStats, now time.Time) bo
 // or stale data falls back to the adaptive weighted policy instead of pinning
 // a session to an account whose current latency cannot be trusted.
 func firstTokenPriorityDefaultStickyEligible(stats FirstTokenLatencyStats, now time.Time) bool {
+	if stats.CircuitBroken {
+		return false
+	}
 	age := now.Sub(stats.UpdatedAt)
 	return firstTokenPriorityStatsReliable(stats) &&
 		age >= 0 && age <= firstTokenPriorityFreshFor &&
@@ -696,7 +702,7 @@ func dynamicFirstTokenProbeIndexes(ranked []firstTokenRankedAccount, fastestMS f
 }
 
 func firstTokenPriorityProbeInterval(stats FirstTokenLatencyStats, fastestMS float64) time.Duration {
-	if stats.RecoveryFastStreak > 0 {
+	if stats.CircuitBroken || stats.RecoveryFastStreak > 0 {
 		return firstTokenPriorityRecoveryProbe
 	}
 	if stats.SampleCount < firstTokenPriorityMinimumSamples {

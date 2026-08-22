@@ -15,6 +15,7 @@ import (
 const firstTokenLatencyStatsPrefix = "scheduler:first_token:account:"
 const firstTokenLatencyProbePrefix = "scheduler:first_token:probe:"
 const firstTokenLatencyManualProbePrefix = "scheduler:first_token:manual_probe:"
+const firstTokenLatencyCircuitBreakThresholdMS = 120_000
 
 // Scheduling uses a time-smoothed robust score. The recent median absorbs
 // isolated samples, while explicit confirmation lets recovered accounts return
@@ -27,6 +28,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	local latency_ms = tonumber(ARGV[1])
 	local stats_ttl_seconds = tonumber(ARGV[2])
 	local dedupe_ttl_seconds = tonumber(ARGV[3])
+	local circuit_break_threshold_ms = tonumber(ARGV[4])
 	local now = redis.call('TIME')
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 
@@ -41,6 +43,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	local old_confirmation_tracked = tonumber(redis.call('HGET', stats_key, 'fast_confirmation_tracked')) or 0
 	local recovery_fast_streak = tonumber(redis.call('HGET', stats_key, 'recovery_fast_streak')) or 0
 	local recovery_fast_samples = redis.call('HGET', stats_key, 'recovery_fast_samples')
+	local circuit_broken = tonumber(redis.call('HGET', stats_key, 'circuit_broken')) or 0
 	local old_updated = tonumber(redis.call('HGET', stats_key, 'updated_at_ms'))
 	local encoded = redis.call('HGET', stats_key, 'recent_samples')
 	local sample_count = tonumber(redis.call('HGET', stats_key, 'sample_count')) or 0
@@ -77,6 +80,17 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	-- state only when at least three retained observations support the median.
 	if old_confirmation_tracked == 0 and old_reliable_fast == 1 and old_median and old_median <= 10000 and retained_sample_count >= 3 then
 		was_confirmed_fast = true
+	end
+	if circuit_broken == 1 then
+		was_confirmed_fast = false
+	end
+	-- A single TTFT over two minutes is a circuit breaker. Do not let the
+	-- robust median/EWMA hide it; recovery still requires three fast samples.
+	if latency_ms > circuit_break_threshold_ms then
+		circuit_broken = 1
+		was_confirmed_fast = false
+		recovery_fast_streak = 0
+		recovery_fast_samples = nil
 	end
 	if elapsed_seconds > 1200 then
 		was_confirmed_fast = false
@@ -140,6 +154,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 	local reliable_fast = 0
 	if (was_confirmed_fast or recovery_confirmed) and ewma > 0 and ewma <= 10000 then reliable_fast = 1 end
 	if recovery_confirmed then
+		circuit_broken = 0
 		recovery_fast_streak = 0
 		recovery_samples = {}
 	end
@@ -163,6 +178,7 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 		'fast_confirmation_tracked', '1',
 		'recovery_fast_streak', tostring(recovery_fast_streak),
 		'recovery_fast_samples', table.concat(recovery_parts, ','),
+		'circuit_broken', tostring(circuit_broken),
 		'score_version', '2',
 		'slow_streak', tostring(slow_streak),
 		'updated_at_ms', tostring(now_ms),
@@ -205,7 +221,7 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 	dedupeKey := fmt.Sprintf("scheduler:first_token:event:%d:%s", accountID, requestID)
 	probeKey := fmt.Sprintf("%s%d", firstTokenLatencyProbePrefix, accountID)
 	manualProbeKey := fmt.Sprintf("%s%d", firstTokenLatencyManualProbePrefix, accountID)
-	if _, err := firstTokenLatencyStatsRecordScript.Run(ctx, c.rdb, []string{statsKey, dedupeKey, probeKey, manualProbeKey}, firstTokenMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds())).Result(); err != nil {
+	if _, err := firstTokenLatencyStatsRecordScript.Run(ctx, c.rdb, []string{statsKey, dedupeKey, probeKey, manualProbeKey}, firstTokenMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds()), firstTokenLatencyCircuitBreakThresholdMS).Result(); err != nil {
 		return fmt.Errorf("record first-token latency stats: %w", err)
 	}
 	return nil
@@ -272,14 +288,14 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		if accountID <= 0 {
 			continue
 		}
-		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID), "ewma_ms", "median_ms", "sample_count", "updated_at_ms", "slow_streak", "reliable_fast", "recent_samples", "fast_confirmation_tracked", "recovery_fast_streak", "score_version")
+		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID), "ewma_ms", "median_ms", "sample_count", "updated_at_ms", "slow_streak", "reliable_fast", "recent_samples", "fast_confirmation_tracked", "recovery_fast_streak", "score_version", "circuit_broken")
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("get first-token latency stats: %w", err)
 	}
 	for accountID, cmd := range commands {
 		values, err := cmd.Result()
-		if err != nil || len(values) != 10 || values[0] == nil {
+		if err != nil || len(values) != 11 || values[0] == nil {
 			continue
 		}
 		stablePrediction, ewmaErr := strconv.ParseFloat(fmt.Sprint(values[0]), 64)
@@ -332,6 +348,7 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		if values[9] != nil {
 			scoreVersion, _ = strconv.Atoi(fmt.Sprint(values[9]))
 		}
+		circuitBroken := values[10] != nil && fmt.Sprint(values[10]) == "1"
 		if scoreVersion < 2 {
 			stablePrediction = median
 		}
@@ -346,6 +363,7 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 			ReliableFast:            reliableFast,
 			FastConfirmationTracked: confirmationTracked,
 			RecoveryFastStreak:      recoveryFastStreak,
+			CircuitBroken:           circuitBroken,
 		}
 	}
 	return result, nil
