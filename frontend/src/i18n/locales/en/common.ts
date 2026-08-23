@@ -224,7 +224,11 @@ export default {
     noConversations: 'No conversations',
     selectConversation: 'Select a conversation to reply',
     adminTitle: 'Support Inbox',
-    adminDescription: 'Select a conversation to view messages'
+    adminDescription: 'Select a conversation to view messages',
+    insertEmoji: 'Insert emoji',
+    attachFile: 'Attach file',
+    fileTooLarge: 'Files must be 4 MB or smaller',
+    sendFailed: 'Send failed. Please try again.'
   },
 
   // Auth

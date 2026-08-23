@@ -224,7 +224,11 @@ export default {
     noConversations: '暂无会话',
     selectConversation: '选择一个会话开始回复',
     adminTitle: '客服收件箱',
-    adminDescription: '选择左侧会话查看消息'
+    adminDescription: '选择左侧会话查看消息',
+    insertEmoji: '插入表情',
+    attachFile: '添加附件',
+    fileTooLarge: '文件不能超过 4 MB',
+    sendFailed: '发送失败，请稍后重试'
   },
 
   // Auth
