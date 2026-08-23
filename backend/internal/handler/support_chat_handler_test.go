@@ -29,7 +29,7 @@ func TestSupportChatInsertMessageRejectsBlankContent(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	h := NewSupportChatHandler(db)
+	h := NewSupportChatHandler(db, nil)
 	_, err = h.insertMessage(supportChatTestContext(), 41, 7, "user", supportMessageInput{Content: " \n\t"})
 	require.EqualError(t, err, "message content must be between 1 and 10000 characters")
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -39,7 +39,7 @@ func TestSupportChatInsertMessageUpdatesUnreadForEachSender(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
-	h := NewSupportChatHandler(db)
+	h := NewSupportChatHandler(db, nil)
 	now := time.Date(2026, 8, 23, 16, 0, 0, 0, time.UTC)
 	insertPattern := `INSERT INTO support_messages .*ON CONFLICT \(idempotency_key\) DO NOTHING RETURNING`
 	updateAdminPattern := `UPDATE support_conversations SET unread_by_admin=unread_by_admin\+1,last_message_at=\$2,updated_at=\$2 WHERE id=\$1`
@@ -63,7 +63,7 @@ func TestSupportChatInsertMessageIdempotentRetryDoesNotIncrementUnread(t *testin
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
-	h := NewSupportChatHandler(db)
+	h := NewSupportChatHandler(db, nil)
 	now := time.Date(2026, 8, 23, 16, 0, 0, 0, time.UTC)
 	insertPattern := `INSERT INTO support_messages .*ON CONFLICT \(idempotency_key\) DO NOTHING RETURNING`
 	mock.ExpectQuery(insertPattern).WithArgs(int64(41), "user", int64(7), "hello", "text", "retry-key").WillReturnError(sql.ErrNoRows)
@@ -79,7 +79,7 @@ func TestSupportChatReadClearsUserUnread(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
-	h := NewSupportChatHandler(db)
+	h := NewSupportChatHandler(db, nil)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE support_conversations SET unread_by_user=0,updated_at=NOW() WHERE user_id=$1")).
 		WithArgs(int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
 	c := supportChatTestContext()
@@ -92,7 +92,7 @@ func TestSupportChatAdminReadClearsAdminUnread(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	defer db.Close()
-	h := NewSupportChatHandler(db)
+	h := NewSupportChatHandler(db, nil)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE support_conversations SET unread_by_admin=0,manually_unread_by_admin=false,updated_at=NOW() WHERE id=$1")).
 		WithArgs(int64(41)).WillReturnResult(sqlmock.NewResult(0, 1))
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

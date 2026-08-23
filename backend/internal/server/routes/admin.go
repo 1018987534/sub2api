@@ -134,6 +134,7 @@ func registerSupportChatRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	chat.GET("/unread-count", h.SupportChat.AdminUnreadCount)
 	chat.GET("/conversations/:id/messages", h.SupportChat.AdminMessages)
 	chat.POST("/conversations/:id/messages", h.SupportChat.AdminSend)
+	chat.GET("/attachments/:id", h.SupportChat.AdminAttachment)
 	chat.POST("/conversations/:id/read", h.SupportChat.AdminRead)
 }
 
