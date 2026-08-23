@@ -22,7 +22,7 @@ func TestListUserGroupMetricsAggregatesMonitoredGroups(t *testing.T) {
 			"monitor_id", "platform", "id", "name", "first_token_p50_ms", "first_token_sample_count", "cache_read_tokens", "cache_rate_denominator",
 		}).
 			AddRow(int64(17), "openai", int64(10), "性价比分组", 1250.0, int64(24), int64(625), int64(1000)).
-			AddRow(int64(15), "anthropic", int64(20), "KIRO分组", nil, nil, int64(0), int64(0)))
+			AddRow(int64(15), "anthropic", int64(20), "KIRO分组", nil, nil, nil, nil))
 
 	repo := &channelMonitorRepository{db: db}
 	rows, err := repo.ListUserGroupMetrics(context.Background(), start, end)
