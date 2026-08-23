@@ -288,11 +288,13 @@ ORDER BY mg.platform, mg.name, mg.id`
 	for rows.Next() {
 		var metric service.UserMonitorGroupMetric
 		var p50 sql.NullFloat64
-		var sampleCount int64
+		var sampleCount sql.NullInt64
 		if err := rows.Scan(&metric.MonitorID, &metric.Platform, &metric.GroupID, &metric.GroupName, &p50, &sampleCount, &metric.CacheReadTokens, &metric.CacheRateDenominator); err != nil {
 			return nil, fmt.Errorf("scan user monitor group metrics: %w", err)
 		}
-		metric.FirstTokenSampleCount = sampleCount
+		if sampleCount.Valid {
+			metric.FirstTokenSampleCount = sampleCount.Int64
+		}
 		if p50.Valid {
 			value := int64(math.Round(p50.Float64))
 			metric.FirstTokenP50Ms = &value

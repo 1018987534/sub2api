@@ -22,7 +22,7 @@ func TestListUserGroupMetricsAggregatesMonitoredGroups(t *testing.T) {
 			"monitor_id", "platform", "id", "name", "first_token_p50_ms", "first_token_sample_count", "cache_read_tokens", "cache_rate_denominator",
 		}).
 			AddRow(int64(17), "openai", int64(10), "性价比分组", 1250.0, int64(24), int64(625), int64(1000)).
-			AddRow(int64(15), "anthropic", int64(20), "KIRO分组", nil, int64(0), int64(0), int64(0)))
+			AddRow(int64(15), "anthropic", int64(20), "KIRO分组", nil, nil, int64(0), int64(0)))
 
 	repo := &channelMonitorRepository{db: db}
 	rows, err := repo.ListUserGroupMetrics(context.Background(), start, end)
@@ -36,6 +36,7 @@ func TestListUserGroupMetricsAggregatesMonitoredGroups(t *testing.T) {
 	require.NotNil(t, rows[0].CacheRate)
 	require.InDelta(t, 0.625, *rows[0].CacheRate, 0.0001)
 	require.Nil(t, rows[1].FirstTokenP50Ms)
+	require.Zero(t, rows[1].FirstTokenSampleCount)
 	require.Nil(t, rows[1].CacheRate)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
