@@ -302,6 +302,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/support',
+    name: 'SupportChat',
+    component: () => import('@/views/user/SupportChatView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Support Chat',
+      titleKey: 'supportChat.title',
+      descriptionKey: 'supportChat.description'
+    }
+  },
+  {
     path: '/subscriptions',
     name: 'Subscriptions',
     component: () => import('@/views/user/SubscriptionsView.vue'),
@@ -548,6 +560,12 @@ const routes: RouteRecordRaw[] = [
       titleKey: 'admin.announcements.title',
       descriptionKey: 'admin.announcements.description'
     }
+  },
+  {
+    path: '/admin/support',
+    name: 'AdminSupportChat',
+    component: () => import('@/views/admin/SupportChatView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Support Inbox', titleKey: 'supportChat.inbox' }
   },
   {
     path: '/admin/proxies',

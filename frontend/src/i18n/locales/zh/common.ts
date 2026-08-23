@@ -170,6 +170,8 @@ export default {
     affiliateRebateRecords: '返利记录',
     affiliateTransferRecords: '提取记录',
     profile: '个人资料',
+    support: '在线客服',
+    supportInbox: '客服收件箱',
     users: '用户管理',
     groups: '分组管理',
     channels: '渠道管理',
@@ -206,6 +208,23 @@ export default {
     contentModeration: '内容审核',
     promptAudit: '提示词审计',
     auditLogs: '操作日志',
+  },
+
+  supportChat: {
+    title: '在线客服',
+    description: '与客服保持一个长期会话，问题和回复都会保留在这里。',
+    connected: '在线',
+    emptyTitle: '开始联系在线客服',
+    emptyDescription: '输入问题后发送，客服回复会实时显示在这里。',
+    messageLabel: '消息内容',
+    placeholder: '请输入消息内容...',
+    send: '发送',
+    inbox: '客服会话',
+    searchUser: '搜索用户邮箱或用户名',
+    noConversations: '暂无会话',
+    selectConversation: '选择一个会话开始回复',
+    adminTitle: '客服收件箱',
+    adminDescription: '选择左侧会话查看消息'
   },
 
   // Auth

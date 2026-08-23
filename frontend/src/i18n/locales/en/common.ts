@@ -170,6 +170,8 @@ export default {
     affiliateRebateRecords: 'Rebate Records',
     affiliateTransferRecords: 'Transfer Records',
     profile: 'Profile',
+    support: 'Support',
+    supportInbox: 'Support Inbox',
     users: 'Users',
     groups: 'Groups',
     channels: 'Channels',
@@ -206,6 +208,23 @@ export default {
     contentModeration: 'Content Moderation',
     promptAudit: 'Prompt Audit',
     auditLogs: 'Audit Logs',
+  },
+
+  supportChat: {
+    title: 'Support Chat',
+    description: 'Keep a long-running conversation with support. Your messages and replies stay here.',
+    connected: 'Available',
+    emptyTitle: 'Start a conversation',
+    emptyDescription: 'Send a question and support replies will appear here.',
+    messageLabel: 'Message',
+    placeholder: 'Write a message...',
+    send: 'Send',
+    inbox: 'Support Inbox',
+    searchUser: 'Search email or username',
+    noConversations: 'No conversations',
+    selectConversation: 'Select a conversation to reply',
+    adminTitle: 'Support Inbox',
+    adminDescription: 'Select a conversation to view messages'
   },
 
   // Auth

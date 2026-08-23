@@ -1,0 +1,61 @@
+BASE_SHA=18a94e0df2bf8e8c4e899174293d6d6c3cb6afe1
+CHANGED_BRANCH_OR_FIELD=support-chat user/admin conversation routes, message persistence, unread counters, polling inbox
+MODIFIED_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-chat-20260823T151500+0800/MODIFIED_FILE
+DIFF_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-chat-20260823T151500+0800/DIFF_FILE
+VERIFICATION_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-chat-20260823T151500+0800/VERIFICATION.txt
+ROLLBACK_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-chat-20260823T151500+0800/ROLLBACK.sh
+
+BASELINE_COMMAND_1=(cd /tmp/sub2api-support-baseline/backend && go test ./internal/server/routes -run '^$')
+BASELINE_COMMAND_2=(cd /tmp/sub2api-support-baseline/backend && go test ./internal/handler -run '^$')
+BASELINE_COMMAND_3=(cd /tmp/sub2api-support-baseline/backend && go test ./migrations -run '^$')
+BASELINE_FRONTEND_COMMAND=(cd /tmp/sub2api-support-baseline/frontend && pnpm exec vitest run src/router/__tests__/guards.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1)
+BASELINE_RESULT=routes, handler, migrations compile-only tests passed; baseline frontend Vitest was not runnable because the detached worktree has no node_modules (exit 254)
+BASELINE_EXIT_STATUS=0_for_backend_compile_checks; 254_for_missing_baseline_frontend_dependencies
+
+MODIFIED_COMMAND_1=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/backend && go test ./internal/handler -run 'TestSupportChat' -count=1 && go test ./migrations -run 'TestSupportChat' -count=1)
+MODIFIED_COMMAND_2=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/backend && go test ./internal/server/routes ./internal/handler ./migrations -count=1)
+MODIFIED_COMMAND_3=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/frontend && pnpm exec vue-tsc --noEmit --pretty false)
+MODIFIED_COMMAND_4=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/frontend && pnpm run build)
+MODIFIED_COMMAND_5=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/frontend && pnpm exec vitest run src/router/__tests__/guards.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1)
+MODIFIED_RESULT=SupportChat handler tests passed; migration test passed; routes/handler/migrations packages passed; vue-tsc passed; Vite build passed; 46 frontend Vitest tests passed
+MODIFIED_EXIT_STATUS=0
+
+FULL_BACKEND_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/backend && go test ./...)
+FULL_BACKEND_RESULT=all packages passed except existing external Aliyun captcha verifier tests TestAliyunCaptchaVerifier_VerifySuccess, TestAliyunCaptchaVerifier_VerifyResultFalse, TestAliyunCaptchaVerifier_APIErrorNormalized, TestAliyunCaptchaVerifier_TransportError; each received captcha API code 502
+FULL_BACKEND_EXIT_STATUS=1
+
+DIFF_CHECK_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login && git diff --check)
+DIFF_CHECK_RESULT=no whitespace errors
+DIFF_CHECK_EXIT_STATUS=0
+
+ROLLBACK_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login && release-evidence/support-chat-20260823T151500+0800/ROLLBACK.sh /tmp/sub2api-support-rollback /tmp/support-chat-rollback-verification-3.txt)
+ROLLBACK_RESULT=rollback copy restored to BASE_SHA and removed all support-chat feature files; current working tree remained modified
+ROLLBACK_EXIT_STATUS=0
+RESTORED_BEHAVIOR=rollback copy has no support-chat routes, handler, migration, API module, or support views; current working tree intentionally retains the modified support-chat implementation
+
+BASELINE_LITERAL_OUTPUT:
+ok  github.com/Wei-Shaw/sub2api/internal/server/routes  1.687s [no tests to run]
+ok  github.com/Wei-Shaw/sub2api/internal/handler  0.779s [no tests to run]
+ok  github.com/Wei-Shaw/sub2api/migrations  0.790s [no tests to run]
+BASELINE_INPUT=detached worktree /tmp/sub2api-support-baseline at BASE_SHA
+
+MODIFIED_LITERAL_OUTPUT:
+ok  github.com/Wei-Shaw/sub2api/internal/handler  2.819s
+ok  github.com/Wei-Shaw/sub2api/migrations  0.297s
+ok  github.com/Wei-Shaw/sub2api/internal/server/routes  3.251s
+ok  github.com/Wei-Shaw/sub2api/internal/handler  37.060s
+ok  github.com/Wei-Shaw/sub2api/migrations  1.028s
+Test Files  2 passed (2); Tests 46 passed (46)
+MODIFIED_INPUT=working tree support-chat implementation with polling fallback and idempotent message writes
+
+ROLLBACK_LITERAL_OUTPUT:
+rollback_script_exit=0
+rollback_git_diff_exit=0
+ROLLBACK_INPUT=/tmp/sub2api-support-rollback fixture populated from current support-chat files
+ROLLBACK_STATUS=empty after restore; support feature files removed; restored behavior/status matches BASE_SHA
+
+FULL_BACKEND_LITERAL_FAILURES:
+--- FAIL: TestAliyunCaptchaVerifier_VerifySuccess (code 502)
+--- FAIL: TestAliyunCaptchaVerifier_VerifyResultFalse (code 502)
+--- FAIL: TestAliyunCaptchaVerifier_APIErrorNormalized (code 502)
+--- FAIL: TestAliyunCaptchaVerifier_TransportError (code 502)

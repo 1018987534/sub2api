@@ -25,6 +25,15 @@ func RegisterUserRoutes(
 	// 用户管理面变更类操作入审计（含 TOTP 启用/禁用、step-up 验证、密码修改等安全事件）
 	authenticated.Use(gin.HandlerFunc(auditLog))
 	{
+		chat := authenticated.Group("/chat")
+		{
+			chat.GET("/conversation", h.SupportChat.Conversation)
+			chat.GET("/messages", h.SupportChat.Messages)
+			chat.POST("/messages", h.SupportChat.Send)
+			chat.POST("/read", h.SupportChat.Read)
+			chat.GET("/unread-count", h.SupportChat.UnreadCount)
+		}
+
 		// 用户接口
 		user := authenticated.Group("/user")
 		{

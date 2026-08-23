@@ -124,7 +124,17 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+		registerSupportChatRoutes(admin, h)
 	}
+}
+
+func registerSupportChatRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	chat := admin.Group("/chat")
+	chat.GET("/conversations", h.SupportChat.AdminConversations)
+	chat.GET("/unread-count", h.SupportChat.AdminUnreadCount)
+	chat.GET("/conversations/:id/messages", h.SupportChat.AdminMessages)
+	chat.POST("/conversations/:id/messages", h.SupportChat.AdminSend)
+	chat.POST("/conversations/:id/read", h.SupportChat.AdminRead)
 }
 
 func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
