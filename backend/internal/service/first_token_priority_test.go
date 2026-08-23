@@ -438,6 +438,71 @@ func TestFirstTokenProbePreservesHealthyFastStickyBinding(t *testing.T) {
 	require.Equal(t, []int64{probe.ID, fast.ID}, candidateAccountIDs(ordered))
 }
 
+func TestFirstTokenProbeOnlyReordersFreshScheduling(t *testing.T) {
+	now := time.Now()
+	probe := upstreamCostTestAccount(31, UpstreamBillingProbeStatusOK, 0.02, now.Add(-time.Minute), 30*time.Minute)
+	sticky := upstreamCostTestAccount(32, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
+	for _, account := range []*Account{probe, sticky} {
+		account.Status = StatusActive
+		account.Schedulable = true
+	}
+	cache := &staticFirstTokenLatencyStatsCache{
+		claimAllowed: true,
+		stats: map[int64]FirstTokenLatencyStats{
+			probe.ID:  {PredictedMS: 30_000, SampleCount: 5, UpdatedAt: now.Add(-firstTokenPriorityProbeMax)},
+			sticky.ID: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+		},
+	}
+
+	ordered := []openAIAccountCandidateScore{{account: sticky}, {account: probe}}
+	applyOpenAIFirstTokenPriorityOrder(context.Background(), OpenAIAccountScheduleRequest{
+		FirstTokenProbeEligible: true,
+		StickyAccountID:         sticky.ID,
+	}, ordered, cache, defaultOpenAIOAuthSchedulingRateMultiplier)
+	require.Equal(t, []int64{sticky.ID, probe.ID}, candidateAccountIDs(ordered))
+	require.Empty(t, cache.claimedIDs, "existing sticky scheduling must not claim a dynamic probe")
+
+	cache.claimedIDs = nil
+	ordered = []openAIAccountCandidateScore{{account: sticky}, {account: probe}}
+	applyOpenAIFirstTokenPriorityOrder(context.Background(), OpenAIAccountScheduleRequest{
+		FirstTokenProbeEligible: true,
+	}, ordered, cache, defaultOpenAIOAuthSchedulingRateMultiplier)
+	require.Equal(t, []int64{probe.ID, sticky.ID}, candidateAccountIDs(ordered))
+	require.Equal(t, []int64{probe.ID}, cache.claimedIDs)
+}
+
+func TestFirstTokenManualProbeStillRunsForStickyScheduling(t *testing.T) {
+	now := time.Now()
+	probe := upstreamCostTestAccount(41, UpstreamBillingProbeStatusOK, 0.02, now.Add(-time.Minute), 30*time.Minute)
+	sticky := upstreamCostTestAccount(42, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
+	for _, account := range []*Account{probe, sticky} {
+		account.Status = StatusActive
+		account.Schedulable = true
+	}
+	cache := &staticFirstTokenLatencyStatsCache{
+		manualProbeID: probe.ID,
+		stats: map[int64]FirstTokenLatencyStats{
+			probe.ID:  {PredictedMS: 30_000, SampleCount: 5, UpdatedAt: now},
+			sticky.ID: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+		},
+	}
+	ordered := []openAIAccountCandidateScore{{account: sticky}, {account: probe}}
+	applyOpenAIFirstTokenPriorityOrder(context.Background(), OpenAIAccountScheduleRequest{
+		FirstTokenProbeEligible: true,
+		StickyAccountID:         sticky.ID,
+	}, ordered, cache, defaultOpenAIOAuthSchedulingRateMultiplier)
+	require.Equal(t, []int64{probe.ID, sticky.ID}, candidateAccountIDs(ordered))
+	require.Zero(t, cache.manualProbeID)
+	require.Empty(t, cache.claimedIDs, "manual probe should not consume the adaptive lease")
+}
+
+func TestFirstTokenProbeGateTreatsPreviousResponseAsSticky(t *testing.T) {
+	require.False(t, firstTokenProbeAllowedForNewScheduling(true, 0, 44))
+	require.False(t, firstTokenProbeAllowedForNewScheduling(true, 44, 0))
+	require.True(t, firstTokenProbeAllowedForNewScheduling(true, 0, 0))
+	require.False(t, firstTokenProbeAllowedForNewScheduling(false, 0, 0))
+}
+
 func candidateAccountIDs(candidates []openAIAccountCandidateScore) []int64 {
 	ids := make([]int64, 0, len(candidates))
 	for _, candidate := range candidates {

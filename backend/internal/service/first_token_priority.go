@@ -58,6 +58,13 @@ func firstTokenProbeEligible(ctx context.Context) bool {
 	return ok && eligible
 }
 
+// firstTokenProbeAllowedForNewScheduling keeps adaptive probes out of an
+// existing sticky session or previous-response chain. A probe may reorder only
+// a fresh account assignment, where no affinity binding is already known.
+func firstTokenProbeAllowedForNewScheduling(eligible bool, stickyAccountID, stickyPreviousAccountID int64) bool {
+	return eligible && stickyAccountID <= 0 && stickyPreviousAccountID <= 0
+}
+
 type AccountFirstTokenLatencyMetric struct {
 	AccountID                int64                           `json:"account_id"`
 	AccountName              string                          `json:"account_name"`
@@ -291,6 +298,16 @@ func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache F
 }
 
 func firstTokenPriorityOrderWithProbe(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache, allowProbe bool) []int64 {
+	return firstTokenPriorityOrderWithProbeOptions(ctx, candidates, cache, allowProbe, allowProbe)
+}
+
+func firstTokenPriorityOrderWithProbeOptions(
+	ctx context.Context,
+	candidates []*Account,
+	cache FirstTokenLatencyStatsCache,
+	allowProbe bool,
+	allowManualProbe bool,
+) []int64 {
 	accountIDs := make([]int64, 0, len(candidates))
 	priorityAccountIDs := make([]int64, 0, len(candidates))
 	fallbackAccountIDs := make([]int64, 0, len(candidates))
@@ -322,7 +339,7 @@ func firstTokenPriorityOrderWithProbe(ctx context.Context, candidates []*Account
 	}
 	baseline := firstTokenPriorityOrderWithStats(priorityAccountIDs, stats, now, false)
 	ordered := append(baseline, fallbackAccountIDs...)
-	if allowProbe {
+	if allowManualProbe {
 		if manualCache, ok := cache.(FirstTokenManualProbeCache); ok {
 			manualAccountID, claimed, claimErr := manualCache.TryClaimManualProbe(ctx, priorityAccountIDs, firstTokenPriorityProbeLease)
 			if claimErr == nil && claimed {
@@ -725,7 +742,17 @@ func firstTokenPriorityProbeInterval(stats FirstTokenLatencyStats, fastestMS flo
 }
 
 func firstTokenPriorityRanks(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache, allowProbe bool) map[int64]int {
-	ordered := firstTokenPriorityOrderWithProbe(ctx, candidates, cache, allowProbe)
+	return firstTokenPriorityRanksWithProbeOptions(ctx, candidates, cache, allowProbe, allowProbe)
+}
+
+func firstTokenPriorityRanksWithProbeOptions(
+	ctx context.Context,
+	candidates []*Account,
+	cache FirstTokenLatencyStatsCache,
+	allowProbe bool,
+	allowManualProbe bool,
+) map[int64]int {
+	ordered := firstTokenPriorityOrderWithProbeOptions(ctx, candidates, cache, allowProbe, allowManualProbe)
 	ranks := make(map[int64]int, len(ordered))
 	for rank, accountID := range ordered {
 		ranks[accountID] = rank

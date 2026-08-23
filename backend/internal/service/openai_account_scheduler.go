@@ -1095,7 +1095,18 @@ func applyOpenAIFirstTokenPriorityOrder(
 		for _, candidate := range selectionOrder[start:end] {
 			accounts = append(accounts, candidate.account)
 		}
-		ranks := firstTokenPriorityRanks(ctx, accounts, cache, req.FirstTokenProbeEligible)
+		allowProbe := firstTokenProbeAllowedForNewScheduling(
+			req.FirstTokenProbeEligible,
+			req.StickyAccountID,
+			req.StickyPreviousAccountID,
+		)
+		ranks := firstTokenPriorityRanksWithProbeOptions(
+			ctx,
+			accounts,
+			cache,
+			allowProbe,
+			req.FirstTokenProbeEligible,
+		)
 		sort.SliceStable(selectionOrder[start:end], func(i, j int) bool {
 			return ranks[selectionOrder[start+i].account.ID] < ranks[selectionOrder[start+j].account.ID]
 		})

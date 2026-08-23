@@ -834,7 +834,14 @@ func (s *GatewayService) selectAccountWithLoadAwarenessSingleGroup(ctx context.C
 			for _, candidate := range baseline {
 				accounts = append(accounts, candidate.account)
 			}
-			ranks := firstTokenPriorityRanks(ctx, accounts, s.rateLimitService.firstTokenLatencyStatsCache, firstTokenProbeEligible(ctx))
+			allowProbe := firstTokenProbeAllowedForNewScheduling(firstTokenProbeEligible(ctx), stickyAccountID, 0)
+			ranks := firstTokenPriorityRanksWithProbeOptions(
+				ctx,
+				accounts,
+				s.rateLimitService.firstTokenLatencyStatsCache,
+				allowProbe,
+				firstTokenProbeEligible(ctx),
+			)
 			sort.SliceStable(baseline, func(i, j int) bool {
 				return ranks[baseline[i].account.ID] < ranks[baseline[j].account.ID]
 			})
