@@ -172,6 +172,7 @@ export default {
     profile: '个人资料',
     support: '在线客服',
     supportInbox: '客服收件箱',
+    supportUnread: '有新的客服消息',
     users: '用户管理',
     groups: '分组管理',
     channels: '渠道管理',

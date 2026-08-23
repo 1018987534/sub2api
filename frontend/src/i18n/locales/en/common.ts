@@ -172,6 +172,7 @@ export default {
     profile: 'Profile',
     support: 'Support',
     supportInbox: 'Support Inbox',
+    supportUnread: 'New support message',
     users: 'Users',
     groups: 'Groups',
     channels: 'Channels',

@@ -87,3 +87,14 @@ describe('AppSidebar image studio access', () => {
     expect(componentSource).toContain("{ path: '/image-studio', label: t('nav.imageStudio'), icon: AIImageIcon }")
   })
 })
+
+describe('AppSidebar support unread badge', () => {
+  it('polls the role-specific support unread count and renders a red status dot', () => {
+    expect(componentSource).toContain("supportChatAPI.adminUnreadCount()")
+    expect(componentSource).toContain("supportChatAPI.unreadCount()")
+    expect(componentSource).toContain("path === '/admin/support'")
+    expect(componentSource).toContain("path === '/support'")
+    expect(componentSource).toContain('bg-red-500')
+    expect(componentSource).toContain("window.addEventListener('support-chat-read'")
+  })
+})

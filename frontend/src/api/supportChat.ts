@@ -44,7 +44,10 @@ export const supportChatAPI = {
     }
     return (await apiClient.post<SupportMessage>('/chat/messages', { content, kind: 'text', idempotency_key: idempotencyKey }, { headers: { 'Idempotency-Key': idempotencyKey } })).data
   },
-  read: async () => { await apiClient.post('/chat/read') },
+  read: async () => {
+    await apiClient.post('/chat/read')
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('support-chat-read'))
+  },
   unreadCount: async () => (await apiClient.get<{ unread_count: number }>('/chat/unread-count')).data.unread_count,
   adminConversations: async (params: { search?: string; unread_only?: boolean } = {}) => (await apiClient.get<Page<SupportConversation>>('/admin/chat/conversations', { params })).data,
   adminMessages: async (id: number) => (await apiClient.get<Page<SupportMessage>>(`/admin/chat/conversations/${id}/messages`)).data,
@@ -58,7 +61,10 @@ export const supportChatAPI = {
   },
   attachmentUrl: (id: number, admin = false) => `${admin ? '/admin/chat/attachments' : '/chat/attachments'}/${id}`,
   fetchAttachment: async (id: number, admin = false) => (await apiClient.get<Blob>(`${admin ? '/admin/chat/attachments' : '/chat/attachments'}/${id}`, { responseType: 'blob' })).data,
-  adminRead: async (id: number) => { await apiClient.post(`/admin/chat/conversations/${id}/read`) },
+  adminRead: async (id: number) => {
+    await apiClient.post(`/admin/chat/conversations/${id}/read`)
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('support-chat-read'))
+  },
   adminUnreadCount: async () => (await apiClient.get<{ unread_count: number }>('/admin/chat/unread-count')).data.unread_count,
 }
 

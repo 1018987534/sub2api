@@ -1,0 +1,175 @@
+diff --git a/frontend/src/api/supportChat.ts b/frontend/src/api/supportChat.ts
+index c9eb6163a..a42864750 100644
+--- a/frontend/src/api/supportChat.ts
++++ b/frontend/src/api/supportChat.ts
+@@ -44,7 +44,10 @@ export const supportChatAPI = {
+    }
+    return (await apiClient.post<SupportMessage>('/chat/messages', { content, kind: 'text', idempotency_key: idempotencyKey }, { headers: { 'Idempotency-Key': idempotencyKey } })).data
+  },
+  read: async () => {
+    await apiClient.post('/chat/read')
+    {+if (typeof window !== 'undefined') window.dispatchEvent(new Event('support-chat-read'))+}
+  },
+  unreadCount: async () => (await apiClient.get<{ unread_count: number }>('/chat/unread-count')).data.unread_count,
+  adminConversations: async (params: { search?: string; unread_only?: boolean } = {}) => (await apiClient.get<Page<SupportConversation>>('/admin/chat/conversations', { params })).data,
+  adminMessages: async (id: number) => (await apiClient.get<Page<SupportMessage>>(`/admin/chat/conversations/${id}/messages`)).data,
+@@ -58,7 +61,10 @@ export const supportChatAPI = {
+  },
+  attachmentUrl: (id: number, admin = false) => `${admin ? '/admin/chat/attachments' : '/chat/attachments'}/${id}`,
+  fetchAttachment: async (id: number, admin = false) => (await apiClient.get<Blob>(`${admin ? '/admin/chat/attachments' : '/chat/attachments'}/${id}`, { responseType: 'blob' })).data,
+  adminRead: async (id: number) => {
+    await apiClient.post(`/admin/chat/conversations/${id}/read`)
+    {+if (typeof window !== 'undefined') window.dispatchEvent(new Event('support-chat-read'))+}
+  },
+  adminUnreadCount: async () => (await apiClient.get<{ unread_count: number }>('/admin/chat/unread-count')).data.unread_count,
+}
+
+diff --git a/frontend/src/components/layout/AppSidebar.vue b/frontend/src/components/layout/AppSidebar.vue
+index 34783b11f..81ed07fa0 100644
+--- a/frontend/src/components/layout/AppSidebar.vue
++++ b/frontend/src/components/layout/AppSidebar.vue
+@@ -97,6 +97,7 @@
+              <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
+              <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+              <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+              {+<span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />+}
+            </router-link>
+          </template>
+        </div>
+@@ -122,6 +123,7 @@
+            <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
+            <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+            {+<span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />+}
+          </router-link>
+        </div>
+      </template>
+@@ -142,6 +144,7 @@
+            <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
+            <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+            {+<span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />+}
+          </router-link>
+        </div>
+      </template>
+@@ -197,6 +200,7 @@ import { sanitizeSvg } from '@/utils/sanitize'
+import { sanitizeUrl } from '@/utils/url'
+import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
+import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+{+import supportChatAPI from '@/api/supportChat'+}
+
+interface NavItem {
+  path: string
+@@ -250,9 +254,46 @@ const isAdmin = computed(() => authStore.isAdmin)
+const sidebarNavRef = ref<HTMLElement | null>(null)
+const lastKnownSidebarScrollTop = ref(appStore.sidebarScrollTop)
+const isDark = ref(document.documentElement.classList.contains('dark'))
+{+const supportUnreadCount = ref(0)+}
+{+let supportUnreadTimer: ReturnType<typeof setInterval> | undefined+}
+{+let supportUnreadRequest: Promise<void> | null = null+}
+
+const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
+
+{+async function refreshSupportUnread() {+}
+{+  if (!authStore.isAuthenticated) {+}
+{+    supportUnreadCount.value = 0+}
+{+    return+}
+{+  }+}
+{+  if (supportUnreadRequest) return supportUnreadRequest+}
+{+  supportUnreadRequest = (async () => {+}
+{+    try {+}
+{+      supportUnreadCount.value = isAdmin.value+}
+{+        ? await supportChatAPI.adminUnreadCount()+}
+{+        : await supportChatAPI.unreadCount()+}
+{+    } catch {+}
+{+      // A sidebar badge must not interrupt navigation when support is unavailable.+}
+{+    } finally {+}
+{+      supportUnreadRequest = null+}
+{+    }+}
+{+  })()+}
+{+  return supportUnreadRequest+}
+{+}+}
+
+{+function hasSupportUnread(path: string): boolean {+}
+{+  if (supportUnreadCount.value <= 0) return false+}
+{+  return isAdmin.value ? path === '/admin/support' : path === '/support'+}
+{+}+}
+
+{+function handleSupportChatRead() {+}
+{+  void refreshSupportUnread()+}
+{+}+}
+
+{+watch(+}
+{+  [isAdmin, () => authStore.isAuthenticated],+}
+{+  () => { void refreshSupportUnread() },+}
+{+)+}
+
+// Track which parent nav groups are expanded
+const expandedGroups = ref<Set<string>>(new Set())
+
+@@ -987,6 +1028,11 @@ onMounted(() => {
+  if (isAdmin.value) {
+    adminSettingsStore.fetch()
+  }
+  {+void refreshSupportUnread()+}
+{+  supportUnreadTimer = setInterval(() => {+}
+{+    if (document.visibilityState === 'visible') void refreshSupportUnread()+}
+{+  }, 15000)+}
+{+  window.addEventListener('support-chat-read', handleSupportChatRead)+}
+  restoreSidebarScrollPosition()
+})
+
+@@ -995,6 +1041,10 @@ onMounted(() => {
+onActivated(restoreSidebarScrollPosition)
+onDeactivated(persistSidebarScrollPosition)
+onBeforeUnmount(persistSidebarScrollPosition)
+{+onBeforeUnmount(() => {+}
+{+  if (supportUnreadTimer) clearInterval(supportUnreadTimer)+}
+{+  window.removeEventListener('support-chat-read', handleSupportChatRead)+}
+{+})+}
+</script>
+
+<style scoped>
+diff --git a/frontend/src/components/layout/__tests__/AppSidebar.spec.ts b/frontend/src/components/layout/__tests__/AppSidebar.spec.ts
+index 59504a7de..43cd353b9 100644
+--- a/frontend/src/components/layout/__tests__/AppSidebar.spec.ts
++++ b/frontend/src/components/layout/__tests__/AppSidebar.spec.ts
+@@ -87,3 +87,14 @@ describe('AppSidebar image studio access', () => {
+    expect(componentSource).toContain("{ path: '/image-studio', label: t('nav.imageStudio'), icon: AIImageIcon }")
+  })
+})
+
+{+describe('AppSidebar support unread badge', () => {+}
+{+  it('polls the role-specific support unread count and renders a red status dot', () => {+}
+{+    expect(componentSource).toContain("supportChatAPI.adminUnreadCount()")+}
+{+    expect(componentSource).toContain("supportChatAPI.unreadCount()")+}
+{+    expect(componentSource).toContain("path === '/admin/support'")+}
+{+    expect(componentSource).toContain("path === '/support'")+}
+{+    expect(componentSource).toContain('bg-red-500')+}
+{+    expect(componentSource).toContain("window.addEventListener('support-chat-read'")+}
+{+  })+}
+{+})+}
+diff --git a/frontend/src/i18n/locales/en/common.ts b/frontend/src/i18n/locales/en/common.ts
+index f32990de4..ed68f1bd1 100644
+--- a/frontend/src/i18n/locales/en/common.ts
++++ b/frontend/src/i18n/locales/en/common.ts
+@@ -172,6 +172,7 @@ export default {
+    profile: 'Profile',
+    support: 'Support',
+    supportInbox: 'Support Inbox',
+    {+supportUnread: 'New support message',+}
+    users: 'Users',
+    groups: 'Groups',
+    channels: 'Channels',
+diff --git a/frontend/src/i18n/locales/zh/common.ts b/frontend/src/i18n/locales/zh/common.ts
+index 4f597515d..370b20605 100644
+--- a/frontend/src/i18n/locales/zh/common.ts
++++ b/frontend/src/i18n/locales/zh/common.ts
+@@ -172,6 +172,7 @@ export default {
+    profile: '个人资料',
+    support: '在线客服',
+    supportInbox: '客服收件箱',
+    {+supportUnread: '有新的客服消息',+}
+    users: '用户管理',
+    groups: '分组管理',
+    channels: '渠道管理',

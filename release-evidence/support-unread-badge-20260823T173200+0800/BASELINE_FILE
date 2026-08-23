@@ -97,7 +97,6 @@
               <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
               <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
-              <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
             </router-link>
           </template>
         </div>
@@ -123,7 +122,6 @@
             <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
-            <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
           </router-link>
         </div>
       </template>
@@ -144,7 +142,6 @@
             <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
-            <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
           </router-link>
         </div>
       </template>
@@ -200,7 +197,6 @@ import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
-import supportChatAPI from '@/api/supportChat'
 
 interface NavItem {
   path: string
@@ -254,45 +250,8 @@ const isAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
 const lastKnownSidebarScrollTop = ref(appStore.sidebarScrollTop)
 const isDark = ref(document.documentElement.classList.contains('dark'))
-const supportUnreadCount = ref(0)
-let supportUnreadTimer: ReturnType<typeof setInterval> | undefined
-let supportUnreadRequest: Promise<void> | null = null
 
 const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
-
-async function refreshSupportUnread() {
-  if (!authStore.isAuthenticated) {
-    supportUnreadCount.value = 0
-    return
-  }
-  if (supportUnreadRequest) return supportUnreadRequest
-  supportUnreadRequest = (async () => {
-    try {
-      supportUnreadCount.value = isAdmin.value
-        ? await supportChatAPI.adminUnreadCount()
-        : await supportChatAPI.unreadCount()
-    } catch {
-      // A sidebar badge must not interrupt navigation when support is unavailable.
-    } finally {
-      supportUnreadRequest = null
-    }
-  })()
-  return supportUnreadRequest
-}
-
-function hasSupportUnread(path: string): boolean {
-  if (supportUnreadCount.value <= 0) return false
-  return isAdmin.value ? path === '/admin/support' : path === '/support'
-}
-
-function handleSupportChatRead() {
-  void refreshSupportUnread()
-}
-
-watch(
-  [isAdmin, () => authStore.isAuthenticated],
-  () => { void refreshSupportUnread() },
-)
 
 // Track which parent nav groups are expanded
 const expandedGroups = ref<Set<string>>(new Set())
@@ -1028,11 +987,6 @@ onMounted(() => {
   if (isAdmin.value) {
     adminSettingsStore.fetch()
   }
-  void refreshSupportUnread()
-  supportUnreadTimer = setInterval(() => {
-    if (document.visibilityState === 'visible') void refreshSupportUnread()
-  }, 15000)
-  window.addEventListener('support-chat-read', handleSupportChatRead)
   restoreSidebarScrollPosition()
 })
 
@@ -1041,10 +995,6 @@ onMounted(() => {
 onActivated(restoreSidebarScrollPosition)
 onDeactivated(persistSidebarScrollPosition)
 onBeforeUnmount(persistSidebarScrollPosition)
-onBeforeUnmount(() => {
-  if (supportUnreadTimer) clearInterval(supportUnreadTimer)
-  window.removeEventListener('support-chat-read', handleSupportChatRead)
-})
 </script>
 
 <style scoped>

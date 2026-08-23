@@ -1,0 +1,26 @@
+BASE_SHA=0e63df60e1f608266af67e68cbf533854c0d51fb
+CHANGED_BRANCH_OR_FIELD=support unread badge for admin inbox and user support navigation
+BASELINE_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-unread-badge-20260823T173200+0800/BASELINE_FILE
+MODIFIED_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-unread-badge-20260823T173200+0800/MODIFIED_FILE
+DIFF_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-unread-badge-20260823T173200+0800/DIFF_FILE
+VERIFICATION_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-unread-badge-20260823T173200+0800/VERIFICATION.txt
+ROLLBACK_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-unread-badge-20260823T173200+0800/ROLLBACK.sh
+BASELINE_FILE_SHA256=5a05a1e40841ad7397690517bace8732b5840cc8ad221419c8582772df7f5906
+MODIFIED_FILE_SHA256=e932ab5b623ce5267aa8d7726c5deb4eed691c94ecafa8d09cc2e17cf68db4ec
+DIFF_FILE_SHA256=deaf912852441059cce305bb4e8bf01aafdd867c5a62bc12355023cb78d9f29a
+
+BASELINE_COMMAND=(cd /tmp/sub2api-support-unread-baseline/frontend && pnpm exec vue-tsc --noEmit --pretty false && pnpm exec vitest run src/components/layout/__tests__/AppSidebar.spec.ts src/router/__tests__/guards.spec.ts --maxWorkers=1 --minWorkers=1)
+BASELINE_INPUT=detached worktree at BASE_SHA with shared node_modules symlink
+BASELINE_LITERAL_OUTPUT=vue-tsc passed; Test Files 2 passed; Tests 46 passed
+BASELINE_EXIT_STATUS=0
+
+MODIFIED_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/frontend && pnpm exec vue-tsc --noEmit --pretty false && pnpm exec vitest run src/components/layout/__tests__/AppSidebar.spec.ts src/router/__tests__/guards.spec.ts --maxWorkers=1 --minWorkers=1 && pnpm run build)
+MODIFIED_INPUT=working tree with support unread badge changes
+MODIFIED_LITERAL_OUTPUT=vue-tsc passed; Test Files 2 passed; Tests 47 passed; Vite 1035 modules transformed; built in 11.85s; existing dynamic-import and chunk-size warnings only
+MODIFIED_EXIT_STATUS=0
+
+ROLLBACK_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login && release-evidence/support-unread-badge-20260823T173200+0800/ROLLBACK.sh /tmp/sub2api-support-unread-rollback /tmp/support-unread-rollback.txt)
+ROLLBACK_INPUT=another BASE_SHA copy with the five modified support-navigation files overwritten from the current checkout
+ROLLBACK_LITERAL_OUTPUT=rollback_status=clean; restored AppSidebar SHA256 equals baseline 5a05a1e40841ad7397690517bace8732b5840cc8ad221419c8582772df7f5906
+ROLLBACK_EXIT_STATUS=0
+RESTORED_BEHAVIOR=rollback copy has the BASE_SHA sidebar/API/locales behavior and clean status; current checkout remains on the modified commit
