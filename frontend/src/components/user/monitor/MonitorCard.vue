@@ -43,6 +43,36 @@
       </span>
     </div>
 
+    <div
+      v-if="(item.model_preview?.length ?? 0) > 0"
+      class="mt-3 border-t border-gray-100 pt-3 dark:border-dark-700/60"
+      data-testid="monitor-model-preview"
+    >
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-[10px] font-semibold uppercase text-gray-400">
+          {{ t('channelStatus.models.previewTitle') }}
+        </span>
+        <span class="text-[10px] text-gray-400">
+          {{ t('channelStatus.models.viewAll', { n: item.model_count }) }}
+        </span>
+      </div>
+      <div class="mt-1.5 flex flex-wrap gap-1.5">
+        <span
+          v-for="model in item.model_preview"
+          :key="`${model.platform}:${model.name}`"
+          class="max-w-full truncate rounded-md bg-gray-100 px-2 py-1 font-mono text-[11px] text-gray-600 dark:bg-dark-700/70 dark:text-gray-300"
+        >
+          {{ model.name }}
+        </span>
+        <span
+          v-if="item.model_count > (item.model_preview?.length ?? 0)"
+          class="rounded-md px-1.5 py-1 text-[11px] font-medium text-primary-600 dark:text-primary-300"
+        >
+          +{{ item.model_count - (item.model_preview?.length ?? 0) }}
+        </span>
+      </div>
+    </div>
+
     <!-- Metrics -->
     <MonitorMetricPair
       primary-icon="bolt"
@@ -62,9 +92,6 @@
         </div>
         <div class="mt-1 font-mono text-base font-bold tabular-nums text-sky-700 dark:text-sky-300">
           {{ formatFirstToken(item.group_first_token_p50_ms) }}
-          <span v-if="(item.group_first_token_sample_count ?? 0) > 0" class="ml-1 text-[10px] font-normal text-gray-400">
-            ({{ item.group_first_token_sample_count }})
-          </span>
         </div>
       </div>
       <div class="rounded-xl border border-cyan-100 bg-cyan-50/60 p-3 dark:border-cyan-900/40 dark:bg-cyan-950/20">

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 	gocache "github.com/patrickmn/go-cache"
 )
 
@@ -191,7 +193,47 @@ type usageLogRepository struct {
 	instanceID          string
 }
 
-func NewUsageLogRepository(client *dbent.Client, sqlDB *sql.DB, cfg *config.Config) service.UsageLogRepository {
+// ListRecentModelsByGroup returns distinct billable model names used by a
+// group in a bounded window. It is consumed by the public model catalog only
+// as a fallback for open-ended passthrough accounts.
+func (r *usageLogRepository) ListRecentModelsByGroup(ctx context.Context, groupID int64, accountIDs []int64, startTime, endTime time.Time) ([]service.RecentGroupModel, error) {
+	if r == nil || r.db == nil || len(accountIDs) == 0 {
+		return []service.RecentGroupModel{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT DISTINCT
+  COALESCE(NULLIF(TRIM(ul.requested_model), ''), ul.model) AS model,
+  a.platform,
+  COALESCE(NULLIF(TRIM(ul.upstream_model), ''), ul.model) AS upstream_model
+FROM usage_logs ul
+JOIN accounts a ON a.id = ul.account_id
+WHERE ul.group_id = $1
+  AND ul.account_id = ANY($2)
+  AND ul.created_at >= $3
+  AND ul.created_at < $4
+  AND ul.actual_cost > 0
+  AND NULLIF(BTRIM(ul.model), '') IS NOT NULL
+ORDER BY model, a.platform
+LIMIT 500`, groupID, pq.Array(accountIDs), startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("query recent models by group: %w", err)
+	}
+	defer rows.Close()
+	models := make([]service.RecentGroupModel, 0)
+	for rows.Next() {
+		var model service.RecentGroupModel
+		if err := rows.Scan(&model.Name, &model.Platform, &model.UpstreamModel); err != nil {
+			return nil, fmt.Errorf("scan recent model by group: %w", err)
+		}
+		models = append(models, model)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate recent models by group: %w", err)
+	}
+	return models, nil
+}
+
+func NewUsageLogRepository(client *dbent.Client, sqlDB *sql.DB, cfg *config.Config) *usageLogRepository {
 	instanceID := ""
 	if cfg != nil {
 		instanceID = cfg.InstanceID

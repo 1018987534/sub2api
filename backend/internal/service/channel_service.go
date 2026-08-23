@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -51,6 +52,35 @@ type ChannelRepository interface {
 	UpdateModelPricing(ctx context.Context, pricing *ChannelModelPricing) error
 	DeleteModelPricing(ctx context.Context, id int64) error
 	ReplaceModelPricing(ctx context.Context, channelID int64, pricingList []ChannelModelPricing) error
+}
+
+// SchedulableAccountReader is the narrow account dependency needed by the
+// public model catalog. Keeping it separate from the full account repository
+// makes the catalog refresh independently testable and avoids widening the
+// channel service contract.
+type SchedulableAccountReader interface {
+	ListSchedulable(context.Context) ([]Account, error)
+}
+
+// UpstreamModelInventoryReader fetches the real model inventory exposed by an
+// account's upstream. AccountTestService implements this contract.
+type UpstreamModelInventoryReader interface {
+	FetchUpstreamSupportedModels(context.Context, *Account) ([]string, error)
+}
+
+// RecentGroupModel is a successfully served customer-facing model observed in
+// the bounded usage fallback. UpstreamModel preserves the final provider model
+// so aliases can still resolve to the correct official reference price.
+type RecentGroupModel struct {
+	Name          string
+	Platform      string
+	UpstreamModel string
+}
+
+// RecentGroupModelsReader supplies the successful-usage fallback, restricted
+// to the accounts that are schedulable at refresh time.
+type RecentGroupModelsReader interface {
+	ListRecentModelsByGroup(context.Context, int64, []int64, time.Time, time.Time) ([]RecentGroupModel, error)
 }
 
 // channelModelKey 渠道缓存复合键（显式包含 platform 防止跨平台同名模型冲突）
@@ -153,11 +183,50 @@ const (
 type ChannelService struct {
 	repo                 ChannelRepository
 	groupRepo            GroupRepository
+	accountRepo          SchedulableAccountReader // optional: live schedulable-account model inventory
+	modelInventoryReader UpstreamModelInventoryReader
+	recentGroupModels    RecentGroupModelsReader
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	pricingService       *PricingService // 用于「可用渠道」展示时回落到全局定价；可为 nil（测试场景）
 
-	cache   atomic.Value // *channelCache
-	cacheSF singleflight.Group
+	cache                    atomic.Value // *channelCache
+	cacheSF                  singleflight.Group
+	plazaInventoryMu         sync.Mutex
+	plazaInventoryAt         time.Time
+	plazaInventory           map[int64][]plazaInventoryModel
+	plazaInventoryRefreshing bool
+	plazaSyncCancel          context.CancelFunc
+	plazaSyncWG              sync.WaitGroup
+}
+
+// SetAccountRepository enables the model-plaza inventory to reflect the
+// currently schedulable accounts. Kept as a setter so existing service tests
+// and alternate deployments remain source-compatible.
+func (s *ChannelService) SetAccountRepository(repo SchedulableAccountReader) {
+	if s != nil {
+		s.accountRepo = repo
+	}
+}
+
+// SetUpstreamModelInventoryReader enables periodic live upstream model sync
+// for the model plaza. It is wired after AccountTestService construction to
+// avoid a constructor cycle with gateway services.
+func (s *ChannelService) SetUpstreamModelInventoryReader(reader UpstreamModelInventoryReader) {
+	if s != nil {
+		s.modelInventoryReader = reader
+		s.plazaInventoryMu.Lock()
+		s.plazaInventoryAt = time.Time{}
+		s.plazaInventory = nil
+		s.plazaInventoryMu.Unlock()
+	}
+}
+
+// SetRecentGroupModelsReader supplies the bounded usage-log fallback for
+// open-ended passthrough accounts whose live capability has no finite list.
+func (s *ChannelService) SetRecentGroupModelsReader(reader RecentGroupModelsReader) {
+	if s != nil {
+		s.recentGroupModels = reader
+	}
 }
 
 // NewChannelService 创建渠道服务实例。

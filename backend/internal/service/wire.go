@@ -255,6 +255,43 @@ func ProvideAccountTestService(
 	return service
 }
 
+// ProvideChannelService wires the live account and bounded usage fallback
+// dependencies without expanding the historical constructor used by tests.
+func ProvideChannelService(
+	repo ChannelRepository,
+	groupRepo GroupRepository,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	pricingService *PricingService,
+	accountRepo AccountRepository,
+	recentModels RecentGroupModelsReader,
+) *ChannelService {
+	svc := NewChannelService(repo, groupRepo, authCacheInvalidator, pricingService)
+	svc.SetAccountRepository(accountRepo)
+	svc.SetRecentGroupModelsReader(recentModels)
+	return svc
+}
+
+// PlazaModelInventoryRuntime owns the background upstream catalog refresh.
+type PlazaModelInventoryRuntime struct{ channelService *ChannelService }
+
+func ProvidePlazaModelInventoryRuntime(
+	channelService *ChannelService,
+	accountTestService *AccountTestService,
+	cfg *config.Config,
+) *PlazaModelInventoryRuntime {
+	channelService.SetUpstreamModelInventoryReader(accountTestService)
+	if controlPlaneEnabled(cfg) {
+		channelService.StartPlazaModelInventorySync()
+	}
+	return &PlazaModelInventoryRuntime{channelService: channelService}
+}
+
+func (r *PlazaModelInventoryRuntime) Stop() {
+	if r != nil && r.channelService != nil {
+		r.channelService.StopPlazaModelInventorySync()
+	}
+}
+
 func ProvideGrokQuotaService(
 	accountRepo AccountRepository,
 	proxyRepo ProxyRepository,
@@ -936,7 +973,8 @@ var ProviderSet = wire.NewSet(
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
 	NewGroupCapacityService,
-	NewChannelService,
+	ProvideChannelService,
+	ProvidePlazaModelInventoryRuntime,
 	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
 	NewModelPricingResolver,
 	NewContentModerationService,

@@ -33,6 +33,7 @@ function makeItem(overrides: Partial<UserMonitorView> = {}): UserMonitorView {
     availability_7d: 100,
     extra_models: [],
     timeline: [],
+    model_count: 0,
     ...overrides,
   }
 }
@@ -99,5 +100,37 @@ describe('MonitorCard quota snapshot visibility', () => {
     const wrapper = mountCard(makeItem({ primary_model: 'claude-sonnet-4-5' }))
     expect(wrapper.text()).toContain('claude-sonnet-4-5')
     expect(wrapper.text()).not.toContain('monitorCommon.checkMode.quota')
+  })
+
+  it('renders the three models supplied by the live catalog preview', () => {
+    const wrapper = mountCard(makeItem({
+      model_count: 5,
+      model_preview: [
+        { name: 'gpt-5.6-sol', platform: 'openai', official_pricing: null },
+        { name: 'gpt-5.6-terra', platform: 'openai', official_pricing: null },
+        { name: 'gpt-5.6-luna', platform: 'openai', official_pricing: null },
+      ],
+    }))
+    const preview = wrapper.get('[data-testid="monitor-model-preview"]')
+    expect(preview.text()).toContain('gpt-5.6-sol')
+    expect(preview.text()).toContain('gpt-5.6-terra')
+    expect(preview.text()).toContain('gpt-5.6-luna')
+    expect(preview.text()).toContain('+2')
+  })
+
+  it('does not substitute configured probe models when the live catalog is empty', () => {
+    const wrapper = mountCard(makeItem({ primary_model: 'configured-probe', model_count: 0, model_preview: [] }))
+    expect(wrapper.find('[data-testid="monitor-model-preview"]').exists()).toBe(false)
+  })
+
+  it('shows first-token latency without exposing its sample count', () => {
+    const wrapper = mountCard(makeItem({
+      group_first_token_p50_ms: 5210,
+      group_first_token_sample_count: 7298,
+    }))
+
+    const metrics = wrapper.get('[data-testid="monitor-group-metrics"]')
+    expect(metrics.text()).toContain('5.21s')
+    expect(metrics.text()).not.toContain('7298')
   })
 })

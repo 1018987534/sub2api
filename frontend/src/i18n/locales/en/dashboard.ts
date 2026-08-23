@@ -522,6 +522,17 @@ export default {
       cacheRate: 'Average cache rate',
       empty: 'No group request data is available yet',
     },
+    models: {
+      previewTitle: 'Available models',
+      viewAll: 'View all {n}',
+      officialTitle: 'Official model pricing',
+      officialDescription: 'Official reference prices only, shown per 1M tokens.',
+      input: 'Input',
+      output: 'Output',
+      cacheWrite: 'Cache write',
+      cacheRead: 'Cache read',
+      noPricing: 'No official pricing data',
+    },
     closeDetail: 'Close',
     windowTab: {
       '7d': '7 days',

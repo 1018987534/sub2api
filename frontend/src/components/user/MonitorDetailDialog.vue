@@ -11,10 +11,26 @@
     <div v-else-if="!detail" class="py-8 text-center text-sm text-gray-500">
       {{ t('channelStatus.detailLoadError') }}
     </div>
-    <div v-else class="overflow-x-auto">
-      <table class="w-full text-left text-sm">
+    <div v-else class="space-y-5">
+      <section>
+        <div class="mb-2">
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">
+            {{ t('channelStatus.models.officialTitle') }}
+          </h3>
+          <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
+            {{ t('channelStatus.models.officialDescription') }}
+          </p>
+        </div>
+        <MonitorOfficialPricingTable :models="detail.pricing_models ?? []" />
+      </section>
+
+      <section class="overflow-x-auto">
+        <h3 class="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+          {{ t('channelStatus.detailColumns.latestStatus') }}
+        </h3>
+      <table class="w-full min-w-[720px] text-left text-sm">
         <thead class="border-b border-gray-200 dark:border-dark-700">
-          <tr class="text-xs uppercase tracking-wider text-gray-500 dark:text-gray-400">
+          <tr class="text-xs uppercase text-gray-500 dark:text-gray-400">
             <th class="py-2 pr-3">{{ t('channelStatus.detailColumns.model') }}</th>
             <th class="py-2 pr-3">{{ t('channelStatus.detailColumns.latestStatus') }}</th>
             <th class="py-2 pr-3">{{ t('channelStatus.detailColumns.latestLatency') }}</th>
@@ -47,6 +63,7 @@
           </tr>
         </tbody>
       </table>
+      </section>
     </div>
 
     <template #footer>
@@ -70,6 +87,7 @@ import {
 } from '@/api/channelMonitor'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import { useChannelMonitorFormat } from '@/composables/useChannelMonitorFormat'
+import MonitorOfficialPricingTable from './monitor/MonitorOfficialPricingTable.vue'
 
 const props = defineProps<{
   show: boolean

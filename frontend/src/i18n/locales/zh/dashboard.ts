@@ -527,6 +527,17 @@ export default {
       cacheRate: '平均缓存率',
       empty: '当前没有可用的分组请求数据',
     },
+    models: {
+      previewTitle: '可用模型',
+      viewAll: '查看全部 {n} 个',
+      officialTitle: '官方模型定价',
+      officialDescription: '仅展示官方参考价格，按每 100 万 Token 计。',
+      input: '输入',
+      output: '输出',
+      cacheWrite: '缓存写入',
+      cacheRead: '缓存读取',
+      noPricing: '暂无官方价格数据',
+    },
     closeDetail: '关闭',
     windowTab: {
       '7d': '7 天',

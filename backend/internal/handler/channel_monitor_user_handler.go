@@ -1,7 +1,11 @@
 package handler
 
 import (
+	"context"
+	"sort"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
@@ -15,6 +19,7 @@ import (
 // ChannelMonitorUserHandler 渠道监控用户只读 handler。
 type ChannelMonitorUserHandler struct {
 	monitorService *service.ChannelMonitorService
+	channelService *service.ChannelService
 	settingService *service.SettingService
 }
 
@@ -22,10 +27,12 @@ type ChannelMonitorUserHandler struct {
 // settingService 用于每次请求前读取功能开关；关闭时 List/GetStatus 直接返回空/404。
 func NewChannelMonitorUserHandler(
 	monitorService *service.ChannelMonitorService,
+	channelService *service.ChannelService,
 	settingService *service.SettingService,
 ) *ChannelMonitorUserHandler {
 	return &ChannelMonitorUserHandler{
 		monitorService: monitorService,
+		channelService: channelService,
 		settingService: settingService,
 	}
 }
@@ -66,9 +73,20 @@ type channelMonitorUserListItem struct {
 	GroupFirstTokenP50Ms       *int64                               `json:"group_first_token_p50_ms,omitempty"`
 	GroupFirstTokenSampleCount int64                                `json:"group_first_token_sample_count"`
 	GroupCacheRate             *float64                             `json:"group_cache_rate,omitempty"`
+	ModelPreview               []channelMonitorUserModelPricing     `json:"model_preview,omitempty"`
+	ModelCount                 int                                  `json:"model_count"`
 	// LatestQuota 主模型最近配额快照；channel_monitor_show_quota=false 时
 	// 由 userMonitorViewToItem 的调用方传入 false 剥离（服务端脱敏，非仅前端隐藏）。
 	LatestQuota *domain.MonitorQuotaSnapshot `json:"latest_quota,omitempty"`
+}
+
+// channelMonitorUserModelPricing contains only the public model identity and
+// the official reference price. Customer-specific channel/order pricing is
+// intentionally omitted from the monitor surface.
+type channelMonitorUserModelPricing struct {
+	Name            string                     `json:"name"`
+	Platform        string                     `json:"platform"`
+	OfficialPricing *modelPlazaOfficialPricing `json:"official_pricing"`
 }
 
 // channelMonitorUserTimelinePoint 主模型最近一次检测的 timeline 点。
@@ -81,11 +99,12 @@ type channelMonitorUserTimelinePoint struct {
 }
 
 type channelMonitorUserDetailResponse struct {
-	ID        int64                         `json:"id"`
-	Name      string                        `json:"name"`
-	Provider  string                        `json:"provider"`
-	GroupName string                        `json:"group_name"`
-	Models    []channelMonitorUserModelStat `json:"models"`
+	ID            int64                            `json:"id"`
+	Name          string                           `json:"name"`
+	Provider      string                           `json:"provider"`
+	GroupName     string                           `json:"group_name"`
+	Models        []channelMonitorUserModelStat    `json:"models"`
+	PricingModels []channelMonitorUserModelPricing `json:"pricing_models"`
 }
 
 type channelMonitorUserModelStat struct {
@@ -138,6 +157,87 @@ func userMonitorViewToItem(v *service.UserMonitorView, includeQuota bool) channe
 	return item
 }
 
+const monitorModelPreviewLimit = 3
+
+func toMonitorModelPricing(models []service.PlazaModel) []channelMonitorUserModelPricing {
+	out := make([]channelMonitorUserModelPricing, 0, len(models))
+	for _, model := range models {
+		out = append(out, channelMonitorUserModelPricing{
+			Name:            model.Name,
+			Platform:        model.Platform,
+			OfficialPricing: toModelPlazaOfficialPricing(model.OfficialPricing),
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
+	return out
+}
+
+func monitorGroupKey(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimSuffix(value, "monitor")
+	value = strings.TrimSuffix(value, "监控")
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, value)
+}
+
+func monitorProviderMatches(provider, groupPlatform string) bool {
+	return groupPlatform == "composite" || strings.EqualFold(provider, groupPlatform)
+}
+
+func findMonitorPlazaGroup(view *service.UserMonitorView, groups []service.PlazaGroup) *service.PlazaGroup {
+	if view == nil {
+		return nil
+	}
+	if explicit := strings.TrimSpace(view.GroupName); explicit != "" {
+		for i := range groups {
+			if monitorProviderMatches(view.Provider, groups[i].Platform) && groups[i].Name == explicit {
+				return &groups[i]
+			}
+		}
+	}
+	key := monitorGroupKey(view.Name)
+	if key == "" {
+		return nil
+	}
+	for i := range groups {
+		if !monitorProviderMatches(view.Provider, groups[i].Platform) {
+			continue
+		}
+		groupKey := monitorGroupKey(groups[i].Name)
+		if groupKey == key || strings.HasPrefix(groupKey, key) {
+			return &groups[i]
+		}
+	}
+	return nil
+}
+
+func monitorPricingModels(view *service.UserMonitorView, groups []service.PlazaGroup) []channelMonitorUserModelPricing {
+	if view == nil {
+		return nil
+	}
+	if group := findMonitorPlazaGroup(view, groups); group != nil && len(group.Models) > 0 {
+		return toMonitorModelPricing(group.Models)
+	}
+	return nil
+}
+
+func (h *ChannelMonitorUserHandler) loadMonitorPricingCatalog(ctx context.Context) []service.PlazaGroup {
+	if h == nil || h.channelService == nil {
+		return nil
+	}
+	groups, err := h.channelService.ListPlazaGroups(ctx)
+	if err != nil {
+		return nil
+	}
+	return groups
+}
+
 func userMonitorDetailToResponse(d *service.UserMonitorDetail) *channelMonitorUserDetailResponse {
 	models := make([]channelMonitorUserModelStat, 0, len(d.Models))
 	for _, m := range d.Models {
@@ -174,9 +274,18 @@ func (h *ChannelMonitorUserHandler) List(c *gin.Context) {
 		return
 	}
 	includeQuota := h.quotaVisible(c)
+	catalog := h.loadMonitorPricingCatalog(c.Request.Context())
 	items := make([]channelMonitorUserListItem, 0, len(views))
 	for _, v := range views {
-		items = append(items, userMonitorViewToItem(v, includeQuota))
+		item := userMonitorViewToItem(v, includeQuota)
+		models := monitorPricingModels(v, catalog)
+		item.ModelCount = len(models)
+		if len(models) > monitorModelPreviewLimit {
+			item.ModelPreview = models[:monitorModelPreviewLimit]
+		} else {
+			item.ModelPreview = models
+		}
+		items = append(items, item)
 	}
 	response.Success(c, gin.H{"items": items})
 }
@@ -197,5 +306,19 @@ func (h *ChannelMonitorUserHandler) GetStatus(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, userMonitorDetailToResponse(detail))
+	out := userMonitorDetailToResponse(detail)
+	view := &service.UserMonitorView{
+		ID:        detail.ID,
+		Name:      detail.Name,
+		Provider:  detail.Provider,
+		GroupName: detail.GroupName,
+	}
+	if len(detail.Models) > 0 {
+		view.PrimaryModel = detail.Models[0].Model
+		for _, model := range detail.Models[1:] {
+			view.ExtraModels = append(view.ExtraModels, service.ExtraModelStatus{Model: model.Model})
+		}
+	}
+	out.PricingModels = monitorPricingModels(view, h.loadMonitorPricingCatalog(c.Request.Context()))
+	response.Success(c, out)
 }
