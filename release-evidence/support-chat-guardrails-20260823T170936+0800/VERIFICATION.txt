@@ -1,0 +1,42 @@
+BASE_SHA=5ff4b03816fe1e66e4580d067e9f33bcfe4d7e7d
+CHANGED_BRANCH_OR_FIELD=support-chat send rate limit, JSON/multipart request bounds, attachment MIME/filename validation, emoji composer, authenticated attachment download
+BASELINE_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-chat-guardrails-20260823T170936+0800/BASELINE_FILE
+MODIFIED_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-chat-guardrails-20260823T170936+0800/MODIFIED_FILE
+DIFF_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-chat-guardrails-20260823T170936+0800/DIFF_FILE
+VERIFICATION_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-chat-guardrails-20260823T170936+0800/VERIFICATION.txt
+ROLLBACK_FILE=/Users/chendeyao/work/sub2api-upstream-brand-login/release-evidence/support-chat-guardrails-20260823T170936+0800/ROLLBACK.sh
+BASELINE_FILE_SHA256=9b2297822a314fedb73c58dacfb425272b3c5a8a58488ba4d78c493a909c68f0
+MODIFIED_FILE_SHA256=1a4178124e42da14dfa3d56b538c88f459bd17ef9ce4383736fad0af3d7a474a
+DIFF_FILE_SHA256=cb9ad1d8a998ec20cb57aac691b7b2ea891b57ee51ead940024e21c36308d5c8
+
+BASELINE_BACKEND_COMMAND=(cd /tmp/sub2api-support-guardrails-baseline/backend && go test ./internal/handler ./migrations -run 'TestSupportChat' -count=1 && go test ./internal/server/routes ./internal/handler ./migrations -run '^$')
+BASELINE_BACKEND_INPUT=detached worktree at BASE_SHA
+BASELINE_BACKEND_LITERAL_OUTPUT=ok github.com/Wei-Shaw/sub2api/internal/handler 1.804s; ok github.com/Wei-Shaw/sub2api/migrations 0.860s; routes, handler, migrations compile-only tests passed
+BASELINE_BACKEND_EXIT_STATUS=0
+BASELINE_FRONTEND_COMMAND=(cd /tmp/sub2api-support-guardrails-baseline/frontend && pnpm exec vue-tsc --noEmit --pretty false && pnpm exec vitest run src/router/__tests__/guards.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1)
+BASELINE_FRONTEND_INPUT=detached worktree with shared node_modules symlink
+BASELINE_FRONTEND_LITERAL_OUTPUT=vue-tsc passed; Test Files 2 passed; Tests 46 passed
+BASELINE_FRONTEND_EXIT_STATUS=0
+
+MODIFIED_BACKEND_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/backend && go test ./internal/handler ./migrations -run 'TestSupportChat|TestParseSupportMessageRequest' -count=1 && go test ./internal/server/routes ./internal/handler ./migrations -count=1 && go test ./cmd/server ./internal/server/routes ./internal/handler ./migrations -run '^$')
+MODIFIED_BACKEND_INPUT=working tree support-chat guardrails before commit
+MODIFIED_BACKEND_LITERAL_OUTPUT=handler and migrations support-chat tests passed; routes/handler/migrations full package tests passed; cmd/server/routes/handler/migrations compile-only checks passed
+MODIFIED_BACKEND_EXIT_STATUS=0
+MODIFIED_FRONTEND_TYPECHECK_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/frontend && pnpm exec vue-tsc --noEmit --pretty false)
+MODIFIED_FRONTEND_TYPECHECK_LITERAL_OUTPUT=completed with no output
+MODIFIED_FRONTEND_TYPECHECK_EXIT_STATUS=0
+MODIFIED_FRONTEND_TEST_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/frontend && pnpm exec vitest run src/router/__tests__/guards.spec.ts src/components/layout/__tests__/AppSidebar.spec.ts --maxWorkers=1 --minWorkers=1)
+MODIFIED_FRONTEND_TEST_LITERAL_OUTPUT=Test Files 2 passed; Tests 46 passed
+MODIFIED_FRONTEND_TEST_EXIT_STATUS=0
+MODIFIED_FRONTEND_BUILD_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login/frontend && pnpm run build)
+MODIFIED_FRONTEND_BUILD_LITERAL_OUTPUT=Vite 1035 modules transformed; built in 12.42s; existing dynamic-import and chunk-size warnings only
+MODIFIED_FRONTEND_BUILD_EXIT_STATUS=0
+DIFF_CHECK_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login && git diff --check)
+DIFF_CHECK_LITERAL_OUTPUT=no whitespace errors
+DIFF_CHECK_EXIT_STATUS=0
+
+ROLLBACK_COMMAND=(cd /Users/chendeyao/work/sub2api-upstream-brand-login && release-evidence/support-chat-guardrails-20260823T170936+0800/ROLLBACK.sh /tmp/sub2api-support-guardrails-rollback /tmp/support-chat-guardrails-rollback.txt)
+ROLLBACK_INPUT=another copy of BASE_SHA with the five modified support-chat files overwritten from the working tree
+ROLLBACK_LITERAL_OUTPUT=rollback_status=clean; rollback handler SHA256 equals baseline 9b2297822a314fedb73c58dacfb425272b3c5a8a58488ba4d78c493a909c68f0; ROLLBACK_TARGET recorded
+ROLLBACK_EXIT_STATUS=0
+RESTORED_BEHAVIOR=rollback copy has the BASE_SHA support-chat implementation and no uncommitted changes; working tree MODIFIED_FILE remains changed until commit

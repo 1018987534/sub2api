@@ -57,6 +57,7 @@ export const supportChatAPI = {
     return (await apiClient.post<SupportMessage>(`/admin/chat/conversations/${id}/messages`, { content, kind: 'text', idempotency_key: idempotencyKey })).data
   },
   attachmentUrl: (id: number, admin = false) => `${admin ? '/admin/chat/attachments' : '/chat/attachments'}/${id}`,
+  fetchAttachment: async (id: number, admin = false) => (await apiClient.get<Blob>(`${admin ? '/admin/chat/attachments' : '/chat/attachments'}/${id}`, { responseType: 'blob' })).data,
   adminRead: async (id: number) => { await apiClient.post(`/admin/chat/conversations/${id}/read`) },
   adminUnreadCount: async () => (await apiClient.get<{ unread_count: number }>('/admin/chat/unread-count')).data.unread_count,
 }

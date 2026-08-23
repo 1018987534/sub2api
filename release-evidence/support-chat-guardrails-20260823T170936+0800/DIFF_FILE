@@ -1,0 +1,265 @@
+diff --git a/backend/internal/handler/support_chat_handler.go b/backend/internal/handler/support_chat_handler.go
+index d5d011c12..eafc78127 100644
+--- a/backend/internal/handler/support_chat_handler.go
++++ b/backend/internal/handler/support_chat_handler.go
+@@ -22,6 +22,7 @@ const (
+	supportChatRateLimitWindow   = time.Minute
+	supportChatMaxAttachment     = 4 << 20
+	supportChatMaxRequest        = supportChatMaxAttachment + 256<<10
+	{+supportChatMaxJSONRequest    = 64 << 10+}
+)
+
+var supportChatAttachmentTypes = map[string]struct{}{
+@@ -164,7 +165,7 @@ func (h *SupportChatHandler) insertMessage(c *gin.Context, conversationID, sende
+	if len(uploads) > 0 {
+		upload = uploads[0]
+	}
+	if [-in.Content-]{+(in.Content+} == "" && upload == [-nil-]{+nil)+} || len(in.Content) > 10000 {
+		return supportMessage{}, fmt.Errorf("message content must be between 1 and 10000 characters")
+	}
+	if upload != nil {
+@@ -263,7 +264,7 @@ func (h *SupportChatHandler) checkMessageRateLimit(c *gin.Context, subjectID int
+	}
+	result, err := h.limiter.Allow(c.Request.Context(), fmt.Sprintf("support-chat:%s:%d", senderType, subjectID), supportChatMessagesPerMinute, supportChatRateLimitWindow)
+	if err != nil {
+		return [-true, 0-]{+false, supportChatRateLimitWindow+}
+	}
+	return result.Allowed, result.RetryAfter
+}
+@@ -299,10 +300,13 @@ func parseSupportMessageRequest(c *gin.Context) (supportMessageInput, *supportAt
+			return supportMessageInput{}, nil, fmt.Errorf("file must be 4 MiB or smaller")
+		}
+		contentType := http.DetectContentType(data)
+		{+if mediaType, _, ok := strings.Cut(contentType, ";"); ok {+}
+{+			contentType = strings.TrimSpace(mediaType)+}
+{+		}+}
+		if _, ok := supportChatAttachmentTypes[contentType]; !ok {
+			return supportMessageInput{}, nil, fmt.Errorf("unsupported file type")
+		}
+		filename := [-filepath.Base(strings.TrimSpace(header.Filename))-]{+filepath.Base(strings.TrimSpace(strings.ReplaceAll(header.Filename, `\`, "/")))+}
+		filename = strings.Map(func(r rune) rune {
+			if r < 0x20 || r == 0x7f {
+				return -1
+@@ -317,6 +321,7 @@ func parseSupportMessageRequest(c *gin.Context) (supportMessageInput, *supportAt
+		}
+		return supportMessageInput{Content: strings.TrimSpace(c.PostForm("content")), IdempotencyKey: c.GetHeader("Idempotency-Key")}, &supportAttachmentUpload{Filename: filename, ContentType: contentType, Data: data}, nil
+	}
+	{+c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, supportChatMaxJSONRequest)+}
+	var in supportMessageInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		return in, nil, err
+@@ -366,6 +371,10 @@ func (h *SupportChatHandler) Send(c *gin.Context) {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	{+if allowed, retryAfter := h.checkMessageRateLimit(c, s.UserID, "user"); !allowed {+}
+{+		rejectMessageRateLimit(c, retryAfter)+}
+{+		return+}
+{+	}+}
+	v, err := h.ensureConversation(c, s.UserID)
+	if err != nil {
+		response.Error(c, 500, err.Error())
+@@ -373,11 +382,7 @@ func (h *SupportChatHandler) Send(c *gin.Context) {
+	}
+	in, upload, err := parseSupportMessageRequest(c)
+	if err != nil {
+		response.BadRequest(c, "Invalid [-request")-]
+[-		return-]
+[-	}-]
+[-	if allowed, retryAfter := h.checkMessageRateLimit(c, s.UserID, "user"); !allowed {-]
+[-		rejectMessageRateLimit(c, retryAfter)-]{+request: "+err.Error())+}
+		return
+	}
+	m, err := h.insertMessage(c, v.ID, s.UserID, "user", in, upload)
+@@ -458,15 +463,15 @@ func (h *SupportChatHandler) AdminSend(c *gin.Context) {
+		response.Unauthorized(c, "Admin not authenticated")
+		return
+	}
+[-	in, upload, err := parseSupportMessageRequest(c)-]
+[-	if err != nil {-]
+[-		response.BadRequest(c, "Invalid request")-]
+[-		return-]
+[-	}-]
+	if allowed, retryAfter := h.checkMessageRateLimit(c, s.UserID, "admin"); !allowed {
+		rejectMessageRateLimit(c, retryAfter)
+		return
+	}
+	{+in, upload, err := parseSupportMessageRequest(c)+}
+{+	if err != nil {+}
+{+		response.BadRequest(c, "Invalid request: "+err.Error())+}
+{+		return+}
+{+	}+}
+	m, err := h.insertMessage(c, id, s.UserID, "admin", in, upload)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+diff --git a/backend/internal/handler/support_chat_handler_test.go b/backend/internal/handler/support_chat_handler_test.go
+index 9dd11e1a2..ce7d209e8 100644
+--- a/backend/internal/handler/support_chat_handler_test.go
++++ b/backend/internal/handler/support_chat_handler_test.go
+@@ -1,20 +1,26 @@
+package handler
+
+import (
+	{+"bytes"+}
+	"database/sql"
+	{+"mime/multipart"+}
+	"net/http/httptest"
+	"regexp"
+	{+"strings"+}
+	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	{+"github.com/alicebob/miniredis/v2"+}
+	"github.com/gin-gonic/gin"
+	{+"github.com/redis/go-redis/v9"+}
+	"github.com/stretchr/testify/require"
+)
+
+func supportChatTestContext() *gin.Context {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	{+c.Request = httptest.NewRequest("POST", "/chat/messages", nil)+}
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 7})
+	return c
+}
+@@ -101,3 +107,87 @@ func TestSupportChatAdminReadClearsAdminUnread(t *testing.T) {
+	require.Equal(t, 200, c.Writer.Status())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+{+func TestParseSupportMessageRequestBoundsAndSniffsAttachment(t *testing.T) {+}
+{+	var body bytes.Buffer+}
+{+	writer := multipart.NewWriter(&body)+}
+{+	require.NoError(t, writer.WriteField("content", "see screenshot"))+}
+{+	part, err := writer.CreateFormFile("file", "../screenshot.png")+}
+{+	require.NoError(t, err)+}
+{+	_, err = part.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0})+}
+{+	require.NoError(t, err)+}
+{+	require.NoError(t, writer.Close())+}
+
+{+	c, _ := gin.CreateTestContext(httptest.NewRecorder())+}
+{+	c.Request = httptest.NewRequest("POST", "/chat/messages", &body)+}
+{+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())+}
+{+	in, upload, err := parseSupportMessageRequest(c)+}
+{+	require.NoError(t, err)+}
+{+	require.Equal(t, "see screenshot", in.Content)+}
+{+	require.Equal(t, "screenshot.png", upload.Filename)+}
+{+	require.Equal(t, "image/png", upload.ContentType)+}
+{+	require.Len(t, upload.Data, 12)+}
+{+}+}
+
+{+func TestParseSupportMessageRequestAcceptsPlainTextWithCharset(t *testing.T) {+}
+{+	var body bytes.Buffer+}
+{+	writer := multipart.NewWriter(&body)+}
+{+	part, err := writer.CreateFormFile("file", "notes.txt")+}
+{+	require.NoError(t, err)+}
+{+	_, err = part.Write([]byte("plain text attachment"))+}
+{+	require.NoError(t, err)+}
+{+	require.NoError(t, writer.Close())+}
+
+{+	c, _ := gin.CreateTestContext(httptest.NewRecorder())+}
+{+	c.Request = httptest.NewRequest("POST", "/chat/messages", &body)+}
+{+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())+}
+{+	_, upload, err := parseSupportMessageRequest(c)+}
+{+	require.NoError(t, err)+}
+{+	require.Equal(t, "text/plain", upload.ContentType)+}
+{+}+}
+
+{+func TestParseSupportMessageRequestCapsJSONBody(t *testing.T) {+}
+{+	body := `{"content":"` + strings.Repeat("x", supportChatMaxJSONRequest) + `"}`+}
+{+	c, _ := gin.CreateTestContext(httptest.NewRecorder())+}
+{+	c.Request = httptest.NewRequest("POST", "/chat/messages", strings.NewReader(body))+}
+{+	c.Request.Header.Set("Content-Type", "application/json")+}
+{+	_, _, err := parseSupportMessageRequest(c)+}
+{+	require.Error(t, err)+}
+{+}+}
+
+{+func TestSupportChatMessageRateLimitIsTenPerMinute(t *testing.T) {+}
+{+	mr, err := miniredis.Run()+}
+{+	require.NoError(t, err)+}
+{+	defer mr.Close()+}
+{+	h := NewSupportChatHandler(nil, redis.NewClient(&redis.Options{Addr: mr.Addr()}))+}
+{+	c := supportChatTestContext()+}
+{+	for i := 0; i < supportChatMessagesPerMinute; i++ {+}
+{+		allowed, _ := h.checkMessageRateLimit(c, 7, "user")+}
+{+		require.True(t, allowed)+}
+{+	}+}
+{+	allowed, retryAfter := h.checkMessageRateLimit(c, 7, "user")+}
+{+	require.False(t, allowed)+}
+{+	require.Greater(t, retryAfter, time.Duration(0))+}
+{+}+}
+
+{+func TestSupportChatAttachmentMessagePersistsAtomically(t *testing.T) {+}
+{+	db, mock, err := sqlmock.New()+}
+{+	require.NoError(t, err)+}
+{+	defer db.Close()+}
+{+	h := NewSupportChatHandler(db, nil)+}
+{+	now := time.Date(2026, 8, 23, 17, 0, 0, 0, time.UTC)+}
+{+	mock.ExpectBegin()+}
+{+	mock.ExpectQuery(`INSERT INTO support_messages .*VALUES \(\$1,\$2,\$3,\$4,'file',\$5\).*RETURNING`).+}
+{+		WithArgs(int64(41), "user", int64(7), "", "file-key").+}
+{+		WillReturnRows(supportMessageRows(201, 41, 7, "user", "", now))+}
+{+	mock.ExpectQuery(`INSERT INTO support_attachments .*RETURNING id`).+}
+{+		WithArgs(int64(201), int64(41), "user", int64(7), "shot.png", "image/png", 4, []byte("png!")).+}
+{+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(301)))+}
+{+	mock.ExpectExec(`UPDATE support_conversations SET unread_by_admin=unread_by_admin\+1,last_message_at=\$2,updated_at=\$2 WHERE id=\$1`).+}
+{+		WithArgs(int64(41), now).WillReturnResult(sqlmock.NewResult(0, 1))+}
+{+	mock.ExpectCommit()+}
+{+	m, err := h.insertMessage(supportChatTestContext(), 41, 7, "user", supportMessageInput{IdempotencyKey: "file-key"}, &supportAttachmentUpload{Filename: "shot.png", ContentType: "image/png", Data: []byte("png!")})+}
+{+	require.NoError(t, err)+}
+{+	require.Equal(t, int64(301), m.Attachment.ID)+}
+{+	require.NoError(t, mock.ExpectationsWereMet())+}
+{+}+}
+diff --git a/frontend/src/api/supportChat.ts b/frontend/src/api/supportChat.ts
+index 9790f1960..c9eb6163a 100644
+--- a/frontend/src/api/supportChat.ts
++++ b/frontend/src/api/supportChat.ts
+@@ -57,6 +57,7 @@ export const supportChatAPI = {
+    return (await apiClient.post<SupportMessage>(`/admin/chat/conversations/${id}/messages`, { content, kind: 'text', idempotency_key: idempotencyKey })).data
+  },
+  attachmentUrl: (id: number, admin = false) => `${admin ? '/admin/chat/attachments' : '/chat/attachments'}/${id}`,
+  {+fetchAttachment: async (id: number, admin = false) => (await apiClient.get<Blob>(`${admin ? '/admin/chat/attachments' : '/chat/attachments'}/${id}`, { responseType: 'blob' })).data,+}
+  adminRead: async (id: number) => { await apiClient.post(`/admin/chat/conversations/${id}/read`) },
+  adminUnreadCount: async () => (await apiClient.get<{ unread_count: number }>('/admin/chat/unread-count')).data.unread_count,
+}
+diff --git a/frontend/src/views/admin/SupportChatView.vue b/frontend/src/views/admin/SupportChatView.vue
+index 72df9beae..e74e9e2b1 100644
+--- a/frontend/src/views/admin/SupportChatView.vue
++++ b/frontend/src/views/admin/SupportChatView.vue
+@@ -6,7 +6,7 @@
+        <button v-for="conversation in conversations" :key="conversation.id" class="block w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 dark:border-dark-800 dark:hover:bg-dark-800" :class="conversation.id === selectedId ? 'bg-primary-50 dark:bg-primary-900/20' : ''" @click="selectConversation(conversation.id)"><div class="flex items-center justify-between gap-2"><span class="truncate text-sm font-medium">{{ conversation.user_username || conversation.user_email || `#${conversation.user_id}` }}</span><span v-if="conversation.unread_by_admin" class="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">{{ conversation.unread_by_admin }}</span></div><span class="text-xs text-gray-500">#{{ conversation.user_id }} · {{ formatTime(conversation.last_message_at || conversation.updated_at) }}</span></button>
+        <p v-if="!conversations.length" class="p-6 text-center text-sm text-gray-500">{{ t('supportChat.noConversations') }}</p>
+      </aside>
+      <div class="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900"><header class="border-b border-gray-200 px-5 py-4 dark:border-dark-700"><h2 class="font-semibold">{{ selected ? (selected.user_username || selected.user_email || `#${selected.user_id}`) : t('supportChat.adminTitle') }}</h2><p class="text-sm text-gray-500">{{ selected ? selected.user_email : t('supportChat.adminDescription') }}</p></header><div ref="pane" class="min-h-0 flex-1 overflow-y-auto bg-gray-50 p-5 dark:bg-dark-950/60"><p v-if="!selected" class="flex h-full items-center justify-center text-sm text-gray-500">{{ t('supportChat.selectConversation') }}</p><div v-else class="space-y-4"><article v-for="message in messages" :key="message.id" class="flex" :class="message.sender_type === 'admin' ? 'justify-end' : 'justify-start'"><div class="max-w-[82%] rounded-2xl px-4 py-3 text-sm" :class="message.sender_type === 'admin' ? 'bg-primary-600 text-white' : 'border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800'"><p v-if="message.content" class="whitespace-pre-wrap break-words">{{ message.content [-}}</p><a-]{+}}</p><button+} v-if="message.attachment" [-:href="supportChatAPI.attachmentUrl(message.attachment.id, true)" target="_blank" rel="noopener"-]{+type="button"+} class="mt-2 flex items-center gap-2 [-underline"><span>{{-]{+underline" @click="openAttachment(message.attachment)"><span>{{+} message.attachment.filename }}</span><span class="text-xs opacity-70">({{ formatBytes(message.attachment.size_bytes) [-}})</span></a><time-]{+}})</span></button><time+} class="mt-1 block text-[11px] opacity-70">{{ formatTime(message.created_at) }}</time></div></article></div></div><form v-if="selected" class="border-t border-gray-200 p-4 dark:border-dark-700" @submit.prevent="send"><div class="mb-2 flex flex-wrap gap-1.5"><button v-for="emoji in emojis" :key="emoji" type="button" class="rounded-lg px-2 py-1 text-lg hover:bg-gray-100 dark:hover:bg-dark-800" @click="draft += emoji">{{ emoji }}</button></div><textarea v-model="draft" class="input min-h-20 w-full resize-none" :placeholder="t('supportChat.placeholder')" @keydown.enter.exact.prevent="send" /><div class="mt-2 flex items-center justify-between"><div class="flex items-center gap-2"><input ref="fileInput" type="file" class="hidden" accept="image/gif,image/jpeg,image/png,image/webp,text/plain,application/pdf" @change="pickFile" /><button type="button" class="btn btn-secondary btn-sm" @click="fileInput?.click()"><span>📎</span></button><span v-if="file" class="max-w-48 truncate text-xs text-gray-500">{{ file.name }} <button type="button" class="text-red-500" @click="file = null">×</button></span></div><button class="btn btn-primary" type="submit" :disabled="sending || (!draft.trim() && !file)">{{ t('supportChat.send') }}</button></div><p v-if="error" class="mt-2 text-xs text-red-500">{{ error }}</p></form></div>
+    </section>
+  </AppLayout>
+</template>
+@@ -19,6 +19,7 @@ import supportChatAPI, { type SupportConversation, type SupportMessage } from '@
+const { t, locale } = useI18n(); const conversations=ref<SupportConversation[]>([]); const selectedId=ref<number|null>(null); const messages=ref<SupportMessage[]>([]); const draft=ref(''); const file=ref<File|null>(null); const error=ref(''); const search=ref(''); const sending=ref(false); const pane=ref<HTMLElement|null>(null); const fileInput=ref<HTMLInputElement|null>(null); const emojis=['👍','✅','🎉','🙏','😊','🤝','💡','📌','⏳','❤️']; let timer:ReturnType<typeof setInterval>|undefined
+const selected=computed(()=>conversations.value.find(v=>v.id===selectedId.value)); const formatTime=(value:string)=>new Intl.DateTimeFormat(locale.value,{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(value))
+const formatBytes=(value:number)=>value<1024*1024?`${Math.ceil(value/1024)} KB`:`${(value/1024/1024).toFixed(1)} MB`
+{+async function openAttachment(attachment: NonNullable<SupportMessage['attachment']>) { const blob = await supportChatAPI.fetchAttachment(attachment.id, true); const url = URL.createObjectURL(blob); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60000) }+}
+function pickFile(event:Event){const selected=(event.target as HTMLInputElement).files?.[0];if(!selected)return;if(selected.size>4*1024*1024){error.value=t('supportChat.fileTooLarge');return}file.value=selected;error.value=''}
+async function loadConversations(){const page=await supportChatAPI.adminConversations({search:search.value||undefined});conversations.value=page.items;if(selectedId.value&&!conversations.value.some(v=>v.id===selectedId.value))selectedId.value=null}
+async function refresh(){await loadConversations();if(selectedId.value){messages.value=(await supportChatAPI.adminMessages(selectedId.value)).items;await supportChatAPI.adminRead(selectedId.value);await nextTick();if(pane.value)pane.value.scrollTop=pane.value.scrollHeight}}
+diff --git a/frontend/src/views/user/SupportChatView.vue b/frontend/src/views/user/SupportChatView.vue
+index e7d491f34..f29b61334 100644
+--- a/frontend/src/views/user/SupportChatView.vue
++++ b/frontend/src/views/user/SupportChatView.vue
+@@ -8,7 +8,7 @@
+      <div ref="messagePane" class="min-h-0 flex-1 overflow-y-auto bg-gray-50 p-5 dark:bg-dark-950/60">
+        <div v-if="loading && !messages.length" class="flex h-full items-center justify-center text-sm text-gray-500">{{ t('common.loading') }}</div>
+        <div v-else-if="!messages.length" class="flex h-full flex-col items-center justify-center text-center text-gray-500 dark:text-dark-400"><div class="mb-3 rounded-2xl bg-primary-50 p-4 text-primary-600 dark:bg-primary-900/20 dark:text-primary-300"><Icon name="chat" size="lg" /></div><p class="font-medium text-gray-700 dark:text-dark-200">{{ t('supportChat.emptyTitle') }}</p><p class="mt-1 text-sm">{{ t('supportChat.emptyDescription') }}</p></div>
+        <div v-else class="space-y-4"><article v-for="message in messages" :key="message.id" class="flex" :class="message.sender_type === 'user' ? 'justify-end' : 'justify-start'"><div class="max-w-[82%] rounded-2xl px-4 py-3 text-sm shadow-sm" :class="message.sender_type === 'user' ? 'bg-primary-600 text-white' : 'border border-gray-200 bg-white text-gray-800 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-100'"><p v-if="message.content" class="whitespace-pre-wrap break-words">{{ message.content [-}}</p><a-]{+}}</p><button+} v-if="message.attachment" [-:href="supportChatAPI.attachmentUrl(message.attachment.id)" target="_blank" rel="noopener"-]{+type="button"+} class="mt-2 flex items-center gap-2 [-underline"><Icon-]{+underline" @click="openAttachment(message.attachment)"><Icon+} name="document" size="sm" />{{ message.attachment.filename }} <span class="text-xs opacity-70">({{ formatBytes(message.attachment.size_bytes) [-}})</span></a><time-]{+}})</span></button><time+} class="mt-1 block text-[11px] opacity-70">{{ formatTime(message.created_at) }}</time></div></article></div>
+      </div>
+      <form class="border-t border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-900 sm:p-4" @submit.prevent="send"><div class="mb-2 flex flex-wrap items-center gap-1.5"><button v-for="emoji in emojis" :key="emoji" type="button" class="rounded-lg px-2 py-1 text-lg hover:bg-gray-100 dark:hover:bg-dark-800" :aria-label="t('supportChat.insertEmoji')" @click="draft += emoji">{{ emoji }}</button></div><label for="support-message" class="sr-only">{{ t('supportChat.messageLabel') }}</label><textarea id="support-message" v-model="draft" :maxlength="10000" :placeholder="t('supportChat.placeholder')" :disabled="sending" class="min-h-20 w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 dark:border-dark-700 dark:bg-dark-800" @keydown.enter.exact.prevent="send" /><div class="mt-2 flex items-center justify-between gap-3"><div class="flex min-w-0 items-center gap-2"><input ref="fileInput" type="file" class="hidden" accept="image/gif,image/jpeg,image/png,image/webp,text/plain,application/pdf" @change="pickFile" /><button type="button" class="btn btn-secondary btn-sm" :aria-label="t('supportChat.attachFile')" @click="fileInput?.click()"><Icon name="upload" size="sm" /></button><span v-if="file" class="max-w-48 truncate text-xs text-gray-500">{{ file.name }} <button type="button" class="text-red-500" @click="file = null">×</button></span></div><div class="flex items-center gap-3"><span class="text-xs text-gray-400">{{ draft.length }}/10000</span><button class="btn btn-primary" type="submit" :disabled="sending || (!draft.trim() && !file)">{{ sending ? t('common.submitting') : t('supportChat.send') }}</button></div></div><p v-if="error" class="mt-2 text-xs text-red-500">{{ error }}</p></form>
+    </section>
+@@ -25,6 +25,7 @@ import supportChatAPI, { type SupportMessage } from '@/api/supportChat'
+const { t, locale } = useI18n(); const messages = ref<SupportMessage[]>([]); const draft = ref(''); const file = ref<File | null>(null); const error = ref(''); const loading = ref(false); const sending = ref(false); const messagePane = ref<HTMLElement | null>(null); const fileInput = ref<HTMLInputElement | null>(null); const emojis = ['👍','✅','🎉','🙏','😊','🤝','💡','📌','⏳','❤️']; let timer: ReturnType<typeof setInterval> | undefined
+const formatTime = (value: string) => new Intl.DateTimeFormat(locale.value, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+const formatBytes = (value: number) => value < 1024 * 1024 ? `${Math.ceil(value / 1024)} KB` : `${(value / 1024 / 1024).toFixed(1)} MB`
+{+async function openAttachment(attachment: NonNullable<SupportMessage['attachment']>) { const blob = await supportChatAPI.fetchAttachment(attachment.id); const url = URL.createObjectURL(blob); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60000) }+}
+function pickFile(event: Event) { const selected = (event.target as HTMLInputElement).files?.[0]; if (!selected) return; if (selected.size > 4 * 1024 * 1024) { error.value = t('supportChat.fileTooLarge'); return }; file.value = selected; error.value = '' }
+async function scrollBottom() { await nextTick(); if (messagePane.value) messagePane.value.scrollTop = messagePane.value.scrollHeight }
+async function load() { loading.value = true; try { const page = await supportChatAPI.messages(); messages.value = page.items; await supportChatAPI.read(); await scrollBottom() } finally { loading.value = false } }

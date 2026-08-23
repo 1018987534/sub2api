@@ -22,7 +22,6 @@ const (
 	supportChatRateLimitWindow   = time.Minute
 	supportChatMaxAttachment     = 4 << 20
 	supportChatMaxRequest        = supportChatMaxAttachment + 256<<10
-	supportChatMaxJSONRequest    = 64 << 10
 )
 
 var supportChatAttachmentTypes = map[string]struct{}{
@@ -165,7 +164,7 @@ func (h *SupportChatHandler) insertMessage(c *gin.Context, conversationID, sende
 	if len(uploads) > 0 {
 		upload = uploads[0]
 	}
-	if (in.Content == "" && upload == nil) || len(in.Content) > 10000 {
+	if in.Content == "" && upload == nil || len(in.Content) > 10000 {
 		return supportMessage{}, fmt.Errorf("message content must be between 1 and 10000 characters")
 	}
 	if upload != nil {
@@ -264,7 +263,7 @@ func (h *SupportChatHandler) checkMessageRateLimit(c *gin.Context, subjectID int
 	}
 	result, err := h.limiter.Allow(c.Request.Context(), fmt.Sprintf("support-chat:%s:%d", senderType, subjectID), supportChatMessagesPerMinute, supportChatRateLimitWindow)
 	if err != nil {
-		return false, supportChatRateLimitWindow
+		return true, 0
 	}
 	return result.Allowed, result.RetryAfter
 }
@@ -300,13 +299,10 @@ func parseSupportMessageRequest(c *gin.Context) (supportMessageInput, *supportAt
 			return supportMessageInput{}, nil, fmt.Errorf("file must be 4 MiB or smaller")
 		}
 		contentType := http.DetectContentType(data)
-		if mediaType, _, ok := strings.Cut(contentType, ";"); ok {
-			contentType = strings.TrimSpace(mediaType)
-		}
 		if _, ok := supportChatAttachmentTypes[contentType]; !ok {
 			return supportMessageInput{}, nil, fmt.Errorf("unsupported file type")
 		}
-		filename := filepath.Base(strings.TrimSpace(strings.ReplaceAll(header.Filename, `\`, "/")))
+		filename := filepath.Base(strings.TrimSpace(header.Filename))
 		filename = strings.Map(func(r rune) rune {
 			if r < 0x20 || r == 0x7f {
 				return -1
@@ -321,7 +317,6 @@ func parseSupportMessageRequest(c *gin.Context) (supportMessageInput, *supportAt
 		}
 		return supportMessageInput{Content: strings.TrimSpace(c.PostForm("content")), IdempotencyKey: c.GetHeader("Idempotency-Key")}, &supportAttachmentUpload{Filename: filename, ContentType: contentType, Data: data}, nil
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, supportChatMaxJSONRequest)
 	var in supportMessageInput
 	if err := c.ShouldBindJSON(&in); err != nil {
 		return in, nil, err
@@ -371,10 +366,6 @@ func (h *SupportChatHandler) Send(c *gin.Context) {
 		response.Unauthorized(c, "User not authenticated")
 		return
 	}
-	if allowed, retryAfter := h.checkMessageRateLimit(c, s.UserID, "user"); !allowed {
-		rejectMessageRateLimit(c, retryAfter)
-		return
-	}
 	v, err := h.ensureConversation(c, s.UserID)
 	if err != nil {
 		response.Error(c, 500, err.Error())
@@ -382,7 +373,11 @@ func (h *SupportChatHandler) Send(c *gin.Context) {
 	}
 	in, upload, err := parseSupportMessageRequest(c)
 	if err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+	if allowed, retryAfter := h.checkMessageRateLimit(c, s.UserID, "user"); !allowed {
+		rejectMessageRateLimit(c, retryAfter)
 		return
 	}
 	m, err := h.insertMessage(c, v.ID, s.UserID, "user", in, upload)
@@ -463,13 +458,13 @@ func (h *SupportChatHandler) AdminSend(c *gin.Context) {
 		response.Unauthorized(c, "Admin not authenticated")
 		return
 	}
-	if allowed, retryAfter := h.checkMessageRateLimit(c, s.UserID, "admin"); !allowed {
-		rejectMessageRateLimit(c, retryAfter)
-		return
-	}
 	in, upload, err := parseSupportMessageRequest(c)
 	if err != nil {
-		response.BadRequest(c, "Invalid request: "+err.Error())
+		response.BadRequest(c, "Invalid request")
+		return
+	}
+	if allowed, retryAfter := h.checkMessageRateLimit(c, s.UserID, "admin"); !allowed {
+		rejectMessageRateLimit(c, retryAfter)
 		return
 	}
 	m, err := h.insertMessage(c, id, s.UserID, "admin", in, upload)
