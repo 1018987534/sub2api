@@ -5,11 +5,9 @@ package service
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,84 +21,69 @@ func newPlazaChannelService(channels []Channel, groups []Group, pricing *Pricing
 	return svc
 }
 
-type plazaSchedulableAccountReader struct{ accounts []Account }
-
-func (r *plazaSchedulableAccountReader) ListSchedulable(context.Context) ([]Account, error) {
-	return append([]Account(nil), r.accounts...), nil
-}
-
-type plazaUpstreamModelReader struct {
-	mu     sync.Mutex
-	models map[int64][]string
-	errs   map[int64]error
-	called []int64
-}
-
-func (r *plazaUpstreamModelReader) FetchUpstreamSupportedModels(_ context.Context, account *Account) ([]string, error) {
-	r.mu.Lock()
-	r.called = append(r.called, account.ID)
-	r.mu.Unlock()
-	if err := r.errs[account.ID]; err != nil {
-		return nil, err
-	}
-	return append([]string(nil), r.models[account.ID]...), nil
-}
-
 type plazaRecentModelReader struct {
-	accountIDs []int64
-	models     []RecentGroupModel
+	modelsByGroup map[int64][]RecentGroupModel
+	groupIDs      []int64
+	starts        []time.Time
+	ends          []time.Time
 }
 
-func (r *plazaRecentModelReader) ListRecentModelsByGroup(_ context.Context, _ int64, accountIDs []int64, _, _ time.Time) ([]RecentGroupModel, error) {
-	r.accountIDs = append([]int64(nil), accountIDs...)
-	return append([]RecentGroupModel(nil), r.models...), nil
+func (r *plazaRecentModelReader) ListRecentModelsByGroups(_ context.Context, groupIDs []int64, start, end time.Time) (map[int64][]RecentGroupModel, error) {
+	r.groupIDs = append(r.groupIDs, groupIDs...)
+	r.starts = append(r.starts, start)
+	r.ends = append(r.ends, end)
+	out := make(map[int64][]RecentGroupModel, len(groupIDs))
+	for _, groupID := range groupIDs {
+		out[groupID] = append([]RecentGroupModel(nil), r.modelsByGroup[groupID]...)
+	}
+	return out, nil
 }
 
-func TestListPlazaGroups_UsesLiveUpstreamModelsForMappedAccounts(t *testing.T) {
+func TestListPlazaGroups_UsesOnlyModelsActuallyCalledInLast24Hours(t *testing.T) {
 	channel := Channel{
 		ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10},
-		ModelMapping: map[string]map[string]string{
-			PlatformOpenAI: {"customer-alias": "account-model", "stale-alias": "removed-model"},
-		},
-	}
-	account := Account{
-		ID: 100, Platform: PlatformOpenAI, GroupIDs: []int64{10},
-		Status: StatusActive, Schedulable: true,
-		Credentials: map[string]any{"model_mapping": map[string]any{
-			"account-model": "gpt-5", "removed-model": "removed-upstream",
+		ModelPricing: []ChannelModelPricing{{
+			Platform: PlatformOpenAI,
+			Models:   []string{"gpt-called", "gpt-configured-but-unused"},
 		}},
 	}
-	svc := newPlazaChannelService([]Channel{channel}, []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}, nil)
-	svc.SetAccountRepository(&plazaSchedulableAccountReader{accounts: []Account{account}})
-	svc.SetUpstreamModelInventoryReader(&plazaUpstreamModelReader{models: map[int64][]string{100: {"gpt-5"}}})
+	recent := &plazaRecentModelReader{modelsByGroup: map[int64][]RecentGroupModel{
+		10: {{Name: "gpt-called", Platform: PlatformOpenAI, UpstreamModel: "gpt-upstream"}},
+	}}
+	svc := newPlazaChannelService([]Channel{channel}, []Group{
+		{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1},
+		{ID: 20, Name: "unused", Platform: PlatformOpenAI, RateMultiplier: 1},
+	}, nil)
+	svc.SetRecentGroupModelsReader(recent)
 
 	out, err := svc.ListPlazaGroups(context.Background())
 	require.NoError(t, err)
 	require.Len(t, out, 1)
-	require.Equal(t, []string{"account-model", "customer-alias"}, []string{out[0].Models[0].Name, out[0].Models[1].Name})
+	require.Equal(t, []string{"gpt-called"}, []string{out[0].Models[0].Name})
+	require.Equal(t, []int64{10, 20}, recent.groupIDs)
+	require.Len(t, recent.starts, 1, "all active groups should be loaded in one usage query")
+	require.WithinDuration(t, recent.ends[0].Add(-24*time.Hour), recent.starts[0], time.Second)
 }
 
-func TestListPlazaGroups_OfficialPricingFollowsFinalUpstreamModel(t *testing.T) {
+func TestListPlazaGroups_RecentUsageOfficialPricingFollowsFinalUpstreamModel(t *testing.T) {
 	channel := Channel{
 		ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10},
 		ModelMapping: map[string]map[string]string{
 			PlatformOpenAI: {"customer-alias": "account-model"},
 		},
 	}
-	account := Account{
-		ID: 100, Platform: PlatformOpenAI, GroupIDs: []int64{10}, Status: StatusActive, Schedulable: true,
-		Credentials: map[string]any{"model_mapping": map[string]any{"account-model": "gpt-5"}},
-	}
 	pricing := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
 		"gpt-5": {InputCostPerToken: 1.25e-6, OutputCostPerToken: 1e-5},
+	}}
+	recent := &plazaRecentModelReader{modelsByGroup: map[int64][]RecentGroupModel{
+		10: {{Name: "customer-alias", Platform: PlatformOpenAI, UpstreamModel: "gpt-5"}},
 	}}
 	svc := newPlazaChannelService(
 		[]Channel{channel},
 		[]Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}},
 		pricing,
 	)
-	svc.SetAccountRepository(&plazaSchedulableAccountReader{accounts: []Account{account}})
-	svc.SetUpstreamModelInventoryReader(&plazaUpstreamModelReader{models: map[int64][]string{100: {"gpt-5"}}})
+	svc.SetRecentGroupModelsReader(recent)
 
 	out, err := svc.ListPlazaGroups(context.Background())
 	require.NoError(t, err)
@@ -114,210 +97,38 @@ func TestListPlazaGroups_OfficialPricingFollowsFinalUpstreamModel(t *testing.T) 
 	require.Equal(t, 1e-5, *models["customer-alias"].OfficialPricing.OutputPrice)
 }
 
-func TestListPlazaGroups_RestrictModelsUsesConfiguredBillingSource(t *testing.T) {
-	tests := []struct {
-		name          string
-		billingSource string
-		pricedModel   string
-		wantAlias     bool
-	}{
-		{name: "requested rejects alias without requested price", billingSource: BillingModelSourceRequested, pricedModel: "account-model", wantAlias: false},
-		{name: "channel mapped accepts target price", billingSource: BillingModelSourceChannelMapped, pricedModel: "account-model", wantAlias: true},
-		{name: "upstream accepts final provider price", billingSource: BillingModelSourceUpstream, pricedModel: "gpt-5", wantAlias: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			channel := Channel{
-				ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10},
-				BillingModelSource: tt.billingSource,
-				RestrictModels:     true,
-				ModelMapping: map[string]map[string]string{
-					PlatformOpenAI: {"customer-alias": "account-model"},
-				},
-				ModelPricing: []ChannelModelPricing{{
-					Platform: PlatformOpenAI, Models: []string{tt.pricedModel}, BillingMode: BillingModeToken,
-				}},
-			}
-			account := Account{
-				ID: 100, Platform: PlatformOpenAI, GroupIDs: []int64{10}, Status: StatusActive, Schedulable: true,
-				Credentials: map[string]any{"model_mapping": map[string]any{"account-model": "gpt-5"}},
-			}
-			svc := newPlazaChannelService(
-				[]Channel{channel},
-				[]Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}},
-				nil,
-			)
-			svc.SetAccountRepository(&plazaSchedulableAccountReader{accounts: []Account{account}})
-			svc.SetUpstreamModelInventoryReader(&plazaUpstreamModelReader{models: map[int64][]string{100: {"gpt-5"}}})
-
-			out, err := svc.ListPlazaGroups(context.Background())
-			require.NoError(t, err)
-			foundAlias := false
-			for _, group := range out {
-				for _, model := range group.Models {
-					foundAlias = foundAlias || model.Name == "customer-alias"
-				}
-			}
-			require.Equal(t, tt.wantAlias, foundAlias)
-		})
-	}
-}
-
-func TestListPlazaGroups_UsesLiveUpstreamModelsForPassthroughAccounts(t *testing.T) {
-	channel := Channel{ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10}}
-	account := Account{
-		ID: 101, Platform: PlatformOpenAI, GroupIDs: []int64{10},
-		Status: StatusActive, Schedulable: true,
-		Extra: map[string]any{"openai_passthrough": true},
-	}
+func TestListPlazaGroups_HidesGroupWithoutRecentUsage(t *testing.T) {
+	channel := plazaPricedChannel(1, "live", []int64{10}, PlatformOpenAI, "gpt-configured")
 	svc := newPlazaChannelService([]Channel{channel}, []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}, nil)
-	svc.SetAccountRepository(&plazaSchedulableAccountReader{accounts: []Account{account}})
-	svc.SetUpstreamModelInventoryReader(&plazaUpstreamModelReader{models: map[int64][]string{101: {"gpt-live", "gpt-live-2"}}})
+	svc.SetRecentGroupModelsReader(&plazaRecentModelReader{modelsByGroup: map[int64][]RecentGroupModel{}})
 
 	out, err := svc.ListPlazaGroups(context.Background())
 	require.NoError(t, err)
-	require.Len(t, out, 1)
-	require.Equal(t, []string{"gpt-live", "gpt-live-2"}, []string{out[0].Models[0].Name, out[0].Models[1].Name})
+	require.Empty(t, out)
 }
 
-func TestListPlazaGroups_RecentFallbackOnlyReceivesSchedulableAccountIDs(t *testing.T) {
-	channel := Channel{ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10}}
-	active := Account{ID: 101, Platform: PlatformOpenAI, GroupIDs: []int64{10}, Status: StatusActive, Schedulable: true}
-	recent := &plazaRecentModelReader{models: []RecentGroupModel{{Name: "recent-live", Platform: PlatformOpenAI, UpstreamModel: "gpt-recent"}}}
-	svc := newPlazaChannelService([]Channel{channel}, []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}, nil)
-	svc.SetAccountRepository(&plazaSchedulableAccountReader{accounts: []Account{active}})
-	svc.SetUpstreamModelInventoryReader(&plazaUpstreamModelReader{})
-	svc.SetRecentGroupModelsReader(recent)
-
-	out, err := svc.ListPlazaGroups(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, []int64{101}, recent.accountIDs)
-	require.Len(t, out, 1)
-	require.Equal(t, "recent-live", out[0].Models[0].Name)
-}
-
-func TestListPlazaGroups_MergesLiveModelsWithFailedAccountRecentFallback(t *testing.T) {
-	channel := Channel{ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10}}
-	accounts := []Account{
-		{ID: 101, Platform: PlatformOpenAI, GroupIDs: []int64{10}, Status: StatusActive, Schedulable: true},
-		{ID: 102, Platform: PlatformOpenAI, GroupIDs: []int64{10}, Status: StatusActive, Schedulable: true},
-	}
-	recent := &plazaRecentModelReader{models: []RecentGroupModel{{Name: "recent-fallback", Platform: PlatformOpenAI, UpstreamModel: "gpt-fallback"}}}
-	svc := newPlazaChannelService([]Channel{channel}, []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}, nil)
-	svc.SetAccountRepository(&plazaSchedulableAccountReader{accounts: accounts})
-	svc.SetUpstreamModelInventoryReader(&plazaUpstreamModelReader{
-		models: map[int64][]string{101: {"gpt-live"}},
-		errs:   map[int64]error{102: errors.New("upstream unavailable")},
-	})
-	svc.SetRecentGroupModelsReader(recent)
-
-	out, err := svc.ListPlazaGroups(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, []int64{102}, recent.accountIDs)
-	require.Len(t, out, 1)
-	require.Equal(t, []string{"gpt-live", "recent-fallback"}, []string{out[0].Models[0].Name, out[0].Models[1].Name})
-}
-
-func TestListPlazaGroups_RecentFallbackKeepsCustomerAliasAndUpstreamPricing(t *testing.T) {
+func TestListPlazaGroups_RecentUsageIsNotHiddenByCurrentChannelRestriction(t *testing.T) {
 	channel := Channel{
-		ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10},
-		ModelMapping: map[string]map[string]string{PlatformOpenAI: {"customer-alias": "account-model"}},
+		ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10}, RestrictModels: true,
+		ModelPricing: []ChannelModelPricing{{
+			Platform: PlatformOpenAI,
+			Models:   []string{"currently-allowed"},
+		}},
 	}
-	account := Account{ID: 101, Platform: PlatformOpenAI, GroupIDs: []int64{10}, Status: StatusActive, Schedulable: true}
-	recent := &plazaRecentModelReader{models: []RecentGroupModel{{
-		Name: "customer-alias", Platform: PlatformOpenAI, UpstreamModel: "gpt-5",
-	}}}
-	pricing := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
-		"gpt-5": {InputCostPerToken: 2e-6},
+	recent := &plazaRecentModelReader{modelsByGroup: map[int64][]RecentGroupModel{
+		10: {{Name: "actually-called", Platform: PlatformOpenAI, UpstreamModel: "gpt-5"}},
 	}}
 	svc := newPlazaChannelService(
 		[]Channel{channel},
 		[]Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}},
-		pricing,
+		nil,
 	)
-	svc.SetAccountRepository(&plazaSchedulableAccountReader{accounts: []Account{account}})
-	svc.SetUpstreamModelInventoryReader(&plazaUpstreamModelReader{errs: map[int64]error{101: errors.New("no models endpoint")}})
 	svc.SetRecentGroupModelsReader(recent)
 
 	out, err := svc.ListPlazaGroups(context.Background())
 	require.NoError(t, err)
 	require.Len(t, out, 1)
-	require.Len(t, out[0].Models, 1)
-	require.Equal(t, "customer-alias", out[0].Models[0].Name)
-	require.NotNil(t, out[0].Models[0].OfficialPricing)
-	require.Equal(t, 2e-6, *out[0].Models[0].OfficialPricing.InputPrice)
-}
-
-func TestListPlazaGroups_ExcludesAccountsNoLongerSchedulableAtRefreshTime(t *testing.T) {
-	channel := Channel{ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10}}
-	blockedUntil := time.Now().Add(time.Hour)
-	accounts := []Account{
-		{ID: 101, Platform: PlatformOpenAI, GroupIDs: []int64{10}, Status: StatusActive, Schedulable: true},
-		{ID: 102, Platform: PlatformOpenAI, GroupIDs: []int64{10}, Status: StatusActive, Schedulable: true, RateLimitResetAt: &blockedUntil},
-	}
-	reader := &plazaUpstreamModelReader{models: map[int64][]string{
-		101: {"gpt-live"},
-		102: {"gpt-blocked"},
-	}}
-	svc := newPlazaChannelService([]Channel{channel}, []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}, nil)
-	svc.SetAccountRepository(&plazaSchedulableAccountReader{accounts: accounts})
-	svc.SetUpstreamModelInventoryReader(reader)
-
-	out, err := svc.ListPlazaGroups(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, []int64{101}, reader.called)
-	require.Len(t, out, 1)
-	require.Equal(t, []string{"gpt-live"}, []string{out[0].Models[0].Name})
-}
-
-func TestListPlazaGroups_WildcardMappingUsesRecentModelsAlongsideExactLiveAliases(t *testing.T) {
-	channel := Channel{ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10}}
-	account := Account{
-		ID: 103, Platform: PlatformOpenAI, GroupIDs: []int64{10}, Status: StatusActive, Schedulable: true,
-		Credentials: map[string]any{"model_mapping": map[string]any{
-			"customer-alias": "gpt-upstream", "legacy-*": "gpt-upstream",
-		}},
-	}
-	recent := &plazaRecentModelReader{models: []RecentGroupModel{{Name: "legacy-used", Platform: PlatformOpenAI, UpstreamModel: "gpt-upstream"}}}
-	svc := newPlazaChannelService([]Channel{channel}, []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}, nil)
-	svc.SetAccountRepository(&plazaSchedulableAccountReader{accounts: []Account{account}})
-	svc.SetUpstreamModelInventoryReader(&plazaUpstreamModelReader{models: map[int64][]string{103: {"gpt-upstream"}}})
-	svc.SetRecentGroupModelsReader(recent)
-
-	out, err := svc.ListPlazaGroups(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, []int64{103}, recent.accountIDs)
-	require.Len(t, out, 1)
-	require.Equal(t, []string{"customer-alias", "legacy-used"}, []string{out[0].Models[0].Name, out[0].Models[1].Name})
-}
-
-func TestProvidePlazaModelInventoryRuntimeStartsOnlyOnControl(t *testing.T) {
-	newService := func() *ChannelService {
-		svc := newPlazaChannelService(nil, nil, nil)
-		svc.SetAccountRepository(&plazaSchedulableAccountReader{})
-		return svc
-	}
-
-	gatewayService := newService()
-	gatewayRuntime := ProvidePlazaModelInventoryRuntime(
-		gatewayService,
-		&AccountTestService{},
-		&config.Config{InstanceRole: config.InstanceRoleGateway},
-	)
-	require.NotNil(t, gatewayRuntime)
-	require.NotNil(t, gatewayService.modelInventoryReader)
-	require.Nil(t, gatewayService.plazaSyncCancel)
-
-	controlService := newService()
-	controlRuntime := ProvidePlazaModelInventoryRuntime(
-		controlService,
-		&AccountTestService{},
-		&config.Config{InstanceRole: config.InstanceRoleControl},
-	)
-	require.NotNil(t, controlRuntime)
-	require.NotNil(t, controlService.plazaSyncCancel)
-	controlRuntime.Stop()
-	require.Nil(t, controlService.plazaSyncCancel)
+	require.Equal(t, "actually-called", out[0].Models[0].Name)
 }
 
 func plazaPricedChannel(id int64, name string, groupIDs []int64, platform string, models ...string) Channel {

@@ -523,8 +523,8 @@ export default {
       empty: 'No group request data is available yet',
     },
     models: {
-      previewTitle: 'Available models',
-      viewAll: 'View all {n}',
+      previewTitle: 'Models used in 24h',
+      viewAll: '{n} total',
       officialTitle: 'Official model pricing',
       officialDescription: 'Official reference prices only, shown per 1M tokens.',
       input: 'Input',
@@ -608,7 +608,7 @@ export default {
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
     title: 'Model Plaza',
-    description: 'Browse available models and pricing by group',
+    description: 'Browse models actually used by each group in the last 24 hours',
     loading: 'Loading...',
     empty: 'No groups to display',
     loadFailed: 'Failed to load model plaza',
@@ -627,7 +627,7 @@ export default {
       subscription: 'Subscription'
     },
     detail: {
-      noModels: 'No models configured for this group',
+      noModels: 'No model usage for this group in the last 24 hours',
       noPricing: 'Pricing not configured',
       peakNote: 'Peak hours {window}: billing rate ×{multiplier}'
     },

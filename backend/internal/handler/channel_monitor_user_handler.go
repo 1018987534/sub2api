@@ -157,8 +157,6 @@ func userMonitorViewToItem(v *service.UserMonitorView, includeQuota bool) channe
 	return item
 }
 
-const monitorModelPreviewLimit = 3
-
 func toMonitorModelPricing(models []service.PlazaModel) []channelMonitorUserModelPricing {
 	out := make([]channelMonitorUserModelPricing, 0, len(models))
 	for _, model := range models {
@@ -280,11 +278,7 @@ func (h *ChannelMonitorUserHandler) List(c *gin.Context) {
 		item := userMonitorViewToItem(v, includeQuota)
 		models := monitorPricingModels(v, catalog)
 		item.ModelCount = len(models)
-		if len(models) > monitorModelPreviewLimit {
-			item.ModelPreview = models[:monitorModelPreviewLimit]
-		} else {
-			item.ModelPreview = models
-		}
+		item.ModelPreview = models
 		items = append(items, item)
 	}
 	response.Success(c, gin.H{"items": items})

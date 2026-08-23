@@ -102,23 +102,27 @@ describe('MonitorCard quota snapshot visibility', () => {
     expect(wrapper.text()).not.toContain('monitorCommon.checkMode.quota')
   })
 
-  it('renders the three models supplied by the live catalog preview', () => {
+  it('renders every model actually used by the group in the last 24 hours', () => {
     const wrapper = mountCard(makeItem({
       model_count: 5,
       model_preview: [
         { name: 'gpt-5.6-sol', platform: 'openai', official_pricing: null },
         { name: 'gpt-5.6-terra', platform: 'openai', official_pricing: null },
         { name: 'gpt-5.6-luna', platform: 'openai', official_pricing: null },
+        { name: 'gpt-5.5', platform: 'openai', official_pricing: null },
+        { name: 'gpt-5.4', platform: 'openai', official_pricing: null },
       ],
     }))
     const preview = wrapper.get('[data-testid="monitor-model-preview"]')
     expect(preview.text()).toContain('gpt-5.6-sol')
     expect(preview.text()).toContain('gpt-5.6-terra')
     expect(preview.text()).toContain('gpt-5.6-luna')
-    expect(preview.text()).toContain('+2')
+    expect(preview.text()).toContain('gpt-5.5')
+    expect(preview.text()).toContain('gpt-5.4')
+    expect(preview.text()).not.toContain('+')
   })
 
-  it('does not substitute configured probe models when the live catalog is empty', () => {
+  it('does not substitute configured probe models when recent usage is empty', () => {
     const wrapper = mountCard(makeItem({ primary_model: 'configured-probe', model_count: 0, model_preview: [] }))
     expect(wrapper.find('[data-testid="monitor-model-preview"]').exists()).toBe(false)
   })

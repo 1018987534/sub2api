@@ -528,8 +528,8 @@ export default {
       empty: '当前没有可用的分组请求数据',
     },
     models: {
-      previewTitle: '可用模型',
-      viewAll: '查看全部 {n} 个',
+      previewTitle: '近 24 小时调用模型',
+      viewAll: '共 {n} 个',
       officialTitle: '官方模型定价',
       officialDescription: '仅展示官方参考价格，按每 100 万 Token 计。',
       input: '输入',
@@ -613,7 +613,7 @@ export default {
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
     title: '模型广场',
-    description: '按分组浏览可用模型与价格',
+    description: '按分组浏览近 24 小时实际调用过的模型与价格',
     loading: '加载中...',
     empty: '暂无可展示的分组',
     loadFailed: '加载模型广场失败',
@@ -632,7 +632,7 @@ export default {
       subscription: '订阅'
     },
     detail: {
-      noModels: '该分组暂未配置模型',
+      noModels: '该分组近 24 小时暂无模型调用',
       noPricing: '未配置定价',
       peakNote: '高峰时段 {window} 计费倍率 ×{multiplier}'
     },

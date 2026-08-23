@@ -64,12 +64,6 @@
         >
           {{ model.name }}
         </span>
-        <span
-          v-if="item.model_count > (item.model_preview?.length ?? 0)"
-          class="rounded-md px-1.5 py-1 text-[11px] font-medium text-primary-600 dark:text-primary-300"
-        >
-          +{{ item.model_count - (item.model_preview?.length ?? 0) }}
-        </span>
       </div>
     </div>
 
