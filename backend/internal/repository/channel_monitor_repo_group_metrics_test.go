@@ -16,19 +16,20 @@ func TestListUserGroupMetricsAggregatesMonitoredGroups(t *testing.T) {
 
 	start := time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
-	mock.ExpectQuery(`(?s)WITH monitored_groups AS .*PERCENTILE_CONT.*FROM monitored_groups mg`).
+	mock.ExpectQuery(`(?s)WITH monitor_targets AS .*PERCENTILE_CONT.*FROM monitored_groups mg`).
 		WithArgs(start, end).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"platform", "id", "name", "first_token_p50_ms", "first_token_sample_count", "cache_read_tokens", "cache_rate_denominator",
+			"monitor_id", "platform", "id", "name", "first_token_p50_ms", "first_token_sample_count", "cache_read_tokens", "cache_rate_denominator",
 		}).
-			AddRow("openai", int64(10), "性价比分组", 1250.0, int64(24), int64(625), int64(1000)).
-			AddRow("anthropic", int64(20), "KIRO分组", nil, int64(0), int64(0), int64(0)))
+			AddRow(int64(17), "openai", int64(10), "性价比分组", 1250.0, int64(24), int64(625), int64(1000)).
+			AddRow(int64(15), "anthropic", int64(20), "KIRO分组", nil, int64(0), int64(0), int64(0)))
 
 	repo := &channelMonitorRepository{db: db}
 	rows, err := repo.ListUserGroupMetrics(context.Background(), start, end)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	require.Equal(t, "openai", rows[0].Platform)
+	require.Equal(t, int64(17), rows[0].MonitorID)
 	require.Equal(t, "性价比分组", rows[0].GroupName)
 	require.NotNil(t, rows[0].FirstTokenP50Ms)
 	require.Equal(t, int64(1250), *rows[0].FirstTokenP50Ms)

@@ -55,6 +55,28 @@
       secondary-unit="ms"
     />
 
+    <div class="mt-2 grid grid-cols-2 gap-2" data-testid="monitor-group-metrics">
+      <div class="rounded-xl border border-sky-100 bg-sky-50/60 p-3 dark:border-sky-900/40 dark:bg-sky-950/20">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-sky-600/80 dark:text-sky-300/80">
+          {{ t('channelStatus.groupMetrics.firstToken') }}
+        </div>
+        <div class="mt-1 font-mono text-base font-bold tabular-nums text-sky-700 dark:text-sky-300">
+          {{ formatFirstToken(item.group_first_token_p50_ms) }}
+          <span v-if="(item.group_first_token_sample_count ?? 0) > 0" class="ml-1 text-[10px] font-normal text-gray-400">
+            ({{ item.group_first_token_sample_count }})
+          </span>
+        </div>
+      </div>
+      <div class="rounded-xl border border-cyan-100 bg-cyan-50/60 p-3 dark:border-cyan-900/40 dark:bg-cyan-950/20">
+        <div class="text-[10px] font-semibold uppercase tracking-wider text-cyan-600/80 dark:text-cyan-300/80">
+          {{ t('channelStatus.groupMetrics.cacheRate') }}
+        </div>
+        <div class="mt-1 font-mono text-base font-bold tabular-nums text-cyan-700 dark:text-cyan-300">
+          {{ formatCacheRate(item.group_cache_rate) }}
+        </div>
+      </div>
+    </div>
+
     <!-- 配额模式：最新用量/余额快照（服务端已按系统开关剥离，此处 flag 为纵深防御） -->
     <MonitorQuotaView v-if="quotaVisible" :snapshot="item.latest_quota" class="mt-2" />
 
@@ -142,4 +164,14 @@ const extraModelsCountLabel = computed(() => {
   if (count === 0) return undefined
   return t('monitorCommon.extraModelsCount', { n: count })
 })
+
+function formatFirstToken(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '-'
+  return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${Math.round(value)}ms`
+}
+
+function formatCacheRate(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '-'
+  return `${(value * 100).toFixed(1)}%`
+}
 </script>

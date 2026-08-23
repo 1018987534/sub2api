@@ -33,6 +33,9 @@ export interface UserMonitorView {
   availability_7d: number
   extra_models: UserMonitorExtraModel[]
   timeline: MonitorTimelinePoint[]
+  group_first_token_p50_ms?: number | null
+  group_first_token_sample_count?: number
+  group_cache_rate?: number | null
   /**
    * 主模型最近配额快照。仅当系统开启 channel_monitor_show_quota 时
    * 服务端才会下发（关闭时服务端已剥离，前端 flag 仅作纵深防御）。
@@ -62,19 +65,6 @@ export interface UserMonitorDetail {
   models: UserMonitorModelDetail[]
 }
 
-export interface UserMonitorGroupMetric {
-  platform: Provider | string
-  group_id: number
-  group_name: string
-  first_token_p50_ms: number | null
-  first_token_sample_count: number
-  cache_rate: number | null
-}
-
-export interface UserMonitorGroupMetricResponse {
-  items: UserMonitorGroupMetric[]
-}
-
 /**
  * List all monitor views available to the current user.
  */
@@ -93,18 +83,9 @@ export async function status(id: number): Promise<UserMonitorDetail> {
   return data
 }
 
-/** Get recent real-request metrics for groups referenced by enabled monitors. */
-export async function groupMetrics(options?: { signal?: AbortSignal }): Promise<UserMonitorGroupMetricResponse> {
-  const { data } = await apiClient.get<UserMonitorGroupMetricResponse>('/channel-monitors/group-metrics', {
-    signal: options?.signal,
-  })
-  return data
-}
-
 export const channelMonitorUserAPI = {
   list,
   status,
-  groupMetrics,
 }
 
 export default channelMonitorUserAPI

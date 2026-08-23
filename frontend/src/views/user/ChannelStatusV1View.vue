@@ -10,8 +10,6 @@
       @refresh="manualReload"
     />
 
-    <MonitorGroupMetrics :rows="groupMetrics" :loading="groupMetricsLoading" />
-
     <MonitorCardGrid
       :items="items"
       :window="currentWindow"
@@ -40,13 +38,10 @@ import {
   status as fetchChannelMonitorDetail,
   type UserMonitorView,
   type UserMonitorDetail,
-  groupMetrics as fetchChannelMonitorGroupMetrics,
-  type UserMonitorGroupMetric,
 } from '@/api/channelMonitor'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import MonitorHero, { type MonitorWindow, type OverallStatus } from '@/components/user/monitor/MonitorHero.vue'
 import MonitorCardGrid from '@/components/user/monitor/MonitorCardGrid.vue'
-import MonitorGroupMetrics from '@/components/user/monitor/MonitorGroupMetrics.vue'
 import MonitorDetailDialog from '@/components/user/MonitorDetailDialog.vue'
 import { DEFAULT_INTERVAL_SECONDS, STATUS_OPERATIONAL } from '@/constants/channelMonitor'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
@@ -56,8 +51,6 @@ const appStore = useAppStore()
 
 // ── State ──
 const items = ref<UserMonitorView[]>([])
-const groupMetrics = ref<UserMonitorGroupMetric[]>([])
-const groupMetricsLoading = ref(false)
 const loading = ref(false)
 const currentWindow = ref<MonitorWindow>('7d')
 const detailCache = reactive<Record<number, UserMonitorDetail>>({})
@@ -96,15 +89,9 @@ async function reload(silent = false) {
   abortController = ctrl
   if (!silent) loading.value = true
   try {
-    groupMetricsLoading.value = true
-    const [listResult, groupMetricResult] = await Promise.allSettled([
-      listChannelMonitorViews({ signal: ctrl.signal }),
-      fetchChannelMonitorGroupMetrics({ signal: ctrl.signal }),
-    ])
+    const listResult = await listChannelMonitorViews({ signal: ctrl.signal })
     if (ctrl.signal.aborted || abortController !== ctrl) return
-    if (listResult.status === 'rejected') throw listResult.reason
-    items.value = listResult.value.items || []
-    groupMetrics.value = groupMetricResult.status === 'fulfilled' ? groupMetricResult.value.items || [] : []
+    items.value = listResult.items || []
   } catch (err: unknown) {
     const e = err as { name?: string; code?: string }
     if (e?.name === 'AbortError' || e?.code === 'ERR_CANCELED') return
@@ -114,7 +101,6 @@ async function reload(silent = false) {
       if (!silent) loading.value = false
       countdown.value = DEFAULT_INTERVAL_SECONDS
       abortController = null
-      groupMetricsLoading.value = false
     }
   }
 }

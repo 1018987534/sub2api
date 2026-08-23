@@ -69,30 +69,42 @@ func (s *ChannelMonitorService) ListUserView(ctx context.Context) ([]*UserMonito
 	summaries := s.BatchMonitorStatusSummary(ctx, ids, primaryByID, extrasByID)
 	latestMap := s.batchLatest(ctx, ids)
 	timelineMap := s.batchTimeline(ctx, ids, primaryByID)
+	groupMetrics := s.listUserGroupMetricsByMonitor(ctx)
 
 	views := make([]*UserMonitorView, 0, len(monitors))
 	for _, m := range monitors {
 		primaryLatest := pickLatest(latestMap[m.ID], m.PrimaryModel)
-		views = append(views, buildUserViewFromSummary(m, summaries[m.ID], primaryLatest, timelineMap[m.ID]))
+		view := buildUserViewFromSummary(m, summaries[m.ID], primaryLatest, timelineMap[m.ID])
+		if metric, ok := groupMetrics[m.ID]; ok {
+			view.GroupFirstTokenP50Ms = metric.FirstTokenP50Ms
+			view.GroupFirstTokenSampleCount = metric.FirstTokenSampleCount
+			view.GroupCacheRate = metric.CacheRate
+		}
+		views = append(views, view)
 	}
 	return views, nil
 }
 
-// ListUserGroupMetrics returns the last 24 hours of real-request group metrics
-// for groups referenced by enabled customer-facing monitors.
-func (s *ChannelMonitorService) ListUserGroupMetrics(ctx context.Context) ([]*UserMonitorGroupMetric, error) {
+func (s *ChannelMonitorService) listUserGroupMetricsByMonitor(ctx context.Context) map[int64]*UserMonitorGroupMetric {
 	repo, ok := s.repo.(interface {
 		ListUserGroupMetrics(context.Context, time.Time, time.Time) ([]*UserMonitorGroupMetric, error)
 	})
 	if !ok {
-		return []*UserMonitorGroupMetric{}, nil
+		return map[int64]*UserMonitorGroupMetric{}
 	}
 	end := time.Now().UTC()
 	metrics, err := repo.ListUserGroupMetrics(ctx, end.Add(-24*time.Hour), end)
 	if err != nil {
-		return nil, fmt.Errorf("list user monitor group metrics: %w", err)
+		slog.Warn("channel_monitor: user group metrics failed", "error", err)
+		return map[int64]*UserMonitorGroupMetric{}
 	}
-	return metrics, nil
+	byMonitor := make(map[int64]*UserMonitorGroupMetric, len(metrics))
+	for _, metric := range metrics {
+		if metric != nil && metric.MonitorID != 0 {
+			byMonitor[metric.MonitorID] = metric
+		}
+	}
+	return byMonitor
 }
 
 // collectMonitorIndexes 把 monitors 列表按 ID 展开为聚合查询所需的三个索引结构。

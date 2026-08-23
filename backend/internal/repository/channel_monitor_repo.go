@@ -229,15 +229,37 @@ func (r *channelMonitorRepository) ListUserGroupMetrics(ctx context.Context, sta
 		return []*service.UserMonitorGroupMetric{}, nil
 	}
 	const query = `
-WITH monitored_groups AS (
-  SELECT DISTINCT g.id, g.name, g.platform
+WITH monitor_targets AS (
+  SELECT cm.id AS monitor_id,
+         cm.provider,
+         NULLIF(BTRIM(cm.group_name), '') AS explicit_group_name,
+         REGEXP_REPLACE(
+           REGEXP_REPLACE(LOWER(cm.name), '[[:space:]]*(监控|monitor)[[:space:]]*$', ''),
+           '[[:space:]]+', '', 'g'
+         ) AS derived_group_name
   FROM channel_monitors cm
-  JOIN groups g ON g.name = cm.group_name
-    AND (g.platform = cm.provider OR g.platform = 'composite')
   WHERE cm.enabled = TRUE
-    AND NULLIF(BTRIM(cm.group_name), '') IS NOT NULL
+), monitored_groups AS (
+  SELECT DISTINCT ON (mt.monitor_id)
+         mt.monitor_id, g.id, g.name, g.platform
+  FROM monitor_targets mt
+  JOIN groups g ON (g.platform = mt.provider OR g.platform = 'composite')
+    AND (
+      (mt.explicit_group_name IS NOT NULL AND g.name = mt.explicit_group_name)
+      OR (
+        mt.explicit_group_name IS NULL
+        AND (
+          REGEXP_REPLACE(LOWER(g.name), '[[:space:]]+', '', 'g') = mt.derived_group_name
+          OR REGEXP_REPLACE(LOWER(g.name), '[[:space:]]+', '', 'g') LIKE mt.derived_group_name || '%'
+        )
+      )
+    )
+  ORDER BY mt.monitor_id,
+           CASE WHEN mt.explicit_group_name IS NOT NULL AND g.name = mt.explicit_group_name THEN 0 ELSE 1 END,
+           g.id
 ), grouped AS (
   SELECT
+    mg.monitor_id,
     ul.group_id,
     PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ul.first_token_ms)
       FILTER (WHERE ul.first_token_ms IS NOT NULL) AS first_token_p50_ms,
@@ -249,13 +271,13 @@ WITH monitored_groups AS (
   WHERE ul.created_at >= $1
     AND ul.created_at < $2
     AND ul.actual_cost > 0
-  GROUP BY ul.group_id
+  GROUP BY mg.monitor_id, ul.group_id
 )
-SELECT mg.platform, mg.id, mg.name,
+SELECT mg.monitor_id, mg.platform, mg.id, mg.name,
        g.first_token_p50_ms, g.first_token_sample_count,
        g.cache_read_tokens, g.cache_rate_denominator
 FROM monitored_groups mg
-LEFT JOIN grouped g ON g.group_id = mg.id
+LEFT JOIN grouped g ON g.monitor_id = mg.monitor_id AND g.group_id = mg.id
 ORDER BY mg.platform, mg.name, mg.id`
 	rows, err := r.db.QueryContext(ctx, query, startTime, endTime)
 	if err != nil {
@@ -267,7 +289,7 @@ ORDER BY mg.platform, mg.name, mg.id`
 		var metric service.UserMonitorGroupMetric
 		var p50 sql.NullFloat64
 		var sampleCount int64
-		if err := rows.Scan(&metric.Platform, &metric.GroupID, &metric.GroupName, &p50, &sampleCount, &metric.CacheReadTokens, &metric.CacheRateDenominator); err != nil {
+		if err := rows.Scan(&metric.MonitorID, &metric.Platform, &metric.GroupID, &metric.GroupName, &p50, &sampleCount, &metric.CacheReadTokens, &metric.CacheRateDenominator); err != nil {
 			return nil, fmt.Errorf("scan user monitor group metrics: %w", err)
 		}
 		metric.FirstTokenSampleCount = sampleCount
