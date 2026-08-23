@@ -62,6 +62,19 @@ export interface UserMonitorDetail {
   models: UserMonitorModelDetail[]
 }
 
+export interface UserMonitorGroupMetric {
+  platform: Provider | string
+  group_id: number
+  group_name: string
+  first_token_p50_ms: number | null
+  first_token_sample_count: number
+  cache_rate: number | null
+}
+
+export interface UserMonitorGroupMetricResponse {
+  items: UserMonitorGroupMetric[]
+}
+
 /**
  * List all monitor views available to the current user.
  */
@@ -80,9 +93,18 @@ export async function status(id: number): Promise<UserMonitorDetail> {
   return data
 }
 
+/** Get recent real-request metrics for groups referenced by enabled monitors. */
+export async function groupMetrics(options?: { signal?: AbortSignal }): Promise<UserMonitorGroupMetricResponse> {
+  const { data } = await apiClient.get<UserMonitorGroupMetricResponse>('/channel-monitors/group-metrics', {
+    signal: options?.signal,
+  })
+  return data
+}
+
 export const channelMonitorUserAPI = {
   list,
   status,
+  groupMetrics,
 }
 
 export default channelMonitorUserAPI

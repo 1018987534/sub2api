@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 )
 
 // 渠道监控聚合层：把 latest + availability 拼成 admin/user 视图所需的 summary / detail。
@@ -75,6 +76,23 @@ func (s *ChannelMonitorService) ListUserView(ctx context.Context) ([]*UserMonito
 		views = append(views, buildUserViewFromSummary(m, summaries[m.ID], primaryLatest, timelineMap[m.ID]))
 	}
 	return views, nil
+}
+
+// ListUserGroupMetrics returns the last 24 hours of real-request group metrics
+// for groups referenced by enabled customer-facing monitors.
+func (s *ChannelMonitorService) ListUserGroupMetrics(ctx context.Context) ([]*UserMonitorGroupMetric, error) {
+	repo, ok := s.repo.(interface {
+		ListUserGroupMetrics(context.Context, time.Time, time.Time) ([]*UserMonitorGroupMetric, error)
+	})
+	if !ok {
+		return []*UserMonitorGroupMetric{}, nil
+	}
+	end := time.Now().UTC()
+	metrics, err := repo.ListUserGroupMetrics(ctx, end.Add(-24*time.Hour), end)
+	if err != nil {
+		return nil, fmt.Errorf("list user monitor group metrics: %w", err)
+	}
+	return metrics, nil
 }
 
 // collectMonitorIndexes 把 monitors 列表按 ID 展开为聚合查询所需的三个索引结构。

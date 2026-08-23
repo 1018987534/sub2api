@@ -186,6 +186,19 @@ type UserMonitorDetail struct {
 	Models    []ModelDetail
 }
 
+// UserMonitorGroupMetric is the recent real-request performance summary for a
+// group referenced by an enabled customer-facing channel monitor.
+type UserMonitorGroupMetric struct {
+	Platform              string
+	GroupID               int64
+	GroupName             string
+	FirstTokenP50Ms       *int64
+	FirstTokenSampleCount int64
+	CacheRate             *float64
+	CacheReadTokens       int64
+	CacheRateDenominator  int64
+}
+
 // ModelDetail 单个模型的可用率/延迟统计。
 type ModelDetail struct {
 	Model           string

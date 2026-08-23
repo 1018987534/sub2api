@@ -513,6 +513,15 @@ export default {
     loadError: 'Failed to load channel status',
     detailLoadError: 'Failed to load channel detail',
     detailTitle: 'Channel Detail',
+    groupMetrics: {
+      title: 'Recent monitored-group performance',
+      description: 'Last 24 hours of real requests. First token is P50; average cache rate is cache-read tokens / (input + cache-creation + cache-read tokens). Parentheses show first-token sample count.',
+      count: '{n} groups',
+      group: 'Monitored group',
+      firstToken: 'First token P50',
+      cacheRate: 'Average cache rate',
+      empty: 'No group request data is available yet',
+    },
     closeDetail: 'Close',
     windowTab: {
       '7d': '7 days',

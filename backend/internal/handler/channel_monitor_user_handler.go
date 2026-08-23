@@ -85,6 +85,15 @@ type channelMonitorUserDetailResponse struct {
 	Models    []channelMonitorUserModelStat `json:"models"`
 }
 
+type channelMonitorUserGroupMetricResponse struct {
+	Platform              string   `json:"platform"`
+	GroupID               int64    `json:"group_id"`
+	GroupName             string   `json:"group_name"`
+	FirstTokenP50Ms       *int64   `json:"first_token_p50_ms"`
+	FirstTokenSampleCount int64    `json:"first_token_sample_count"`
+	CacheRate             *float64 `json:"cache_rate"`
+}
+
 type channelMonitorUserModelStat struct {
 	Model           string  `json:"model"`
 	LatestStatus    string  `json:"latest_status"`
@@ -154,6 +163,17 @@ func userMonitorDetailToResponse(d *service.UserMonitorDetail) *channelMonitorUs
 	}
 }
 
+func userMonitorGroupMetricToResponse(metric *service.UserMonitorGroupMetric) channelMonitorUserGroupMetricResponse {
+	return channelMonitorUserGroupMetricResponse{
+		Platform:              metric.Platform,
+		GroupID:               metric.GroupID,
+		GroupName:             metric.GroupName,
+		FirstTokenP50Ms:       metric.FirstTokenP50Ms,
+		FirstTokenSampleCount: metric.FirstTokenSampleCount,
+		CacheRate:             metric.CacheRate,
+	}
+}
+
 // --- Handlers ---
 
 // List GET /api/v1/channel-monitors
@@ -171,6 +191,24 @@ func (h *ChannelMonitorUserHandler) List(c *gin.Context) {
 	items := make([]channelMonitorUserListItem, 0, len(views))
 	for _, v := range views {
 		items = append(items, userMonitorViewToItem(v, includeQuota))
+	}
+	response.Success(c, gin.H{"items": items})
+}
+
+// ListGroupMetrics GET /api/v1/channel-monitors/group-metrics
+func (h *ChannelMonitorUserHandler) ListGroupMetrics(c *gin.Context) {
+	if !h.featureEnabled(c) {
+		response.Success(c, gin.H{"items": []channelMonitorUserGroupMetricResponse{}})
+		return
+	}
+	metrics, err := h.monitorService.ListUserGroupMetrics(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	items := make([]channelMonitorUserGroupMetricResponse, 0, len(metrics))
+	for _, metric := range metrics {
+		items = append(items, userMonitorGroupMetricToResponse(metric))
 	}
 	response.Success(c, gin.H{"items": items})
 }

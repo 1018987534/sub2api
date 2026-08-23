@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -218,6 +219,72 @@ func (r *channelMonitorRepository) ListEnabled(ctx context.Context) ([]*service.
 		out = append(out, entToServiceMonitor(row))
 	}
 	return out, nil
+}
+
+// ListUserGroupMetrics aggregates real, billable requests for groups named by
+// enabled customer-facing monitors. The 24-hour window matches the dashboard's
+// rolling cache-rate reference and keeps this read-only endpoint bounded.
+func (r *channelMonitorRepository) ListUserGroupMetrics(ctx context.Context, startTime, endTime time.Time) ([]*service.UserMonitorGroupMetric, error) {
+	if r == nil || r.db == nil {
+		return []*service.UserMonitorGroupMetric{}, nil
+	}
+	const query = `
+WITH monitored_groups AS (
+  SELECT DISTINCT g.id, g.name, g.platform
+  FROM channel_monitors cm
+  JOIN groups g ON g.name = cm.group_name
+    AND (g.platform = cm.provider OR g.platform = 'composite')
+  WHERE cm.enabled = TRUE
+    AND NULLIF(BTRIM(cm.group_name), '') IS NOT NULL
+), grouped AS (
+  SELECT
+    ul.group_id,
+    PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ul.first_token_ms)
+      FILTER (WHERE ul.first_token_ms IS NOT NULL) AS first_token_p50_ms,
+    COUNT(ul.first_token_ms) AS first_token_sample_count,
+    COALESCE(SUM(ul.cache_read_tokens), 0) AS cache_read_tokens,
+    COALESCE(SUM(ul.input_tokens + ul.cache_creation_tokens + ul.cache_read_tokens), 0) AS cache_rate_denominator
+  FROM usage_logs ul
+  JOIN monitored_groups mg ON mg.id = ul.group_id
+  WHERE ul.created_at >= $1
+    AND ul.created_at < $2
+    AND ul.actual_cost > 0
+  GROUP BY ul.group_id
+)
+SELECT mg.platform, mg.id, mg.name,
+       g.first_token_p50_ms, g.first_token_sample_count,
+       g.cache_read_tokens, g.cache_rate_denominator
+FROM monitored_groups mg
+LEFT JOIN grouped g ON g.group_id = mg.id
+ORDER BY mg.platform, mg.name, mg.id`
+	rows, err := r.db.QueryContext(ctx, query, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("query user monitor group metrics: %w", err)
+	}
+	defer rows.Close()
+	metrics := make([]*service.UserMonitorGroupMetric, 0)
+	for rows.Next() {
+		var metric service.UserMonitorGroupMetric
+		var p50 sql.NullFloat64
+		var sampleCount int64
+		if err := rows.Scan(&metric.Platform, &metric.GroupID, &metric.GroupName, &p50, &sampleCount, &metric.CacheReadTokens, &metric.CacheRateDenominator); err != nil {
+			return nil, fmt.Errorf("scan user monitor group metrics: %w", err)
+		}
+		metric.FirstTokenSampleCount = sampleCount
+		if p50.Valid {
+			value := int64(math.Round(p50.Float64))
+			metric.FirstTokenP50Ms = &value
+		}
+		if metric.CacheRateDenominator > 0 {
+			rate := float64(metric.CacheReadTokens) / float64(metric.CacheRateDenominator)
+			metric.CacheRate = &rate
+		}
+		metrics = append(metrics, &metric)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user monitor group metrics: %w", err)
+	}
+	return metrics, nil
 }
 
 func (r *channelMonitorRepository) MarkChecked(ctx context.Context, id int64, checkedAt time.Time) error {

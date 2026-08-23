@@ -518,6 +518,15 @@ export default {
     loadError: '加载渠道状态失败',
     detailLoadError: '加载渠道详情失败',
     detailTitle: '渠道详情',
+    groupMetrics: {
+      title: '监控分组近期表现',
+      description: '近 24 小时真实请求汇总；首字为 P50，平均缓存率按缓存读取 token ÷（输入 + 缓存创建 + 缓存读取 token）计算。括号内为首字样本数。',
+      count: '{n} 个分组',
+      group: '监控分组',
+      firstToken: '首字 P50',
+      cacheRate: '平均缓存率',
+      empty: '当前没有可用的分组请求数据',
+    },
     closeDetail: '关闭',
     windowTab: {
       '7d': '7 天',
