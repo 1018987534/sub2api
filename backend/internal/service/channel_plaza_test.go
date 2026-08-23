@@ -76,7 +76,7 @@ func TestListPlazaGroups_RecentUsageOfficialPricingFollowsFinalUpstreamModel(t *
 		"gpt-5": {InputCostPerToken: 1.25e-6, OutputCostPerToken: 1e-5},
 	}}
 	recent := &plazaRecentModelReader{modelsByGroup: map[int64][]RecentGroupModel{
-		10: {{Name: "customer-alias", Platform: PlatformOpenAI, UpstreamModel: "gpt-5"}},
+		10: {{Name: "gpt-5", Platform: PlatformOpenAI, UpstreamModel: "gpt-5"}},
 	}}
 	svc := newPlazaChannelService(
 		[]Channel{channel},
@@ -92,9 +92,9 @@ func TestListPlazaGroups_RecentUsageOfficialPricingFollowsFinalUpstreamModel(t *
 	for _, model := range out[0].Models {
 		models[model.Name] = model
 	}
-	require.NotNil(t, models["customer-alias"].OfficialPricing)
-	require.Equal(t, 1.25e-6, *models["customer-alias"].OfficialPricing.InputPrice)
-	require.Equal(t, 1e-5, *models["customer-alias"].OfficialPricing.OutputPrice)
+	require.NotNil(t, models["gpt-5"].OfficialPricing)
+	require.Equal(t, 1.25e-6, *models["gpt-5"].OfficialPricing.InputPrice)
+	require.Equal(t, 1e-5, *models["gpt-5"].OfficialPricing.OutputPrice)
 }
 
 func TestListPlazaGroups_HidesGroupWithoutRecentUsage(t *testing.T) {

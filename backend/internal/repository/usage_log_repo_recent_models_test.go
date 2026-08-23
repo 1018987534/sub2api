@@ -11,26 +11,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestListRecentModelsByGroupsUsesActualGroupUsage(t *testing.T) {
+func TestListRecentModelsByGroupsUsesLatestFinalDispatch(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	start := time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
-	mock.ExpectQuery(`(?s)SELECT DISTINCT ON.*ul\.group_id.*COALESCE\(NULLIF\(TRIM\(ul\.requested_model\), ''\), ul\.model\) AS model.*a\.platform.*COALESCE\(NULLIF\(TRIM\(ul\.upstream_model\), ''\), ul\.model\) AS upstream_model.*ul\.group_id = ANY\(\$1\).*ul\.created_at >= \$2.*ul\.created_at < \$3.*ul\.actual_cost > 0.*ul\.created_at DESC`).
+	mock.ExpectQuery(`(?s)WITH latest_requested AS.*SELECT DISTINCT ON.*ul\.group_id.*COALESCE\(NULLIF\(TRIM\(ul\.requested_model\), ''\), ul\.model\).*COALESCE\(NULLIF\(TRIM\(ul\.upstream_model\), ''\), ul\.model\) AS final_model.*ul\.group_id = ANY\(\$1\).*ul\.created_at >= \$2.*ul\.created_at < \$3.*ul\.actual_cost > 0.*ul\.created_at DESC.*SELECT DISTINCT group_id, final_model AS model`).
 		WithArgs(pq.Array([]int64{10, 20}), start, end).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "model", "platform", "upstream_model"}).
-			AddRow(int64(10), "customer-alias", service.PlatformOpenAI, "gpt-live").
-			AddRow(int64(20), "claude-used", service.PlatformAnthropic, "claude-upstream"))
+			AddRow(int64(10), "gpt-5.6-terra", service.PlatformOpenAI, "gpt-5.6-terra").
+			AddRow(int64(20), "claude-upstream", service.PlatformAnthropic, "claude-upstream"))
 
 	repo := &usageLogRepository{db: db}
 	models, err := repo.ListRecentModelsByGroups(context.Background(), []int64{10, 20}, start, end)
 	require.NoError(t, err)
 	require.Equal(t, []service.RecentGroupModel{{
-		Name: "customer-alias", Platform: service.PlatformOpenAI, UpstreamModel: "gpt-live",
+		Name: "gpt-5.6-terra", Platform: service.PlatformOpenAI, UpstreamModel: "gpt-5.6-terra",
 	}}, models[10])
+	require.NotContains(t, models[10], service.RecentGroupModel{
+		Name: "gpt-5.6-luna", Platform: service.PlatformOpenAI, UpstreamModel: "gpt-5.6-luna",
+	})
 	require.Equal(t, []service.RecentGroupModel{{
-		Name: "claude-used", Platform: service.PlatformAnthropic, UpstreamModel: "claude-upstream",
+		Name: "claude-upstream", Platform: service.PlatformAnthropic, UpstreamModel: "claude-upstream",
 	}}, models[20])
 	require.NoError(t, mock.ExpectationsWereMet())
 }

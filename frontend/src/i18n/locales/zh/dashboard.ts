@@ -528,7 +528,7 @@ export default {
       empty: '当前没有可用的分组请求数据',
     },
     models: {
-      previewTitle: '近 24 小时调用模型',
+      previewTitle: '近 24 小时实际可调用模型',
       viewAll: '共 {n} 个',
       officialTitle: '官方模型定价',
       officialDescription: '仅展示官方参考价格，按每 100 万 Token 计。',

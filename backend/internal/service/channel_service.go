@@ -53,9 +53,9 @@ type ChannelRepository interface {
 	ReplaceModelPricing(ctx context.Context, channelID int64, pricingList []ChannelModelPricing) error
 }
 
-// RecentGroupModel is a successfully served customer-facing model observed in
-// a bounded usage window. UpstreamModel preserves the final provider model so
-// aliases can still resolve to the correct official reference price.
+// RecentGroupModel is a final upstream model observed on the latest successful
+// dispatch for a requested alias in a bounded usage window. Name and
+// UpstreamModel are identical; the latter remains for pricing compatibility.
 type RecentGroupModel struct {
 	Name          string
 	Platform      string

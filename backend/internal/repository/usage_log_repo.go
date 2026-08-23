@@ -193,36 +193,42 @@ type usageLogRepository struct {
 	instanceID          string
 }
 
-// ListRecentModelsByGroups returns distinct billable model names actually used
-// by each requested group in a bounded window. The most recent matching row
-// supplies the final upstream model used for official-price lookup.
+// ListRecentModelsByGroups returns distinct final upstream models actually
+// dispatched for each requested group in a bounded window. For a requested
+// alias, the latest successful row is authoritative so stale aliases do not
+// leak into the customer-facing catalog after a mapping changes.
 func (r *usageLogRepository) ListRecentModelsByGroups(ctx context.Context, groupIDs []int64, startTime, endTime time.Time) (map[int64][]service.RecentGroupModel, error) {
 	if r == nil || r.db == nil || len(groupIDs) == 0 {
 		return map[int64][]service.RecentGroupModel{}, nil
 	}
 	rows, err := r.db.QueryContext(ctx, `
-SELECT DISTINCT ON (
-  ul.group_id,
-  COALESCE(NULLIF(TRIM(ul.requested_model), ''), ul.model),
-  a.platform
+WITH latest_requested AS (
+  SELECT DISTINCT ON (
+    ul.group_id,
+    COALESCE(NULLIF(TRIM(ul.requested_model), ''), ul.model),
+    a.platform
+  )
+    ul.group_id,
+    a.platform,
+    COALESCE(NULLIF(TRIM(ul.upstream_model), ''), ul.model) AS final_model
+  FROM usage_logs ul
+  JOIN accounts a ON a.id = ul.account_id
+  WHERE ul.group_id = ANY($1)
+    AND ul.created_at >= $2
+    AND ul.created_at < $3
+    AND ul.actual_cost > 0
+    AND NULLIF(BTRIM(ul.model), '') IS NOT NULL
+  ORDER BY
+    ul.group_id,
+    COALESCE(NULLIF(TRIM(ul.requested_model), ''), ul.model),
+    a.platform,
+    ul.created_at DESC,
+    ul.id DESC
 )
-  ul.group_id,
-  COALESCE(NULLIF(TRIM(ul.requested_model), ''), ul.model) AS model,
-  a.platform,
-  COALESCE(NULLIF(TRIM(ul.upstream_model), ''), ul.model) AS upstream_model
-FROM usage_logs ul
-JOIN accounts a ON a.id = ul.account_id
-WHERE ul.group_id = ANY($1)
-  AND ul.created_at >= $2
-  AND ul.created_at < $3
-  AND ul.actual_cost > 0
-  AND NULLIF(BTRIM(ul.model), '') IS NOT NULL
-ORDER BY
-  ul.group_id,
-  COALESCE(NULLIF(TRIM(ul.requested_model), ''), ul.model),
-  a.platform,
-  ul.created_at DESC,
-  ul.id DESC`, pq.Array(groupIDs), startTime, endTime)
+SELECT DISTINCT group_id, final_model AS model, platform, final_model AS upstream_model
+FROM latest_requested
+WHERE NULLIF(BTRIM(final_model), '') IS NOT NULL
+ORDER BY group_id, platform, final_model`, pq.Array(groupIDs), startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("query recent models by groups: %w", err)
 	}

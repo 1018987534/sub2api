@@ -58,11 +58,18 @@
       </div>
       <div class="mt-1.5 flex flex-wrap gap-1.5">
         <span
-          v-for="model in item.model_preview"
+          v-for="model in previewModels"
           :key="`${model.platform}:${model.name}`"
           class="max-w-full truncate rounded-md bg-gray-100 px-2 py-1 font-mono text-[11px] text-gray-600 dark:bg-dark-700/70 dark:text-gray-300"
         >
           {{ model.name }}
+        </span>
+        <span
+          v-if="hiddenModelCount > 0"
+          class="rounded-md bg-gray-100 px-2 py-1 font-mono text-[11px] text-gray-500 dark:bg-dark-700/70 dark:text-gray-400"
+          data-testid="monitor-model-overflow"
+        >
+          +{{ hiddenModelCount }}
         </span>
       </div>
     </div>
@@ -174,6 +181,9 @@ const providerTintClass = computed(() =>
 const quotaVisible = computed(
   () => isChannelMonitorQuotaVisible() && !!props.item.latest_quota
 )
+
+const previewModels = computed(() => (props.item.model_preview ?? []).slice(0, 3))
+const hiddenModelCount = computed(() => Math.max(0, (props.item.model_count ?? 0) - previewModels.value.length))
 
 const availabilityLabel = computed(() => {
   const win = t(`channelStatus.windowTab.${props.window}`)

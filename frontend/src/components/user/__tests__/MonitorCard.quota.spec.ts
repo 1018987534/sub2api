@@ -102,7 +102,7 @@ describe('MonitorCard quota snapshot visibility', () => {
     expect(wrapper.text()).not.toContain('monitorCommon.checkMode.quota')
   })
 
-  it('renders every model actually used by the group in the last 24 hours', () => {
+  it('renders at most three models and an overflow count', () => {
     const wrapper = mountCard(makeItem({
       model_count: 5,
       model_preview: [
@@ -116,10 +116,9 @@ describe('MonitorCard quota snapshot visibility', () => {
     const preview = wrapper.get('[data-testid="monitor-model-preview"]')
     expect(preview.text()).toContain('gpt-5.6-sol')
     expect(preview.text()).toContain('gpt-5.6-terra')
-    expect(preview.text()).toContain('gpt-5.6-luna')
-    expect(preview.text()).toContain('gpt-5.5')
-    expect(preview.text()).toContain('gpt-5.4')
-    expect(preview.text()).not.toContain('+')
+    expect(preview.text()).not.toContain('gpt-5.5')
+    expect(preview.text()).not.toContain('gpt-5.4')
+    expect(preview.get('[data-testid="monitor-model-overflow"]').text()).toBe('+2')
   })
 
   it('does not substitute configured probe models when recent usage is empty', () => {

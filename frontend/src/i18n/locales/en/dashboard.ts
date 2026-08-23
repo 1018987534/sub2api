@@ -523,7 +523,7 @@ export default {
       empty: 'No group request data is available yet',
     },
     models: {
-      previewTitle: 'Models used in 24h',
+      previewTitle: 'Actually callable models in 24h',
       viewAll: '{n} total',
       officialTitle: 'Official model pricing',
       officialDescription: 'Official reference prices only, shown per 1M tokens.',
