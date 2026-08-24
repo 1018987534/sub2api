@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"archive/zip"
 	"bytes"
 	"database/sql"
 	"mime/multipart"
@@ -144,6 +145,62 @@ func TestParseSupportMessageRequestAcceptsPlainTextWithCharset(t *testing.T) {
 	_, upload, err := parseSupportMessageRequest(c)
 	require.NoError(t, err)
 	require.Equal(t, "text/plain", upload.ContentType)
+}
+
+func TestParseSupportMessageRequestAcceptsWordDocuments(t *testing.T) {
+	t.Run("docx", func(t *testing.T) {
+		var document bytes.Buffer
+		archive := zip.NewWriter(&document)
+		contentTypes, err := archive.Create("[Content_Types].xml")
+		require.NoError(t, err)
+		_, err = contentTypes.Write([]byte(`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>`))
+		require.NoError(t, err)
+		wordDocument, err := archive.Create("word/document.xml")
+		require.NoError(t, err)
+		_, err = wordDocument.Write([]byte(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>`))
+		require.NoError(t, err)
+		require.NoError(t, archive.Close())
+
+		_, upload, err := parseSupportAttachmentForTest(t, "guide.docx", document.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, supportChatDOCXType, upload.ContentType)
+	})
+
+	t.Run("doc", func(t *testing.T) {
+		data := append(append([]byte(nil), supportChatOLEHeader...), bytes.Repeat([]byte{0}, 512)...)
+		_, upload, err := parseSupportAttachmentForTest(t, "guide.doc", data)
+		require.NoError(t, err)
+		require.Equal(t, supportChatDOCType, upload.ContentType)
+	})
+}
+
+func TestParseSupportMessageRequestRejectsRenamedZipAsDOCX(t *testing.T) {
+	var document bytes.Buffer
+	archive := zip.NewWriter(&document)
+	entry, err := archive.Create("unrelated.txt")
+	require.NoError(t, err)
+	_, err = entry.Write([]byte("not a Word document"))
+	require.NoError(t, err)
+	require.NoError(t, archive.Close())
+
+	_, _, err = parseSupportAttachmentForTest(t, "fake.docx", document.Bytes())
+	require.EqualError(t, err, "unsupported file type")
+}
+
+func parseSupportAttachmentForTest(t *testing.T, filename string, data []byte) (supportMessageInput, *supportAttachmentUpload, error) {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", filename)
+	require.NoError(t, err)
+	_, err = part.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/chat/messages", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	return parseSupportMessageRequest(c)
 }
 
 func TestParseSupportMessageRequestCapsJSONBody(t *testing.T) {

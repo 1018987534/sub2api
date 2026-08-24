@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"archive/zip"
+	"bytes"
 	"database/sql"
 	"fmt"
 	"io"
@@ -33,6 +35,13 @@ var supportChatAttachmentTypes = map[string]struct{}{
 	"text/plain":      {},
 	"application/pdf": {},
 }
+
+const (
+	supportChatDOCType  = "application/msword"
+	supportChatDOCXType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+
+var supportChatOLEHeader = []byte{0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1}
 
 type SupportChatHandler struct {
 	db      *sql.DB
@@ -299,13 +308,6 @@ func parseSupportMessageRequest(c *gin.Context) (supportMessageInput, *supportAt
 		if err != nil || len(data) == 0 || len(data) > supportChatMaxAttachment {
 			return supportMessageInput{}, nil, fmt.Errorf("file must be 4 MiB or smaller")
 		}
-		contentType := http.DetectContentType(data)
-		if mediaType, _, ok := strings.Cut(contentType, ";"); ok {
-			contentType = strings.TrimSpace(mediaType)
-		}
-		if _, ok := supportChatAttachmentTypes[contentType]; !ok {
-			return supportMessageInput{}, nil, fmt.Errorf("unsupported file type")
-		}
 		filename := filepath.Base(strings.TrimSpace(strings.ReplaceAll(header.Filename, `\`, "/")))
 		filename = strings.Map(func(r rune) rune {
 			if r < 0x20 || r == 0x7f {
@@ -319,6 +321,10 @@ func parseSupportMessageRequest(c *gin.Context) (supportMessageInput, *supportAt
 		if len(filename) > 255 {
 			filename = filename[:255]
 		}
+		contentType, ok := detectSupportAttachmentType(filename, data)
+		if !ok {
+			return supportMessageInput{}, nil, fmt.Errorf("unsupported file type")
+		}
 		return supportMessageInput{Content: strings.TrimSpace(c.PostForm("content")), IdempotencyKey: c.GetHeader("Idempotency-Key")}, &supportAttachmentUpload{Filename: filename, ContentType: contentType, Data: data}, nil
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, supportChatMaxJSONRequest)
@@ -330,6 +336,47 @@ func parseSupportMessageRequest(c *gin.Context) (supportMessageInput, *supportAt
 		in.IdempotencyKey = c.GetHeader("Idempotency-Key")
 	}
 	return in, nil, nil
+}
+
+func detectSupportAttachmentType(filename string, data []byte) (string, bool) {
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".doc":
+		if bytes.HasPrefix(data, supportChatOLEHeader) {
+			return supportChatDOCType, true
+		}
+		return "", false
+	case ".docx":
+		if isDOCX(data) {
+			return supportChatDOCXType, true
+		}
+		return "", false
+	}
+
+	contentType := http.DetectContentType(data)
+	if mediaType, _, ok := strings.Cut(contentType, ";"); ok {
+		contentType = strings.TrimSpace(mediaType)
+	}
+	_, ok := supportChatAttachmentTypes[contentType]
+	return contentType, ok
+}
+
+func isDOCX(data []byte) bool {
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return false
+	}
+	hasContentTypes := false
+	hasDocument := false
+	for _, file := range reader.File {
+		switch file.Name {
+		case "[Content_Types].xml":
+			hasContentTypes = true
+		case "word/document.xml":
+			hasDocument = true
+		}
+	}
+	return hasContentTypes && hasDocument
 }
 
 func (h *SupportChatHandler) Attachment(c *gin.Context)      { h.serveAttachment(c, false) }
