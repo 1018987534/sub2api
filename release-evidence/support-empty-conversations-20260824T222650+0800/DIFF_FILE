@@ -1,0 +1,6 @@
+branch=admin_conversations
+field=requires_existing_message
+- requires_existing_message=false
++ requires_existing_message=true
+
+The administrator conversation query now requires an indexed support_messages row for each listed conversation.

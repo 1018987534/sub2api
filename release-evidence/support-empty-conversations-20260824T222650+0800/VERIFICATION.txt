@@ -1,0 +1,47 @@
+changed_branch=cdy/support-hide-empty-conversations-20260824
+changed_field=AdminConversations.requires_existing_message:false->true
+baseline_commit=6f3b7701f61b5a8786a2e640ce33b7e503f2f069
+baseline_handler_sha256=19394701816ae6194626f10e958b2a06fa3d81ede60fb76264d7ec16b04b192e
+modified_handler_sha256=aca09318dac9d7c1d39deb273bcf831a496253b7361f383c2f640d40c4b6650a
+
+artifacts:
+MODIFIED_FILE=/private/tmp/sub2api-support-empty-fix-20260824/release-evidence/support-empty-conversations-20260824T222650+0800/MODIFIED_FILE
+DIFF_FILE=/private/tmp/sub2api-support-empty-fix-20260824/release-evidence/support-empty-conversations-20260824T222650+0800/DIFF_FILE
+VERIFICATION=/private/tmp/sub2api-support-empty-fix-20260824/release-evidence/support-empty-conversations-20260824T222650+0800/VERIFICATION.txt
+ROLLBACK=/private/tmp/sub2api-support-empty-fix-20260824/release-evidence/support-empty-conversations-20260824T222650+0800/ROLLBACK.sh
+
+BASELINE:
+command=env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY go test ./internal/handler -run 'TestSupportChat' -count=1
+input=workdir /private/tmp/sub2api-support-empty-baseline-20260824/backend at 6f3b7701f61b5a8786a2e640ce33b7e503f2f069
+literal_output=ok  github.com/Wei-Shaw/sub2api/internal/handler  1.349s
+exit_status=0
+result=existing support-chat tests passed; administrator query still allowed message-less conversations
+
+MODIFIED:
+command=env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY go test ./internal/handler -run 'TestSupportChat' -count=1
+input=workdir /private/tmp/sub2api-support-empty-fix-20260824/backend with AdminConversations EXISTS predicate and regression test
+literal_output=ok  github.com/Wei-Shaw/sub2api/internal/handler  0.729s
+exit_status=0
+result=all support-chat tests passed, including TestSupportChatAdminConversationsHidesEmptyConversations
+
+MODIFIED_COMPILE:
+command=env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY go test ./internal/server/routes ./internal/handler ./migrations -run '^$'
+input=workdir /private/tmp/sub2api-support-empty-fix-20260824/backend
+literal_output=ok github.com/Wei-Shaw/sub2api/internal/server/routes (cached) [no tests to run]; ok github.com/Wei-Shaw/sub2api/internal/handler (cached) [no tests to run]; ok github.com/Wei-Shaw/sub2api/migrations (cached) [no tests to run]
+exit_status=0
+result=affected backend packages compiled
+
+ROLLBACK:
+command=release-evidence/support-empty-conversations-20260824T222650+0800/ROLLBACK.sh /tmp/support-empty-conversations-rollback-copy-20260824.txt
+input=separate copy initialized from MODIFIED_FILE with requires_existing_message=true
+literal_output=rollback_result=requires_existing_message=false
+exit_status=0
+verification_command=cmp -s release-evidence/support-empty-conversations-20260824T222650+0800/ORIGINAL_FILE /tmp/support-empty-conversations-rollback-copy-20260824.txt
+verification_exit_status=0
+restored_behavior=administrator query fixture permits message-less conversations, matching baseline
+restored_status=rollback copy byte-identical to ORIGINAL_FILE; MODIFIED_FILE remains requires_existing_message=true
+
+LIVE_DIAGNOSIS:
+input=production PostgreSQL support_conversations joined to support_messages for user IDs 502 and 523
+literal_result=both conversations have message_count=0, last_message_at=NULL, unread_by_admin=0; database totals are 6 conversations, 2 empty, 4 message-backed
+status=confirmed

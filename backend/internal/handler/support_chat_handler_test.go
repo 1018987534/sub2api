@@ -109,6 +109,24 @@ func TestSupportChatAdminReadClearsAdminUnread(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestSupportChatAdminConversationsHidesEmptyConversations(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	h := NewSupportChatHandler(db, nil)
+	rows := sqlmock.NewRows([]string{"id", "user_id", "email", "username", "unread_by_user", "unread_by_admin", "manually_unread_by_admin", "last_message_at", "updated_at"})
+	mock.ExpectQuery(`FROM support_conversations c JOIN users u ON u.id=c.user_id WHERE EXISTS \(SELECT 1 FROM support_messages m WHERE m.conversation_id=c.id\)`).
+		WithArgs("", false).
+		WillReturnRows(rows)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("GET", "/admin/chat/conversations", nil)
+	h.AdminConversations(c)
+
+	require.Equal(t, 200, c.Writer.Status())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestParseSupportMessageRequestBoundsAndSniffsAttachment(t *testing.T) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)

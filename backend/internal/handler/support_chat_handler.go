@@ -474,7 +474,7 @@ func (h *SupportChatHandler) UnreadCount(c *gin.Context) {
 func (h *SupportChatHandler) AdminConversations(c *gin.Context) {
 	search := strings.TrimSpace(c.Query("search"))
 	unread := c.Query("unread_only") == "1" || strings.EqualFold(c.Query("unread_only"), "true")
-	rows, err := h.db.QueryContext(c, `SELECT c.id,c.user_id,u.email,u.username,c.unread_by_user,c.unread_by_admin,c.manually_unread_by_admin,c.last_message_at,c.updated_at FROM support_conversations c JOIN users u ON u.id=c.user_id WHERE ($1='' OR u.email ILIKE '%'||$1||'%' OR u.username ILIKE '%'||$1||'%') AND ($2=false OR c.unread_by_admin>0 OR c.manually_unread_by_admin) ORDER BY COALESCE(c.last_message_at,c.updated_at) DESC,c.id DESC LIMIT 100`, search, unread)
+	rows, err := h.db.QueryContext(c, `SELECT c.id,c.user_id,u.email,u.username,c.unread_by_user,c.unread_by_admin,c.manually_unread_by_admin,c.last_message_at,c.updated_at FROM support_conversations c JOIN users u ON u.id=c.user_id WHERE EXISTS (SELECT 1 FROM support_messages m WHERE m.conversation_id=c.id) AND ($1='' OR u.email ILIKE '%'||$1||'%' OR u.username ILIKE '%'||$1||'%') AND ($2=false OR c.unread_by_admin>0 OR c.manually_unread_by_admin) ORDER BY COALESCE(c.last_message_at,c.updated_at) DESC,c.id DESC LIMIT 100`, search, unread)
 	if err != nil {
 		response.Error(c, 500, err.Error())
 		return

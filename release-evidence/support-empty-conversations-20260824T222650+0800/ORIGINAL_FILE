@@ -1,0 +1,5 @@
+branch=admin_conversations
+field=requires_existing_message
+requires_existing_message=false
+source_commit=6f3b7701f61b5a8786a2e640ce33b7e503f2f069
+source_sha256=19394701816ae6194626f10e958b2a06fa3d81ede60fb76264d7ec16b04b192e
