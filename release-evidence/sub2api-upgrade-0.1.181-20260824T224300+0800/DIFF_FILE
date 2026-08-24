@@ -1,0 +1,6 @@
+branch=cdy/sub2api-upgrade-0.1.181-20260824
+field=backend_version
+- backend_version=0.1.180
++ backend_version=0.1.181
+
+Upstream v0.1.181 changes were merged without conflicts while retaining the support empty-conversation fix and local production customizations.

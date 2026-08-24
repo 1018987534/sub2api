@@ -1,0 +1,42 @@
+changed_branch=cdy/sub2api-upgrade-0.1.181-20260824
+changed_field=backend_version:0.1.180->0.1.181
+baseline_commit=f0c260c0e6662ae51ad1a95f988722d3ad84d9d6
+modified_commit=adb7bfb115d712124bc6153e0c3665fd9746d752
+upstream_commit=e2d9b823f63dc4e8f4014be3fd24a0a73e339867
+
+artifacts:
+MODIFIED_FILE=/private/tmp/sub2api-upgrade-0.1.181-20260824/release-evidence/sub2api-upgrade-0.1.181-20260824T224300+0800/MODIFIED_FILE
+DIFF_FILE=/private/tmp/sub2api-upgrade-0.1.181-20260824/release-evidence/sub2api-upgrade-0.1.181-20260824T224300+0800/DIFF_FILE
+VERIFICATION=/private/tmp/sub2api-upgrade-0.1.181-20260824/release-evidence/sub2api-upgrade-0.1.181-20260824T224300+0800/VERIFICATION.txt
+ROLLBACK=/private/tmp/sub2api-upgrade-0.1.181-20260824/release-evidence/sub2api-upgrade-0.1.181-20260824T224300+0800/ROLLBACK.sh
+
+BASELINE:
+command=env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy go test ./internal/service ./internal/pkg/xai -run 'TestTransform.*Schema|Test.*Rejected|Test.*Parallel|Test.*UserAgent' -count=1
+input=workdir /private/tmp/sub2api-support-empty-fix-20260824/backend at f0c260c0e6662ae51ad1a95f988722d3ad84d9d6
+literal_output=ok github.com/Wei-Shaw/sub2api/internal/service 0.888s; ok github.com/Wei-Shaw/sub2api/internal/pkg/xai 0.332s [no tests to run]
+exit_status=0
+result=0.1.180 customized baseline passed the focused compatibility test selection
+
+MODIFIED:
+command=env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy go test ./internal/service ./internal/pkg/xai -run 'TestTransform.*Schema|Test.*Rejected|Test.*Parallel|Test.*UserAgent' -count=1
+input=workdir /private/tmp/sub2api-upgrade-0.1.181-20260824/backend at adb7bfb115d712124bc6153e0c3665fd9746d752
+literal_output=ok github.com/Wei-Shaw/sub2api/internal/service 2.034s; ok github.com/Wei-Shaw/sub2api/internal/pkg/xai 0.713s [no tests to run]
+exit_status=0
+result=0.1.181 focused compatibility tests passed
+
+MODIFIED_REPOSITORY_PROXY_FIXTURE:
+command=env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy NO_PROXY='127.0.0.1,localhost,in-process' no_proxy='127.0.0.1,localhost,in-process' go test ./internal/repository -run 'TestAliyunCaptchaVerifier' -count=1
+input=workdir /private/tmp/sub2api-upgrade-0.1.181-20260824/backend with all uppercase and lowercase proxy variables cleared
+literal_output=ok github.com/Wei-Shaw/sub2api/internal/repository 1.111s
+exit_status=0
+result=in-process transport tests passed after clearing duplicate lowercase proxy environment variables
+
+ROLLBACK:
+command=release-evidence/sub2api-upgrade-0.1.181-20260824T224300+0800/ROLLBACK.sh /private/tmp/sub2api-upgrade-0.1.181-rollback-20260824
+input=separate worktree at modified commit adb7bfb115d712124bc6153e0c3665fd9746d752
+literal_output=rollback_result=backend_version=0.1.180
+exit_status=0
+verification_command=git diff --exit-code f0c260c0e6662ae51ad1a95f988722d3ad84d9d6 -- modified-paths
+verification_exit_status=0
+restored_behavior=upstream 0.1.181 changed paths match the 0.1.180 support-fix baseline
+restored_status=rollback copy reports backend version 0.1.180; MODIFIED_FILE remains backend_version=0.1.181

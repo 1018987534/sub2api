@@ -1,0 +1,5 @@
+branch=cdy/sub2api-upgrade-0.1.181-20260824
+field=backend_version
+backend_version=0.1.181
+merge_commit=adb7bfb115d712124bc6153e0c3665fd9746d752
+upstream_commit=e2d9b823f63dc4e8f4014be3fd24a0a73e339867
