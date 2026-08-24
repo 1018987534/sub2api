@@ -19,7 +19,7 @@ import (
 // ChannelMonitorUserHandler 渠道监控用户只读 handler。
 type ChannelMonitorUserHandler struct {
 	monitorService *service.ChannelMonitorService
-	channelService *service.ChannelService
+	plazaService   *service.ModelPlazaService
 	settingService *service.SettingService
 }
 
@@ -27,12 +27,12 @@ type ChannelMonitorUserHandler struct {
 // settingService 用于每次请求前读取功能开关；关闭时 List/GetStatus 直接返回空/404。
 func NewChannelMonitorUserHandler(
 	monitorService *service.ChannelMonitorService,
-	channelService *service.ChannelService,
+	plazaService *service.ModelPlazaService,
 	settingService *service.SettingService,
 ) *ChannelMonitorUserHandler {
 	return &ChannelMonitorUserHandler{
 		monitorService: monitorService,
-		channelService: channelService,
+		plazaService:   plazaService,
 		settingService: settingService,
 	}
 }
@@ -226,10 +226,10 @@ func monitorPricingModels(view *service.UserMonitorView, groups []service.PlazaG
 }
 
 func (h *ChannelMonitorUserHandler) loadMonitorPricingCatalog(ctx context.Context) []service.PlazaGroup {
-	if h == nil || h.channelService == nil {
+	if h == nil || h.plazaService == nil {
 		return nil
 	}
-	groups, err := h.channelService.ListPlazaGroups(ctx)
+	groups, err := h.plazaService.ListGroups(ctx)
 	if err != nil {
 		return nil
 	}
