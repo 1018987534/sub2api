@@ -518,6 +518,16 @@ export default {
       updateSuccess: '监控更新成功',
       deleteSuccess: '监控删除成功',
       loadError: '加载监控列表失败',
+      order: {
+        button: '调整顺序',
+        title: '调整渠道展示顺序',
+        description: '此顺序会固定用于用户端渠道状态卡片；停用项目也保留位置，重新启用后回到原位。',
+        moveUp: '上移',
+        moveDown: '下移',
+        loadFailed: '加载渠道顺序失败',
+        saveSuccess: '渠道展示顺序已更新',
+        saveFailed: '保存渠道顺序失败'
+      },
       deleteConfirm: '确定要删除监控「{name}」吗？此操作不可撤销。',
       nameRequired: '请输入监控名称',
       primaryModelRequired: '请输入主模型',

@@ -71,6 +71,7 @@ func (r *channelMonitorRepository) Create(ctx context.Context, m *service.Channe
 		return translatePersistenceError(err, service.ErrChannelMonitorNotFound, nil)
 	}
 	m.ID = created.ID
+	m.SortOrder = created.SortOrder
 	m.CreatedAt = created.CreatedAt
 	m.UpdatedAt = created.UpdatedAt
 	return nil
@@ -122,6 +123,7 @@ func (r *channelMonitorRepository) Update(ctx context.Context, m *service.Channe
 		SetExtraModels(emptySliceIfNil(m.ExtraModels)).
 		SetGroupName(m.GroupName).
 		SetEnabled(m.Enabled).
+		SetSortOrder(m.SortOrder).
 		SetIntervalSeconds(m.IntervalSeconds).
 		SetJitterSeconds(m.JitterSeconds).
 		SetExtraHeaders(channelMonitorHeadersForPersistence(m)).
@@ -190,7 +192,7 @@ func (r *channelMonitorRepository) List(ctx context.Context, params service.Chan
 	}
 
 	rows, err := q.
-		Order(dbent.Desc(channelmonitor.FieldID)).
+		Order(dbent.Asc(channelmonitor.FieldSortOrder), dbent.Asc(channelmonitor.FieldID)).
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		All(ctx)
@@ -205,11 +207,65 @@ func (r *channelMonitorRepository) List(ctx context.Context, params service.Chan
 	return out, int64(total), nil
 }
 
+func (r *channelMonitorRepository) UpdateSortOrders(ctx context.Context, updates []service.ChannelMonitorSortOrderUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin channel monitor reorder: %w", err)
+	}
+	defer tx.Rollback()
+	ids := make([]int64, 0, len(updates))
+	args := make([]any, 0, len(updates)*2+1)
+	caseClauses := make([]string, 0, len(updates))
+	for index, update := range updates {
+		ids = append(ids, update.ID)
+		idPlaceholder := index*2 + 1
+		sortPlaceholder := idPlaceholder + 1
+		caseClauses = append(caseClauses, fmt.Sprintf("WHEN $%d THEN $%d", idPlaceholder, sortPlaceholder))
+		args = append(args, update.ID, update.SortOrder)
+	}
+	var existingCount int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_monitors WHERE id = ANY($1)`, pq.Array(ids)).Scan(&existingCount); err != nil {
+		return fmt.Errorf("count channel monitors for reorder: %w", err)
+	}
+	if existingCount != len(ids) {
+		return service.ErrChannelMonitorNotFound
+	}
+	args = append(args, pq.Array(ids))
+	query := fmt.Sprintf(`
+		UPDATE channel_monitors
+		SET sort_order = CASE id
+			%s
+			ELSE sort_order
+		END,
+		updated_at = NOW()
+		WHERE id = ANY($%d)
+	`, strings.Join(caseClauses, "\n\t\t\t"), len(args))
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update channel monitor sort order: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read channel monitor reorder result: %w", err)
+	}
+	if affected != int64(len(ids)) {
+		return service.ErrChannelMonitorNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit channel monitor reorder: %w", err)
+	}
+	return nil
+}
+
 // ---------- 调度器辅助 ----------
 
 func (r *channelMonitorRepository) ListEnabled(ctx context.Context) ([]*service.ChannelMonitor, error) {
 	rows, err := r.client.ChannelMonitor.Query().
 		Where(channelmonitor.EnabledEQ(true)).
+		Order(dbent.Asc(channelmonitor.FieldSortOrder), dbent.Asc(channelmonitor.FieldID)).
 		All(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled monitors: %w", err)
@@ -938,6 +994,7 @@ func entToServiceMonitor(row *dbent.ChannelMonitor) *service.ChannelMonitor {
 		ExtraModels:          extras,
 		GroupName:            row.GroupName,
 		Enabled:              row.Enabled,
+		SortOrder:            row.SortOrder,
 		IntervalSeconds:      row.IntervalSeconds,
 		JitterSeconds:        row.JitterSeconds,
 		LastCheckedAt:        row.LastCheckedAt,

@@ -77,6 +77,10 @@ func (ChannelMonitor) Fields() []ent.Field {
 			MaxLen(100),
 		field.Bool("enabled").
 			Default(true),
+		field.Int("sort_order").
+			Default(1000000).
+			NonNegative().
+			Comment("Stable customer-facing display order; lower values appear first"),
 		field.Int("interval_seconds").
 			Range(15, 3600),
 		field.Int("jitter_seconds").
@@ -128,6 +132,7 @@ func (ChannelMonitor) Edges() []ent.Edge {
 func (ChannelMonitor) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("enabled", "last_checked_at"),
+		index.Fields("sort_order", "id"),
 		index.Fields("provider"),
 		index.Fields("provider", "api_mode"),
 		index.Fields("group_name"),

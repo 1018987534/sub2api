@@ -59,6 +59,7 @@
           @reload="reload"
           @create="openCreateDialog"
           @manage-templates="showTemplateManager = true"
+          @reorder="openOrderDialog"
           @search-input="handleSearch"
         />
       </template>
@@ -155,6 +156,15 @@
       @close="showRunResult = false"
     />
 
+    <MonitorOrderDialog
+      :show="showOrderDialog"
+      :items="orderItems"
+      :loading="orderLoading"
+      :submitting="orderSubmitting"
+      @close="showOrderDialog = false"
+      @save="saveOrder"
+    />
+
     <ConfirmDialog
       :show="showDeleteDialog"
       :title="t('common.delete')"
@@ -194,6 +204,7 @@ import MonitorFiltersBar from '@/components/admin/monitor/MonitorFiltersBar.vue'
 import MonitorFormDialog from '@/components/admin/monitor/MonitorFormDialog.vue'
 import MonitorTemplateManagerDialog from '@/components/admin/monitor/MonitorTemplateManagerDialog.vue'
 import MonitorRunResultDialog from '@/components/admin/monitor/MonitorRunResultDialog.vue'
+import MonitorOrderDialog from '@/components/admin/monitor/MonitorOrderDialog.vue'
 import MonitorPrimaryModelCell from '@/components/admin/monitor/MonitorPrimaryModelCell.vue'
 import MonitorActionsCell from '@/components/admin/monitor/MonitorActionsCell.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
@@ -228,6 +239,10 @@ const editing = ref<ChannelMonitor | null>(null)
 const showDeleteDialog = ref(false)
 const deleting = ref<ChannelMonitor | null>(null)
 const showRunResult = ref(false)
+const showOrderDialog = ref(false)
+const orderLoading = ref(false)
+const orderSubmitting = ref(false)
+const orderItems = ref<ChannelMonitor[]>([])
 const runResults = ref<CheckResult[]>([])
 const duplicatingIds = reactive(new Set<number>())
 
@@ -312,6 +327,43 @@ function openEditDialog(row: ChannelMonitor) {
 function closeDialog() {
   showDialog.value = false
   editing.value = null
+}
+
+async function openOrderDialog() {
+  showOrderDialog.value = true
+  orderLoading.value = true
+  try {
+    const items: ChannelMonitor[] = []
+    let page = 1
+    let pages = 1
+    do {
+      const result = await adminAPI.channelMonitor.list({ page, page_size: 100 })
+      items.push(...(result.items || []))
+      pages = result.pages || 1
+      page += 1
+    } while (page <= pages)
+    orderItems.value = items.sort((left, right) => left.sort_order - right.sort_order || left.id - right.id)
+  } catch (err: unknown) {
+    showOrderDialog.value = false
+    appStore.showError(extractApiErrorMessage(err, t('admin.channelMonitor.order.loadFailed')))
+  } finally {
+    orderLoading.value = false
+  }
+}
+
+async function saveOrder(orderedIds: number[]) {
+  if (orderSubmitting.value) return
+  orderSubmitting.value = true
+  try {
+    await adminAPI.channelMonitor.updateSortOrder(orderedIds)
+    showOrderDialog.value = false
+    appStore.showSuccess(t('admin.channelMonitor.order.saveSuccess'))
+    await reload()
+  } catch (err: unknown) {
+    appStore.showError(extractApiErrorMessage(err, t('admin.channelMonitor.order.saveFailed')))
+  } finally {
+    orderSubmitting.value = false
+  }
 }
 
 async function toggleEnabled(row: ChannelMonitor) {

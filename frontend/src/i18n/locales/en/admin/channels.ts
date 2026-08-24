@@ -518,6 +518,16 @@ export default {
       updateSuccess: 'Monitor updated',
       deleteSuccess: 'Monitor deleted',
       loadError: 'Failed to load monitors',
+      order: {
+        button: 'Reorder',
+        title: 'Reorder channel display',
+        description: 'This order is fixed for customer-facing channel cards. Disabled monitors keep their position and return there when re-enabled.',
+        moveUp: 'Move up',
+        moveDown: 'Move down',
+        loadFailed: 'Failed to load channel order',
+        saveSuccess: 'Channel display order updated',
+        saveFailed: 'Failed to save channel order'
+      },
       deleteConfirm: 'Are you sure you want to delete monitor "{name}"? This action cannot be undone.',
       nameRequired: 'Please enter a monitor name',
       primaryModelRequired: 'Please enter a primary model',

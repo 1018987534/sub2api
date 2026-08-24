@@ -27,6 +27,7 @@ function makeRow(overrides: Partial<ChannelMonitor> = {}): ChannelMonitor {
     extra_models: [],
     group_name: '',
     enabled: true,
+    sort_order: 10,
     interval_seconds: 60,
     jitter_seconds: 0,
     last_checked_at: null,

@@ -25,6 +25,7 @@ type ChannelMonitorRepository interface {
 	Update(ctx context.Context, m *ChannelMonitor) error
 	Delete(ctx context.Context, id int64) error
 	List(ctx context.Context, params ChannelMonitorListParams) ([]*ChannelMonitor, int64, error)
+	UpdateSortOrders(ctx context.Context, updates []ChannelMonitorSortOrderUpdate) error
 	FindByDuplicateOperationID(ctx context.Context, operationID string) (*ChannelMonitor, error)
 
 	// 调度器辅助
@@ -132,6 +133,28 @@ func (s *ChannelMonitorService) List(ctx context.Context, params ChannelMonitorL
 		s.decryptInPlace(it)
 	}
 	return items, total, nil
+}
+
+func (s *ChannelMonitorService) UpdateSortOrders(ctx context.Context, orderedIDs []int64) error {
+	if len(orderedIDs) == 0 {
+		return ErrChannelMonitorInvalidSortOrder
+	}
+	seen := make(map[int64]struct{}, len(orderedIDs))
+	updates := make([]ChannelMonitorSortOrderUpdate, 0, len(orderedIDs))
+	for index, id := range orderedIDs {
+		if id <= 0 {
+			return ErrChannelMonitorInvalidSortOrder
+		}
+		if _, exists := seen[id]; exists {
+			return ErrChannelMonitorInvalidSortOrder
+		}
+		seen[id] = struct{}{}
+		updates = append(updates, ChannelMonitorSortOrderUpdate{ID: id, SortOrder: (index + 1) * 10})
+	}
+	if err := s.repo.UpdateSortOrders(ctx, updates); err != nil {
+		return fmt.Errorf("update channel monitor sort order: %w", err)
+	}
+	return nil
 }
 
 // Get 查询单个监控（解密 API Key）。

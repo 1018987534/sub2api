@@ -157,6 +157,9 @@ var (
 	ErrChannelMonitorNotFound = infraerrors.NotFound(
 		"CHANNEL_MONITOR_NOT_FOUND", "channel monitor not found",
 	)
+	ErrChannelMonitorInvalidSortOrder = infraerrors.BadRequest(
+		"CHANNEL_MONITOR_INVALID_SORT_ORDER", "ordered_ids must contain unique positive monitor IDs",
+	)
 	ErrChannelMonitorInvalidProvider = infraerrors.BadRequest(
 		"CHANNEL_MONITOR_INVALID_PROVIDER", "provider must be one of openai/anthropic/gemini/grok/antigravity/kimi/zhipu/deepseek",
 	)
