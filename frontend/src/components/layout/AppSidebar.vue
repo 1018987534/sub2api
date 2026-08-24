@@ -568,6 +568,26 @@ const TicketIcon = {
     )
 }
 
+const CustomerSupportIcon = {
+  render: () =>
+    h(
+      'svg',
+      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
+      [
+        h('path', {
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+          d: 'M15.75 8.25a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM6 21a6 6 0 0112 0'
+        }),
+        h('path', {
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+          d: 'M4.5 10.5V9a7.5 7.5 0 0115 0v4.5a2.25 2.25 0 01-2.25 2.25h-3M4.5 10.5h.75A1.5 1.5 0 016.75 12v2.25a1.5 1.5 0 01-1.5 1.5H4.5V10.5zm15 0h-.75a1.5 1.5 0 00-1.5 1.5v2.25a1.5 1.5 0 001.5 1.5h.75V10.5z'
+        })
+      ]
+    )
+}
+
 const CogIcon = {
   render: () =>
     h(
@@ -778,7 +798,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
-    { path: '/support', label: t('nav.support'), icon: TicketIcon },
+    { path: '/support', label: t('nav.support'), icon: CustomerSupportIcon },
     { path: '/image-studio', label: t('nav.imageStudio'), icon: AIImageIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
       path: `/custom/${item.id}`,
@@ -839,7 +859,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
-    { path: '/admin/support', label: t('nav.supportInbox'), icon: TicketIcon },
+    { path: '/admin/support', label: t('nav.supportInbox'), icon: CustomerSupportIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     {
       path: '/admin/security-audit',

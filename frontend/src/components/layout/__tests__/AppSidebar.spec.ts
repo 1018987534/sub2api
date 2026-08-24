@@ -98,3 +98,15 @@ describe('AppSidebar support unread badge', () => {
     expect(componentSource).toContain("window.addEventListener('support-chat-read'")
   })
 })
+
+describe('AppSidebar customer support icon', () => {
+  it('uses the customer service avatar for user support and the admin inbox', () => {
+    expect(componentSource).toContain('const CustomerSupportIcon = {')
+    expect(componentSource).toContain("{ path: '/support', label: t('nav.support'), icon: CustomerSupportIcon }")
+    expect(componentSource).toContain("{ path: '/admin/support', label: t('nav.supportInbox'), icon: CustomerSupportIcon }")
+  })
+
+  it('keeps the ticket icon for redeem codes', () => {
+    expect(componentSource).toContain("{ path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon")
+  })
+})
