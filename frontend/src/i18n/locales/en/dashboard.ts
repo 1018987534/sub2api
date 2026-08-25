@@ -513,26 +513,6 @@ export default {
     loadError: 'Failed to load channel status',
     detailLoadError: 'Failed to load channel detail',
     detailTitle: 'Channel Detail',
-    groupMetrics: {
-      title: 'Recent monitored-group performance',
-      description: 'Last 24 hours of real requests. First token is P50; average cache rate is cache-read tokens / (input + cache-creation + cache-read tokens). Parentheses show first-token sample count.',
-      count: '{n} groups',
-      group: 'Monitored group',
-      firstToken: 'First token P50',
-      cacheRate: 'Average cache rate',
-      empty: 'No group request data is available yet',
-    },
-    models: {
-      previewTitle: 'Actually callable models in 24h',
-      viewAll: '{n} total',
-      officialTitle: 'Official model pricing',
-      officialDescription: 'Official reference prices only, shown per 1M tokens.',
-      input: 'Input',
-      output: 'Output',
-      cacheWrite: 'Cache write',
-      cacheRead: 'Cache read',
-      noPricing: 'No official pricing data',
-    },
     closeDetail: 'Close',
     windowTab: {
       '7d': '7 days',
@@ -608,7 +588,7 @@ export default {
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
     title: 'Model Plaza',
-    description: 'Browse models actually used by each group in the last 24 hours',
+    description: 'Browse available models and pricing by group',
     loading: 'Loading...',
     empty: 'No groups to display',
     loadFailed: 'Failed to load model plaza',
@@ -627,7 +607,7 @@ export default {
       subscription: 'Subscription'
     },
     detail: {
-      noModels: 'No model usage for this group in the last 24 hours',
+      noModels: 'No models configured for this group',
       noPricing: 'Pricing not configured',
       peakNote: 'Peak hours {window}: billing rate ×{multiplier}'
     },

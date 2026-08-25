@@ -255,20 +255,6 @@ func ProvideAccountTestService(
 	return service
 }
 
-// ProvideChannelService wires the live account and bounded usage fallback
-// dependencies without expanding the historical constructor used by tests.
-func ProvideChannelService(
-	repo ChannelRepository,
-	groupRepo GroupRepository,
-	authCacheInvalidator APIKeyAuthCacheInvalidator,
-	pricingService *PricingService,
-	recentModels RecentGroupModelsReader,
-) *ChannelService {
-	svc := NewChannelService(repo, groupRepo, authCacheInvalidator, pricingService)
-	svc.SetRecentGroupModelsReader(recentModels)
-	return svc
-}
-
 func ProvideGrokQuotaService(
 	accountRepo AccountRepository,
 	proxyRepo ProxyRepository,
@@ -950,7 +936,7 @@ var ProviderSet = wire.NewSet(
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
 	NewGroupCapacityService,
-	ProvideChannelService,
+	NewChannelService,
 	wire.Bind(new(ChannelCacheInvalidator), new(*ChannelService)),
 	NewModelPricingResolver,
 	NewContentModerationService,

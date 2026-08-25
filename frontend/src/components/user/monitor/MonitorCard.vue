@@ -43,37 +43,6 @@
       </span>
     </div>
 
-    <div
-      v-if="(item.model_preview?.length ?? 0) > 0"
-      class="mt-3 border-t border-gray-100 pt-3 dark:border-dark-700/60"
-      data-testid="monitor-model-preview"
-    >
-      <div class="flex items-center justify-between gap-2">
-        <span class="text-[10px] font-semibold uppercase text-gray-400">
-          {{ t('channelStatus.models.previewTitle') }}
-        </span>
-        <span class="text-[10px] text-gray-400">
-          {{ t('channelStatus.models.viewAll', { n: item.model_count }) }}
-        </span>
-      </div>
-      <div class="mt-1.5 flex flex-wrap gap-1.5">
-        <span
-          v-for="model in previewModels"
-          :key="`${model.platform}:${model.name}`"
-          class="max-w-full truncate rounded-md bg-gray-100 px-2 py-1 font-mono text-[11px] text-gray-600 dark:bg-dark-700/70 dark:text-gray-300"
-        >
-          {{ model.name }}
-        </span>
-        <span
-          v-if="hiddenModelCount > 0"
-          class="rounded-md bg-gray-100 px-2 py-1 font-mono text-[11px] text-gray-500 dark:bg-dark-700/70 dark:text-gray-400"
-          data-testid="monitor-model-overflow"
-        >
-          +{{ hiddenModelCount }}
-        </span>
-      </div>
-    </div>
-
     <!-- Metrics -->
     <MonitorMetricPair
       primary-icon="bolt"
@@ -85,25 +54,6 @@
       :secondary-value="formatLatency(item.primary_ping_latency_ms)"
       secondary-unit="ms"
     />
-
-    <div class="mt-2 grid grid-cols-2 gap-2" data-testid="monitor-group-metrics">
-      <div class="rounded-xl border border-sky-100 bg-sky-50/60 p-3 dark:border-sky-900/40 dark:bg-sky-950/20">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-sky-600/80 dark:text-sky-300/80">
-          {{ t('channelStatus.groupMetrics.firstToken') }}
-        </div>
-        <div class="mt-1 font-mono text-base font-bold tabular-nums text-sky-700 dark:text-sky-300">
-          {{ formatFirstToken(item.group_first_token_p50_ms) }}
-        </div>
-      </div>
-      <div class="rounded-xl border border-cyan-100 bg-cyan-50/60 p-3 dark:border-cyan-900/40 dark:bg-cyan-950/20">
-        <div class="text-[10px] font-semibold uppercase tracking-wider text-cyan-600/80 dark:text-cyan-300/80">
-          {{ t('channelStatus.groupMetrics.cacheRate') }}
-        </div>
-        <div class="mt-1 font-mono text-base font-bold tabular-nums text-cyan-700 dark:text-cyan-300">
-          {{ formatCacheRate(item.group_cache_rate) }}
-        </div>
-      </div>
-    </div>
 
     <!-- 配额模式：最新用量/余额快照（服务端已按系统开关剥离，此处 flag 为纵深防御） -->
     <MonitorQuotaView v-if="quotaVisible" :snapshot="item.latest_quota" class="mt-2" />
@@ -182,9 +132,6 @@ const quotaVisible = computed(
   () => isChannelMonitorQuotaVisible() && !!props.item.latest_quota
 )
 
-const previewModels = computed(() => (props.item.model_preview ?? []).slice(0, 3))
-const hiddenModelCount = computed(() => Math.max(0, (props.item.model_count ?? 0) - previewModels.value.length))
-
 const availabilityLabel = computed(() => {
   const win = t(`channelStatus.windowTab.${props.window}`)
   return `${t('monitorCommon.availabilityPrefix')} · ${win}`
@@ -195,14 +142,4 @@ const extraModelsCountLabel = computed(() => {
   if (count === 0) return undefined
   return t('monitorCommon.extraModelsCount', { n: count })
 })
-
-function formatFirstToken(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '-'
-  return value >= 1000 ? `${(value / 1000).toFixed(2)}s` : `${Math.round(value)}ms`
-}
-
-function formatCacheRate(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '-'
-  return `${(value * 100).toFixed(1)}%`
-}
 </script>

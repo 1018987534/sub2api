@@ -53,21 +53,6 @@ type ChannelRepository interface {
 	ReplaceModelPricing(ctx context.Context, channelID int64, pricingList []ChannelModelPricing) error
 }
 
-// RecentGroupModel is a final upstream model observed on the latest successful
-// dispatch for a requested alias in a bounded usage window. Name and
-// UpstreamModel are identical; the latter remains for pricing compatibility.
-type RecentGroupModel struct {
-	Name          string
-	Platform      string
-	UpstreamModel string
-}
-
-// RecentGroupModelsReader supplies the actual successful models used by a
-// group in a bounded window.
-type RecentGroupModelsReader interface {
-	ListRecentModelsByGroups(context.Context, []int64, time.Time, time.Time) (map[int64][]RecentGroupModel, error)
-}
-
 // channelModelKey 渠道缓存复合键（显式包含 platform 防止跨平台同名模型冲突）
 type channelModelKey struct {
 	groupID  int64
@@ -168,20 +153,11 @@ const (
 type ChannelService struct {
 	repo                 ChannelRepository
 	groupRepo            GroupRepository
-	recentGroupModels    RecentGroupModelsReader
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	pricingService       *PricingService // 用于「可用渠道」展示时回落到全局定价；可为 nil（测试场景）
 
 	cache   atomic.Value // *channelCache
 	cacheSF singleflight.Group
-}
-
-// SetRecentGroupModelsReader supplies the model plaza's sole production model
-// source: successful usage recorded during the last 24 hours.
-func (s *ChannelService) SetRecentGroupModelsReader(reader RecentGroupModelsReader) {
-	if s != nil {
-		s.recentGroupModels = reader
-	}
 }
 
 // NewChannelService 创建渠道服务实例。

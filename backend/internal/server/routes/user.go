@@ -30,7 +30,6 @@ func RegisterUserRoutes(
 			chat.GET("/conversation", h.SupportChat.Conversation)
 			chat.GET("/messages", h.SupportChat.Messages)
 			chat.POST("/messages", h.SupportChat.Send)
-			chat.GET("/attachments/:id", h.SupportChat.Attachment)
 			chat.POST("/read", h.SupportChat.Read)
 			chat.GET("/unread-count", h.SupportChat.UnreadCount)
 		}
