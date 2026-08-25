@@ -59,8 +59,8 @@ func TestUsageLogRepositoryPrepareInsert_DefaultsInstanceID(t *testing.T) {
 
 	require.NotNil(t, log.InstanceID)
 	require.Equal(t, "gateway-west", *log.InstanceID)
-	instanceArg, ok := prepared.args[35].(sql.NullString)
-	require.True(t, ok, "instance_id arg should be a sql.NullString, got %T", prepared.args[35])
+	instanceArg, ok := prepared.args[37].(sql.NullString)
+	require.True(t, ok, "instance_id arg should be a sql.NullString, got %T", prepared.args[37])
 	require.True(t, instanceArg.Valid)
 	require.Equal(t, "gateway-west", instanceArg.String)
 }
@@ -73,7 +73,7 @@ func TestUsageLogRepositoryPrepareInsert_PreservesExplicitInstanceID(t *testing.
 
 	prepared := repo.prepareUsageLogInsert(log)
 
-	instanceArg := prepared.args[35].(sql.NullString)
+	instanceArg := prepared.args[37].(sql.NullString)
 	require.True(t, instanceArg.Valid)
 	require.Equal(t, "control-primary", instanceArg.String)
 }
