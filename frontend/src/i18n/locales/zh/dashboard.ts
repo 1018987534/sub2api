@@ -518,26 +518,6 @@ export default {
     loadError: '加载渠道状态失败',
     detailLoadError: '加载渠道详情失败',
     detailTitle: '渠道详情',
-    groupMetrics: {
-      title: '监控分组近期表现',
-      description: '近 24 小时真实请求汇总；首字为 P50，平均缓存率按缓存读取 token ÷（输入 + 缓存创建 + 缓存读取 token）计算。括号内为首字样本数。',
-      count: '{n} 个分组',
-      group: '监控分组',
-      firstToken: '首字 P50',
-      cacheRate: '平均缓存率',
-      empty: '当前没有可用的分组请求数据',
-    },
-    models: {
-      previewTitle: '近 24 小时实际可调用模型',
-      viewAll: '共 {n} 个',
-      officialTitle: '官方模型定价',
-      officialDescription: '仅展示官方参考价格，按每 100 万 Token 计。',
-      input: '输入',
-      output: '输出',
-      cacheWrite: '缓存写入',
-      cacheRead: '缓存读取',
-      noPricing: '暂无官方价格数据',
-    },
     closeDetail: '关闭',
     windowTab: {
       '7d': '7 天',
@@ -613,7 +593,7 @@ export default {
   // Model Plaza (public group/model pricing showcase)
   modelPlaza: {
     title: '模型广场',
-    description: '按分组浏览近 24 小时实际调用过的模型与价格',
+    description: '按分组浏览可用模型与价格',
     loading: '加载中...',
     empty: '暂无可展示的分组',
     loadFailed: '加载模型广场失败',
@@ -632,7 +612,7 @@ export default {
       subscription: '订阅'
     },
     detail: {
-      noModels: '该分组近 24 小时暂无模型调用',
+      noModels: '该分组暂未配置模型',
       noPricing: '未配置定价',
       peakNote: '高峰时段 {window} 计费倍率 ×{multiplier}',
       longContextDisabledNote: '该分组未启用长上下文阶梯计费，超阈值请求仍按基础档计费，官方阶梯仅供参考'

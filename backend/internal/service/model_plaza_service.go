@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 )
 
 // PlazaOfficialPricing 模型广场展示用的官方参考价（USD per token），与计费同源：
@@ -30,9 +29,6 @@ type PlazaModel struct {
 	LongContextBasis ContextPricingBasis
 	// TimePricing 计费会生效的分时倍率时段；无分时为 nil。
 	TimePricing *TimePricingSchedule
-	// officialModel records the final dispatched upstream model used for the
-	// official price lookup while Name remains customer-visible.
-	officialModel string
 }
 
 // PlazaGroup 模型广场中以分组为顶层的条目。
@@ -71,15 +67,6 @@ type ModelPlazaService struct {
 	pricingService    *PricingService
 	billingService    *BillingService
 	resolver          *ModelPricingResolver
-	recentGroupModels RecentGroupModelsReader
-}
-
-// SetRecentGroupModelsReader makes successful usage the production catalog
-// source. Tests and legacy callers without a reader retain channel-based data.
-func (s *ModelPlazaService) SetRecentGroupModelsReader(reader RecentGroupModelsReader) {
-	if s != nil {
-		s.recentGroupModels = reader
-	}
 }
 
 // NewModelPlazaService 创建模型广场服务。
@@ -203,44 +190,6 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 		}
 	}
 
-	if s.recentGroupModels != nil {
-		groupIDs := make([]int64, 0, len(groups))
-		for i := range groups {
-			groupIDs = append(groupIDs, groups[i].ID)
-		}
-		end := time.Now().UTC()
-		recentByGroup, err := s.recentGroupModels.ListRecentModelsByGroups(ctx, groupIDs, end.Add(-24*time.Hour), end)
-		if err != nil {
-			return nil, fmt.Errorf("list recent group models: %w", err)
-		}
-		for _, groupID := range groupIDs {
-			pg := byGroup[groupID]
-			pg.Models = pg.Models[:0]
-			seen := make(map[modelKey]struct{}, len(recentByGroup[groupID]))
-			for _, recent := range recentByGroup[groupID] {
-				name := strings.TrimSpace(recent.Name)
-				platform := strings.TrimSpace(recent.Platform)
-				if name == "" || platform == "" {
-					continue
-				}
-				key := modelKey{platform: platform, name: strings.ToLower(name)}
-				if _, exists := seen[key]; exists {
-					continue
-				}
-				seen[key] = struct{}{}
-				officialModel := strings.TrimSpace(recent.UpstreamModel)
-				if officialModel == "" {
-					officialModel = name
-				}
-				pg.Models = append(pg.Models, PlazaModel{
-					Name:          name,
-					Platform:      platform,
-					officialModel: officialModel,
-				})
-			}
-		}
-	}
-
 	officialMemo := make(map[string]*PlazaOfficialPricing)
 	out := make([]PlazaGroup, 0, len(order))
 	for _, gid := range order {
@@ -257,11 +206,7 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 		g := groupEnt[gid]
 		for j := range pg.Models {
 			s.fillDisplayPricing(ctx, &pg.Models[j], g)
-			officialModel := pg.Models[j].officialModel
-			if officialModel == "" {
-				officialModel = pg.Models[j].Name
-			}
-			pg.Models[j].OfficialPricing = s.lookupOfficialPricing(ctx, officialModel, officialMemo)
+			pg.Models[j].OfficialPricing = s.lookupOfficialPricing(ctx, pg.Models[j].Name, officialMemo)
 		}
 		out = append(out, *pg)
 	}

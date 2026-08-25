@@ -40,7 +40,10 @@ import {
   type UserMonitorDetail,
 } from '@/api/channelMonitor'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import MonitorHero, { type MonitorWindow, type OverallStatus } from '@/components/user/monitor/MonitorHero.vue'
+import MonitorHero, {
+  type MonitorWindow,
+  type OverallStatus,
+} from '@/components/user/monitor/MonitorHero.vue'
 import MonitorCardGrid from '@/components/user/monitor/MonitorCardGrid.vue'
 import MonitorDetailDialog from '@/components/user/MonitorDetailDialog.vue'
 import { DEFAULT_INTERVAL_SECONDS, STATUS_OPERATIONAL } from '@/constants/channelMonitor'
@@ -89,9 +92,9 @@ async function reload(silent = false) {
   abortController = ctrl
   if (!silent) loading.value = true
   try {
-    const listResult = await listChannelMonitorViews({ signal: ctrl.signal })
+    const res = await listChannelMonitorViews({ signal: ctrl.signal })
     if (ctrl.signal.aborted || abortController !== ctrl) return
-    items.value = listResult.items || []
+    items.value = res.items || []
   } catch (err: unknown) {
     const e = err as { name?: string; code?: string }
     if (e?.name === 'AbortError' || e?.code === 'ERR_CANCELED') return
@@ -110,7 +113,7 @@ async function manualReload() {
   // After base reload, refresh any cached detail records so non-7d availability
   // values stay in sync without forcing the user to switch tabs again.
   if (currentWindow.value !== '7d') {
-    await Promise.all(items.value.map((it) => loadDetail(it.id, true)))
+    await Promise.all(items.value.map(it => loadDetail(it.id, true)))
   }
 }
 
@@ -125,7 +128,7 @@ async function loadDetail(id: number, force = false) {
 
 async function ensureDetailsForWindow() {
   if (currentWindow.value === '7d') return
-  await Promise.all(items.value.map((it) => loadDetail(it.id)))
+  await Promise.all(items.value.map(it => loadDetail(it.id)))
 }
 
 // ── Handlers ──

@@ -165,10 +165,7 @@ type UserMonitorView struct {
 	Timeline             []UserMonitorTimelinePoint // 主模型最近 N 个历史点（按 checked_at DESC，最新在前）
 	// LatestQuota 主模型最近一次配额快照；channel_monitor_show_quota=false
 	// 时由 handler 服务端剥离。
-	LatestQuota                *domain.MonitorQuotaSnapshot
-	GroupFirstTokenP50Ms       *int64
-	GroupFirstTokenSampleCount int64
-	GroupCacheRate             *float64
+	LatestQuota *domain.MonitorQuotaSnapshot
 }
 
 // UserMonitorTimelinePoint 用户视图 timeline 单点数据（去除 message 以减小响应体）。
@@ -193,20 +190,6 @@ type UserMonitorDetail struct {
 	Provider  string
 	GroupName string
 	Models    []ModelDetail
-}
-
-// UserMonitorGroupMetric is the recent real-request performance summary for a
-// group referenced by an enabled customer-facing channel monitor.
-type UserMonitorGroupMetric struct {
-	MonitorID             int64
-	Platform              string
-	GroupID               int64
-	GroupName             string
-	FirstTokenP50Ms       *int64
-	FirstTokenSampleCount int64
-	CacheRate             *float64
-	CacheReadTokens       int64
-	CacheRateDenominator  int64
 }
 
 // ModelDetail 单个模型的可用率/延迟统计。

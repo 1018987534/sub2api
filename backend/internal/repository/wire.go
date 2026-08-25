@@ -81,7 +81,6 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementReadRepository,
 	NewUsageLogRepository,
 	wire.Bind(new(service.UsageLogRepository), new(*usageLogRepository)),
-	wire.Bind(new(service.RecentGroupModelsReader), new(*usageLogRepository)),
 	NewUsageBillingRepository,
 	NewBatchImageRepository,
 	NewIdempotencyRepository,

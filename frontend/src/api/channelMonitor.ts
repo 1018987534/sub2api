@@ -5,7 +5,6 @@
 
 import { apiClient } from './client'
 import type { MonitorQuotaSnapshot, Provider, MonitorStatus } from './admin/channelMonitor'
-import type { PlazaOfficialPricing } from './modelPlaza'
 
 export type { Provider, MonitorStatus } from './admin/channelMonitor'
 
@@ -13,12 +12,6 @@ export interface UserMonitorExtraModel {
   model: string
   status: MonitorStatus
   latency_ms: number | null
-}
-
-export interface UserMonitorModelPricing {
-  name: string
-  platform: string
-  official_pricing: PlazaOfficialPricing | null
 }
 
 export interface MonitorTimelinePoint {
@@ -40,11 +33,6 @@ export interface UserMonitorView {
   availability_7d: number
   extra_models: UserMonitorExtraModel[]
   timeline: MonitorTimelinePoint[]
-  group_first_token_p50_ms?: number | null
-  group_first_token_sample_count?: number
-  group_cache_rate?: number | null
-  model_preview?: UserMonitorModelPricing[]
-  model_count: number
   /**
    * 主模型最近配额快照。仅当系统开启 channel_monitor_show_quota 时
    * 服务端才会下发（关闭时服务端已剥离，前端 flag 仅作纵深防御）。
@@ -72,7 +60,6 @@ export interface UserMonitorDetail {
   provider: Provider
   group_name: string
   models: UserMonitorModelDetail[]
-  pricing_models: UserMonitorModelPricing[]
 }
 
 /**

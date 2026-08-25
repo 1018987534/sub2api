@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
@@ -18,116 +17,6 @@ func newPlazaService(channels []Channel, groups []Group, pricing *PricingService
 		listAllFn: func(ctx context.Context) ([]Channel, error) { return channels, nil },
 	}
 	return NewModelPlazaService(repo, &stubGroupRepoForAvailable{activeGroups: groups}, pricing, nil, nil)
-}
-
-type plazaRecentModelReader struct {
-	modelsByGroup map[int64][]RecentGroupModel
-	groupIDs      []int64
-	starts        []time.Time
-	ends          []time.Time
-}
-
-func (r *plazaRecentModelReader) ListRecentModelsByGroups(_ context.Context, groupIDs []int64, start, end time.Time) (map[int64][]RecentGroupModel, error) {
-	r.groupIDs = append(r.groupIDs, groupIDs...)
-	r.starts = append(r.starts, start)
-	r.ends = append(r.ends, end)
-	out := make(map[int64][]RecentGroupModel, len(groupIDs))
-	for _, groupID := range groupIDs {
-		out[groupID] = append([]RecentGroupModel(nil), r.modelsByGroup[groupID]...)
-	}
-	return out, nil
-}
-
-func TestListPlazaGroups_UsesOnlyModelsActuallyCalledInLast24Hours(t *testing.T) {
-	channel := Channel{
-		ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10},
-		ModelPricing: []ChannelModelPricing{{
-			Platform: PlatformOpenAI,
-			Models:   []string{"gpt-called", "gpt-configured-but-unused"},
-		}},
-	}
-	recent := &plazaRecentModelReader{modelsByGroup: map[int64][]RecentGroupModel{
-		10: {{Name: "gpt-called", Platform: PlatformOpenAI, UpstreamModel: "gpt-upstream"}},
-	}}
-	svc := newPlazaService([]Channel{channel}, []Group{
-		{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1},
-		{ID: 20, Name: "unused", Platform: PlatformOpenAI, RateMultiplier: 1},
-	}, nil)
-	svc.SetRecentGroupModelsReader(recent)
-
-	out, err := svc.ListGroups(context.Background())
-	require.NoError(t, err)
-	require.Len(t, out, 1)
-	require.Equal(t, []string{"gpt-called"}, []string{out[0].Models[0].Name})
-	require.Equal(t, []int64{10, 20}, recent.groupIDs)
-	require.Len(t, recent.starts, 1, "all active groups should be loaded in one usage query")
-	require.WithinDuration(t, recent.ends[0].Add(-24*time.Hour), recent.starts[0], time.Second)
-}
-
-func TestListPlazaGroups_RecentUsageOfficialPricingFollowsFinalUpstreamModel(t *testing.T) {
-	channel := Channel{
-		ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10},
-		ModelMapping: map[string]map[string]string{
-			PlatformOpenAI: {"customer-alias": "account-model"},
-		},
-	}
-	pricing := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
-		"gpt-5": {InputCostPerToken: 1.25e-6, OutputCostPerToken: 1e-5},
-	}}
-	recent := &plazaRecentModelReader{modelsByGroup: map[int64][]RecentGroupModel{
-		10: {{Name: "gpt-5", Platform: PlatformOpenAI, UpstreamModel: "gpt-5"}},
-	}}
-	svc := newPlazaService(
-		[]Channel{channel},
-		[]Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}},
-		pricing,
-	)
-	svc.SetRecentGroupModelsReader(recent)
-
-	out, err := svc.ListGroups(context.Background())
-	require.NoError(t, err)
-	require.Len(t, out, 1)
-	models := make(map[string]PlazaModel, len(out[0].Models))
-	for _, model := range out[0].Models {
-		models[model.Name] = model
-	}
-	require.NotNil(t, models["gpt-5"].OfficialPricing)
-	require.Equal(t, 1.25e-6, *models["gpt-5"].OfficialPricing.InputPrice)
-	require.Equal(t, 1e-5, *models["gpt-5"].OfficialPricing.OutputPrice)
-}
-
-func TestListPlazaGroups_HidesGroupWithoutRecentUsage(t *testing.T) {
-	channel := plazaPricedChannel(1, "live", []int64{10}, PlatformOpenAI, "gpt-configured")
-	svc := newPlazaService([]Channel{channel}, []Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}}, nil)
-	svc.SetRecentGroupModelsReader(&plazaRecentModelReader{modelsByGroup: map[int64][]RecentGroupModel{}})
-
-	out, err := svc.ListGroups(context.Background())
-	require.NoError(t, err)
-	require.Empty(t, out)
-}
-
-func TestListPlazaGroups_RecentUsageIsNotHiddenByCurrentChannelRestriction(t *testing.T) {
-	channel := Channel{
-		ID: 1, Name: "live", Status: StatusActive, GroupIDs: []int64{10}, RestrictModels: true,
-		ModelPricing: []ChannelModelPricing{{
-			Platform: PlatformOpenAI,
-			Models:   []string{"currently-allowed"},
-		}},
-	}
-	recent := &plazaRecentModelReader{modelsByGroup: map[int64][]RecentGroupModel{
-		10: {{Name: "actually-called", Platform: PlatformOpenAI, UpstreamModel: "gpt-5"}},
-	}}
-	svc := newPlazaService(
-		[]Channel{channel},
-		[]Group{{ID: 10, Name: "g", Platform: PlatformOpenAI, RateMultiplier: 1}},
-		nil,
-	)
-	svc.SetRecentGroupModelsReader(recent)
-
-	out, err := svc.ListGroups(context.Background())
-	require.NoError(t, err)
-	require.Len(t, out, 1)
-	require.Equal(t, "actually-called", out[0].Models[0].Name)
 }
 
 func plazaPricedChannel(id int64, name string, groupIDs []int64, platform string, models ...string) Channel {
