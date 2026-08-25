@@ -102,6 +102,7 @@ func TestChannelMonitorV2ErrorAggregationCountsFinalUserErrorsOnly(t *testing.T)
 	require.Contains(t, query, "where bucket_start >= $1 and bucket_start < $2")
 	require.Contains(t, query, "upstream_affected_requests")
 	require.Contains(t, query, "jsonb_array_length(current_error.upstream_errors) > 0")
+	require.Contains(t, query, "nullif(trim(a.platform), '')")
 	// Data-modifying CTEs must expose RETURNING rows or PostgreSQL rejects the
 	// statement at the CTE closing parenthesis before aggregation can commit.
 	require.Equal(t, 2, strings.Count(query, "returning 1"))
