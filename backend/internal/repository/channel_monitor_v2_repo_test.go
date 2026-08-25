@@ -102,10 +102,6 @@ func TestChannelMonitorV2ErrorAggregationCountsFinalUserErrorsOnly(t *testing.T)
 	require.Contains(t, query, "where bucket_start >= $1 and bucket_start < $2")
 	require.Contains(t, query, "upstream_affected_requests")
 	require.Contains(t, query, "jsonb_array_length(current_error.upstream_errors) > 0")
-	require.Contains(t, query, "nullif(trim(a.platform), '')")
-	// Data-modifying CTEs must expose RETURNING rows or PostgreSQL rejects the
-	// statement at the CTE closing parenthesis before aggregation can commit.
-	require.Equal(t, 2, strings.Count(query, "returning 1"))
 	// request_id dedup must be time-bounded (no full-history scan).
 	require.Contains(t, query, "interval '90 minutes'")
 	require.Contains(t, query, "current_error.created_at >= $1 - interval '90 minutes'")
@@ -120,6 +116,8 @@ func TestChannelMonitorV2ErrorAggregationResolvesCompositePlatform(t *testing.T)
 	require.Contains(t, query, "left join groups g on g.id = current_error.group_id")
 	require.Contains(t, query, "left join accounts a on a.id = current_error.account_id")
 	require.Contains(t, query, "a.platform")
+	require.Contains(t, query, "nullif(trim(a.platform), '')")
+	require.NotContains(t, query, "nullif(trim(a.platform))")
 }
 
 func TestChannelMonitorV2UsageSuccessExcludesCyberBillingRows(t *testing.T) {

@@ -309,13 +309,11 @@ WITH dedup AS (
   ON CONFLICT (bucket_start, platform, group_id, model) DO UPDATE SET
     error_requests = EXCLUDED.error_requests, upstream_affected_requests = EXCLUDED.upstream_affected_requests,
     upstream_attempt_count = EXCLUDED.upstream_attempt_count, computed_at = NOW()
-  RETURNING 1
 ), user_rows AS (
   INSERT INTO channel_monitor_v2_user_metrics_1m (bucket_start, platform, group_id, model, user_id, error_requests, computed_at)
   SELECT bucket_start, platform, group_id, model, user_id, COUNT(*), NOW()
   FROM classified WHERE user_id IS NOT NULL GROUP BY 1,2,3,4,5
   ON CONFLICT (bucket_start, platform, group_id, model, user_id) DO UPDATE SET error_requests = EXCLUDED.error_requests, computed_at = NOW()
-  RETURNING 1
 )
 INSERT INTO channel_monitor_v2_error_metrics_1m (bucket_start, platform, group_id, model, error_category, taxonomy_version, error_requests)
 SELECT bucket_start, platform, group_id, model, category, 1, COUNT(*) FROM classified GROUP BY 1,2,3,4,5
