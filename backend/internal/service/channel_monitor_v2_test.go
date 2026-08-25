@@ -393,6 +393,21 @@ func TestErrorsForViewerStripsDetailsAndCountsForNonAdmin(t *testing.T) {
 	require.Contains(t, adminList.Items[0].Details[0].Message, "gateway timeout")
 }
 
+func TestRedactChannelMonitorV2ErrorsKeepsRatesAndDropsContent(t *testing.T) {
+	list := &ChannelMonitorV2List[ChannelMonitorV2ErrorRow]{Items: []ChannelMonitorV2ErrorRow{{
+		Category: "other",
+		Count:    7,
+		Rate:     0.25,
+		Ignored:  true,
+		Details:  []ChannelMonitorV2ErrorDetail{{Message: "origin detail", Count: 7}},
+	}}}
+	RedactChannelMonitorV2Errors(list)
+	require.Zero(t, list.Items[0].Count)
+	require.Nil(t, list.Items[0].Details)
+	require.InDelta(t, 0.25, list.Items[0].Rate, 0.0001)
+	require.True(t, list.Items[0].Ignored)
+}
+
 func TestSnapshotRedactsPublicConfigPolicyFields(t *testing.T) {
 	updatedBy := int64(9)
 	repo := &channelMonitorV2RepoStub{
