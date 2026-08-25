@@ -1128,7 +1128,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 						_ = resp.Body.Close()
 					}
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
-					if s.shouldFailoverOpenAIUpstreamResponse(compactResp.StatusCode, signal.message, compactBody) {
+					if !compactModelFallbackRetried && s.shouldFailoverOpenAIUpstreamResponse(compactResp.StatusCode, signal.message, compactBody) {
 						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 							Platform:           account.Platform,
 							AccountID:          account.ID,
