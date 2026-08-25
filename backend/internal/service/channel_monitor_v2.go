@@ -549,6 +549,19 @@ func (s *ChannelMonitorV2Service) Errors(ctx context.Context, filter ChannelMoni
 	return s.ErrorsForViewer(ctx, filter, false)
 }
 
+// RedactChannelMonitorV2Errors removes concrete error content from a public
+// response. Category rates remain available for the monitor summary, while
+// provider messages, status codes, and absolute counts stay server-side.
+func RedactChannelMonitorV2Errors(list *ChannelMonitorV2List[ChannelMonitorV2ErrorRow]) {
+	if list == nil {
+		return
+	}
+	for i := range list.Items {
+		list.Items[i].Count = 0
+		list.Items[i].Details = nil
+	}
+}
+
 // ErrorsForViewer returns the error breakdown.
 // Non-admin callers receive category rates + ignored flags only: absolute Count
 // is zeroed and Details (upstream messages / status codes / volume) are omitted.
@@ -562,10 +575,7 @@ func (s *ChannelMonitorV2Service) ErrorsForViewer(ctx context.Context, filter Ch
 		return nil, err
 	}
 	if !admin && list != nil {
-		for i := range list.Items {
-			list.Items[i].Count = 0
-			list.Items[i].Details = nil
-		}
+		RedactChannelMonitorV2Errors(list)
 	}
 	return list, nil
 }
