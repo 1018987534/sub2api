@@ -6,6 +6,11 @@ const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 15;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
 const MAX_INGRESS_ERROR_BODY_BYTES = 8 * 1024;
 const SAFE_EDGE_CONNECTION_FAILURE_STATUSES = new Set([521, 522, 523, 525, 526]);
+const SAFE_CAPACITY_REJECTION_TYPES = new Set([
+  "node_capacity",
+  "node_capacity_unavailable",
+]);
+const EDGE_CAPACITY_NONCE_HEADER = "X-Sub2API-Edge-Capacity-Nonce";
 const NGINX_BAD_REQUEST_HTML = new RegExp(
   [
     "^\\s*<html>\\s*<head><title>400 Bad Request</title></head>",
@@ -109,6 +114,9 @@ function staticRoutingNodes(env) {
 
 function normalizeRuntimeNodes(payload) {
   const nodes = payload?.data?.nodes ?? payload?.nodes;
+  const overflowNodeID = String(
+    payload?.data?.overflow_node_id ?? payload?.overflow_node_id ?? "",
+  );
   if (!Array.isArray(nodes) || nodes.length === 0) {
     throw new Error("routing runtime returned no nodes");
   }
@@ -138,6 +146,10 @@ function normalizeRuntimeNodes(payload) {
       id: String(node?.id ?? ""),
       origin,
       effective_weight: weight,
+      target_weight: Number.parseInt(node?.target_weight ?? weight, 10),
+      auto_disabled: node?.auto_disabled === true,
+      overflow_fallback:
+        node?.overflow_fallback === true || String(node?.id ?? "") === overflowNodeID,
     };
   });
 }
@@ -245,34 +257,53 @@ function resolveRoutingNodes(env, ctx, metadata = null) {
   return staticRoutingNodes(env);
 }
 
-function selectOrigins(env, randomSource = crypto, runtimeNodes = null) {
-  const nodes = (runtimeNodes ?? staticRoutingNodes(env)).filter(
-    (node) => node.origin && node.effective_weight > 0,
-  );
+function randomIndex(randomSource, length) {
+  return randomSource.getRandomValues(new Uint32Array(1))[0] % length;
+}
+
+function weightedNode(nodes, randomSource) {
   const totalWeight = nodes.reduce(
     (total, node) => total + node.effective_weight,
     0,
   );
   if (totalWeight <= 0) {
-    return [];
+    return null;
   }
 
-  const roll =
-    randomSource.getRandomValues(new Uint32Array(1))[0] % totalWeight;
+  const roll = randomIndex(randomSource, totalWeight);
   let cumulativeWeight = 0;
-  let selectedOrigin = null;
   for (const node of nodes) {
     cumulativeWeight += node.effective_weight;
     if (roll < cumulativeWeight) {
-      selectedOrigin = node.origin;
-      break;
+      return node;
     }
+  }
+  return nodes.at(-1) ?? null;
+}
+
+function selectOrigins(env, randomSource = crypto, runtimeNodes = null) {
+  const allNodes = (runtimeNodes ?? staticRoutingNodes(env)).filter((node) => node.origin);
+  const weightedNodes = allNodes.filter((node) => node.effective_weight > 0);
+  const fallbackNode = allNodes.find(
+    (node) => node.overflow_fallback && !node.auto_disabled,
+  );
+  const selectedNode = weightedNode(weightedNodes, randomSource) ?? fallbackNode;
+  if (!selectedNode) {
+    return [];
   }
 
   const origins = [];
-  appendUnique(origins, selectedOrigin);
-  for (const node of nodes) {
-    appendUnique(origins, node.origin);
+  appendUnique(origins, selectedNode.origin);
+  if (fallbackNode) {
+    appendUnique(origins, fallbackNode.origin);
+  }
+  const remaining = weightedNodes.filter(
+    (node) => node.origin !== selectedNode.origin && node.origin !== fallbackNode?.origin,
+  );
+  while (remaining.length > 0) {
+    const next = weightedNode(remaining, randomSource);
+    appendUnique(origins, next.origin);
+    remaining.splice(remaining.indexOf(next), 1);
   }
   return origins;
 }
@@ -315,9 +346,22 @@ function originRequest(request, originBase) {
   return new Request(incomingURL, request);
 }
 
-async function safeIngressFailureType(request, response) {
+async function safeIngressFailureType(request, response, capacityNonce = "") {
   if (request.method !== "POST") {
     return "";
+  }
+  const capacityRejection = response.headers
+    .get("x-sub2api-ingress-reject")
+    ?.trim()
+    .toLowerCase();
+  if (
+    response.status === 503 &&
+    capacityRejection &&
+    SAFE_CAPACITY_REJECTION_TYPES.has(capacityRejection) &&
+    capacityNonce &&
+    response.headers.get(EDGE_CAPACITY_NONCE_HEADER) === capacityNonce
+  ) {
+    return capacityRejection;
   }
   if (SAFE_EDGE_CONNECTION_FAILURE_STATUSES.has(response.status)) {
     return `edge_connection_${response.status}`;
@@ -395,10 +439,16 @@ async function fetchWithSafeIngressRecovery(
   for (let i = 0; i < origins.length; i += 1) {
     const replayRequest = i < origins.length - 1 ? attemptRequest.clone() : null;
     const forwarded = originRequest(attemptRequest, origins[i]);
+    const capacityNonce = crypto.randomUUID();
     forwarded.headers.set("X-Sub2API-Edge-Routing-Ms", String(routingWaitMs));
     forwarded.headers.set("X-Sub2API-Edge-Routing-Source", routingSource);
+    forwarded.headers.set(EDGE_CAPACITY_NONCE_HEADER, capacityNonce);
     const response = await fetch(forwarded, { redirect: "manual" });
-    const failureType = await safeIngressFailureType(attemptRequest, response);
+    const failureType = await safeIngressFailureType(
+      attemptRequest,
+      response,
+      capacityNonce,
+    );
     if (!failureType) {
       return response;
     }

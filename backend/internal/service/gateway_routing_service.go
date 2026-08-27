@@ -21,12 +21,14 @@ const (
 	defaultGatewayRoutingThresholdPercent = 90
 	gatewayRoutingRuntimeCacheTTL         = 30 * time.Second
 	gatewayRoutingRuntimeErrorTTL         = 10 * time.Second
+	gatewayRoutingAdmissionCacheTTL       = 5 * time.Second
 	gatewayRoutingMonitorTimeout          = 5 * time.Second
 	gatewayRoutingMonitorStaleAfter       = 15 * time.Minute
 	gatewayRoutingHealthStaleAfter        = 3 * time.Minute
 	gatewayRoutingMonitorResponseLimit    = 4 << 20
 	maxGatewayRoutingNodes                = 16
 	maxGatewayRoutingWeight               = 100
+	maxGatewayRoutingConcurrency          = 100000
 )
 
 var gatewayRoutingNodeIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
@@ -38,6 +40,7 @@ type GatewayRoutingSettings struct {
 	TrafficProtectionEnabled bool                         `json:"traffic_protection_enabled"`
 	HealthProtectionEnabled  bool                         `json:"health_protection_enabled"`
 	TrafficThresholdPercent  float64                      `json:"traffic_threshold_percent"`
+	OverflowNodeID           string                       `json:"overflow_node_id"`
 	Nodes                    []GatewayRoutingNodeSettings `json:"nodes"`
 }
 
@@ -49,9 +52,10 @@ func (s *GatewayRoutingSettings) UnmarshalJSON(data []byte) error {
 }
 
 type GatewayRoutingNodeSettings struct {
-	ID           string `json:"id"`
-	Origin       string `json:"origin"`
-	TargetWeight int    `json:"target_weight"`
+	ID             string `json:"id"`
+	Origin         string `json:"origin"`
+	TargetWeight   int    `json:"target_weight"`
+	MaxConcurrency int    `json:"max_concurrency"`
 }
 
 // GatewayRoutingRuntime is the read-only configuration consumed by the edge
@@ -61,6 +65,8 @@ type GatewayRoutingRuntime struct {
 	MonitorChecked time.Time                   `json:"monitor_checked_at"`
 	MonitorStale   bool                        `json:"monitor_stale"`
 	MonitorError   string                      `json:"monitor_error,omitempty"`
+	CapacityError  string                      `json:"capacity_error,omitempty"`
+	OverflowNodeID string                      `json:"overflow_node_id"`
 	Nodes          []GatewayRoutingNodeRuntime `json:"nodes"`
 }
 
@@ -69,6 +75,9 @@ type GatewayRoutingNodeRuntime struct {
 	Origin              string     `json:"origin"`
 	TargetWeight        int        `json:"target_weight"`
 	EffectiveWeight     int        `json:"effective_weight"`
+	MaxConcurrency      int        `json:"max_concurrency"`
+	CurrentConcurrency  *int       `json:"current_concurrency"`
+	OverflowFallback    bool       `json:"overflow_fallback"`
 	AutoDisabled        bool       `json:"auto_disabled"`
 	AutoDisabledReason  string     `json:"auto_disabled_reason,omitempty"`
 	Status              string     `json:"status"`
@@ -83,6 +92,11 @@ type GatewayRoutingNodeRuntime struct {
 
 type cachedGatewayRoutingRuntime struct {
 	runtime   *GatewayRoutingRuntime
+	expiresAt int64
+}
+
+type cachedGatewayRoutingAdmissionSettings struct {
+	settings  *GatewayRoutingSettings
 	expiresAt int64
 }
 
@@ -171,6 +185,8 @@ func (s *SettingService) SetGatewayRoutingSettings(ctx context.Context, settings
 		return fmt.Errorf("save gateway routing settings: %w", err)
 	}
 	s.gatewayRoutingRuntimeSF.Forget("gateway_routing_runtime")
+	s.gatewayRoutingAdmissionSF.Forget("gateway_routing_admission")
+	s.gatewayRoutingAdmissionCache.Store(&cachedGatewayRoutingAdmissionSettings{expiresAt: 0})
 	previous := currentCachedGatewayRoutingRuntime(s)
 	s.gatewayRoutingRuntimeCache.Store(&cachedGatewayRoutingRuntime{runtime: previous, expiresAt: 0})
 	if s.onUpdate != nil {
@@ -184,6 +200,7 @@ func normalizeAndValidateGatewayRoutingSettings(settings *GatewayRoutingSettings
 		return errors.New("gateway routing settings are required")
 	}
 	settings.MonitorURL = strings.TrimRight(strings.TrimSpace(settings.MonitorURL), "/")
+	settings.OverflowNodeID = strings.ToLower(strings.TrimSpace(settings.OverflowNodeID))
 	for i := range settings.Nodes {
 		settings.Nodes[i].ID = strings.ToLower(strings.TrimSpace(settings.Nodes[i].ID))
 		settings.Nodes[i].Origin = strings.TrimRight(strings.TrimSpace(settings.Nodes[i].Origin), "/")
@@ -225,7 +242,15 @@ func validateGatewayRoutingSettings(settings *GatewayRoutingSettings) error {
 		if node.TargetWeight < 0 || node.TargetWeight > maxGatewayRoutingWeight {
 			return fmt.Errorf("nodes[%d].target_weight must be between 0 and %d", i, maxGatewayRoutingWeight)
 		}
+		if node.MaxConcurrency < 0 || node.MaxConcurrency > maxGatewayRoutingConcurrency {
+			return fmt.Errorf("nodes[%d].max_concurrency must be between 0 and %d", i, maxGatewayRoutingConcurrency)
+		}
 		totalWeight += node.TargetWeight
+	}
+	if settings.OverflowNodeID != "" {
+		if _, exists := ids[settings.OverflowNodeID]; !exists {
+			return errors.New("overflow_node_id must reference a configured node")
+		}
 	}
 	if totalWeight == 0 {
 		return errors.New("at least one node target_weight must be greater than zero")
@@ -234,6 +259,77 @@ func validateGatewayRoutingSettings(settings *GatewayRoutingSettings) error {
 		return fmt.Errorf("target weights must total 100%% (got %d%%)", totalWeight)
 	}
 	return nil
+}
+
+func cloneGatewayRoutingSettings(source *GatewayRoutingSettings) *GatewayRoutingSettings {
+	if source == nil {
+		return nil
+	}
+	cloned := *source
+	cloned.Nodes = append([]GatewayRoutingNodeSettings(nil), source.Nodes...)
+	return &cloned
+}
+
+// GetGatewayRoutingAdmissionSettings returns a short-lived settings snapshot
+// for the request admission hot path without hitting PostgreSQL per request.
+func (s *SettingService) GetGatewayRoutingAdmissionSettings(ctx context.Context) (*GatewayRoutingSettings, error) {
+	now := time.Now().UTC()
+	if cached, ok := s.gatewayRoutingAdmissionCache.Load().(*cachedGatewayRoutingAdmissionSettings); ok && cached != nil && cached.settings != nil && now.UnixNano() < cached.expiresAt {
+		return cloneGatewayRoutingSettings(cached.settings), nil
+	}
+	value, err, _ := s.gatewayRoutingAdmissionSF.Do("gateway_routing_admission", func() (any, error) {
+		if cached, ok := s.gatewayRoutingAdmissionCache.Load().(*cachedGatewayRoutingAdmissionSettings); ok && cached != nil && cached.settings != nil && time.Now().UTC().UnixNano() < cached.expiresAt {
+			return cloneGatewayRoutingSettings(cached.settings), nil
+		}
+		settings, loadErr := s.GetGatewayRoutingSettings(ctx)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		s.gatewayRoutingAdmissionCache.Store(&cachedGatewayRoutingAdmissionSettings{
+			settings:  cloneGatewayRoutingSettings(settings),
+			expiresAt: time.Now().Add(gatewayRoutingAdmissionCacheTTL).UnixNano(),
+		})
+		return settings, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	settings, ok := value.(*GatewayRoutingSettings)
+	if !ok || settings == nil {
+		return nil, errors.New("gateway routing admission settings are unavailable")
+	}
+	return cloneGatewayRoutingSettings(settings), nil
+}
+
+func (s *SettingService) SetGatewayRoutingCapacityStore(store *GatewayNodeCapacityStore) {
+	if s != nil {
+		s.gatewayRoutingCapacityStore = store
+	}
+}
+
+func (s *SettingService) GatewayRoutingNodeMaxConcurrency(ctx context.Context, nodeID string) (int, error) {
+	settings, err := s.GetGatewayRoutingAdmissionSettings(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, node := range settings.Nodes {
+		if node.ID == strings.ToLower(strings.TrimSpace(nodeID)) {
+			return node.MaxConcurrency, nil
+		}
+	}
+	return 0, nil
+}
+
+func (s *SettingService) AcquireGatewayRoutingNodeCapacity(ctx context.Context, nodeID string) (*GatewayNodeCapacityLease, int, int, error) {
+	limit, err := s.GatewayRoutingNodeMaxConcurrency(ctx, nodeID)
+	if err != nil || limit <= 0 {
+		return nil, 0, limit, err
+	}
+	if s == nil || s.gatewayRoutingCapacityStore == nil {
+		return nil, 0, limit, errors.New("gateway node capacity store is unavailable")
+	}
+	lease, current, err := s.gatewayRoutingCapacityStore.Acquire(ctx, nodeID, limit)
+	return lease, current, limit, err
 }
 
 // normalizeStoredGatewayRoutingWeights migrates the pre-percentage ratio format
@@ -294,7 +390,9 @@ func (s *SettingService) GetGatewayRoutingRuntime(ctx context.Context) (*Gateway
 	now := time.Now().UTC()
 	if cached, ok := s.gatewayRoutingRuntimeCache.Load().(*cachedGatewayRoutingRuntime); ok && cached != nil && cached.runtime != nil {
 		if now.UnixNano() < cached.expiresAt {
-			return cloneGatewayRoutingRuntime(cached.runtime), nil
+			runtime := cloneGatewayRoutingRuntime(cached.runtime)
+			s.populateGatewayRoutingCapacity(ctx, runtime)
+			return runtime, nil
 		}
 	}
 
@@ -325,7 +423,9 @@ func (s *SettingService) GetGatewayRoutingRuntime(ctx context.Context) (*Gateway
 	if !ok || runtime == nil {
 		return nil, errors.New("gateway routing runtime is unavailable")
 	}
-	return cloneGatewayRoutingRuntime(runtime), nil
+	cloned := cloneGatewayRoutingRuntime(runtime)
+	s.populateGatewayRoutingCapacity(ctx, cloned)
+	return cloned, nil
 }
 
 func currentCachedGatewayRoutingRuntime(s *SettingService) *GatewayRoutingRuntime {
@@ -354,6 +454,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 	runtime := &GatewayRoutingRuntime{
 		GeneratedAt:    now,
 		MonitorChecked: now,
+		OverflowNodeID: settings.OverflowNodeID,
 		Nodes:          make([]GatewayRoutingNodeRuntime, len(settings.Nodes)),
 	}
 	type matchedMonitorNode struct {
@@ -368,11 +469,13 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 			status = "manual_disabled"
 		}
 		runtime.Nodes[i] = GatewayRoutingNodeRuntime{
-			ID:              configured.ID,
-			Origin:          configured.Origin,
-			TargetWeight:    configured.TargetWeight,
-			EffectiveWeight: configured.TargetWeight,
-			Status:          status,
+			ID:               configured.ID,
+			Origin:           configured.Origin,
+			TargetWeight:     configured.TargetWeight,
+			EffectiveWeight:  configured.TargetWeight,
+			MaxConcurrency:   configured.MaxConcurrency,
+			OverflowFallback: configured.ID == settings.OverflowNodeID,
+			Status:           status,
 		}
 		monitorNode, ok := byName[configured.ID]
 		if !ok {
@@ -403,14 +506,14 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 	}
 	_ = group.Wait()
 
-	hasFreshPositiveNode := false
+	hasFreshRoutingNode := false
 	for _, result := range results {
 		if result.err != nil {
 			continue
 		}
 		configured := settings.Nodes[result.index]
-		if configured.TargetWeight > 0 && gatewayRoutingRecordFreshForHealth(result.record, now) {
-			hasFreshPositiveNode = true
+		if gatewayRoutingNodeCanReceiveRequests(settings, configured) && gatewayRoutingRecordFreshForHealth(result.record, now) {
+			hasFreshRoutingNode = true
 			break
 		}
 	}
@@ -418,7 +521,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 	for _, index := range missing {
 		configured := settings.Nodes[index]
 		applyStaleGatewayRoutingNode(&runtime.Nodes[index], configured, previousGatewayRoutingNode(previous, configured))
-		if settings.HealthProtectionEnabled && configured.TargetWeight > 0 && hasFreshPositiveNode {
+		if settings.HealthProtectionEnabled && gatewayRoutingNodeCanReceiveRequests(settings, configured) && hasFreshRoutingNode {
 			applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[index], "monitor_missing")
 		}
 	}
@@ -427,7 +530,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 		configured := settings.Nodes[result.index]
 		if result.err != nil {
 			applyStaleGatewayRoutingNode(&runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
-			if settings.HealthProtectionEnabled && configured.TargetWeight > 0 && hasFreshPositiveNode {
+			if settings.HealthProtectionEnabled && gatewayRoutingNodeCanReceiveRequests(settings, configured) && hasFreshRoutingNode {
 				applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[result.index], "monitor_record_unavailable")
 			}
 			continue
@@ -435,7 +538,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 		runtime.Nodes[result.index].MonitorSampleAt = &result.record.Time
 		if !gatewayRoutingRecordFreshForHealth(result.record, now) {
 			applyStaleGatewayRoutingNode(&runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
-			if settings.HealthProtectionEnabled && configured.TargetWeight > 0 && hasFreshPositiveNode {
+			if settings.HealthProtectionEnabled && gatewayRoutingNodeCanReceiveRequests(settings, configured) && hasFreshRoutingNode {
 				applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[result.index], "monitor_stale")
 			}
 			continue
@@ -447,7 +550,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 		used := gatewayRoutingTrafficUsed(runtime.Nodes[result.index].TrafficLimitType, result.record.NetTotalUp, result.record.NetTotalDown)
 		runtime.Nodes[result.index].TrafficUsedBytes = used
 		if runtime.Nodes[result.index].Unlimited {
-			if runtime.Nodes[result.index].TargetWeight == 0 {
+			if configured.TargetWeight == 0 {
 				continue
 			}
 			runtime.Nodes[result.index].Status = "unlimited"
@@ -455,7 +558,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 		}
 		percentage := float64(used) / float64(runtime.Nodes[result.index].TrafficLimitBytes) * 100
 		runtime.Nodes[result.index].TrafficUsagePercent = &percentage
-		if runtime.Nodes[result.index].TargetWeight > 0 && settings.TrafficProtectionEnabled && percentage >= settings.TrafficThresholdPercent {
+		if gatewayRoutingNodeCanReceiveRequests(settings, configured) && settings.TrafficProtectionEnabled && percentage >= settings.TrafficThresholdPercent {
 			applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[result.index], "traffic_threshold")
 		}
 	}
@@ -466,6 +569,24 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 		}
 	}
 	return runtime, nil
+}
+
+func gatewayRoutingNodeCanReceiveRequests(settings *GatewayRoutingSettings, node GatewayRoutingNodeSettings) bool {
+	return node.TargetWeight > 0 || (settings != nil && node.ID == settings.OverflowNodeID)
+}
+
+func (s *SettingService) populateGatewayRoutingCapacity(ctx context.Context, runtime *GatewayRoutingRuntime) {
+	if s == nil || s.gatewayRoutingCapacityStore == nil || runtime == nil {
+		return
+	}
+	for i := range runtime.Nodes {
+		count, err := s.gatewayRoutingCapacityStore.Current(ctx, runtime.Nodes[i].ID)
+		if err != nil {
+			runtime.CapacityError = err.Error()
+			return
+		}
+		runtime.Nodes[i].CurrentConcurrency = &count
+	}
 }
 
 func gatewayRoutingRecordFreshForHealth(record gatewayRoutingMonitorRecord, now time.Time) bool {
@@ -486,14 +607,17 @@ func staleGatewayRoutingRuntime(settings *GatewayRoutingSettings, previous *Gate
 		MonitorChecked: now,
 		MonitorStale:   true,
 		MonitorError:   message,
+		OverflowNodeID: settings.OverflowNodeID,
 		Nodes:          make([]GatewayRoutingNodeRuntime, len(settings.Nodes)),
 	}
 	for i, node := range settings.Nodes {
 		runtime.Nodes[i] = GatewayRoutingNodeRuntime{
-			ID:              node.ID,
-			Origin:          node.Origin,
-			TargetWeight:    node.TargetWeight,
-			EffectiveWeight: node.TargetWeight,
+			ID:               node.ID,
+			Origin:           node.Origin,
+			TargetWeight:     node.TargetWeight,
+			EffectiveWeight:  node.TargetWeight,
+			MaxConcurrency:   node.MaxConcurrency,
+			OverflowFallback: node.ID == settings.OverflowNodeID,
 		}
 		applyStaleGatewayRoutingNode(&runtime.Nodes[i], node, previousGatewayRoutingNode(previous, node))
 	}

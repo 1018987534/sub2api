@@ -103,6 +103,10 @@ func TestGatewayRoutingSettingsDefaultsAndValidation(t *testing.T) {
 		settings.Nodes[4].TargetWeight,
 	})
 	require.True(t, settings.HealthProtectionEnabled)
+	require.Empty(t, settings.OverflowNodeID)
+	for _, node := range settings.Nodes {
+		require.Zero(t, node.MaxConcurrency)
+	}
 
 	for i := range settings.Nodes {
 		settings.Nodes[i].TargetWeight = 0
@@ -116,6 +120,15 @@ func TestGatewayRoutingSettingsDefaultsAndValidation(t *testing.T) {
 	settings = DefaultGatewayRoutingSettings()
 	settings.Nodes[0].TargetWeight--
 	require.ErrorContains(t, service.SetGatewayRoutingSettings(context.Background(), settings), "must total 100%")
+
+	settings = DefaultGatewayRoutingSettings()
+	settings.OverflowNodeID = "missing-node"
+	require.ErrorContains(t, service.SetGatewayRoutingSettings(context.Background(), settings), "overflow_node_id")
+
+	settings = DefaultGatewayRoutingSettings()
+	settings.OverflowNodeID = "dmit-us-01"
+	settings.Nodes[0].MaxConcurrency = 50
+	require.NoError(t, service.SetGatewayRoutingSettings(context.Background(), settings))
 }
 
 func TestGatewayRoutingSettingsMigratesLegacyRatiosOnRead(t *testing.T) {
@@ -232,6 +245,54 @@ func TestGatewayRoutingRuntimeAutoDisablesStaleNodeWhenPeerIsFresh(t *testing.T)
 	require.Equal(t, "auto_disabled_monitor_stale", runtime.Nodes[0].Status)
 	require.Equal(t, 40, runtime.Nodes[1].EffectiveWeight)
 	require.False(t, runtime.Nodes[1].MonitorStale)
+}
+
+func TestGatewayRoutingRuntimeProtectsZeroWeightOverflowFallback(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/nodes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+				{"uuid": "primary-uuid", "name": "primary", "traffic_limit": int64(1000), "traffic_limit_type": "sum"},
+				{"uuid": "fallback-uuid", "name": "fallback", "traffic_limit": int64(1000), "traffic_limit_type": "sum"},
+			}})
+		case "/api/records/load":
+			recordTime := now.Add(-30 * time.Second)
+			if r.URL.Query().Get("uuid") == "fallback-uuid" {
+				recordTime = now.Add(-4 * time.Minute)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"records": []map[string]any{
+				{"time": recordTime, "net_total_up": int64(100), "net_total_down": int64(100)},
+			}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	repo := newGatewayRoutingRepoStub()
+	settingService := NewSettingService(repo, &config.Config{})
+	settingService.gatewayRoutingHTTPClient = server.Client()
+	settings := &GatewayRoutingSettings{
+		MonitorURL:               server.URL,
+		TrafficProtectionEnabled: true,
+		HealthProtectionEnabled:  true,
+		TrafficThresholdPercent:  90,
+		OverflowNodeID:           "fallback",
+		Nodes: []GatewayRoutingNodeSettings{
+			{ID: "primary", Origin: "https://primary.example", TargetWeight: 100},
+			{ID: "fallback", Origin: "https://fallback.example", TargetWeight: 0},
+		},
+	}
+	require.NoError(t, settingService.SetGatewayRoutingSettings(context.Background(), settings))
+
+	runtime, err := settingService.GetGatewayRoutingRuntime(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "active", runtime.Nodes[0].Status)
+	require.True(t, runtime.Nodes[1].OverflowFallback)
+	require.True(t, runtime.Nodes[1].AutoDisabled)
+	require.Equal(t, "auto_disabled_monitor_stale", runtime.Nodes[1].Status)
 }
 
 func TestGatewayRoutingRuntimeDoesNotDisableEveryNodeWhenAllHealthSamplesAreStale(t *testing.T) {
