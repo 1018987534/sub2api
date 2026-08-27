@@ -2111,7 +2111,7 @@ describe("admin SettingsView platform quota matrix", () => {
     expect(saveButton).toBeDefined();
 
 	await targetInputs[0].setValue("50");
-	await concurrencyInputs[0].setValue("55");
+	await concurrencyInputs[0].setValue("");
     await flushPromises();
     expect(saveButton!.attributes("disabled")).toBeUndefined();
     await saveButton!.trigger("click");
@@ -2122,9 +2122,11 @@ describe("admin SettingsView platform quota matrix", () => {
 		health_protection_enabled: true,
 		overflow_node_id: "yt-us-01",
 		nodes: expect.arrayContaining([
-		  expect.objectContaining({ id: "bwg-us-01", max_concurrency: 55 }),
+		  expect.objectContaining({ id: "bwg-us-01", max_concurrency: 0 }),
 		]),
 	  }),
     );
+	const payload = updateGatewayRoutingSettings.mock.calls.at(-1)![0];
+	expect(payload.nodes.every((node) => typeof node.max_concurrency === "number")).toBe(true);
   });
 });

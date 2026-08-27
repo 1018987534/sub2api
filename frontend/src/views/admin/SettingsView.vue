@@ -12217,9 +12217,14 @@ async function saveGatewayRoutingSettings() {
         health_protection_enabled:
           gatewayRoutingForm.health_protection_enabled,
         traffic_threshold_percent:
-          gatewayRoutingForm.traffic_threshold_percent,
+          Number(gatewayRoutingForm.traffic_threshold_percent),
 		overflow_node_id: gatewayRoutingForm.overflow_node_id,
-        nodes: gatewayRoutingForm.nodes.map((node) => ({ ...node })),
+        nodes: gatewayRoutingForm.nodes.map((node) => ({
+          id: node.id,
+          origin: node.origin,
+          target_weight: Number(node.target_weight),
+          max_concurrency: Number(node.max_concurrency) || 0,
+        })),
       }),
     );
     appStore.showSuccess(t("admin.settings.gatewayRouting.saved"));
