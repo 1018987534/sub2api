@@ -36,42 +36,25 @@ function originsFor(randomValue, nodes = null) {
   );
 }
 
+function assertOriginSelection(randomValue, expectedFirst, expectedOrigins, nodes = null) {
+  const origins = originsFor(randomValue, nodes);
+  assert.equal(origins[0], expectedFirst);
+  assert.deepEqual([...origins].sort(), [...expectedOrigins].sort());
+}
+
 test("selects the five static nodes with the configured percentages", () => {
-  assert.deepEqual(originsFor(0), [
+  const allOrigins = [
     "https://control.example",
     "https://old.example",
     "https://yt.example",
     "https://new.example",
     "https://dmit.example",
-  ]);
-  assert.deepEqual(originsFor(25), [
-    "https://old.example",
-    "https://control.example",
-    "https://yt.example",
-    "https://new.example",
-    "https://dmit.example",
-  ]);
-  assert.deepEqual(originsFor(45), [
-    "https://yt.example",
-    "https://control.example",
-    "https://old.example",
-    "https://new.example",
-    "https://dmit.example",
-  ]);
-  assert.deepEqual(originsFor(85), [
-    "https://new.example",
-    "https://control.example",
-    "https://old.example",
-    "https://yt.example",
-    "https://dmit.example",
-  ]);
-  assert.deepEqual(originsFor(95), [
-    "https://dmit.example",
-    "https://control.example",
-    "https://old.example",
-    "https://yt.example",
-    "https://new.example",
-  ]);
+  ];
+  assertOriginSelection(0, "https://control.example", allOrigins);
+  assertOriginSelection(25, "https://old.example", allOrigins);
+  assertOriginSelection(45, "https://yt.example", allOrigins);
+  assertOriginSelection(85, "https://new.example", allOrigins);
+  assertOriginSelection(95, "https://dmit.example", allOrigins);
 });
 
 test("uses arbitrary runtime ratios and omits zero-weight nodes", () => {
@@ -81,15 +64,47 @@ test("uses arbitrary runtime ratios and omits zero-weight nodes", () => {
     { origin: "https://yt.example", effective_weight: 3 },
     { origin: "https://new.example", effective_weight: 1 },
   ];
-  assert.deepEqual(originsFor(5, nodes), [
-    "https://yt.example",
-    "https://control.example",
-    "https://new.example",
-  ]);
-  assert.deepEqual(originsFor(8, nodes), [
-    "https://new.example",
+  const activeOrigins = [
     "https://control.example",
     "https://yt.example",
+    "https://new.example",
+  ];
+  assertOriginSelection(5, "https://yt.example", activeOrigins, nodes);
+  assertOriginSelection(8, "https://new.example", activeOrigins, nodes);
+});
+
+test("tries the configured zero-weight capacity fallback before random peers", () => {
+  const nodes = normalizeRuntimeNodes({
+    data: {
+      overflow_node_id: "fallback",
+      nodes: [
+        {
+          id: "primary",
+          origin: "https://primary.example",
+          target_weight: 70,
+          effective_weight: 70,
+        },
+        {
+          id: "peer",
+          origin: "https://peer.example",
+          target_weight: 30,
+          effective_weight: 30,
+        },
+        {
+          id: "fallback",
+          origin: "https://fallback.example",
+          target_weight: 0,
+          effective_weight: 0,
+          auto_disabled: false,
+        },
+      ],
+    },
+  });
+
+  assert.deepEqual(originsFor(0, nodes), [
+    "https://primary.example",
+    "https://fallback.example",
+    "https://peer.example",
   ]);
 });
 
@@ -522,6 +537,118 @@ test("retries a POST after Sub2API rejects the unreadable request body", async (
     resetRoutingConfigCache();
   }
 });
+
+test("retries a POST on explicit node capacity rejection using the configured fallback", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  const runtimeEnv = {
+    ROUTING_CONFIG_URL: "https://config.example/api/v1/gateway-routing/runtime",
+    ROUTING_CONFIG_TOKEN: "runtime-secret",
+  };
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string" ? input : input.url;
+    if (url === runtimeEnv.ROUTING_CONFIG_URL) {
+      return Response.json({
+        data: {
+          overflow_node_id: "fallback",
+          nodes: [
+            {
+              id: "primary",
+              origin: "https://primary.example",
+              target_weight: 100,
+              effective_weight: 100,
+            },
+            {
+              id: "fallback",
+              origin: "https://fallback.example",
+              target_weight: 0,
+              effective_weight: 0,
+              auto_disabled: false,
+            },
+          ],
+        },
+      });
+    }
+    forwarded.push(url);
+    if (forwarded.length === 1) {
+      const capacityNonce = input.headers.get("X-Sub2API-Edge-Capacity-Nonce");
+      return Response.json(
+        { error: { code: "node_capacity", type: "server_error" } },
+        {
+          status: 503,
+          headers: {
+            "X-Sub2API-Edge-Capacity-Nonce": capacityNonce,
+            "X-Sub2API-Ingress-Reject": "node_capacity",
+          },
+        },
+      );
+    }
+    return new Response("recovered");
+  };
+
+  try {
+    await fetchRoutingNodes(runtimeEnv);
+    const response = await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: '{"model":"gpt-5","input":"hello"}',
+      }),
+      runtimeEnv,
+    );
+
+    assert.equal(await response.text(), "recovered");
+    assert.deepEqual(forwarded, [
+      "https://primary.example/v1/responses",
+      "https://fallback.example/v1/responses",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+for (const nonceCase of ["missing", "wrong"]) {
+  test(`does not retry a POST capacity response with ${nonceCase} nonce proof`, async () => {
+    resetRoutingConfigCache();
+    const originalFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async (request) => {
+      calls += 1;
+      const headers = { "X-Sub2API-Ingress-Reject": "node_capacity" };
+      if (nonceCase === "wrong") {
+        headers["X-Sub2API-Edge-Capacity-Nonce"] = `${request.headers.get("X-Sub2API-Edge-Capacity-Nonce")}-wrong`;
+      }
+      return Response.json(
+        { error: { code: "node_capacity", type: "server_error" } },
+        { status: 503, headers },
+      );
+    };
+
+    try {
+      const response = await responsesDispatcher.fetch(
+        new Request("https://public.example/v1/responses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: '{"model":"gpt-5","input":"hello"}',
+        }),
+        {
+          BWG_US_01_ORIGIN: "https://control.example",
+          BWG_US_01_PERCENT: "50",
+          VMISS_US_01_ORIGIN: "https://gateway.example",
+          VMISS_US_01_PERCENT: "50",
+        },
+      );
+
+      assert.equal(response.status, 503);
+      assert.equal(calls, 1);
+    } finally {
+      globalThis.fetch = originalFetch;
+      resetRoutingConfigCache();
+    }
+  });
+}
 
 test("retries a POST after an edge-to-origin TLS handshake failure", async () => {
   resetRoutingConfigCache();

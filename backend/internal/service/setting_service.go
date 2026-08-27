@@ -159,9 +159,12 @@ type SettingService struct {
 
 	// gatewayRoutingRuntimeCache holds the last monitor-backed routing result.
 	// It is deliberately per-service so tests and multiple processes do not share state.
-	gatewayRoutingRuntimeCache atomic.Value // *cachedGatewayRoutingRuntime
-	gatewayRoutingRuntimeSF    singleflight.Group
-	gatewayRoutingHTTPClient   *http.Client
+	gatewayRoutingRuntimeCache   atomic.Value // *cachedGatewayRoutingRuntime
+	gatewayRoutingRuntimeSF      singleflight.Group
+	gatewayRoutingHTTPClient     *http.Client
+	gatewayRoutingCapacityStore  *GatewayNodeCapacityStore
+	gatewayRoutingAdmissionCache atomic.Value // *cachedGatewayRoutingAdmissionSettings
+	gatewayRoutingAdmissionSF    singleflight.Group
 
 	channelMonitorRuntimeListenersMu sync.Mutex
 	channelMonitorRuntimeListeners   []func()

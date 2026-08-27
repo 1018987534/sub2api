@@ -21,6 +21,8 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+const gatewayNodeCapacityNonceHeader = "X-Sub2API-Edge-Capacity-Nonce"
+
 // RegisterGatewayRoutes 注册 API 网关路由（Claude/OpenAI/Gemini 兼容）
 func RegisterGatewayRoutes(
 	r *gin.Engine,
@@ -33,6 +35,7 @@ func RegisterGatewayRoutes(
 	compositeResolver *service.CompositeRouteResolver,
 	cfg *config.Config,
 ) {
+	capacityAdmission := gatewayNodeCapacityAdmission(settingService, cfg)
 	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
 	textBodyLimit := middleware.RequestBodyLimit(cfg.Gateway.TextMaxBodySize)
 	clientRequestID := middleware.ClientRequestID()
@@ -211,24 +214,24 @@ func RegisterGatewayRoutes(
 		gateway.POST("/live", h.OpenAIGateway.Live)
 		gateway.GET("/live/:call_id", h.OpenAIGateway.LiveSideband)
 		// OpenAI Responses API: auto-route based on group platform
-		gateway.POST("/responses", func(c *gin.Context) {
-			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
-				h.OpenAIGateway.Responses(c)
-				return
-			}
-			h.Gateway.Responses(c)
-		})
-		gateway.POST("/responses/*subpath", guardResponsesSubpath(func(c *gin.Context) {
+		gateway.POST("/responses", capacityAdmission(func(c *gin.Context) {
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.Responses(c)
 				return
 			}
 			h.Gateway.Responses(c)
 		}))
+		gateway.POST("/responses/*subpath", capacityAdmission(guardResponsesSubpath(func(c *gin.Context) {
+			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
+				h.OpenAIGateway.Responses(c)
+				return
+			}
+			h.Gateway.Responses(c)
+		})))
 		gateway.POST("/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
-		gateway.GET("/responses", func(c *gin.Context) {
+		gateway.GET("/responses", capacityAdmission(func(c *gin.Context) {
 			h.OpenAIGateway.ResponsesWebSocket(c)
-		})
+		}))
 		// OpenAI Chat Completions API: auto-route based on group platform
 		gateway.POST("/chat/completions", func(c *gin.Context) {
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
@@ -360,12 +363,12 @@ func RegisterGatewayRoutes(
 		}
 		h.Gateway.Responses(c)
 	}
-	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, responsesHandler)
-	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, guardResponsesSubpath(responsesHandler))
+	r.POST("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, capacityAdmission(responsesHandler))
+	r.POST("/responses/*subpath", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, capacityAdmission(guardResponsesSubpath(responsesHandler)))
 	r.POST("/alpha/search", textBodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, h.OpenAIGateway.AlphaSearch)
-	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, func(c *gin.Context) {
+	r.GET("/responses", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, capacityAdmission(func(c *gin.Context) {
 		h.OpenAIGateway.ResponsesWebSocket(c)
-	})
+	}))
 	r.GET("/models", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, modelsHandler)
 	r.POST("/messages/count_tokens", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroupAnthropic, countTokensHandler)
 	codexDirect := r.Group("/backend-api/codex")
@@ -373,12 +376,12 @@ func RegisterGatewayRoutes(
 	{
 		codexDirect.POST("/realtime/calls", h.OpenAIGateway.Live)
 		codexDirect.GET("/:call_id", h.OpenAIGateway.LiveSideband)
-		codexDirect.POST("/responses", responsesHandler)
-		codexDirect.POST("/responses/*subpath", guardResponsesSubpath(responsesHandler))
+		codexDirect.POST("/responses", capacityAdmission(responsesHandler))
+		codexDirect.POST("/responses/*subpath", capacityAdmission(guardResponsesSubpath(responsesHandler)))
 		codexDirect.POST("/alpha/search", textBodyLimit, h.OpenAIGateway.AlphaSearch)
-		codexDirect.GET("/responses", func(c *gin.Context) {
+		codexDirect.GET("/responses", capacityAdmission(func(c *gin.Context) {
 			h.OpenAIGateway.ResponsesWebSocket(c)
-		})
+		}))
 		codexDirect.GET("/models", h.OpenAIGateway.CodexModels)
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
@@ -521,6 +524,7 @@ func RegisterResponsesGatewayRoutes(
 	compositeResolver *service.CompositeRouteResolver,
 	cfg *config.Config,
 ) {
+	capacityAdmission := gatewayNodeCapacityAdmission(settingService, cfg)
 	bodyLimit := middleware.RequestBodyLimit(cfg.Gateway.MaxBodySize)
 	clientRequestID := middleware.ClientRequestID()
 	opsErrorLogger := handler.OpsErrorLoggerMiddleware(opsService)
@@ -538,13 +542,62 @@ func RegisterResponsesGatewayRoutes(
 	chain := []gin.HandlerFunc{bodyLimit, clientRequestID, opsErrorLogger, endpointNorm,
 		gin.HandlerFunc(apiKeyAuth), compositeTarget, requireGroup}
 	for _, path := range []string{"/v1/responses", "/responses", "/backend-api/codex/responses"} {
-		r.POST(path, append(chain, responsesHandler)...)
-		r.POST(path+"/*subpath", append(chain, responsesHandler)...)
+		r.POST(path, append(chain, capacityAdmission(responsesHandler))...)
+		r.POST(path+"/*subpath", append(chain, capacityAdmission(responsesHandler))...)
 	}
 	ws := func(c *gin.Context) { h.OpenAIGateway.ResponsesWebSocket(c) }
 	for _, path := range []string{"/v1/responses", "/responses", "/backend-api/codex/responses"} {
-		r.GET(path, append(chain, ws)...)
+		r.GET(path, append(chain, capacityAdmission(ws))...)
 	}
+}
+
+func gatewayNodeCapacityAdmission(settingService *service.SettingService, cfg *config.Config) func(gin.HandlerFunc) gin.HandlerFunc {
+	return func(next gin.HandlerFunc) gin.HandlerFunc {
+		return func(c *gin.Context) {
+			capacityNonce := strings.TrimSpace(c.GetHeader(gatewayNodeCapacityNonceHeader))
+			c.Request.Header.Del(gatewayNodeCapacityNonceHeader)
+			if settingService == nil || cfg == nil || strings.TrimSpace(cfg.InstanceID) == "" {
+				next(c)
+				return
+			}
+			lease, current, limit, err := settingService.AcquireGatewayRoutingNodeCapacity(c.Request.Context(), cfg.InstanceID)
+			if err != nil {
+				gatewayNodeCapacityReject(c, cfg.InstanceID, "node_capacity_unavailable", capacityNonce, 0, limit)
+				return
+			}
+			if limit <= 0 {
+				next(c)
+				return
+			}
+			if lease == nil {
+				gatewayNodeCapacityReject(c, cfg.InstanceID, "node_capacity", capacityNonce, current, limit)
+				return
+			}
+			defer lease.Release()
+			c.Request = c.Request.WithContext(lease.Context())
+			next(c)
+		}
+	}
+}
+
+func gatewayNodeCapacityReject(c *gin.Context, nodeID, reason, capacityNonce string, current, limit int) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Retry-After", "1")
+	c.Header("X-Sub2API-Ingress-Reject", reason)
+	c.Header("X-Sub2API-Node-ID", nodeID)
+	if capacityNonce != "" {
+		c.Header(gatewayNodeCapacityNonceHeader, capacityNonce)
+	}
+	c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+		"error": gin.H{
+			"code":                reason,
+			"message":             "The selected routing node has no available capacity.",
+			"type":                "server_error",
+			"node_id":             nodeID,
+			"current_concurrency": current,
+			"max_concurrency":     limit,
+		},
+	})
 }
 
 // getGroupPlatform extracts the group platform from the API Key stored in context.

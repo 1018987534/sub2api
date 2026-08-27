@@ -92,6 +92,7 @@ func SetupRouter(
 	}
 
 	// 注册路由
+	settingService.SetGatewayRoutingCapacityStore(service.NewGatewayNodeCapacityStore(redisClient))
 	registerRoutes(r, handlers, jwtAuth, optionalJWTAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, compositeResolver, cfg, db, redisClient)
 
 	return r

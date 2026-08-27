@@ -1302,6 +1302,7 @@ export interface GatewayRoutingNodeSettings {
   id: string;
   origin: string;
   target_weight: number;
+  max_concurrency: number;
 }
 
 export interface GatewayRoutingSettings {
@@ -1309,11 +1310,14 @@ export interface GatewayRoutingSettings {
   traffic_protection_enabled: boolean;
   health_protection_enabled: boolean;
   traffic_threshold_percent: number;
+  overflow_node_id: string;
   nodes: GatewayRoutingNodeSettings[];
 }
 
 export interface GatewayRoutingNodeRuntime extends GatewayRoutingNodeSettings {
   effective_weight: number;
+  current_concurrency: number | null;
+  overflow_fallback: boolean;
   auto_disabled: boolean;
   auto_disabled_reason?: string;
   status:
@@ -1339,6 +1343,8 @@ export interface GatewayRoutingRuntime {
   monitor_checked_at: string;
   monitor_stale: boolean;
   monitor_error?: string;
+  capacity_error?: string;
+  overflow_node_id: string;
   nodes: GatewayRoutingNodeRuntime[];
 }
 

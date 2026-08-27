@@ -311,6 +311,23 @@
                   />
                 </div>
 
+				<div class="max-w-xl">
+				  <label
+					class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+				  >
+					{{ t("admin.settings.gatewayRouting.overflowNode") }}
+				  </label>
+				  <select v-model="gatewayRoutingForm.overflow_node_id" class="input w-full">
+					<option value="">{{ t("admin.settings.gatewayRouting.overflowRandom") }}</option>
+					<option v-for="node in gatewayRoutingForm.nodes" :key="node.id" :value="node.id">
+					  {{ node.id }}
+					</option>
+				  </select>
+				  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+					{{ t("admin.settings.gatewayRouting.overflowNodeHint") }}
+				  </p>
+				</div>
+
                 <div class="overflow-x-auto rounded border border-gray-200 dark:border-dark-700">
                   <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
                     <thead class="bg-gray-50 dark:bg-dark-800">
@@ -324,6 +341,12 @@
                         <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
                           {{ t("admin.settings.gatewayRouting.effectiveWeight") }}
                         </th>
+						<th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+						  {{ t("admin.settings.gatewayRouting.maxConcurrency") }}
+						</th>
+						<th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+						  {{ t("admin.settings.gatewayRouting.currentConcurrency") }}
+						</th>
                         <th class="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
                           {{ t("admin.settings.gatewayRouting.traffic") }}
                         </th>
@@ -359,6 +382,22 @@
                           </template>
                           <template v-else>-</template>
                         </td>
+						<td class="px-4 py-3">
+						  <input
+							v-model.number="node.max_concurrency"
+							type="number"
+							min="0"
+							max="100000"
+							step="1"
+							class="input w-24"
+						  />
+						  <p class="mt-1 whitespace-nowrap text-xs text-gray-400">
+							{{ node.max_concurrency > 0 ? t("admin.settings.gatewayRouting.requests") : t("admin.settings.gatewayRouting.unlimitedConcurrency") }}
+						  </p>
+						</td>
+						<td class="px-4 py-3 font-mono text-sm text-gray-700 dark:text-gray-200">
+						  {{ gatewayRoutingConcurrencyLabel(node.id) }}
+						</td>
                         <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">
                           {{ gatewayRoutingTrafficLabel(node.id) }}
                         </td>
@@ -9229,6 +9268,7 @@ const gatewayRoutingForm = reactive<GatewayRoutingSettings>({
   traffic_protection_enabled: true,
   health_protection_enabled: true,
   traffic_threshold_percent: 90,
+  overflow_node_id: "",
   nodes: [],
 });
 const gatewayRoutingRuntime = ref<GatewayRoutingRuntime | null>(null);
@@ -12132,7 +12172,11 @@ function applyGatewayRoutingResponse(response: {
     response.settings.health_protection_enabled;
   gatewayRoutingForm.traffic_threshold_percent =
     response.settings.traffic_threshold_percent;
-  gatewayRoutingForm.nodes = response.settings.nodes.map((node) => ({ ...node }));
+	gatewayRoutingForm.overflow_node_id = response.settings.overflow_node_id || "";
+	gatewayRoutingForm.nodes = response.settings.nodes.map((node) => ({
+	  ...node,
+	  max_concurrency: Number(node.max_concurrency) || 0,
+	}));
   gatewayRoutingRuntime.value = response.runtime;
 }
 
@@ -12174,6 +12218,7 @@ async function saveGatewayRoutingSettings() {
           gatewayRoutingForm.health_protection_enabled,
         traffic_threshold_percent:
           gatewayRoutingForm.traffic_threshold_percent,
+		overflow_node_id: gatewayRoutingForm.overflow_node_id,
         nodes: gatewayRoutingForm.nodes.map((node) => ({ ...node })),
       }),
     );
@@ -12210,6 +12255,17 @@ function gatewayRoutingTrafficLabel(nodeID: string): string {
   return `${formatGatewayRoutingBytes(node.traffic_used_bytes)} / ${formatGatewayRoutingBytes(
     node.traffic_limit_bytes,
   )} (${node.traffic_usage_percent.toFixed(2)}%)`;
+}
+
+function gatewayRoutingConcurrencyLabel(nodeID: string): string {
+  const node = gatewayRoutingRuntimeByID.value[nodeID];
+  if (!node || node.current_concurrency == null) {
+    return t("admin.settings.gatewayRouting.capacityUnavailable");
+  }
+  if (node.max_concurrency <= 0) {
+    return `${node.current_concurrency} / ${t("admin.settings.gatewayRouting.unlimitedConcurrency")}`;
+  }
+  return `${node.current_concurrency} / ${node.max_concurrency}`;
 }
 
 function gatewayRoutingStatusLabel(nodeID: string): string {

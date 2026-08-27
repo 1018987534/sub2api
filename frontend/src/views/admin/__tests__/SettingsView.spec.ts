@@ -689,22 +689,24 @@ describe("admin SettingsView payment visible method controls", () => {
         traffic_protection_enabled: true,
         health_protection_enabled: true,
         traffic_threshold_percent: 90,
+		overflow_node_id: "yt-us-01",
         nodes: [
-          { id: "bwg-us-01", origin: "https://control.example", target_weight: 50 },
-          { id: "vmiss-us-01", origin: "https://gateway.example", target_weight: 10 },
-          { id: "yt-us-01", origin: "https://yt.example", target_weight: 30 },
-          { id: "vmiss-us-02", origin: "https://gateway-2.example", target_weight: 10 },
+		  { id: "bwg-us-01", origin: "https://control.example", target_weight: 50, max_concurrency: 50 },
+		  { id: "vmiss-us-01", origin: "https://gateway.example", target_weight: 10, max_concurrency: 20 },
+		  { id: "yt-us-01", origin: "https://yt.example", target_weight: 30, max_concurrency: 40 },
+		  { id: "vmiss-us-02", origin: "https://gateway-2.example", target_weight: 10, max_concurrency: 0 },
         ],
       },
       runtime: {
         generated_at: "2026-08-01T00:00:00Z",
         monitor_checked_at: "2026-08-01T00:00:00Z",
         monitor_stale: false,
+		overflow_node_id: "yt-us-01",
         nodes: [
-          { id: "bwg-us-01", origin: "https://control.example", target_weight: 50, effective_weight: 50, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
-          { id: "vmiss-us-01", origin: "https://gateway.example", target_weight: 10, effective_weight: 10, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
-          { id: "yt-us-01", origin: "https://yt.example", target_weight: 30, effective_weight: 30, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
-          { id: "vmiss-us-02", origin: "https://gateway-2.example", target_weight: 10, effective_weight: 10, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
+		  { id: "bwg-us-01", origin: "https://control.example", target_weight: 50, max_concurrency: 50, current_concurrency: 12, overflow_fallback: false, effective_weight: 50, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
+		  { id: "vmiss-us-01", origin: "https://gateway.example", target_weight: 10, max_concurrency: 20, current_concurrency: 3, overflow_fallback: false, effective_weight: 10, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
+		  { id: "yt-us-01", origin: "https://yt.example", target_weight: 30, max_concurrency: 40, current_concurrency: 7, overflow_fallback: true, effective_weight: 30, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
+		  { id: "vmiss-us-02", origin: "https://gateway-2.example", target_weight: 10, max_concurrency: 0, current_concurrency: 0, overflow_fallback: false, effective_weight: 10, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
         ],
       },
     });
@@ -714,9 +716,12 @@ describe("admin SettingsView payment visible method controls", () => {
         generated_at: "2026-08-01T00:00:00Z",
         monitor_checked_at: "2026-08-01T00:00:00Z",
         monitor_stale: false,
+		overflow_node_id: payload.overflow_node_id,
         nodes: payload.nodes.map((node: { id: string; origin: string; target_weight: number }) => ({
           ...node,
           effective_weight: node.target_weight,
+		  current_concurrency: 0,
+		  overflow_fallback: node.id === payload.overflow_node_id,
           auto_disabled: false,
           status: "active",
           traffic_limit_bytes: 0,
@@ -2084,8 +2089,15 @@ describe("admin SettingsView platform quota matrix", () => {
       .findAll("table")
       .find((table) => table.text().includes("bwg-us-01"));
     expect(gatewayTable).toBeDefined();
-    const targetInputs = gatewayTable!.findAll('input[type="number"]');
+	const targetInputs = gatewayTable!
+	  .findAll('input[type="number"]')
+	  .filter((input) => input.attributes("max") === "100");
+	const concurrencyInputs = gatewayTable!
+	  .findAll('input[type="number"]')
+	  .filter((input) => input.attributes("max") === "100000");
     expect(targetInputs).toHaveLength(4);
+	expect(concurrencyInputs).toHaveLength(4);
+	expect(wrapper.text()).toContain("12 / 50");
     expect(wrapper.text()).toContain("admin.settings.gatewayRouting.targetTotal");
     expect(wrapper.text()).toContain("100%");
 
@@ -2098,14 +2110,21 @@ describe("admin SettingsView platform quota matrix", () => {
       .find((button) => button.text().includes("common.save") && button.attributes("disabled") !== undefined);
     expect(saveButton).toBeDefined();
 
-    await targetInputs[0].setValue("50");
+	await targetInputs[0].setValue("50");
+	await concurrencyInputs[0].setValue("55");
     await flushPromises();
     expect(saveButton!.attributes("disabled")).toBeUndefined();
     await saveButton!.trigger("click");
     await flushPromises();
     expect(updateGatewayRoutingSettings).toHaveBeenCalled();
     expect(updateGatewayRoutingSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ health_protection_enabled: true }),
+	  expect.objectContaining({
+		health_protection_enabled: true,
+		overflow_node_id: "yt-us-01",
+		nodes: expect.arrayContaining([
+		  expect.objectContaining({ id: "bwg-us-01", max_concurrency: 55 }),
+		]),
+	  }),
     );
   });
 });
