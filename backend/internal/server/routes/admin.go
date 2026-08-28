@@ -131,7 +131,17 @@ func RegisterAdminRoutes(
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
 		registerSupportChatRoutes(admin, h)
+		registerLotteryRoutes(admin, h)
 	}
+}
+
+func registerLotteryRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	lottery := admin.Group("/lottery")
+	lottery.GET("/config", h.Lottery.AdminConfig)
+	lottery.PUT("/config", h.Lottery.AdminUpdateConfig)
+	lottery.POST("/rounds", h.Lottery.AdminStartRound)
+	lottery.GET("/rounds", h.Lottery.AdminRounds)
+	lottery.POST("/rounds/:id/draw", h.Lottery.AdminDraw)
 }
 
 func registerSupportChatRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

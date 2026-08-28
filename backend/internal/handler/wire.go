@@ -195,9 +195,11 @@ func ProvideHandlers(
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
 	supportChatHandler *SupportChatHandler,
+	lotteryHandler *LotteryHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 	_ *service.OpenAIQuotaAutoResetService,
+	_ *service.LotteryRuntime,
 ) *Handlers {
 	return &Handlers{
 		Auth:             authHandler,
@@ -222,6 +224,7 @@ func ProvideHandlers(
 		AsyncImage:       asyncImageHandler,
 		BatchImage:       batchImageHandler,
 		SupportChat:      supportChatHandler,
+		Lottery:          lotteryHandler,
 	}
 }
 
@@ -238,6 +241,7 @@ var ProviderSet = wire.NewSet(
 	NewChannelMonitorUserHandler,
 	NewChannelMonitorV2Handler,
 	NewSupportChatHandler,
+	NewLotteryHandler,
 	ProvideGatewayHandler,
 	ProvideOpenAIGatewayHandler,
 	NewTotpHandler,

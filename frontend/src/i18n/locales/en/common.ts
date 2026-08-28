@@ -169,6 +169,8 @@ export default {
     affiliateInviteRecords: 'Invite Records',
     affiliateRebateRecords: 'Rebate Records',
     affiliateTransferRecords: 'Transfer Records',
+    lottery: 'Lottery',
+    lotteryManagement: 'Lottery Management',
     profile: 'Profile',
     support: 'Support',
     supportInbox: 'Support Inbox',
@@ -231,6 +233,42 @@ export default {
     attachFile: 'Attach file',
     fileTooLarge: 'Files must be 4 MB or smaller',
     sendFailed: 'Send failed. Please try again.'
+  },
+
+  lottery: {
+    title: 'Lottery',
+    description: 'Join the current round. The draw starts when the participant target is reached and rewards are credited to your balance.',
+    refresh: 'Refresh',
+    prize: 'Reward',
+    prizeCount: 'Prizes',
+    round: 'Round',
+    progress: 'Draw progress',
+    joined: 'You joined this round',
+    join: 'Join lottery',
+    joining: 'Joining...',
+    noRound: 'There is no open lottery round right now',
+    eligibility: 'Eligibility',
+    rechargeRequired: 'A completed recharge is required',
+    minRecharge: 'At least {amount} coins recharged',
+    accountAge: 'Account older than {days} days',
+    waiting: 'The draw runs automatically after the target is reached.',
+    manualWaiting: 'This round will be drawn manually by an administrator.',
+    recentWinners: 'Recent winners',
+    myWinners: 'My winnings',
+    history: 'Recent rounds',
+    columns: { round: 'Round', participants: 'Participants', winners: 'Winners', status: 'Status' },
+    statuses: { open: 'Open', drawn: 'Drawn', cancelled: 'Cancelled' },
+    awarded: 'Reward credited to account balance',
+    notEligible: 'You do not meet the requirements yet',
+    reasons: {
+      recharge_required: 'Complete a recharge to join',
+      recharge_amount: 'Your cumulative recharge is below the requirement',
+      account_age: 'Your account is not old enough',
+      not_eligible: 'You do not meet this round\'s requirements'
+    },
+    loadFailed: 'Failed to load lottery data',
+    joinSuccess: 'You joined successfully. Good luck!',
+    joinFailed: 'Failed to join the lottery'
   },
 
   // Auth

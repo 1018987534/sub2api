@@ -169,6 +169,8 @@ export default {
     affiliateInviteRecords: '邀请记录',
     affiliateRebateRecords: '返利记录',
     affiliateTransferRecords: '提取记录',
+    lottery: '抽奖活动',
+    lotteryManagement: '抽奖管理',
     profile: '个人资料',
     support: '在线客服',
     supportInbox: '客服收件箱',
@@ -231,6 +233,42 @@ export default {
     attachFile: '添加附件',
     fileTooLarge: '文件不能超过 4 MB',
     sendFailed: '发送失败，请稍后重试'
+  },
+
+  lottery: {
+    title: '抽奖活动',
+    description: '参与当前期抽奖，达到人数后自动开奖，中奖奖励直接发放到账户余额。',
+    refresh: '刷新',
+    prize: '奖励余额',
+    prizeCount: '礼品数量',
+    round: '期数',
+    progress: '开奖进度',
+    joined: '您已参与本期抽奖',
+    join: '参与抽奖',
+    joining: '参与中...',
+    noRound: '当前暂无进行中的抽奖',
+    eligibility: '参与条件',
+    rechargeRequired: '需要完成过充值',
+    minRecharge: '累计充值达到 {amount} coins',
+    accountAge: '注册满 {days} 天',
+    waiting: '达到人数后自动开奖，请耐心等待。',
+    manualWaiting: '本期由管理员手动开奖。',
+    recentWinners: '最近中奖',
+    myWinners: '我的中奖记录',
+    history: '最近期数',
+    columns: { round: '期数', participants: '参与人数', winners: '中奖人数', status: '状态' },
+    statuses: { open: '进行中', drawn: '已开奖', cancelled: '已取消' },
+    awarded: '中奖奖励已发放到账户余额',
+    notEligible: '暂不满足参与条件',
+    reasons: {
+      recharge_required: '完成充值后即可参与',
+      recharge_amount: '累计充值金额未达到要求',
+      account_age: '账号注册时间未达到要求',
+      not_eligible: '暂不满足本期参与条件'
+    },
+    loadFailed: '抽奖数据加载失败',
+    joinSuccess: '参与成功，祝您好运！',
+    joinFailed: '参与抽奖失败'
   },
 
   // Auth

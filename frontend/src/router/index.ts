@@ -278,6 +278,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/lottery',
+    name: 'Lottery',
+    component: () => import('@/views/user/LotteryView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Lottery',
+      titleKey: 'lottery.title',
+      descriptionKey: 'lottery.description'
+    }
+  },
+  {
     path: '/available-channels',
     name: 'UserAvailableChannels',
     component: () => import('@/views/user/AvailableChannelsView.vue'),
@@ -578,6 +590,18 @@ const routes: RouteRecordRaw[] = [
     name: 'AdminSupportChat',
     component: () => import('@/views/admin/SupportChatView.vue'),
     meta: { requiresAuth: true, requiresAdmin: true, title: 'Support Inbox', titleKey: 'supportChat.inbox' }
+  },
+  {
+    path: '/admin/lottery',
+    name: 'AdminLottery',
+    component: () => import('@/views/admin/LotteryView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Lottery Management',
+      titleKey: 'admin.lottery.title',
+      descriptionKey: 'admin.lottery.description'
+    }
   },
   {
     path: '/admin/proxies',
