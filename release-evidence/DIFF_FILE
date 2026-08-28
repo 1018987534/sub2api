@@ -1,0 +1,1272 @@
+diff --git a/backend/cmd/server/VERSION b/backend/cmd/server/VERSION
+index 24f1cf39c..c3ba241b6 100644
+--- a/backend/cmd/server/VERSION
++++ b/backend/cmd/server/VERSION
+@@ -1 +1 @@
+-0.1.183
++0.1.184
+diff --git a/backend/cmd/server/wire.go b/backend/cmd/server/wire.go
+index 954b3e3d6..06720610b 100644
+--- a/backend/cmd/server/wire.go
++++ b/backend/cmd/server/wire.go
+@@ -103,7 +103,6 @@ func provideCleanup(
+ 	subscriptionExpiry *service.SubscriptionExpiryService,
+ 	usageCleanup *service.UsageCleanupService,
+ 	idempotencyCleanup *service.IdempotencyCleanupService,
+-	lotteryRuntime *service.LotteryRuntime,
+ 	batchImageCleanup *service.BatchImageCleanupService,
+ 	batchImageWorker *service.BatchImageWorkerRuntime,
+ 	pricing *service.PricingService,
+@@ -243,12 +242,6 @@ func provideCleanup(
+ 				}
+ 				return nil
+ 			}},
+-			{"LotteryRuntime", func() error {
+-				if lotteryRuntime != nil {
+-					lotteryRuntime.Stop()
+-				}
+-				return nil
+-			}},
+ 			{"BatchImageCleanupService", func() error {
+ 				if batchImageCleanup != nil {
+ 					batchImageCleanup.Stop()
+diff --git a/backend/cmd/server/wire_gen.go b/backend/cmd/server/wire_gen.go
+index c5b12c1f6..831442127 100644
+--- a/backend/cmd/server/wire_gen.go
++++ b/backend/cmd/server/wire_gen.go
+@@ -321,12 +321,11 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
+ 	batchImageHandler := handler.ProvideBatchImageHandler(batchImagePublicService, batchImageDownloadService, batchImageCleanupService, openAIGatewayHandler)
+ 	supportChatHandler := handler.NewSupportChatHandler(db, redisClient)
+ 	lotteryService := service.NewLotteryService(db, apiKeyAuthCacheInvalidator, billingCacheService)
+-	lotteryHandler := handler.NewLotteryHandler(lotteryService)
++	lotteryHandler := handler.NewLotteryHandler(lotteryService, authService)
+ 	idempotencyCoordinator := service.ProvideIdempotencyCoordinator(idempotencyRepository, configConfig)
+ 	idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, configConfig)
+ 	openAIQuotaAutoResetService := service.ProvideOpenAIQuotaAutoResetService(accountRepository, openAIQuotaService, rateLimitService, idempotencyCoordinator, auditLogService, settingService, leaderLockCache)
+-	lotteryRuntime := service.ProvideLotteryRuntime(lotteryService)
+-	handlers := handler.ProvideHandlers(authHandler, userHandler, apiKeyHandler, usageHandler, redeemHandler, subscriptionHandler, announcementHandler, channelMonitorUserHandler, channelMonitorV2Handler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, passkeyHandler, handlerPaymentHandler, paymentWebhookHandler, availableChannelHandler, modelPlazaHandler, asyncImageHandler, batchImageHandler, supportChatHandler, lotteryHandler, idempotencyCoordinator, idempotencyCleanupService, openAIQuotaAutoResetService, lotteryRuntime)
++	handlers := handler.ProvideHandlers(authHandler, userHandler, apiKeyHandler, usageHandler, redeemHandler, subscriptionHandler, announcementHandler, channelMonitorUserHandler, channelMonitorV2Handler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, passkeyHandler, handlerPaymentHandler, paymentWebhookHandler, availableChannelHandler, modelPlazaHandler, asyncImageHandler, batchImageHandler, supportChatHandler, lotteryHandler, idempotencyCoordinator, idempotencyCleanupService, openAIQuotaAutoResetService)
+ 	jwtAuthMiddleware := middleware.NewJWTAuthMiddleware(authService, userService, settingService, auditLogService)
+ 	optionalJWTAuthMiddleware := middleware.NewOptionalJWTAuthMiddleware(authService, userService, settingService, auditLogService)
+ 	adminAuthMiddleware := middleware.NewAdminAuthMiddleware(authService, userService, settingService, auditLogService)
+@@ -353,7 +352,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
+ 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService, channelMonitorQuotaFetcher, configConfig)
+ 	channelMonitorV2Aggregator := service.ProvideChannelMonitorV2Aggregator(channelMonitorV2Repository, db, settingService, configConfig)
+ 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
+-	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, cnProviderBalanceCheckService, openAICodexVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, lotteryRuntime, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, auditLogService, openAIQuotaAutoResetService, promptService, pluginManager)
++	v := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, cnProviderBalanceCheckService, openAICodexVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, auditLogService, openAIQuotaAutoResetService, promptService, pluginManager)
+ 	application := &Application{
+ 		Server:        httpServer,
+ 		PromptAudit:   promptService,
+@@ -412,7 +411,6 @@ func provideCleanup(
+ 	subscriptionExpiry *service.SubscriptionExpiryService,
+ 	usageCleanup *service.UsageCleanupService,
+ 	idempotencyCleanup *service.IdempotencyCleanupService,
+-	lotteryRuntime *service.LotteryRuntime,
+ 	batchImageCleanup *service.BatchImageCleanupService,
+ 	batchImageWorker *service.BatchImageWorkerRuntime,
+ 	pricing *service.PricingService,
+@@ -551,12 +549,6 @@ func provideCleanup(
+ 				}
+ 				return nil
+ 			}},
+-			{"LotteryRuntime", func() error {
+-				if lotteryRuntime != nil {
+-					lotteryRuntime.Stop()
+-				}
+-				return nil
+-			}},
+ 			{"BatchImageCleanupService", func() error {
+ 				if batchImageCleanup != nil {
+ 					batchImageCleanup.Stop()
+diff --git a/backend/cmd/server/wire_gen_test.go b/backend/cmd/server/wire_gen_test.go
+index 604184c10..b3581641e 100644
+--- a/backend/cmd/server/wire_gen_test.go
++++ b/backend/cmd/server/wire_gen_test.go
+@@ -47,7 +47,6 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
+ 	emailQueueSvc := service.NewEmailQueueService(nil, 1)
+ 	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+ 	idempotencyCleanupSvc := service.NewIdempotencyCleanupService(nil, cfg)
+-	lotteryRuntimeSvc := service.NewLotteryRuntime(nil)
+ 	schedulerSnapshotSvc := service.NewSchedulerSnapshotService(nil, nil, nil, nil, cfg)
+ 	opsSystemLogSinkSvc := service.NewOpsSystemLogSink(nil)
+ 
+@@ -73,7 +72,6 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
+ 		subscriptionExpirySvc,
+ 		&service.UsageCleanupService{},
+ 		idempotencyCleanupSvc,
+-		lotteryRuntimeSvc,
+ 		&service.BatchImageCleanupService{},
+ 		nil, // batchImageWorker
+ 		pricingSvc,
+diff --git a/backend/internal/handler/lottery_handler.go b/backend/internal/handler/lottery_handler.go
+index 96113dc56..2ac5c3228 100644
+--- a/backend/internal/handler/lottery_handler.go
++++ b/backend/internal/handler/lottery_handler.go
+@@ -11,11 +11,22 @@ import (
+ )
+ 
+ type LotteryHandler struct {
+-	service *service.LotteryService
++	service     *service.LotteryService
++	authService *service.AuthService
+ }
+ 
+-func NewLotteryHandler(lotteryService *service.LotteryService) *LotteryHandler {
+-	return &LotteryHandler{service: lotteryService}
++func NewLotteryHandler(lotteryService *service.LotteryService, authService *service.AuthService) *LotteryHandler {
++	return &LotteryHandler{service: lotteryService, authService: authService}
++}
++
++type lotteryJoinRequest struct {
++	TurnstileToken        string `json:"turnstile_token"`
++	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
++	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
++}
++
++type lotteryProgressRequest struct {
++	ParticipantCount int `json:"participant_count"`
+ }
+ 
+ func (h *LotteryHandler) Current(c *gin.Context) {
+@@ -38,6 +49,19 @@ func (h *LotteryHandler) Join(c *gin.Context) {
+ 		response.Unauthorized(c, "User not authenticated")
+ 		return
+ 	}
++	var req lotteryJoinRequest
++	if err := c.ShouldBindJSON(&req); err != nil {
++		response.BadRequest(c, "Invalid request body")
++		return
++	}
++	if err := h.authService.VerifyRequiredActionCaptcha(c.Request.Context(), service.CaptchaProof{
++		TurnstileToken: req.TurnstileToken,
++		TencentTicket:  req.TencentCaptchaTicket,
++		TencentRandstr: req.TencentCaptchaRandstr,
++	}, ip.GetClientIP(c)); err != nil {
++		response.ErrorFrom(c, err)
++		return
++	}
+ 	result, err := h.service.Join(c.Request.Context(), subject.UserID, ip.GetClientIP(c))
+ 	if err != nil {
+ 		response.ErrorFrom(c, err)
+@@ -46,6 +70,25 @@ func (h *LotteryHandler) Join(c *gin.Context) {
+ 	response.Success(c, result)
+ }
+ 
++func (h *LotteryHandler) AdminUpdateProgress(c *gin.Context) {
++	roundID, err := strconv.ParseInt(c.Param("id"), 10, 64)
++	if err != nil || roundID <= 0 {
++		response.BadRequest(c, "Invalid round ID")
++		return
++	}
++	var req lotteryProgressRequest
++	if err := c.ShouldBindJSON(&req); err != nil {
++		response.BadRequest(c, "Invalid request body")
++		return
++	}
++	round, err := h.service.UpdateProgress(c.Request.Context(), roundID, req.ParticipantCount)
++	if err != nil {
++		response.ErrorFrom(c, err)
++		return
++	}
++	response.Success(c, round)
++}
++
+ func (h *LotteryHandler) Rounds(c *gin.Context) {
+ 	page, pageSize := lotteryPagination(c)
+ 	result, err := h.service.ListPublicRounds(c.Request.Context(), page, pageSize)
+diff --git a/backend/internal/handler/wire.go b/backend/internal/handler/wire.go
+index 224b67131..b87b2a1f3 100644
+--- a/backend/internal/handler/wire.go
++++ b/backend/internal/handler/wire.go
+@@ -199,7 +199,6 @@ func ProvideHandlers(
+ 	_ *service.IdempotencyCoordinator,
+ 	_ *service.IdempotencyCleanupService,
+ 	_ *service.OpenAIQuotaAutoResetService,
+-	_ *service.LotteryRuntime,
+ ) *Handlers {
+ 	return &Handlers{
+ 		Auth:             authHandler,
+diff --git a/backend/internal/server/routes/admin.go b/backend/internal/server/routes/admin.go
+index 5db0e8c69..ba9766242 100644
+--- a/backend/internal/server/routes/admin.go
++++ b/backend/internal/server/routes/admin.go
+@@ -141,6 +141,7 @@ func registerLotteryRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+ 	lottery.PUT("/config", h.Lottery.AdminUpdateConfig)
+ 	lottery.POST("/rounds", h.Lottery.AdminStartRound)
+ 	lottery.GET("/rounds", h.Lottery.AdminRounds)
++	lottery.PUT("/rounds/:id/progress", h.Lottery.AdminUpdateProgress)
+ 	lottery.POST("/rounds/:id/draw", h.Lottery.AdminDraw)
+ }
+ 
+diff --git a/backend/internal/service/auth_service.go b/backend/internal/service/auth_service.go
+index 6c4f42534..3bb0e6708 100644
+--- a/backend/internal/service/auth_service.go
++++ b/backend/internal/service/auth_service.go
+@@ -44,12 +44,13 @@ var (
+ 		"EMAIL_DOMAIN_REGISTRATION_LIMIT",
+ 		"this email domain cannot register another account; use a mainstream email or contact support to add the enterprise domain",
+ 	)
+-	ErrRegDisabled             = infraerrors.Forbidden("REGISTRATION_DISABLED", "registration is currently disabled")
+-	ErrServiceUnavailable      = infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "service temporarily unavailable")
+-	ErrInvitationCodeRequired  = infraerrors.BadRequest("INVITATION_CODE_REQUIRED", "invitation code is required")
+-	ErrInvitationCodeInvalid   = infraerrors.BadRequest("INVITATION_CODE_INVALID", "invalid or used invitation code")
+-	ErrOAuthInvitationRequired = infraerrors.Forbidden("OAUTH_INVITATION_REQUIRED", "invitation code required to complete oauth registration")
+-	ErrCaptchaProviderConflict = infraerrors.ServiceUnavailable("CAPTCHA_PROVIDER_CONFLICT", "multiple captcha providers are enabled")
++	ErrRegDisabled                = infraerrors.Forbidden("REGISTRATION_DISABLED", "registration is currently disabled")
++	ErrServiceUnavailable         = infraerrors.ServiceUnavailable("SERVICE_UNAVAILABLE", "service temporarily unavailable")
++	ErrInvitationCodeRequired     = infraerrors.BadRequest("INVITATION_CODE_REQUIRED", "invitation code is required")
++	ErrInvitationCodeInvalid      = infraerrors.BadRequest("INVITATION_CODE_INVALID", "invalid or used invitation code")
++	ErrOAuthInvitationRequired    = infraerrors.Forbidden("OAUTH_INVITATION_REQUIRED", "invitation code required to complete oauth registration")
++	ErrCaptchaProviderConflict    = infraerrors.ServiceUnavailable("CAPTCHA_PROVIDER_CONFLICT", "multiple captcha providers are enabled")
++	ErrActionCaptchaNotConfigured = infraerrors.ServiceUnavailable("ACTION_CAPTCHA_NOT_CONFIGURED", "an action captcha provider is required")
+ )
+ 
+ // maxTokenLength 限制 token 大小，避免超长 header 触发解析时的异常内存分配。
+@@ -501,6 +502,38 @@ func (s *AuthService) VerifyActionCaptchaIfEnabled(ctx context.Context, proof Ca
+ 	)
+ }
+ 
++// VerifyRequiredActionCaptcha requires a slider-style provider for high-risk actions.
++// Cloudflare Turnstile is intentionally excluded because it is not an interactive slider.
++func (s *AuthService) VerifyRequiredActionCaptcha(ctx context.Context, proof CaptchaProof, remoteIP string) error {
++	if s == nil || s.settingService == nil {
++		return ErrServiceUnavailable
++	}
++
++	providerConfig, err := s.settingService.GetCaptchaProviderConfig(ctx)
++	if err != nil {
++		logger.LegacyPrintf("service.auth", "%s", "[Auth] Failed to read captcha provider settings")
++		return ErrServiceUnavailable
++	}
++	tencentEnabled := providerConfig.Tencent.Enabled
++	aliyunEnabled := providerConfig.Aliyun.Enabled
++	if captchaProvidersConflict(providerConfig.TurnstileEnabled, tencentEnabled, aliyunEnabled) {
++		return ErrCaptchaProviderConflict
++	}
++	if aliyunEnabled {
++		if s.aliyunCaptchaService == nil {
++			return ErrAliyunCaptchaNotConfigured
++		}
++		return s.aliyunCaptchaService.VerifyParamWithConfig(ctx, providerConfig.Aliyun, proof.TurnstileToken)
++	}
++	if tencentEnabled {
++		if s.tencentCaptchaService == nil {
++			return ErrTencentCaptchaNotConfigured
++		}
++		return s.tencentCaptchaService.VerifyTicketWithConfig(ctx, providerConfig.Tencent, proof.TencentTicket, proof.TencentRandstr, remoteIP)
++	}
++	return ErrActionCaptchaNotConfigured
++}
++
+ // VerifyTurnstileForRegister 保留旧内部接口，生产 handler 使用 VerifyCaptchaForRegister。
+ func (s *AuthService) VerifyTurnstileForRegister(ctx context.Context, token, remoteIP, verifyCode string) error {
+ 	return s.VerifyCaptchaForRegister(ctx, CaptchaProof{TurnstileToken: token}, remoteIP, verifyCode)
+diff --git a/backend/internal/service/auth_service_captcha_test.go b/backend/internal/service/auth_service_captcha_test.go
+index 343ff4ca5..b34311ae0 100644
+--- a/backend/internal/service/auth_service_captcha_test.go
++++ b/backend/internal/service/auth_service_captcha_test.go
+@@ -186,3 +186,24 @@ func TestVerifyActionCaptchaIfEnabledFailsClosedOnSettingReadError(t *testing.T)
+ 
+ 	require.ErrorIs(t, err, ErrServiceUnavailable)
+ }
++
++func TestVerifyRequiredActionCaptchaRejectsMissingSliderProvider(t *testing.T) {
++	svc := newAuthServiceForCaptchaTest(map[string]string{}, false, nil, nil)
++
++	err := svc.VerifyRequiredActionCaptcha(context.Background(), CaptchaProof{}, "203.0.113.10")
++
++	require.ErrorIs(t, err, ErrActionCaptchaNotConfigured)
++}
++
++func TestVerifyRequiredActionCaptchaVerifiesTencentProof(t *testing.T) {
++	verifier := &tencentCaptchaVerifierStub{response: &TencentCaptchaVerifyResponse{CaptchaCode: 1}}
++	svc := newAuthServiceForCaptchaTest(tencentCaptchaSettings(), false, nil, verifier)
++
++	err := svc.VerifyRequiredActionCaptcha(context.Background(), CaptchaProof{
++		TencentTicket:  "ticket",
++		TencentRandstr: "@rand",
++	}, "203.0.113.10")
++
++	require.NoError(t, err)
++	require.Equal(t, 1, verifier.calls)
++}
+diff --git a/backend/internal/service/lottery_service.go b/backend/internal/service/lottery_service.go
+index cebb78984..a31991904 100644
+--- a/backend/internal/service/lottery_service.go
++++ b/backend/internal/service/lottery_service.go
+@@ -2,15 +2,12 @@ package service
+ 
+ import (
+ 	"context"
+-	"crypto/rand"
+ 	"database/sql"
+ 	"errors"
+ 	"fmt"
+ 	"log/slog"
+ 	"math"
+-	"math/big"
+ 	"strings"
+-	"sync"
+ 	"time"
+ 
+ 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+@@ -23,7 +20,6 @@ const (
+ 	LotteryRoundModeManual        = "manual"
+ 	LotteryRoundStatusOpen        = "open"
+ 	LotteryRoundStatusDrawn       = "drawn"
+-	lotteryRuntimeInterval        = 5 * time.Second
+ 	lotteryAdvisoryLock     int64 = 0x4c4f5454455259
+ )
+ 
+@@ -32,9 +28,10 @@ var (
+ 	ErrLotteryNoOpenRound                  = infraerrors.Conflict("LOTTERY_NO_OPEN_ROUND", "there is no open lottery round")
+ 	ErrLotteryRoundAlreadyOpen             = infraerrors.Conflict("LOTTERY_ROUND_ALREADY_OPEN", "an open lottery round already exists")
+ 	ErrLotteryAlreadyJoined                = infraerrors.Conflict("LOTTERY_ALREADY_JOINED", "you already joined this lottery round")
+-	ErrLotteryRealSlotsFull                = infraerrors.Conflict("LOTTERY_REAL_SLOTS_FULL", "all real participant slots are reserved")
++	ErrLotteryProgressFull                 = infraerrors.Conflict("LOTTERY_PROGRESS_FULL", "lottery progress is already full")
+ 	ErrLotteryNotEligible                  = infraerrors.Forbidden("LOTTERY_NOT_ELIGIBLE", "you are not eligible for this lottery round")
+ 	ErrLotteryInsufficientRealParticipants = infraerrors.BadRequest("LOTTERY_NOT_ENOUGH_REAL_PARTICIPANTS", "not enough real participants to draw all prizes")
++	ErrLotteryProgressInvalid              = infraerrors.BadRequest("LOTTERY_PROGRESS_INVALID", "participant progress must be between the real participant count and the draw threshold")
+ )
+ 
+ type LotteryConfig struct {
+@@ -44,9 +41,6 @@ type LotteryConfig struct {
+ 	PrizeAmount          float64   `json:"prize_amount"`
+ 	DrawMode             string    `json:"draw_mode"`
+ 	NextRoundMode        string    `json:"next_round_mode"`
+-	ActorPercentage      float64   `json:"actor_percentage"`
+-	ActorJoinMinSeconds  int       `json:"actor_join_min_seconds"`
+-	ActorJoinMaxSeconds  int       `json:"actor_join_max_seconds"`
+ 	RequireRecharge      bool      `json:"require_recharge"`
+ 	MinRechargeAmount    float64   `json:"min_recharge_amount"`
+ 	MinAccountAgeDays    int       `json:"min_account_age_days"`
+@@ -63,20 +57,15 @@ type LotteryRound struct {
+ 	PrizeAmount          float64    `json:"prize_amount"`
+ 	DrawMode             string     `json:"draw_mode"`
+ 	NextRoundMode        string     `json:"next_round_mode"`
+-	ActorPercentage      float64    `json:"actor_percentage"`
+-	ActorTargetCount     int        `json:"actor_target_count"`
+-	ActorJoinMinSeconds  int        `json:"actor_join_min_seconds"`
+-	ActorJoinMaxSeconds  int        `json:"actor_join_max_seconds"`
+ 	RequireRecharge      bool       `json:"require_recharge"`
+ 	MinRechargeAmount    float64    `json:"min_recharge_amount"`
+ 	MinAccountAgeDays    int        `json:"min_account_age_days"`
+ 	RecentRechargeDays   int        `json:"recent_recharge_days"`
+ 	ParticipantCount     int        `json:"participant_count"`
+-	ActorCount           int        `json:"actor_count"`
++	ManualProgressCount  int        `json:"manual_progress_count"`
+ 	RealParticipantCount int        `json:"real_participant_count"`
+ 	WinnerCount          int        `json:"winner_count"`
+ 	UniqueIPCount        int        `json:"unique_ip_count"`
+-	NextActorAt          *time.Time `json:"next_actor_at,omitempty"`
+ 	StartedAt            time.Time  `json:"started_at"`
+ 	DrawnAt              *time.Time `json:"drawn_at,omitempty"`
+ 	UpdatedAt            time.Time  `json:"updated_at"`
+@@ -159,7 +148,6 @@ type LotteryService struct {
+ 	authCache    APIKeyAuthCacheInvalidator
+ 	billingCache *BillingCacheService
+ 	now          func() time.Time
+-	randomDelay  func(minSeconds, maxSeconds int) time.Duration
+ }
+ 
+ func NewLotteryService(db *sql.DB, authCache APIKeyAuthCacheInvalidator, billingCache *BillingCacheService) *LotteryService {
+@@ -168,30 +156,9 @@ func NewLotteryService(db *sql.DB, authCache APIKeyAuthCacheInvalidator, billing
+ 		authCache:    authCache,
+ 		billingCache: billingCache,
+ 		now:          time.Now,
+-		randomDelay:  lotteryRandomDelay,
+ 	}
+ }
+ 
+-func lotteryRandomDelay(minSeconds, maxSeconds int) time.Duration {
+-	if maxSeconds <= minSeconds {
+-		return time.Duration(minSeconds) * time.Second
+-	}
+-	span := int64(maxSeconds-minSeconds) + 1
+-	n, err := rand.Int(rand.Reader, big.NewInt(span))
+-	if err != nil {
+-		return time.Duration(minSeconds) * time.Second
+-	}
+-	return time.Duration(int64(minSeconds)+n.Int64()) * time.Second
+-}
+-
+-func lotteryActorTarget(threshold int, percentage float64) int {
+-	return int(math.Floor(float64(threshold) * percentage / 100))
+-}
+-
+-func lotteryRealSlotCapacity(threshold, actorTarget int) int {
+-	return threshold - actorTarget
+-}
+-
+ func ValidateLotteryConfig(cfg LotteryConfig) error {
+ 	if cfg.ParticipantThreshold < 2 || cfg.ParticipantThreshold > 100000 {
+ 		return infraerrors.BadRequest("LOTTERY_CONFIG_INVALID", "participant threshold must be between 2 and 100000")
+@@ -208,21 +175,14 @@ func ValidateLotteryConfig(cfg LotteryConfig) error {
+ 	if cfg.NextRoundMode != LotteryRoundModeAuto && cfg.NextRoundMode != LotteryRoundModeManual {
+ 		return infraerrors.BadRequest("LOTTERY_CONFIG_INVALID", "next round mode must be auto or manual")
+ 	}
+-	if cfg.ActorPercentage < 0 || cfg.ActorPercentage > 95 || math.IsNaN(cfg.ActorPercentage) || math.IsInf(cfg.ActorPercentage, 0) {
+-		return infraerrors.BadRequest("LOTTERY_CONFIG_INVALID", "actor percentage must be between 0 and 95")
+-	}
+-	if cfg.ActorJoinMinSeconds < 5 || cfg.ActorJoinMaxSeconds > 86400 || cfg.ActorJoinMaxSeconds < cfg.ActorJoinMinSeconds {
+-		return infraerrors.BadRequest("LOTTERY_CONFIG_INVALID", "actor join interval must be between 5 and 86400 seconds")
+-	}
+ 	if cfg.MinRechargeAmount < 0 || math.IsNaN(cfg.MinRechargeAmount) || math.IsInf(cfg.MinRechargeAmount, 0) {
+ 		return infraerrors.BadRequest("LOTTERY_CONFIG_INVALID", "minimum recharge amount cannot be negative")
+ 	}
+ 	if cfg.MinAccountAgeDays < 0 || cfg.MinAccountAgeDays > 36500 || cfg.RecentRechargeDays < 0 || cfg.RecentRechargeDays > 36500 {
+ 		return infraerrors.BadRequest("LOTTERY_CONFIG_INVALID", "eligibility day values must be between 0 and 36500")
+ 	}
+-	realSlots := lotteryRealSlotCapacity(cfg.ParticipantThreshold, lotteryActorTarget(cfg.ParticipantThreshold, cfg.ActorPercentage))
+-	if cfg.PrizeCount > realSlots {
+-		return infraerrors.BadRequest("LOTTERY_CONFIG_INVALID", "prize count cannot exceed real participant slots")
++	if cfg.PrizeCount > cfg.ParticipantThreshold {
++		return infraerrors.BadRequest("LOTTERY_CONFIG_INVALID", "prize count cannot exceed participant threshold")
+ 	}
+ 	return nil
+ }
+@@ -230,7 +190,6 @@ func ValidateLotteryConfig(cfg LotteryConfig) error {
+ const lotteryConfigSelect = `
+ 	SELECT COALESCE((SELECT LOWER(TRIM(value)) = 'true' FROM settings WHERE key = 'lottery_enabled'), FALSE),
+ 	       participant_threshold, prize_count, prize_amount, draw_mode, next_round_mode,
+-	       actor_percentage, actor_join_min_seconds, actor_join_max_seconds,
+ 	       require_recharge, min_recharge_amount, min_account_age_days,
+ 	       recent_recharge_days, updated_at
+ 	FROM lottery_config WHERE id = 1`
+@@ -243,8 +202,7 @@ func scanLotteryConfig(row lotteryRowScanner) (LotteryConfig, error) {
+ 	var cfg LotteryConfig
+ 	err := row.Scan(
+ 		&cfg.Enabled, &cfg.ParticipantThreshold, &cfg.PrizeCount, &cfg.PrizeAmount,
+-		&cfg.DrawMode, &cfg.NextRoundMode, &cfg.ActorPercentage,
+-		&cfg.ActorJoinMinSeconds, &cfg.ActorJoinMaxSeconds, &cfg.RequireRecharge,
++		&cfg.DrawMode, &cfg.NextRoundMode, &cfg.RequireRecharge,
+ 		&cfg.MinRechargeAmount, &cfg.MinAccountAgeDays, &cfg.RecentRechargeDays, &cfg.UpdatedAt,
+ 	)
+ 	return cfg, err
+@@ -269,13 +227,11 @@ func (s *LotteryService) UpdateConfig(ctx context.Context, cfg LotteryConfig) (L
+ 
+ 	_, err = tx.ExecContext(ctx, `
+ 		UPDATE lottery_config SET participant_threshold=$1, prize_count=$2, prize_amount=$3,
+-			draw_mode=$4, next_round_mode=$5, actor_percentage=$6,
+-			actor_join_min_seconds=$7, actor_join_max_seconds=$8, require_recharge=$9,
+-			min_recharge_amount=$10, min_account_age_days=$11, recent_recharge_days=$12,
++			draw_mode=$4, next_round_mode=$5, require_recharge=$6,
++			min_recharge_amount=$7, min_account_age_days=$8, recent_recharge_days=$9,
+ 			updated_at=NOW() WHERE id=1`,
+ 		cfg.ParticipantThreshold, cfg.PrizeCount, cfg.PrizeAmount, cfg.DrawMode,
+-		cfg.NextRoundMode, cfg.ActorPercentage, cfg.ActorJoinMinSeconds,
+-		cfg.ActorJoinMaxSeconds, cfg.RequireRecharge, cfg.MinRechargeAmount,
++		cfg.NextRoundMode, cfg.RequireRecharge, cfg.MinRechargeAmount,
+ 		cfg.MinAccountAgeDays, cfg.RecentRechargeDays,
+ 	)
+ 	if err != nil {
+@@ -293,25 +249,24 @@ func (s *LotteryService) UpdateConfig(ctx context.Context, cfg LotteryConfig) (L
+ 
+ const lotteryRoundColumns = `
+ 	r.id,r.round_no,r.status,r.participant_threshold,r.prize_count,r.prize_amount,
+-	r.draw_mode,r.next_round_mode,r.actor_percentage,r.actor_target_count,
+-	r.actor_join_min_seconds,r.actor_join_max_seconds,r.require_recharge,
++	r.draw_mode,r.next_round_mode,r.require_recharge,
+ 	r.min_recharge_amount,r.min_account_age_days,r.recent_recharge_days,
+-	r.participant_count,r.actor_count,r.winner_count,
++	r.participant_count,r.manual_progress_count,
++	COALESCE((SELECT COUNT(*) FROM lottery_participants p WHERE p.round_id=r.id AND p.is_actor=FALSE),0),
++	r.winner_count,
+ 	COALESCE((SELECT COUNT(DISTINCT p.client_ip) FROM lottery_participants p WHERE p.round_id=r.id AND p.client_ip IS NOT NULL AND p.client_ip<>''),0),
+-	r.next_actor_at,r.started_at,r.drawn_at,r.updated_at`
++	r.started_at,r.drawn_at,r.updated_at`
+ 
+ func scanLotteryRound(row lotteryRowScanner) (LotteryRound, error) {
+ 	var round LotteryRound
+ 	err := row.Scan(
+ 		&round.ID, &round.RoundNo, &round.Status, &round.ParticipantThreshold,
+ 		&round.PrizeCount, &round.PrizeAmount, &round.DrawMode, &round.NextRoundMode,
+-		&round.ActorPercentage, &round.ActorTargetCount, &round.ActorJoinMinSeconds,
+-		&round.ActorJoinMaxSeconds, &round.RequireRecharge, &round.MinRechargeAmount,
++		&round.RequireRecharge, &round.MinRechargeAmount,
+ 		&round.MinAccountAgeDays, &round.RecentRechargeDays, &round.ParticipantCount,
+-		&round.ActorCount, &round.WinnerCount, &round.UniqueIPCount, &round.NextActorAt,
++		&round.ManualProgressCount, &round.RealParticipantCount, &round.WinnerCount, &round.UniqueIPCount,
+ 		&round.StartedAt, &round.DrawnAt, &round.UpdatedAt,
+ 	)
+-	round.RealParticipantCount = round.ParticipantCount - round.ActorCount
+ 	return round, err
+ }
+ 
+@@ -363,12 +318,6 @@ func (s *LotteryService) insertRoundTx(ctx context.Context, tx *sql.Tx, cfg Lott
+ 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(round_no),0)+1 FROM lottery_rounds`).Scan(&roundNo); err != nil {
+ 		return LotteryRound{}, err
+ 	}
+-	actorTarget := lotteryActorTarget(cfg.ParticipantThreshold, cfg.ActorPercentage)
+-	var nextActorAt *time.Time
+-	if actorTarget > 0 {
+-		next := s.now().Add(s.randomDelay(cfg.ActorJoinMinSeconds, cfg.ActorJoinMaxSeconds))
+-		nextActorAt = &next
+-	}
+ 	var creator any
+ 	if createdBy > 0 {
+ 		creator = createdBy
+@@ -378,15 +327,14 @@ func (s *LotteryService) insertRoundTx(ctx context.Context, tx *sql.Tx, cfg Lott
+ 		actor_percentage,actor_target_count,actor_join_min_seconds,actor_join_max_seconds,
+ 		require_recharge,min_recharge_amount,min_account_age_days,recent_recharge_days,
+ 		next_actor_at,created_by
+-	) VALUES ($1,'open',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
++	) VALUES ($1,'open',$2,$3,$4,$5,$6,0,0,5,5,$7,$8,$9,$10,NULL,$11)
+ 	RETURNING id`
+ 	var roundID int64
+ 	err = tx.QueryRowContext(ctx, query,
+ 		roundNo, cfg.ParticipantThreshold, cfg.PrizeCount, cfg.PrizeAmount,
+-		cfg.DrawMode, cfg.NextRoundMode, cfg.ActorPercentage, actorTarget,
+-		cfg.ActorJoinMinSeconds, cfg.ActorJoinMaxSeconds, cfg.RequireRecharge,
++		cfg.DrawMode, cfg.NextRoundMode, cfg.RequireRecharge,
+ 		cfg.MinRechargeAmount, cfg.MinAccountAgeDays, cfg.RecentRechargeDays,
+-		nextActorAt, creator,
++		creator,
+ 	).Scan(&roundID)
+ 	if err != nil {
+ 		if strings.Contains(strings.ToLower(err.Error()), "idx_lottery_rounds_one_open") {
+@@ -517,8 +465,8 @@ func (s *LotteryService) Join(ctx context.Context, userID int64, clientIP string
+ 	if !errors.Is(err, sql.ErrNoRows) {
+ 		return LotteryJoinResult{}, err
+ 	}
+-	if round.RealParticipantCount >= lotteryRealSlotCapacity(round.ParticipantThreshold, round.ActorTargetCount) {
+-		return LotteryJoinResult{}, ErrLotteryRealSlotsFull
++	if round.ParticipantCount >= round.ParticipantThreshold {
++		return LotteryJoinResult{}, ErrLotteryProgressFull
+ 	}
+ 	eligibility, err := s.checkEligibilityTx(ctx, tx, userID, round)
+ 	if err != nil {
+@@ -615,6 +563,59 @@ func (s *LotteryService) ListRounds(ctx context.Context, page, pageSize int) (Lo
+ 	return LotteryRoundPage{Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pages}, nil
+ }
+ 
++func (s *LotteryService) UpdateProgress(ctx context.Context, roundID int64, participantCount int) (LotteryRound, error) {
++	tx, err := s.db.BeginTx(ctx, nil)
++	if err != nil {
++		return LotteryRound{}, err
++	}
++	defer func() { _ = tx.Rollback() }()
++
++	round, err := scanLotteryRound(tx.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.id=$1 FOR UPDATE OF r`, roundID))
++	if errors.Is(err, sql.ErrNoRows) {
++		return LotteryRound{}, ErrLotteryNoOpenRound
++	}
++	if err != nil {
++		return LotteryRound{}, err
++	}
++	if round.Status != LotteryRoundStatusOpen {
++		return LotteryRound{}, infraerrors.Conflict("LOTTERY_ROUND_CLOSED", "lottery round is already closed")
++	}
++	if err := validateLotteryProgress(round, participantCount); err != nil {
++		return LotteryRound{}, err
++	}
++	manualProgressCount := participantCount - round.RealParticipantCount
++	if _, err := tx.ExecContext(ctx, `
++		UPDATE lottery_rounds
++		SET participant_count=$2,manual_progress_count=$3,updated_at=NOW()
++		WHERE id=$1`, round.ID, participantCount, manualProgressCount); err != nil {
++		return LotteryRound{}, err
++	}
++	updated, err := scanLotteryRound(tx.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.id=$1`, round.ID))
++	if err != nil {
++		return LotteryRound{}, err
++	}
++	if err := tx.Commit(); err != nil {
++		return LotteryRound{}, err
++	}
++	if updated.DrawMode == LotteryDrawModeAuto && updated.ParticipantCount >= updated.ParticipantThreshold {
++		go s.advanceWithTimeout()
++	}
++	return updated, nil
++}
++
++func validateLotteryProgress(round LotteryRound, participantCount int) error {
++	if participantCount < round.RealParticipantCount || participantCount > round.ParticipantThreshold {
++		return ErrLotteryProgressInvalid.WithMetadata(map[string]string{
++			"real_participant_count": fmt.Sprintf("%d", round.RealParticipantCount),
++			"participant_threshold":  fmt.Sprintf("%d", round.ParticipantThreshold),
++		})
++	}
++	if participantCount == round.ParticipantThreshold && round.RealParticipantCount < round.PrizeCount {
++		return ErrLotteryInsufficientRealParticipants
++	}
++	return nil
++}
++
+ func (s *LotteryService) ListPublicRounds(ctx context.Context, page, pageSize int) (LotteryPublicRoundPage, error) {
+ 	adminPage, err := s.ListRounds(ctx, page, pageSize)
+ 	if err != nil {
+@@ -755,10 +756,10 @@ func (s *LotteryService) drawRoundTx(ctx context.Context, tx *sql.Tx, roundID in
+ 		winners = append(winners, LotteryWinner{ID: winnerID, RoundID: round.ID, RoundNo: round.RoundNo, Email: MaskLotteryEmail(candidate.email), PrizeAmount: round.PrizeAmount, AwardedAt: now, ParticipatedAt: candidate.joinedAt})
+ 		winnerIDs = append(winnerIDs, candidate.userID)
+ 	}
+-	if _, err := tx.ExecContext(ctx, `UPDATE lottery_rounds SET status='drawn',winner_count=$2,drawn_at=$3,next_actor_at=NULL,updated_at=$3 WHERE id=$1`, round.ID, len(winners), now); err != nil {
++	if _, err := tx.ExecContext(ctx, `UPDATE lottery_rounds SET status='drawn',winner_count=$2,drawn_at=$3,updated_at=$3 WHERE id=$1`, round.ID, len(winners), now); err != nil {
+ 		return LotteryDrawResult{}, nil, err
+ 	}
+-	round.Status, round.WinnerCount, round.DrawnAt, round.NextActorAt, round.UpdatedAt = LotteryRoundStatusDrawn, len(winners), &now, nil, now
++	round.Status, round.WinnerCount, round.DrawnAt, round.UpdatedAt = LotteryRoundStatusDrawn, len(winners), &now, now
+ 	result := LotteryDrawResult{Round: round, Winners: winners}
+ 	if round.NextRoundMode == LotteryRoundModeAuto && cfg.Enabled {
+ 		next, err := s.insertRoundTx(ctx, tx, cfg, 0)
+@@ -813,23 +814,6 @@ func (s *LotteryService) Advance(ctx context.Context) error {
+ 	if err != nil {
+ 		return err
+ 	}
+-	now := s.now()
+-	if round.ActorCount < round.ActorTargetCount && round.ParticipantCount < round.ParticipantThreshold && round.NextActorAt != nil && !round.NextActorAt.After(now) {
+-		if _, err := tx.ExecContext(ctx, `INSERT INTO lottery_participants (round_id,user_id,is_actor,joined_at) VALUES ($1,NULL,TRUE,$2)`, round.ID, now); err != nil {
+-			return err
+-		}
+-		round.ActorCount++
+-		round.ParticipantCount++
+-		var nextActorAt *time.Time
+-		if round.ActorCount < round.ActorTargetCount && round.ParticipantCount < round.ParticipantThreshold {
+-			next := now.Add(s.randomDelay(round.ActorJoinMinSeconds, round.ActorJoinMaxSeconds))
+-			nextActorAt = &next
+-		}
+-		if _, err := tx.ExecContext(ctx, `UPDATE lottery_rounds SET participant_count=$2,actor_count=$3,next_actor_at=$4,updated_at=$5 WHERE id=$1`, round.ID, round.ParticipantCount, round.ActorCount, nextActorAt, now); err != nil {
+-			return err
+-		}
+-		round.NextActorAt = nextActorAt
+-	}
+ 	var winnerIDs []int64
+ 	if round.DrawMode == LotteryDrawModeAuto && round.ParticipantCount >= round.ParticipantThreshold {
+ 		_, winnerIDs, err = s.drawRoundTx(ctx, tx, round.ID, false, cfg)
+@@ -851,49 +835,3 @@ func (s *LotteryService) advanceWithTimeout() {
+ 		slog.Error("lottery advance failed", "error", err)
+ 	}
+ }
+-
+-type LotteryRuntime struct {
+-	service  *LotteryService
+-	stopCh   chan struct{}
+-	stopOnce sync.Once
+-	wg       sync.WaitGroup
+-}
+-
+-func NewLotteryRuntime(service *LotteryService) *LotteryRuntime {
+-	return &LotteryRuntime{service: service, stopCh: make(chan struct{})}
+-}
+-
+-func ProvideLotteryRuntime(service *LotteryService) *LotteryRuntime {
+-	runtime := NewLotteryRuntime(service)
+-	runtime.Start()
+-	return runtime
+-}
+-
+-func (r *LotteryRuntime) Start() {
+-	if r == nil || r.service == nil || r.service.db == nil {
+-		return
+-	}
+-	r.wg.Add(1)
+-	go func() {
+-		defer r.wg.Done()
+-		ticker := time.NewTicker(lotteryRuntimeInterval)
+-		defer ticker.Stop()
+-		r.service.advanceWithTimeout()
+-		for {
+-			select {
+-			case <-ticker.C:
+-				r.service.advanceWithTimeout()
+-			case <-r.stopCh:
+-				return
+-			}
+-		}
+-	}()
+-}
+-
+-func (r *LotteryRuntime) Stop() {
+-	if r == nil {
+-		return
+-	}
+-	r.stopOnce.Do(func() { close(r.stopCh) })
+-	r.wg.Wait()
+-}
+diff --git a/backend/internal/service/lottery_service_test.go b/backend/internal/service/lottery_service_test.go
+index ea200c515..e3a41a16e 100644
+--- a/backend/internal/service/lottery_service_test.go
++++ b/backend/internal/service/lottery_service_test.go
+@@ -7,36 +7,40 @@ import (
+ 	"github.com/stretchr/testify/require"
+ )
+ 
+-func TestValidateLotteryConfigDefaultsAndActorBoundary(t *testing.T) {
++func TestValidateLotteryConfigDefaultsAndPrizeBoundary(t *testing.T) {
+ 	cfg := LotteryConfig{
+ 		ParticipantThreshold: 50,
+ 		PrizeCount:           6,
+ 		PrizeAmount:          5,
+ 		DrawMode:             LotteryDrawModeAuto,
+ 		NextRoundMode:        LotteryRoundModeManual,
+-		ActorPercentage:      50,
+-		ActorJoinMinSeconds:  60,
+-		ActorJoinMaxSeconds:  600,
+ 		RequireRecharge:      true,
+ 	}
+ 	require.NoError(t, ValidateLotteryConfig(cfg))
+-	require.Equal(t, 25, lotteryActorTarget(cfg.ParticipantThreshold, cfg.ActorPercentage))
+-	require.Equal(t, 25, lotteryRealSlotCapacity(cfg.ParticipantThreshold, lotteryActorTarget(cfg.ParticipantThreshold, cfg.ActorPercentage)))
+ 
+-	cfg.PrizeCount = 26
++	cfg.PrizeCount = 51
+ 	err := ValidateLotteryConfig(cfg)
+ 	require.Error(t, err)
+-	require.Contains(t, err.Error(), "real participant slots")
++	require.Contains(t, err.Error(), "participant threshold")
+ }
+ 
+-func TestValidateLotteryConfigRejectsInvalidModesAndIntervals(t *testing.T) {
+-	cfg := LotteryConfig{ParticipantThreshold: 50, PrizeCount: 1, PrizeAmount: 5, DrawMode: "later", NextRoundMode: LotteryRoundModeManual, ActorJoinMinSeconds: 60, ActorJoinMaxSeconds: 600}
+-	require.Error(t, ValidateLotteryConfig(cfg))
+-	cfg.DrawMode = LotteryDrawModeAuto
+-	cfg.ActorJoinMinSeconds = 700
++func TestValidateLotteryConfigRejectsInvalidModes(t *testing.T) {
++	cfg := LotteryConfig{ParticipantThreshold: 50, PrizeCount: 1, PrizeAmount: 5, DrawMode: "later", NextRoundMode: LotteryRoundModeManual}
+ 	require.Error(t, ValidateLotteryConfig(cfg))
+ }
+ 
++func TestValidateLotteryProgressBounds(t *testing.T) {
++	round := LotteryRound{RealParticipantCount: 12, ParticipantThreshold: 50, PrizeCount: 6}
++	require.NoError(t, validateLotteryProgress(round, 12))
++	require.NoError(t, validateLotteryProgress(round, 50))
++	require.ErrorIs(t, validateLotteryProgress(round, 11), ErrLotteryProgressInvalid)
++	require.ErrorIs(t, validateLotteryProgress(round, 51), ErrLotteryProgressInvalid)
++
++	round.RealParticipantCount = 5
++	require.NoError(t, validateLotteryProgress(round, 49))
++	require.ErrorIs(t, validateLotteryProgress(round, 50), ErrLotteryInsufficientRealParticipants)
++}
++
+ func TestMaskLotteryEmail(t *testing.T) {
+ 	require.Equal(t, "mh***o@gmail.com", MaskLotteryEmail("mhdeyao@gmail.com"))
+ 	require.Equal(t, "a***@example.com", MaskLotteryEmail("a@example.com"))
+diff --git a/backend/internal/service/wire.go b/backend/internal/service/wire.go
+index 83a49a6a0..28de9a73c 100644
+--- a/backend/internal/service/wire.go
++++ b/backend/internal/service/wire.go
+@@ -951,7 +951,6 @@ var ProviderSet = wire.NewSet(
+ 	ProvideProxyExpiryService,
+ 	ProvideSubscriptionExpiryService,
+ 	NewLotteryService,
+-	ProvideLotteryRuntime,
+ 	ProvideTimingWheelService,
+ 	ProvideDashboardAggregationService,
+ 	ProvideUsageCleanupService,
+diff --git a/backend/migrations/lottery_migration_test.go b/backend/migrations/lottery_migration_test.go
+index 6c967c35a..d214b19c9 100644
+--- a/backend/migrations/lottery_migration_test.go
++++ b/backend/migrations/lottery_migration_test.go
+@@ -25,3 +25,15 @@ func TestLotteryMigration(t *testing.T) {
+ 	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS lottery_balance_ledger")
+ 	require.Contains(t, sql, "winner_id BIGINT NOT NULL UNIQUE")
+ }
++
++func TestLotteryManualProgressMigration(t *testing.T) {
++	content, err := FS.ReadFile("234_lottery_manual_progress.sql")
++	require.NoError(t, err)
++	sql := strings.Join(strings.Fields(string(content)), " ")
++
++	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS manual_progress_count INTEGER NOT NULL DEFAULT 0")
++	require.Contains(t, sql, "manual_progress_count = GREATEST(manual_progress_count, actor_count)")
++	require.Contains(t, sql, "actor_target_count = 0")
++	require.Contains(t, sql, "actor_count = 0")
++	require.Contains(t, sql, "next_actor_at = NULL")
++}
+diff --git a/frontend/src/api/lottery.ts b/frontend/src/api/lottery.ts
+index 7edb4a03e..2db3182cb 100644
+--- a/frontend/src/api/lottery.ts
++++ b/frontend/src/api/lottery.ts
+@@ -8,9 +8,6 @@ export interface LotteryConfig {
+   prize_amount: number
+   draw_mode: 'auto' | 'manual'
+   next_round_mode: 'auto' | 'manual'
+-  actor_percentage: number
+-  actor_join_min_seconds: number
+-  actor_join_max_seconds: number
+   require_recharge: boolean
+   min_recharge_amount: number
+   min_account_age_days: number
+@@ -27,19 +24,14 @@ export interface LotteryRound {
+   prize_amount: number
+   draw_mode?: 'auto' | 'manual' | string
+   next_round_mode?: 'auto' | 'manual' | string
+-  actor_percentage?: number
+-  actor_target_count?: number
+-  actor_join_min_seconds?: number
+-  actor_join_max_seconds?: number
+   require_recharge: boolean
+   min_recharge_amount: number
+   min_account_age_days: number
+   participant_count: number
+-  actor_count?: number
++  manual_progress_count?: number
+   real_participant_count?: number
+   winner_count: number
+   unique_ip_count?: number
+-  next_actor_at?: string | null
+   started_at: string
+   drawn_at?: string | null
+   updated_at?: string
+@@ -76,13 +68,19 @@ export interface LotteryDrawResult {
+   next_round?: LotteryRound
+ }
+ 
++export interface LotteryCaptchaProof {
++  turnstile_token?: string
++  tencent_captcha_ticket?: string
++  tencent_captcha_randstr?: string
++}
++
+ export const lotteryAPI = {
+   async getCurrent() {
+     const { data } = await apiClient.get<LotteryCurrent>('/lottery/current')
+     return data
+   },
+-  async join() {
+-    const { data } = await apiClient.post<{ round_id: number; round_no: number; participant_count: number; joined_at: string }>('/lottery/join')
++  async join(proof: LotteryCaptchaProof) {
++    const { data } = await apiClient.post<{ round_id: number; round_no: number; participant_count: number; joined_at: string }>('/lottery/join', proof)
+     return data
+   },
+   async getRounds(page = 1, pageSize = 8) {
+@@ -105,6 +103,10 @@ export const lotteryAPI = {
+     const { data } = await apiClient.get<BasePaginationResponse<LotteryRound>>('/admin/lottery/rounds', { params: { page, page_size: pageSize } })
+     return data
+   },
++  async updateRoundProgress(roundId: number, participantCount: number) {
++    const { data } = await apiClient.put<LotteryRound>(`/admin/lottery/rounds/${roundId}/progress`, { participant_count: participantCount })
++    return data
++  },
+   async drawRound(roundId: number) {
+     const { data } = await apiClient.post<LotteryDrawResult>(`/admin/lottery/rounds/${roundId}/draw`)
+     return data
+diff --git a/frontend/src/components/layout/AppSidebar.vue b/frontend/src/components/layout/AppSidebar.vue
+index e6911fead..df03e372c 100644
+--- a/frontend/src/components/layout/AppSidebar.vue
++++ b/frontend/src/components/layout/AppSidebar.vue
+@@ -98,6 +98,7 @@
+               <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+               <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
++              <span v-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
+             </router-link>
+           </template>
+         </div>
+@@ -124,6 +125,7 @@
+             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+             <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
++            <span v-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
+           </router-link>
+         </div>
+       </template>
+@@ -145,6 +147,7 @@
+             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+             <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
++            <span v-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
+           </router-link>
+         </div>
+       </template>
+@@ -202,6 +205,7 @@ import { sanitizeUrl } from '@/utils/url'
+ import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
+ import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+ import supportChatAPI from '@/api/supportChat'
++import lotteryAPI from '@/api/lottery'
+ 
+ interface NavItem {
+   path: string
+@@ -256,8 +260,11 @@ const sidebarNavRef = ref<HTMLElement | null>(null)
+ const lastKnownSidebarScrollTop = ref(appStore.sidebarScrollTop)
+ const isDark = ref(document.documentElement.classList.contains('dark'))
+ const supportUnreadCount = ref(0)
++const lotteryAvailable = ref(false)
+ let supportUnreadTimer: ReturnType<typeof setInterval> | undefined
+ let supportUnreadRequest: Promise<void> | null = null
++let lotteryAvailabilityTimer: ReturnType<typeof setInterval> | undefined
++let lotteryAvailabilityRequest: Promise<void> | null = null
+ 
+ const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
+ 
+@@ -290,9 +297,47 @@ function handleSupportChatRead() {
+   void refreshSupportUnread()
+ }
+ 
++async function refreshLotteryAvailability() {
++  if (!authStore.isAuthenticated) {
++    lotteryAvailable.value = false
++    return
++  }
++  if (lotteryAvailabilityRequest) return lotteryAvailabilityRequest
++  lotteryAvailabilityRequest = (async () => {
++    try {
++      const current = await lotteryAPI.getCurrent()
++      if (appStore.cachedPublicSettings?.lottery_enabled !== current.enabled) {
++        await appStore.fetchPublicSettings(true)
++      }
++      lotteryAvailable.value = Boolean(
++        current.enabled &&
++        current.current_round?.status === 'open' &&
++        !current.joined &&
++        current.eligibility.eligible
++      )
++    } catch {
++      // Lottery availability is advisory and must not interrupt navigation.
++    } finally {
++      lotteryAvailabilityRequest = null
++    }
++  })()
++  return lotteryAvailabilityRequest
++}
++
++function hasLotteryAvailable(path: string): boolean {
++  return lotteryAvailable.value && path === '/lottery'
++}
++
++function handleLotteryAvailabilityChanged() {
++  void refreshLotteryAvailability()
++}
++
+ watch(
+   [isAdmin, () => authStore.isAuthenticated],
+-  () => { void refreshSupportUnread() },
++  () => {
++    void refreshSupportUnread()
++    void refreshLotteryAvailability()
++  },
+ )
+ 
+ // Track which parent nav groups are expanded
+@@ -1062,7 +1107,12 @@ onMounted(() => {
+   supportUnreadTimer = setInterval(() => {
+     if (document.visibilityState === 'visible') void refreshSupportUnread()
+   }, 15000)
++  void refreshLotteryAvailability()
++  lotteryAvailabilityTimer = setInterval(() => {
++    if (document.visibilityState === 'visible') void refreshLotteryAvailability()
++  }, 15000)
+   window.addEventListener('support-chat-read', handleSupportChatRead)
++  window.addEventListener('lottery-availability-changed', handleLotteryAvailabilityChanged)
+   restoreSidebarScrollPosition()
+ })
+ 
+@@ -1073,7 +1123,9 @@ onDeactivated(persistSidebarScrollPosition)
+ onBeforeUnmount(persistSidebarScrollPosition)
+ onBeforeUnmount(() => {
+   if (supportUnreadTimer) clearInterval(supportUnreadTimer)
++  if (lotteryAvailabilityTimer) clearInterval(lotteryAvailabilityTimer)
+   window.removeEventListener('support-chat-read', handleSupportChatRead)
++  window.removeEventListener('lottery-availability-changed', handleLotteryAvailabilityChanged)
+ })
+ </script>
+ 
+diff --git a/frontend/src/components/layout/__tests__/AppSidebar.spec.ts b/frontend/src/components/layout/__tests__/AppSidebar.spec.ts
+index e201bfb79..ed7ff10bd 100644
+--- a/frontend/src/components/layout/__tests__/AppSidebar.spec.ts
++++ b/frontend/src/components/layout/__tests__/AppSidebar.spec.ts
+@@ -99,6 +99,19 @@ describe('AppSidebar support unread badge', () => {
+   })
+ })
+ 
++describe('AppSidebar lottery availability badge', () => {
++  it('polls current eligibility and only marks the personal lottery route', () => {
++    expect(componentSource).toContain('await lotteryAPI.getCurrent()')
++    expect(componentSource).toContain("current.current_round?.status === 'open'")
++    expect(componentSource).toContain('!current.joined')
++    expect(componentSource).toContain('current.eligibility.eligible')
++    expect(componentSource).toContain('appStore.fetchPublicSettings(true)')
++    expect(componentSource).toContain("path === '/lottery'")
++    expect(componentSource).toContain("window.addEventListener('lottery-availability-changed'")
++    expect(componentSource).toContain("t('nav.lotteryAvailable')")
++  })
++})
++
+ describe('AppSidebar customer support icon', () => {
+   it('uses the customer service avatar for user support and the admin inbox', () => {
+     expect(componentSource).toContain('const CustomerSupportIcon = {')
+diff --git a/frontend/src/i18n/locales/en/admin/overview.ts b/frontend/src/i18n/locales/en/admin/overview.ts
+index 2bc32f0db..a7a7336f6 100644
+--- a/frontend/src/i18n/locales/en/admin/overview.ts
++++ b/frontend/src/i18n/locales/en/admin/overview.ts
+@@ -1251,7 +1251,7 @@ export default {
+ 
+     lottery: {
+       title: 'Lottery Management',
+-      description: 'Configure the lottery switch, draw rules, actor pacing, and eligibility. Changes apply to new rounds.',
++      description: 'Configure the lottery switch, draw rules, and eligibility. Round configuration changes apply to new rounds.',
+       enabled: 'Enable lottery activity',
+       enabledHint: 'When disabled, the user menu is hidden and existing rounds stop accepting entries.',
+       rules: 'Round rules',
+@@ -1264,10 +1264,6 @@ export default {
+       nextRoundMode: 'Next round mode',
+       autoNext: 'Start immediately after draw',
+       manualNext: 'Start next round manually',
+-      actors: 'Actor pacing',
+-      actorPercentage: 'Actor percentage',
+-      actorInterval: 'Actor join interval (seconds)',
+-      actorHint: 'Actors count toward progress but never win. They join one at a time at randomized intervals.',
+       eligibility: 'Eligibility (all selected rules apply)',
+       requireRecharge: 'Has completed a recharge',
+       minRecharge: 'Cumulative recharge amount',
+@@ -1277,16 +1273,20 @@ export default {
+       recentRechargeHint: 'Only visible to administrators; users receive a generic eligibility message. Use 0 for no minimum.',
+       save: 'Save configuration',
+       startRound: 'Start new round',
++      updateProgress: 'Update progress',
++      progressInput: 'Set draw progress manually',
+       draw: 'Draw now',
+       currentRound: 'Current round',
+       rounds: 'Round history',
+       noOpenRound: 'No open round',
+       saved: 'Lottery configuration saved',
+       roundStarted: 'New round started',
++      progressUpdated: 'Draw progress updated',
++      progressUpdateFailed: 'Failed to update draw progress',
+       drawn: 'Draw completed',
+       loadFailed: 'Failed to load lottery management data',
+       saveFailed: 'Failed to save lottery configuration',
+-      columns: { round: 'Round', progress: 'Progress', real: 'Real', actors: 'Actors', status: 'Status', actions: 'Actions' }
++      columns: { round: 'Round', progress: 'Draw progress', real: 'Real entries', manualProgress: 'Manual addition', status: 'Status', actions: 'Actions' }
+     },
+ 
+     // Available Channels (aggregated read-only view)
+diff --git a/frontend/src/i18n/locales/en/common.ts b/frontend/src/i18n/locales/en/common.ts
+index 68fd3fa03..07d689c2f 100644
+--- a/frontend/src/i18n/locales/en/common.ts
++++ b/frontend/src/i18n/locales/en/common.ts
+@@ -171,6 +171,7 @@ export default {
+     affiliateTransferRecords: 'Transfer Records',
+     lottery: 'Lottery',
+     lotteryManagement: 'Lottery Management',
++    lotteryAvailable: 'A lottery is available to join',
+     profile: 'Profile',
+     support: 'Support',
+     supportInbox: 'Support Inbox',
+@@ -268,7 +269,9 @@ export default {
+     },
+     loadFailed: 'Failed to load lottery data',
+     joinSuccess: 'You joined successfully. Good luck!',
+-    joinFailed: 'Failed to join the lottery'
++    joinFailed: 'Failed to join the lottery',
++    captchaUnavailable: 'Lottery entry is unavailable until an administrator configures slider verification',
++    captchaFailed: 'Slider verification failed. Please try again.'
+   },
+ 
+   // Auth
+diff --git a/frontend/src/i18n/locales/zh/admin/overview.ts b/frontend/src/i18n/locales/zh/admin/overview.ts
+index 3fa45df86..15570b57f 100644
+--- a/frontend/src/i18n/locales/zh/admin/overview.ts
++++ b/frontend/src/i18n/locales/zh/admin/overview.ts
+@@ -1250,7 +1250,7 @@ export default {
+ 
+     lottery: {
+       title: '抽奖管理',
+-      description: '配置抽奖开关、开奖规则、群演节奏与参与资格。配置只对新轮次生效。',
++      description: '配置抽奖开关、开奖规则与参与资格。轮次配置只对新轮次生效。',
+       enabled: '开启抽奖活动',
+       enabledHint: '关闭后用户菜单隐藏，已有轮次不会再接受参与。',
+       rules: '轮次规则',
+@@ -1263,10 +1263,6 @@ export default {
+       nextRoundMode: '下一轮开始方式',
+       autoNext: '结束后立即开始',
+       manualNext: '手动开始下一轮',
+-      actors: '群演设置',
+-      actorPercentage: '群演比例',
+-      actorInterval: '群演加入间隔（秒）',
+-      actorHint: '群演只计入进度，不参与中奖；系统会按随机间隔逐个加入。',
+       eligibility: '参与资格（多项同时满足）',
+       requireRecharge: '完成过充值',
+       minRecharge: '累计充值金额',
+@@ -1276,16 +1272,20 @@ export default {
+       recentRechargeHint: '仅后台可见，用户只会看到通用资格提示。填写 0 表示不限制。',
+       save: '保存配置',
+       startRound: '开始新一轮',
++      updateProgress: '更新进度',
++      progressInput: '手动设置开奖进度',
+       draw: '立即开奖',
+       currentRound: '当前轮次',
+       rounds: '轮次记录',
+       noOpenRound: '暂无进行中的轮次',
+       saved: '抽奖配置已保存',
+       roundStarted: '新轮次已开始',
++      progressUpdated: '开奖进度已更新',
++      progressUpdateFailed: '更新开奖进度失败',
+       drawn: '开奖完成',
+       loadFailed: '抽奖管理数据加载失败',
+       saveFailed: '保存抽奖配置失败',
+-      columns: { round: '期数', progress: '进度', real: '真实参与', actors: '群演', status: '状态', actions: '操作' }
++      columns: { round: '期数', progress: '开奖进度', real: '真实参与', manualProgress: '手动补充', status: '状态', actions: '操作' }
+     },
+ 
+     // Available Channels (aggregated read-only view)
+diff --git a/frontend/src/i18n/locales/zh/common.ts b/frontend/src/i18n/locales/zh/common.ts
+index dd24a2a52..74077d9ad 100644
+--- a/frontend/src/i18n/locales/zh/common.ts
++++ b/frontend/src/i18n/locales/zh/common.ts
+@@ -171,6 +171,7 @@ export default {
+     affiliateTransferRecords: '提取记录',
+     lottery: '抽奖活动',
+     lotteryManagement: '抽奖管理',
++    lotteryAvailable: '有可参与的抽奖',
+     profile: '个人资料',
+     support: '在线客服',
+     supportInbox: '客服收件箱',
+@@ -268,7 +269,9 @@ export default {
+     },
+     loadFailed: '抽奖数据加载失败',
+     joinSuccess: '参与成功，祝您好运！',
+-    joinFailed: '参与抽奖失败'
++    joinFailed: '参与抽奖失败',
++    captchaUnavailable: '管理员尚未配置滑块验证，当前暂不能参与抽奖',
++    captchaFailed: '滑块验证失败，请重试'
+   },
+ 
+   // Auth
+diff --git a/frontend/src/views/admin/LotteryView.vue b/frontend/src/views/admin/LotteryView.vue
+index 17b461366..fa1ee0fac 100644
+--- a/frontend/src/views/admin/LotteryView.vue
++++ b/frontend/src/views/admin/LotteryView.vue
+@@ -21,13 +21,11 @@
+             <label class="space-y-1.5 md:col-span-2"><span class="label">{{ t('admin.lottery.nextRoundMode') }}</span><select v-model="form.next_round_mode" class="input"><option value="manual">{{ t('admin.lottery.manualNext') }}</option><option value="auto">{{ t('admin.lottery.autoNext') }}</option></select></label>
+           </div></section>
+ 
+-          <section class="card p-5 sm:p-6"><div class="flex items-start justify-between gap-3"><div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.actors') }}</h2><p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.lottery.actorHint') }}</p></div><Icon name="users" size="lg" class="text-primary-500" /></div><div class="mt-5 grid gap-5 md:grid-cols-3"><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.actorPercentage') }}</span><div class="relative"><input v-model.number="form.actor_percentage" type="number" min="0" max="95" step="0.1" class="input pr-8" /><span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-gray-400">%</span></div></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.actorInterval') }}</span><div class="flex items-center gap-2"><input v-model.number="form.actor_join_min_seconds" type="number" min="5" max="86400" class="input" /><span class="text-gray-400">-</span><input v-model.number="form.actor_join_max_seconds" type="number" min="5" max="86400" class="input" /></div></label><div class="rounded-xl bg-gray-50 p-4 text-sm text-gray-600 dark:bg-dark-900 dark:text-dark-300"><span class="font-medium text-gray-900 dark:text-white">{{ actorPreview }}</span><p class="mt-1 text-xs">{{ t('admin.lottery.actorHint') }}</p></div></div></section>
+-
+           <section class="card p-5 sm:p-6"><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.eligibility') }}</h2><div class="mt-5 grid gap-5 md:grid-cols-3"><label class="flex items-start gap-3 rounded-xl border border-gray-200 p-4 dark:border-dark-700"><input v-model="form.require_recharge" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" /><span><span class="block text-sm font-medium text-gray-800 dark:text-gray-200">{{ t('admin.lottery.requireRecharge') }}</span><span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.rechargeRequired') }}</span></span></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.minRecharge') }}</span><input v-model.number="form.min_recharge_amount" type="number" min="0" step="0.01" class="input" /><span class="hint">{{ t('admin.lottery.minRechargeHint') }}</span></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.minAccountAge') }}</span><input v-model.number="form.min_account_age_days" type="number" min="0" max="36500" class="input" /><span class="hint">{{ t('admin.lottery.minRechargeHint') }}</span></label><label class="space-y-1.5 md:col-span-2"><span class="label">{{ t('admin.lottery.recentRecharge') }}</span><input v-model.number="form.recent_recharge_days" type="number" min="0" max="36500" class="input" /><span class="hint">{{ t('admin.lottery.recentRechargeHint') }}</span></label></div></section>
+           <div class="flex justify-end"><button class="btn btn-primary w-full sm:w-auto" type="submit" :disabled="saving"><Icon v-if="saving" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="checkCircle" size="sm" /><span>{{ saving ? t('common.saving') : t('admin.lottery.save') }}</span></button></div>
+         </form>
+ 
+-        <section class="card overflow-hidden"><div class="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-800 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.rounds') }}</h2><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ currentOpenRound ? `#${currentOpenRound.round_no}` : t('admin.lottery.noOpenRound') }}</p></div></div><div class="overflow-x-auto"><table class="w-full min-w-[760px] text-left text-sm"><thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-900 dark:text-dark-400"><tr><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.round') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.progress') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.real') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.actors') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.status') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.actions') }}</th></tr></thead><tbody class="divide-y divide-gray-100 dark:divide-dark-800"><tr v-for="round in rounds" :key="round.id"><td class="px-5 py-3 font-medium text-gray-900 dark:text-white">#{{ round.round_no }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.participant_count }} / {{ round.participant_threshold }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.real_participant_count ?? (round.participant_count - (round.actor_count || 0)) }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.actor_count || 0 }} / {{ round.actor_target_count || 0 }}</td><td class="px-5 py-3"><span class="badge" :class="round.status === 'open' ? 'badge-warning' : round.status === 'drawn' ? 'badge-success' : 'badge-gray'">{{ statusLabel(round.status) }}</span></td><td class="px-5 py-3"><button v-if="round.status === 'open'" class="btn btn-secondary btn-sm" :disabled="drawingId === round.id" @click="draw(round)"><Icon v-if="drawingId === round.id" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="trophy" size="sm" /><span>{{ t('admin.lottery.draw') }}</span></button><span v-else class="text-xs text-gray-400">{{ round.drawn_at ? date(round.drawn_at) : '-' }}</span></td></tr><tr v-if="rounds.length === 0"><td colspan="6" class="px-5 py-10 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('common.noData') }}</td></tr></tbody></table></div></section>
++        <section class="card overflow-hidden"><div class="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-800 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.rounds') }}</h2><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ currentOpenRound ? `#${currentOpenRound.round_no}` : t('admin.lottery.noOpenRound') }}</p></div></div><div class="overflow-x-auto"><table class="w-full min-w-[820px] text-left text-sm"><thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-900 dark:text-dark-400"><tr><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.round') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.progress') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.real') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.manualProgress') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.status') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.actions') }}</th></tr></thead><tbody class="divide-y divide-gray-100 dark:divide-dark-800"><tr v-for="round in rounds" :key="round.id"><td class="px-5 py-3 font-medium text-gray-900 dark:text-white">#{{ round.round_no }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300"><div v-if="round.status === 'open'" class="flex w-44 items-center gap-2"><input v-model.number="progressDrafts[round.id]" type="number" :min="round.real_participant_count || 0" :max="round.participant_threshold" class="input h-9 w-24" :aria-label="t('admin.lottery.progressInput')" /><span class="shrink-0 text-xs">/ {{ round.participant_threshold }}</span></div><span v-else>{{ round.participant_count }} / {{ round.participant_threshold }}</span></td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.real_participant_count || 0 }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.manual_progress_count || 0 }}</td><td class="px-5 py-3"><span class="badge" :class="round.status === 'open' ? 'badge-warning' : round.status === 'drawn' ? 'badge-success' : 'badge-gray'">{{ statusLabel(round.status) }}</span></td><td class="px-5 py-3"><div v-if="round.status === 'open'" class="flex flex-wrap gap-2"><button class="btn btn-secondary btn-sm" :disabled="updatingId === round.id || drawingId === round.id" @click="updateProgress(round)"><Icon v-if="updatingId === round.id" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="checkCircle" size="sm" /><span>{{ t('admin.lottery.updateProgress') }}</span></button><button class="btn btn-secondary btn-sm" :disabled="drawingId === round.id || updatingId === round.id" @click="draw(round)"><Icon v-if="drawingId === round.id" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="trophy" size="sm" /><span>{{ t('admin.lottery.draw') }}</span></button></div><span v-else class="text-xs text-gray-400">{{ round.drawn_at ? date(round.drawn_at) : '-' }}</span></td></tr><tr v-if="rounds.length === 0"><td colspan="6" class="px-5 py-10 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('common.noData') }}</td></tr></tbody></table></div></section>
+       </template>
+     </div>
+   </AppLayout>
+@@ -47,10 +45,11 @@ const appStore = useAppStore()
+ const loading = ref(true)
+ const saving = ref(false)
+ const drawingId = ref<number | null>(null)
++const updatingId = ref<number | null>(null)
+ const rounds = ref<LotteryRound[]>([])
+-const form = reactive<LotteryConfig>({ enabled: false, participant_threshold: 50, prize_count: 1, prize_amount: 5, draw_mode: 'auto', next_round_mode: 'manual', actor_percentage: 0, actor_join_min_seconds: 60, actor_join_max_seconds: 600, require_recharge: true, min_recharge_amount: 0, min_account_age_days: 0, recent_recharge_days: 0 })
++const progressDrafts = reactive<Record<number, number>>({})
++const form = reactive<LotteryConfig>({ enabled: false, participant_threshold: 50, prize_count: 1, prize_amount: 5, draw_mode: 'auto', next_round_mode: 'manual', require_recharge: true, min_recharge_amount: 0, min_account_age_days: 0, recent_recharge_days: 0 })
+ const currentOpenRound = computed(() => rounds.value.find((round) => round.status === 'open'))
+-const actorPreview = computed(() => `${Math.max(0, Math.floor(form.participant_threshold * form.actor_percentage / 100))} / ${form.participant_threshold} ${t('admin.lottery.actors')}`)
+ 
+ function date(value: string): string { return new Date(value).toLocaleString() }
+ function statusLabel(status: string): string { return t(`lottery.statuses.${status}`, status) }
+@@ -61,19 +60,31 @@ async function load(): Promise<void> {
+     const [config, page] = await Promise.all([lotteryAPI.getAdminConfig(), lotteryAPI.getAdminRounds(1, 50)])
+     Object.assign(form, config)
+     rounds.value = page.items
++    for (const round of rounds.value) progressDrafts[round.id] = round.participant_count
+   } catch (error) { appStore.showError(extractApiErrorMessage(error, t('admin.lottery.loadFailed'))) }
+   finally { loading.value = false }
+ }
+ async function save(): Promise<void> {
+   saving.value = true
+-  try { const updated = await lotteryAPI.updateAdminConfig({ ...form }); Object.assign(form, updated); appStore.showSuccess(t('admin.lottery.saved')) }
++  try { const updated = await lotteryAPI.updateAdminConfig({ ...form }); Object.assign(form, updated); await appStore.fetchPublicSettings(true); appStore.showSuccess(t('admin.lottery.saved')) }
+   catch (error) { appStore.showError(extractApiErrorMessage(error, t('admin.lottery.saveFailed'))) }
+   finally { saving.value = false }
+ }
+ async function startRound(): Promise<void> {
+-  try { const round = await lotteryAPI.startRound(); rounds.value = [round, ...rounds.value.filter((item) => item.id !== round.id)]; appStore.showSuccess(t('admin.lottery.roundStarted')) }
++  try { const round = await lotteryAPI.startRound(); progressDrafts[round.id] = round.participant_count; rounds.value = [round, ...rounds.value.filter((item) => item.id !== round.id)]; appStore.showSuccess(t('admin.lottery.roundStarted')) }
+   catch (error) { appStore.showError(extractApiErrorMessage(error, t('admin.lottery.loadFailed'))) }
+ }
++async function updateProgress(round: LotteryRound): Promise<void> {
++  updatingId.value = round.id
++  try {
++    const updated = await lotteryAPI.updateRoundProgress(round.id, Number(progressDrafts[round.id]))
++    const index = rounds.value.findIndex((item) => item.id === round.id)
++    if (index >= 0) rounds.value[index] = updated
++    progressDrafts[round.id] = updated.participant_count
++    appStore.showSuccess(t('admin.lottery.progressUpdated'))
++  } catch (error) { appStore.showError(extractApiErrorMessage(error, t('admin.lottery.progressUpdateFailed'))) }
++  finally { updatingId.value = null }
++}
+ async function draw(round: LotteryRound): Promise<void> {
+   drawingId.value = round.id
+   try { const result = await lotteryAPI.drawRound(round.id); const index = rounds.value.findIndex((item) => item.id === round.id); if (index >= 0) rounds.value[index] = result.round; if (result.next_round) rounds.value.unshift(result.next_round); appStore.showSuccess(t('admin.lottery.drawn')) }
+diff --git a/frontend/src/views/user/LotteryView.vue b/frontend/src/views/user/LotteryView.vue
+index 19f7c77cc..f7d45e408 100644
+--- a/frontend/src/views/user/LotteryView.vue
++++ b/frontend/src/views/user/LotteryView.vue
+@@ -18,6 +18,19 @@
+           <span>{{ t('lottery.refresh') }}</span>
+         </button>
+       </div>
++      <CaptchaChallenge
++        ref="captchaRef"
++        :turnstile-enabled="false"
++        turnstile-site-key=""
++        :tencent-enabled="tencentCaptchaEnabled"
++        :tencent-app-id="publicSettings?.tencent_captcha_app_id || ''"
++        :tencent-region="publicSettings?.tencent_captcha_region || 'cn'"
++        :aliyun-enabled="aliyunCaptchaEnabled"
++        :aliyun-scene-id="publicSettings?.aliyun_captcha_scene_id || ''"
++        :aliyun-prefix="publicSettings?.aliyun_captcha_prefix || ''"
++        :aliyun-region="publicSettings?.aliyun_captcha_region || 'cn'"
++        @error="handleCaptchaError"
++      />
+ 
+       <div v-if="loading" class="card flex justify-center py-16">
+         <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
+@@ -134,6 +147,7 @@ import { computed, onMounted, ref } from 'vue'
+ import { useI18n } from 'vue-i18n'
+ import AppLayout from '@/components/layout/AppLayout.vue'
+ import Icon from '@/components/icons/Icon.vue'
++import CaptchaChallenge from '@/components/CaptchaChallenge.vue'
+ import lotteryAPI, { type LotteryCurrent, type LotteryRound } from '@/api/lottery'
+ import { useAppStore } from '@/stores/app'
+ import { extractApiErrorMessage } from '@/utils/apiError'
+@@ -142,8 +156,13 @@ const { t } = useI18n()
+ const appStore = useAppStore()
+ const loading = ref(true)
+ const joining = ref(false)
++const captchaRef = ref<InstanceType<typeof CaptchaChallenge> | null>(null)
+ const current = ref<LotteryCurrent | null>(null)
+ const rounds = ref<LotteryRound[]>([])
++const publicSettings = computed(() => appStore.cachedPublicSettings)
++const tencentCaptchaEnabled = computed(() => publicSettings.value?.tencent_captcha_enabled === true && Boolean(publicSettings.value.tencent_captcha_app_id))
++const aliyunCaptchaEnabled = computed(() => publicSettings.value?.aliyun_captcha_enabled === true && Boolean(publicSettings.value.aliyun_captcha_scene_id) && Boolean(publicSettings.value.aliyun_captcha_prefix))
++const sliderCaptchaConfigured = computed(() => tencentCaptchaEnabled.value || aliyunCaptchaEnabled.value)
+ const progress = computed(() => {
+   const round = current.value?.current_round
+   return round ? Math.min(100, Math.round((round.participant_count / Math.max(1, round.participant_threshold)) * 100)) : 0
+@@ -165,15 +184,30 @@ async function load(): Promise<void> {
+ }
+ 
+ async function join(): Promise<void> {
++  if (!sliderCaptchaConfigured.value) {
++    appStore.showError(t('lottery.captchaUnavailable'))
++    return
++  }
+   joining.value = true
+   try {
+-    await lotteryAPI.join()
++    const proof = await captchaRef.value?.verifyAction()
++    if (!proof) return
++    await lotteryAPI.join(tencentCaptchaEnabled.value
++      ? { tencent_captcha_ticket: proof.token, tencent_captcha_randstr: proof.randstr }
++      : { turnstile_token: proof.token })
+     appStore.showSuccess(t('lottery.joinSuccess'))
+     await load()
++    window.dispatchEvent(new Event('lottery-availability-changed'))
+   } catch (error) {
+     appStore.showError(extractApiErrorMessage(error, t('lottery.joinFailed')))
+   } finally { joining.value = false }
+ }
+ 
+-onMounted(load)
++function handleCaptchaError(): void {
++  appStore.showError(t('lottery.captchaFailed'))
++}
++
++onMounted(async () => {
++  await Promise.all([appStore.fetchPublicSettings(), load()])
++})
+ </script>

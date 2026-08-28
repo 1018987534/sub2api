@@ -1250,7 +1250,7 @@ export default {
 
     lottery: {
       title: '抽奖管理',
-      description: '配置抽奖开关、开奖规则、群演节奏与参与资格。配置只对新轮次生效。',
+      description: '配置抽奖开关、开奖规则与参与资格。轮次配置只对新轮次生效。',
       enabled: '开启抽奖活动',
       enabledHint: '关闭后用户菜单隐藏，已有轮次不会再接受参与。',
       rules: '轮次规则',
@@ -1263,10 +1263,6 @@ export default {
       nextRoundMode: '下一轮开始方式',
       autoNext: '结束后立即开始',
       manualNext: '手动开始下一轮',
-      actors: '群演设置',
-      actorPercentage: '群演比例',
-      actorInterval: '群演加入间隔（秒）',
-      actorHint: '群演只计入进度，不参与中奖；系统会按随机间隔逐个加入。',
       eligibility: '参与资格（多项同时满足）',
       requireRecharge: '完成过充值',
       minRecharge: '累计充值金额',
@@ -1276,16 +1272,20 @@ export default {
       recentRechargeHint: '仅后台可见，用户只会看到通用资格提示。填写 0 表示不限制。',
       save: '保存配置',
       startRound: '开始新一轮',
+      updateProgress: '更新进度',
+      progressInput: '手动设置开奖进度',
       draw: '立即开奖',
       currentRound: '当前轮次',
       rounds: '轮次记录',
       noOpenRound: '暂无进行中的轮次',
       saved: '抽奖配置已保存',
       roundStarted: '新轮次已开始',
+      progressUpdated: '开奖进度已更新',
+      progressUpdateFailed: '更新开奖进度失败',
       drawn: '开奖完成',
       loadFailed: '抽奖管理数据加载失败',
       saveFailed: '保存抽奖配置失败',
-      columns: { round: '期数', progress: '进度', real: '真实参与', actors: '群演', status: '状态', actions: '操作' }
+      columns: { round: '期数', progress: '开奖进度', real: '真实参与', manualProgress: '手动补充', status: '状态', actions: '操作' }
     },
 
     // Available Channels (aggregated read-only view)

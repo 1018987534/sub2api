@@ -98,6 +98,7 @@
               <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
               <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
+              <span v-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
             </router-link>
           </template>
         </div>
@@ -124,6 +125,7 @@
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
             <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
+            <span v-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
           </router-link>
         </div>
       </template>
@@ -145,6 +147,7 @@
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
             <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
+            <span v-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
           </router-link>
         </div>
       </template>
@@ -202,6 +205,7 @@ import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
 import supportChatAPI from '@/api/supportChat'
+import lotteryAPI from '@/api/lottery'
 
 interface NavItem {
   path: string
@@ -256,8 +260,11 @@ const sidebarNavRef = ref<HTMLElement | null>(null)
 const lastKnownSidebarScrollTop = ref(appStore.sidebarScrollTop)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 const supportUnreadCount = ref(0)
+const lotteryAvailable = ref(false)
 let supportUnreadTimer: ReturnType<typeof setInterval> | undefined
 let supportUnreadRequest: Promise<void> | null = null
+let lotteryAvailabilityTimer: ReturnType<typeof setInterval> | undefined
+let lotteryAvailabilityRequest: Promise<void> | null = null
 
 const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
 
@@ -290,9 +297,47 @@ function handleSupportChatRead() {
   void refreshSupportUnread()
 }
 
+async function refreshLotteryAvailability() {
+  if (!authStore.isAuthenticated) {
+    lotteryAvailable.value = false
+    return
+  }
+  if (lotteryAvailabilityRequest) return lotteryAvailabilityRequest
+  lotteryAvailabilityRequest = (async () => {
+    try {
+      const current = await lotteryAPI.getCurrent()
+      if (appStore.cachedPublicSettings?.lottery_enabled !== current.enabled) {
+        await appStore.fetchPublicSettings(true)
+      }
+      lotteryAvailable.value = Boolean(
+        current.enabled &&
+        current.current_round?.status === 'open' &&
+        !current.joined &&
+        current.eligibility.eligible
+      )
+    } catch {
+      // Lottery availability is advisory and must not interrupt navigation.
+    } finally {
+      lotteryAvailabilityRequest = null
+    }
+  })()
+  return lotteryAvailabilityRequest
+}
+
+function hasLotteryAvailable(path: string): boolean {
+  return lotteryAvailable.value && path === '/lottery'
+}
+
+function handleLotteryAvailabilityChanged() {
+  void refreshLotteryAvailability()
+}
+
 watch(
   [isAdmin, () => authStore.isAuthenticated],
-  () => { void refreshSupportUnread() },
+  () => {
+    void refreshSupportUnread()
+    void refreshLotteryAvailability()
+  },
 )
 
 // Track which parent nav groups are expanded
@@ -1062,7 +1107,12 @@ onMounted(() => {
   supportUnreadTimer = setInterval(() => {
     if (document.visibilityState === 'visible') void refreshSupportUnread()
   }, 15000)
+  void refreshLotteryAvailability()
+  lotteryAvailabilityTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') void refreshLotteryAvailability()
+  }, 15000)
   window.addEventListener('support-chat-read', handleSupportChatRead)
+  window.addEventListener('lottery-availability-changed', handleLotteryAvailabilityChanged)
   restoreSidebarScrollPosition()
 })
 
@@ -1073,7 +1123,9 @@ onDeactivated(persistSidebarScrollPosition)
 onBeforeUnmount(persistSidebarScrollPosition)
 onBeforeUnmount(() => {
   if (supportUnreadTimer) clearInterval(supportUnreadTimer)
+  if (lotteryAvailabilityTimer) clearInterval(lotteryAvailabilityTimer)
   window.removeEventListener('support-chat-read', handleSupportChatRead)
+  window.removeEventListener('lottery-availability-changed', handleLotteryAvailabilityChanged)
 })
 </script>
 

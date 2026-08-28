@@ -171,6 +171,7 @@ export default {
     affiliateTransferRecords: '提取记录',
     lottery: '抽奖活动',
     lotteryManagement: '抽奖管理',
+    lotteryAvailable: '有可参与的抽奖',
     profile: '个人资料',
     support: '在线客服',
     supportInbox: '客服收件箱',
@@ -268,7 +269,9 @@ export default {
     },
     loadFailed: '抽奖数据加载失败',
     joinSuccess: '参与成功，祝您好运！',
-    joinFailed: '参与抽奖失败'
+    joinFailed: '参与抽奖失败',
+    captchaUnavailable: '管理员尚未配置滑块验证，当前暂不能参与抽奖',
+    captchaFailed: '滑块验证失败，请重试'
   },
 
   // Auth

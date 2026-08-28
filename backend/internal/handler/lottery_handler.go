@@ -11,11 +11,22 @@ import (
 )
 
 type LotteryHandler struct {
-	service *service.LotteryService
+	service     *service.LotteryService
+	authService *service.AuthService
 }
 
-func NewLotteryHandler(lotteryService *service.LotteryService) *LotteryHandler {
-	return &LotteryHandler{service: lotteryService}
+func NewLotteryHandler(lotteryService *service.LotteryService, authService *service.AuthService) *LotteryHandler {
+	return &LotteryHandler{service: lotteryService, authService: authService}
+}
+
+type lotteryJoinRequest struct {
+	TurnstileToken        string `json:"turnstile_token"`
+	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
+	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
+}
+
+type lotteryProgressRequest struct {
+	ParticipantCount int `json:"participant_count"`
 }
 
 func (h *LotteryHandler) Current(c *gin.Context) {
@@ -38,12 +49,44 @@ func (h *LotteryHandler) Join(c *gin.Context) {
 		response.Unauthorized(c, "User not authenticated")
 		return
 	}
+	var req lotteryJoinRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	if err := h.authService.VerifyRequiredActionCaptcha(c.Request.Context(), service.CaptchaProof{
+		TurnstileToken: req.TurnstileToken,
+		TencentTicket:  req.TencentCaptchaTicket,
+		TencentRandstr: req.TencentCaptchaRandstr,
+	}, ip.GetClientIP(c)); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	result, err := h.service.Join(c.Request.Context(), subject.UserID, ip.GetClientIP(c))
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *LotteryHandler) AdminUpdateProgress(c *gin.Context) {
+	roundID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || roundID <= 0 {
+		response.BadRequest(c, "Invalid round ID")
+		return
+	}
+	var req lotteryProgressRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	round, err := h.service.UpdateProgress(c.Request.Context(), roundID, req.ParticipantCount)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, round)
 }
 
 func (h *LotteryHandler) Rounds(c *gin.Context) {

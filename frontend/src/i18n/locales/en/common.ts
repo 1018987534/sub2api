@@ -171,6 +171,7 @@ export default {
     affiliateTransferRecords: 'Transfer Records',
     lottery: 'Lottery',
     lotteryManagement: 'Lottery Management',
+    lotteryAvailable: 'A lottery is available to join',
     profile: 'Profile',
     support: 'Support',
     supportInbox: 'Support Inbox',
@@ -268,7 +269,9 @@ export default {
     },
     loadFailed: 'Failed to load lottery data',
     joinSuccess: 'You joined successfully. Good luck!',
-    joinFailed: 'Failed to join the lottery'
+    joinFailed: 'Failed to join the lottery',
+    captchaUnavailable: 'Lottery entry is unavailable until an administrator configures slider verification',
+    captchaFailed: 'Slider verification failed. Please try again.'
   },
 
   // Auth

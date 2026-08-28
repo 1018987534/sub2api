@@ -186,3 +186,24 @@ func TestVerifyActionCaptchaIfEnabledFailsClosedOnSettingReadError(t *testing.T)
 
 	require.ErrorIs(t, err, ErrServiceUnavailable)
 }
+
+func TestVerifyRequiredActionCaptchaRejectsMissingSliderProvider(t *testing.T) {
+	svc := newAuthServiceForCaptchaTest(map[string]string{}, false, nil, nil)
+
+	err := svc.VerifyRequiredActionCaptcha(context.Background(), CaptchaProof{}, "203.0.113.10")
+
+	require.ErrorIs(t, err, ErrActionCaptchaNotConfigured)
+}
+
+func TestVerifyRequiredActionCaptchaVerifiesTencentProof(t *testing.T) {
+	verifier := &tencentCaptchaVerifierStub{response: &TencentCaptchaVerifyResponse{CaptchaCode: 1}}
+	svc := newAuthServiceForCaptchaTest(tencentCaptchaSettings(), false, nil, verifier)
+
+	err := svc.VerifyRequiredActionCaptcha(context.Background(), CaptchaProof{
+		TencentTicket:  "ticket",
+		TencentRandstr: "@rand",
+	}, "203.0.113.10")
+
+	require.NoError(t, err)
+	require.Equal(t, 1, verifier.calls)
+}

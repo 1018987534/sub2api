@@ -1,0 +1,26 @@
+Changed branch/field: lottery rounds now use manual_progress_count for administrator-set progress; lottery join requires a verified Tencent or Aliyun slider proof; the sidebar marks an eligible open lottery with a red dot.
+
+Artifacts:
+- MODIFIED_FILE: release-evidence/MODIFIED_FILE
+- DIFF_FILE: release-evidence/DIFF_FILE
+- VERIFICATION.txt: release-evidence/VERIFICATION.txt
+- ROLLBACK.sh: release-evidence/ROLLBACK.sh
+
+BASELINE
+Command: go test ./internal/service -run 'Test(ValidateLottery|Lottery|MaskLottery)' -count=1
+Input: detached worktree at b8d3183af (pre-change)
+Literal output: ok   github.com/Wei-Shaw/sub2api/internal/service 1.312s
+Exit status: 0
+
+MODIFIED
+Command: go test ./internal/service -run 'Test(ValidateLottery|Lottery|MaskLottery|VerifyRequiredActionCaptcha)' -count=1
+Input: current modified worktree
+Literal output: ok   github.com/Wei-Shaw/sub2api/internal/service 0.742s
+Exit status: 0
+
+ROLLBACK
+Command: ./release-evidence/ROLLBACK.sh /private/tmp/sub2api-lottery-rollback-test-20260828/MODIFIED_FILE
+Input: rollback test copy with MODIFIED_FILE.orig from b8d3183af
+Literal output: restored behavior: /private/tmp/sub2api-lottery-rollback-test-20260828/MODIFIED_FILE matches /private/tmp/sub2api-lottery-rollback-test-20260828/MODIFIED_FILE.orig
+Exit status: 0
+Restored behavior/status: rollback test copy exactly matches the pre-change source; release-evidence/MODIFIED_FILE remains changed.

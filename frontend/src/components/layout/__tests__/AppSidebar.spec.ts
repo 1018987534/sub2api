@@ -99,6 +99,19 @@ describe('AppSidebar support unread badge', () => {
   })
 })
 
+describe('AppSidebar lottery availability badge', () => {
+  it('polls current eligibility and only marks the personal lottery route', () => {
+    expect(componentSource).toContain('await lotteryAPI.getCurrent()')
+    expect(componentSource).toContain("current.current_round?.status === 'open'")
+    expect(componentSource).toContain('!current.joined')
+    expect(componentSource).toContain('current.eligibility.eligible')
+    expect(componentSource).toContain('appStore.fetchPublicSettings(true)')
+    expect(componentSource).toContain("path === '/lottery'")
+    expect(componentSource).toContain("window.addEventListener('lottery-availability-changed'")
+    expect(componentSource).toContain("t('nav.lotteryAvailable')")
+  })
+})
+
 describe('AppSidebar customer support icon', () => {
   it('uses the customer service avatar for user support and the admin inbox', () => {
     expect(componentSource).toContain('const CustomerSupportIcon = {')

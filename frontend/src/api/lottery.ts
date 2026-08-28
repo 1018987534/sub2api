@@ -8,9 +8,6 @@ export interface LotteryConfig {
   prize_amount: number
   draw_mode: 'auto' | 'manual'
   next_round_mode: 'auto' | 'manual'
-  actor_percentage: number
-  actor_join_min_seconds: number
-  actor_join_max_seconds: number
   require_recharge: boolean
   min_recharge_amount: number
   min_account_age_days: number
@@ -27,19 +24,14 @@ export interface LotteryRound {
   prize_amount: number
   draw_mode?: 'auto' | 'manual' | string
   next_round_mode?: 'auto' | 'manual' | string
-  actor_percentage?: number
-  actor_target_count?: number
-  actor_join_min_seconds?: number
-  actor_join_max_seconds?: number
   require_recharge: boolean
   min_recharge_amount: number
   min_account_age_days: number
   participant_count: number
-  actor_count?: number
+  manual_progress_count?: number
   real_participant_count?: number
   winner_count: number
   unique_ip_count?: number
-  next_actor_at?: string | null
   started_at: string
   drawn_at?: string | null
   updated_at?: string
@@ -76,13 +68,19 @@ export interface LotteryDrawResult {
   next_round?: LotteryRound
 }
 
+export interface LotteryCaptchaProof {
+  turnstile_token?: string
+  tencent_captcha_ticket?: string
+  tencent_captcha_randstr?: string
+}
+
 export const lotteryAPI = {
   async getCurrent() {
     const { data } = await apiClient.get<LotteryCurrent>('/lottery/current')
     return data
   },
-  async join() {
-    const { data } = await apiClient.post<{ round_id: number; round_no: number; participant_count: number; joined_at: string }>('/lottery/join')
+  async join(proof: LotteryCaptchaProof) {
+    const { data } = await apiClient.post<{ round_id: number; round_no: number; participant_count: number; joined_at: string }>('/lottery/join', proof)
     return data
   },
   async getRounds(page = 1, pageSize = 8) {
@@ -103,6 +101,10 @@ export const lotteryAPI = {
   },
   async getAdminRounds(page = 1, pageSize = 20) {
     const { data } = await apiClient.get<BasePaginationResponse<LotteryRound>>('/admin/lottery/rounds', { params: { page, page_size: pageSize } })
+    return data
+  },
+  async updateRoundProgress(roundId: number, participantCount: number) {
+    const { data } = await apiClient.put<LotteryRound>(`/admin/lottery/rounds/${roundId}/progress`, { participant_count: participantCount })
     return data
   },
   async drawRound(roundId: number) {

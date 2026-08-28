@@ -7,34 +7,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestValidateLotteryConfigDefaultsAndActorBoundary(t *testing.T) {
+func TestValidateLotteryConfigDefaultsAndPrizeBoundary(t *testing.T) {
 	cfg := LotteryConfig{
 		ParticipantThreshold: 50,
 		PrizeCount:           6,
 		PrizeAmount:          5,
 		DrawMode:             LotteryDrawModeAuto,
 		NextRoundMode:        LotteryRoundModeManual,
-		ActorPercentage:      50,
-		ActorJoinMinSeconds:  60,
-		ActorJoinMaxSeconds:  600,
 		RequireRecharge:      true,
 	}
 	require.NoError(t, ValidateLotteryConfig(cfg))
-	require.Equal(t, 25, lotteryActorTarget(cfg.ParticipantThreshold, cfg.ActorPercentage))
-	require.Equal(t, 25, lotteryRealSlotCapacity(cfg.ParticipantThreshold, lotteryActorTarget(cfg.ParticipantThreshold, cfg.ActorPercentage)))
 
-	cfg.PrizeCount = 26
+	cfg.PrizeCount = 51
 	err := ValidateLotteryConfig(cfg)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "real participant slots")
+	require.Contains(t, err.Error(), "participant threshold")
 }
 
-func TestValidateLotteryConfigRejectsInvalidModesAndIntervals(t *testing.T) {
-	cfg := LotteryConfig{ParticipantThreshold: 50, PrizeCount: 1, PrizeAmount: 5, DrawMode: "later", NextRoundMode: LotteryRoundModeManual, ActorJoinMinSeconds: 60, ActorJoinMaxSeconds: 600}
+func TestValidateLotteryConfigRejectsInvalidModes(t *testing.T) {
+	cfg := LotteryConfig{ParticipantThreshold: 50, PrizeCount: 1, PrizeAmount: 5, DrawMode: "later", NextRoundMode: LotteryRoundModeManual}
 	require.Error(t, ValidateLotteryConfig(cfg))
-	cfg.DrawMode = LotteryDrawModeAuto
-	cfg.ActorJoinMinSeconds = 700
-	require.Error(t, ValidateLotteryConfig(cfg))
+}
+
+func TestValidateLotteryProgressBounds(t *testing.T) {
+	round := LotteryRound{RealParticipantCount: 12, ParticipantThreshold: 50, PrizeCount: 6}
+	require.NoError(t, validateLotteryProgress(round, 12))
+	require.NoError(t, validateLotteryProgress(round, 50))
+	require.ErrorIs(t, validateLotteryProgress(round, 11), ErrLotteryProgressInvalid)
+	require.ErrorIs(t, validateLotteryProgress(round, 51), ErrLotteryProgressInvalid)
+
+	round.RealParticipantCount = 5
+	require.NoError(t, validateLotteryProgress(round, 49))
+	require.ErrorIs(t, validateLotteryProgress(round, 50), ErrLotteryInsufficientRealParticipants)
 }
 
 func TestMaskLotteryEmail(t *testing.T) {

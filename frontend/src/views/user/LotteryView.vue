@@ -18,6 +18,19 @@
           <span>{{ t('lottery.refresh') }}</span>
         </button>
       </div>
+      <CaptchaChallenge
+        ref="captchaRef"
+        :turnstile-enabled="false"
+        turnstile-site-key=""
+        :tencent-enabled="tencentCaptchaEnabled"
+        :tencent-app-id="publicSettings?.tencent_captcha_app_id || ''"
+        :tencent-region="publicSettings?.tencent_captcha_region || 'cn'"
+        :aliyun-enabled="aliyunCaptchaEnabled"
+        :aliyun-scene-id="publicSettings?.aliyun_captcha_scene_id || ''"
+        :aliyun-prefix="publicSettings?.aliyun_captcha_prefix || ''"
+        :aliyun-region="publicSettings?.aliyun_captcha_region || 'cn'"
+        @error="handleCaptchaError"
+      />
 
       <div v-if="loading" class="card flex justify-center py-16">
         <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
@@ -134,6 +147,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CaptchaChallenge from '@/components/CaptchaChallenge.vue'
 import lotteryAPI, { type LotteryCurrent, type LotteryRound } from '@/api/lottery'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -142,8 +156,13 @@ const { t } = useI18n()
 const appStore = useAppStore()
 const loading = ref(true)
 const joining = ref(false)
+const captchaRef = ref<InstanceType<typeof CaptchaChallenge> | null>(null)
 const current = ref<LotteryCurrent | null>(null)
 const rounds = ref<LotteryRound[]>([])
+const publicSettings = computed(() => appStore.cachedPublicSettings)
+const tencentCaptchaEnabled = computed(() => publicSettings.value?.tencent_captcha_enabled === true && Boolean(publicSettings.value.tencent_captcha_app_id))
+const aliyunCaptchaEnabled = computed(() => publicSettings.value?.aliyun_captcha_enabled === true && Boolean(publicSettings.value.aliyun_captcha_scene_id) && Boolean(publicSettings.value.aliyun_captcha_prefix))
+const sliderCaptchaConfigured = computed(() => tencentCaptchaEnabled.value || aliyunCaptchaEnabled.value)
 const progress = computed(() => {
   const round = current.value?.current_round
   return round ? Math.min(100, Math.round((round.participant_count / Math.max(1, round.participant_threshold)) * 100)) : 0
@@ -165,15 +184,30 @@ async function load(): Promise<void> {
 }
 
 async function join(): Promise<void> {
+  if (!sliderCaptchaConfigured.value) {
+    appStore.showError(t('lottery.captchaUnavailable'))
+    return
+  }
   joining.value = true
   try {
-    await lotteryAPI.join()
+    const proof = await captchaRef.value?.verifyAction()
+    if (!proof) return
+    await lotteryAPI.join(tencentCaptchaEnabled.value
+      ? { tencent_captcha_ticket: proof.token, tencent_captcha_randstr: proof.randstr }
+      : { turnstile_token: proof.token })
     appStore.showSuccess(t('lottery.joinSuccess'))
     await load()
+    window.dispatchEvent(new Event('lottery-availability-changed'))
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, t('lottery.joinFailed')))
   } finally { joining.value = false }
 }
 
-onMounted(load)
+function handleCaptchaError(): void {
+  appStore.showError(t('lottery.captchaFailed'))
+}
+
+onMounted(async () => {
+  await Promise.all([appStore.fetchPublicSettings(), load()])
+})
 </script>

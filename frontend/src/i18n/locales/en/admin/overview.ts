@@ -1251,7 +1251,7 @@ export default {
 
     lottery: {
       title: 'Lottery Management',
-      description: 'Configure the lottery switch, draw rules, actor pacing, and eligibility. Changes apply to new rounds.',
+      description: 'Configure the lottery switch, draw rules, and eligibility. Round configuration changes apply to new rounds.',
       enabled: 'Enable lottery activity',
       enabledHint: 'When disabled, the user menu is hidden and existing rounds stop accepting entries.',
       rules: 'Round rules',
@@ -1264,10 +1264,6 @@ export default {
       nextRoundMode: 'Next round mode',
       autoNext: 'Start immediately after draw',
       manualNext: 'Start next round manually',
-      actors: 'Actor pacing',
-      actorPercentage: 'Actor percentage',
-      actorInterval: 'Actor join interval (seconds)',
-      actorHint: 'Actors count toward progress but never win. They join one at a time at randomized intervals.',
       eligibility: 'Eligibility (all selected rules apply)',
       requireRecharge: 'Has completed a recharge',
       minRecharge: 'Cumulative recharge amount',
@@ -1277,16 +1273,20 @@ export default {
       recentRechargeHint: 'Only visible to administrators; users receive a generic eligibility message. Use 0 for no minimum.',
       save: 'Save configuration',
       startRound: 'Start new round',
+      updateProgress: 'Update progress',
+      progressInput: 'Set draw progress manually',
       draw: 'Draw now',
       currentRound: 'Current round',
       rounds: 'Round history',
       noOpenRound: 'No open round',
       saved: 'Lottery configuration saved',
       roundStarted: 'New round started',
+      progressUpdated: 'Draw progress updated',
+      progressUpdateFailed: 'Failed to update draw progress',
       drawn: 'Draw completed',
       loadFailed: 'Failed to load lottery management data',
       saveFailed: 'Failed to save lottery configuration',
-      columns: { round: 'Round', progress: 'Progress', real: 'Real', actors: 'Actors', status: 'Status', actions: 'Actions' }
+      columns: { round: 'Round', progress: 'Draw progress', real: 'Real entries', manualProgress: 'Manual addition', status: 'Status', actions: 'Actions' }
     },
 
     // Available Channels (aggregated read-only view)

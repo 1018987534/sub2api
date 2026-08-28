@@ -25,3 +25,15 @@ func TestLotteryMigration(t *testing.T) {
 	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS lottery_balance_ledger")
 	require.Contains(t, sql, "winner_id BIGINT NOT NULL UNIQUE")
 }
+
+func TestLotteryManualProgressMigration(t *testing.T) {
+	content, err := FS.ReadFile("234_lottery_manual_progress.sql")
+	require.NoError(t, err)
+	sql := strings.Join(strings.Fields(string(content)), " ")
+
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS manual_progress_count INTEGER NOT NULL DEFAULT 0")
+	require.Contains(t, sql, "manual_progress_count = GREATEST(manual_progress_count, actor_count)")
+	require.Contains(t, sql, "actor_target_count = 0")
+	require.Contains(t, sql, "actor_count = 0")
+	require.Contains(t, sql, "next_actor_at = NULL")
+}
