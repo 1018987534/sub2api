@@ -30,6 +30,7 @@ var (
 	ErrLotteryAlreadyJoined                = infraerrors.Conflict("LOTTERY_ALREADY_JOINED", "you already joined this lottery round")
 	ErrLotteryProgressFull                 = infraerrors.Conflict("LOTTERY_PROGRESS_FULL", "lottery progress is already full")
 	ErrLotteryNotEligible                  = infraerrors.Forbidden("LOTTERY_NOT_ELIGIBLE", "you are not eligible for this lottery round")
+	ErrLotteryRoundNotFound                = infraerrors.NotFound("LOTTERY_ROUND_NOT_FOUND", "lottery round not found")
 	ErrLotteryInsufficientRealParticipants = infraerrors.BadRequest("LOTTERY_NOT_ENOUGH_REAL_PARTICIPANTS", "not enough real participants to draw all prizes")
 	ErrLotteryProgressInvalid              = infraerrors.BadRequest("LOTTERY_PROGRESS_INVALID", "participant progress must be between the real participant count and the draw threshold")
 )
@@ -120,6 +121,24 @@ type LotteryRoundPage struct {
 	Page     int            `json:"page"`
 	PageSize int            `json:"page_size"`
 	Pages    int            `json:"pages"`
+}
+
+type LotteryParticipant struct {
+	ID       int64     `json:"id"`
+	RoundID  int64     `json:"round_id"`
+	UserID   int64     `json:"user_id"`
+	Username string    `json:"username"`
+	Email    string    `json:"email"`
+	ClientIP string    `json:"client_ip"`
+	JoinedAt time.Time `json:"joined_at"`
+}
+
+type LotteryParticipantPage struct {
+	Items    []LotteryParticipant `json:"items"`
+	Total    int64                `json:"total"`
+	Page     int                  `json:"page"`
+	PageSize int                  `json:"page_size"`
+	Pages    int                  `json:"pages"`
 }
 
 type LotteryPublicRoundPage struct {
@@ -561,6 +580,73 @@ func (s *LotteryService) ListRounds(ctx context.Context, page, pageSize int) (Lo
 	}
 	pages := int((total + int64(pageSize) - 1) / int64(pageSize))
 	return LotteryRoundPage{Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pages}, nil
+}
+
+func (s *LotteryService) ListParticipants(ctx context.Context, roundID int64, page, pageSize int) (LotteryParticipantPage, error) {
+	if roundID <= 0 {
+		return LotteryParticipantPage{}, ErrLotteryRoundNotFound
+	}
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	var total int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(p.id)
+		FROM lottery_rounds r
+		LEFT JOIN lottery_participants p ON p.round_id=r.id AND p.is_actor=FALSE
+		WHERE r.id=$1
+		GROUP BY r.id`, roundID).Scan(&total)
+	if errors.Is(err, sql.ErrNoRows) {
+		return LotteryParticipantPage{}, ErrLotteryRoundNotFound
+	}
+	if err != nil {
+		return LotteryParticipantPage{}, err
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.id,p.round_id,p.user_id,COALESCE(u.username,''),u.email,
+		       COALESCE(p.client_ip,''),p.joined_at
+		FROM lottery_participants p
+		JOIN users u ON u.id=p.user_id
+		WHERE p.round_id=$1 AND p.is_actor=FALSE
+		ORDER BY p.joined_at ASC,p.id ASC
+		LIMIT $2 OFFSET $3`, roundID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return LotteryParticipantPage{}, err
+	}
+	defer rows.Close()
+
+	items := make([]LotteryParticipant, 0, pageSize)
+	for rows.Next() {
+		var participant LotteryParticipant
+		if err := rows.Scan(
+			&participant.ID,
+			&participant.RoundID,
+			&participant.UserID,
+			&participant.Username,
+			&participant.Email,
+			&participant.ClientIP,
+			&participant.JoinedAt,
+		); err != nil {
+			return LotteryParticipantPage{}, err
+		}
+		items = append(items, participant)
+	}
+	if err := rows.Err(); err != nil {
+		return LotteryParticipantPage{}, err
+	}
+
+	pages := int((total + int64(pageSize) - 1) / int64(pageSize))
+	return LotteryParticipantPage{
+		Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pages,
+	}, nil
 }
 
 func (s *LotteryService) UpdateProgress(ctx context.Context, roundID int64, participantCount int) (LotteryRound, error) {

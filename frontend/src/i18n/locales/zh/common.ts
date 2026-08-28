@@ -270,7 +270,12 @@ export default {
     loadFailed: '抽奖数据加载失败',
     joinSuccess: '参与成功，祝您好运！',
     joinFailed: '参与抽奖失败',
-    captchaUnavailable: '管理员尚未配置滑块验证，当前暂不能参与抽奖',
+    captchaTitle: '安全验证',
+    captchaInstruction: '请拖动滑块完成拼图',
+    captchaLoading: '正在加载验证...',
+    captchaSubmitting: '正在验证并参与抽奖...',
+    captchaRetry: '重新加载',
+    captchaLoadFailed: '滑块验证加载失败',
     captchaFailed: '滑块验证失败，请重试'
   },
 

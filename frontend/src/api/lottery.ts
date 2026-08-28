@@ -68,10 +68,38 @@ export interface LotteryDrawResult {
   next_round?: LotteryRound
 }
 
+export interface LotteryJoinResult {
+  round_id: number
+  round_no: number
+  participant_count: number
+  joined_at: string
+}
+
+export interface LotteryParticipant {
+  id: number
+  round_id: number
+  user_id: number
+  username: string
+  email: string
+  client_ip: string
+  joined_at: string
+}
+
+export interface LotteryCaptchaChallenge {
+  id: string
+  image: string
+  thumb: string
+  thumb_x: number
+  thumb_y: number
+  thumb_width: number
+  thumb_height: number
+  expires_in: number
+}
+
 export interface LotteryCaptchaProof {
-  turnstile_token?: string
-  tencent_captcha_ticket?: string
-  tencent_captcha_randstr?: string
+  captcha_id: string
+  captcha_x: number
+  captcha_y: number
 }
 
 export const lotteryAPI = {
@@ -79,8 +107,12 @@ export const lotteryAPI = {
     const { data } = await apiClient.get<LotteryCurrent>('/lottery/current')
     return data
   },
+  async getCaptcha() {
+    const { data } = await apiClient.get<LotteryCaptchaChallenge>('/lottery/captcha')
+    return data
+  },
   async join(proof: LotteryCaptchaProof) {
-    const { data } = await apiClient.post<{ round_id: number; round_no: number; participant_count: number; joined_at: string }>('/lottery/join', proof)
+    const { data } = await apiClient.post<LotteryJoinResult>('/lottery/join', proof)
     return data
   },
   async getRounds(page = 1, pageSize = 8) {
@@ -101,6 +133,10 @@ export const lotteryAPI = {
   },
   async getAdminRounds(page = 1, pageSize = 20) {
     const { data } = await apiClient.get<BasePaginationResponse<LotteryRound>>('/admin/lottery/rounds', { params: { page, page_size: pageSize } })
+    return data
+  },
+  async getAdminParticipants(roundId: number, page = 1, pageSize = 20) {
+    const { data } = await apiClient.get<BasePaginationResponse<LotteryParticipant>>(`/admin/lottery/rounds/${roundId}/participants`, { params: { page, page_size: pageSize } })
     return data
   },
   async updateRoundProgress(roundId: number, participantCount: number) {

@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest'
 
 const viewPath = resolve(dirname(fileURLToPath(import.meta.url)), '../LotteryView.vue')
 const viewSource = readFileSync(viewPath, 'utf8')
+const dialogPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/lottery/LotteryParticipantsDialog.vue')
+const dialogSource = readFileSync(dialogPath, 'utf8')
 
 describe('Admin LotteryView progress control', () => {
   it('updates an open round with an absolute participant count', () => {
@@ -23,5 +25,15 @@ describe('Admin LotteryView progress control', () => {
   it('labels balance amounts as USD instead of coins', () => {
     expect(viewSource.match(/>USD<\/span>/g)).toHaveLength(2)
     expect(viewSource).not.toContain('coins')
+  })
+
+  it('opens a paginated list of exact real participants', () => {
+    expect(viewSource).toContain('@click="openParticipants(round)"')
+    expect(viewSource).toContain('<LotteryParticipantsDialog')
+    expect(dialogSource).toContain('lotteryAPI.getAdminParticipants')
+    expect(dialogSource).toContain("key: 'user_id'")
+    expect(dialogSource).toContain("key: 'email'")
+    expect(dialogSource).toContain("key: 'client_ip'")
+    expect(dialogSource).toContain("key: 'joined_at'")
   })
 })

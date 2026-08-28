@@ -141,6 +141,7 @@ func registerLotteryRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	lottery.PUT("/config", h.Lottery.AdminUpdateConfig)
 	lottery.POST("/rounds", h.Lottery.AdminStartRound)
 	lottery.GET("/rounds", h.Lottery.AdminRounds)
+	lottery.GET("/rounds/:id/participants", h.Lottery.AdminParticipants)
 	lottery.PUT("/rounds/:id/progress", h.Lottery.AdminUpdateProgress)
 	lottery.POST("/rounds/:id/draw", h.Lottery.AdminDraw)
 }

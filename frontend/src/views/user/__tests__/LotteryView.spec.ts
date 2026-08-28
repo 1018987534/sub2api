@@ -6,18 +6,24 @@ import { describe, expect, it } from 'vitest'
 
 const viewPath = resolve(dirname(fileURLToPath(import.meta.url)), '../LotteryView.vue')
 const viewSource = readFileSync(viewPath, 'utf8')
+const sliderPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/lottery/LotterySliderCaptcha.vue')
+const sliderSource = readFileSync(sliderPath, 'utf8')
 
 describe('LotteryView slider verification', () => {
-  it('requires a fresh action captcha proof before joining', () => {
-    expect(viewSource).toContain('captchaRef.value?.verifyAction()')
-    expect(viewSource).toContain('tencent_captcha_ticket: proof.token')
-    expect(viewSource).toContain('turnstile_token: proof.token')
+  it('requires a fresh self-hosted slider proof before joining', () => {
+    expect(viewSource).toContain('<LotterySliderCaptcha')
+    expect(sliderSource).toContain('await lotteryAPI.getCaptcha()')
+    expect(sliderSource).toContain('captcha_id: challenge.value.id')
+    expect(sliderSource).toContain('captcha_x: point.x')
+    expect(sliderSource).toContain('captcha_y: point.y')
     expect(viewSource).toContain("window.dispatchEvent(new Event('lottery-availability-changed'))")
   })
 
-  it('does not submit when no slider provider is configured', () => {
-    expect(viewSource).toContain('if (!sliderCaptchaConfigured.value)')
-    expect(viewSource).toContain("t('lottery.captchaUnavailable')")
+  it('does not depend on Tencent or Aliyun captcha settings', () => {
+    expect(viewSource).not.toContain('CaptchaChallenge')
+    expect(viewSource).not.toContain('tencentCaptchaEnabled')
+    expect(viewSource).not.toContain('aliyunCaptchaEnabled')
+    expect(sliderSource).toContain("from 'go-captcha-vue'")
   })
 
   it('formats lottery rewards in the account USD currency', () => {

@@ -321,7 +321,12 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	batchImageHandler := handler.ProvideBatchImageHandler(batchImagePublicService, batchImageDownloadService, batchImageCleanupService, openAIGatewayHandler)
 	supportChatHandler := handler.NewSupportChatHandler(db, redisClient)
 	lotteryService := service.NewLotteryService(db, apiKeyAuthCacheInvalidator, billingCacheService)
-	lotteryHandler := handler.NewLotteryHandler(lotteryService, authService)
+	lotteryCaptchaStore := repository.NewLotteryCaptchaStore(redisClient)
+	lotteryCaptchaService, err := service.NewLotteryCaptchaService(lotteryCaptchaStore)
+	if err != nil {
+		return nil, err
+	}
+	lotteryHandler := handler.NewLotteryHandler(lotteryService, lotteryCaptchaService)
 	idempotencyCoordinator := service.ProvideIdempotencyCoordinator(idempotencyRepository, configConfig)
 	idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, configConfig)
 	openAIQuotaAutoResetService := service.ProvideOpenAIQuotaAutoResetService(accountRepository, openAIQuotaService, rateLimitService, idempotencyCoordinator, auditLogService, settingService, leaderLockCache)

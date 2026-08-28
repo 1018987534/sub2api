@@ -1285,6 +1285,11 @@ export default {
       drawn: '开奖完成',
       loadFailed: '抽奖管理数据加载失败',
       saveFailed: '保存抽奖配置失败',
+      viewParticipants: '查看 {count} 位真实参与用户',
+      participantsTitle: '第 {round} 期真实参与用户',
+      noParticipants: '本期暂无真实用户参与',
+      participantsLoadFailed: '参与用户明细加载失败',
+      participantColumns: { userId: '用户 ID', username: '用户名', email: '邮箱', ip: 'IP', joinedAt: '参与时间' },
       columns: { round: '期数', progress: '开奖进度', real: '真实参与', manualProgress: '手动补充', status: '状态', actions: '操作' }
     },
 

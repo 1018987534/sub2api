@@ -270,7 +270,12 @@ export default {
     loadFailed: 'Failed to load lottery data',
     joinSuccess: 'You joined successfully. Good luck!',
     joinFailed: 'Failed to join the lottery',
-    captchaUnavailable: 'Lottery entry is unavailable until an administrator configures slider verification',
+    captchaTitle: 'Security verification',
+    captchaInstruction: 'Drag the slider to complete the puzzle',
+    captchaLoading: 'Loading verification...',
+    captchaSubmitting: 'Verifying and joining...',
+    captchaRetry: 'Reload',
+    captchaLoadFailed: 'Failed to load slider verification',
     captchaFailed: 'Slider verification failed. Please try again.'
   },
 

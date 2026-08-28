@@ -11,18 +11,18 @@ import (
 )
 
 type LotteryHandler struct {
-	service     *service.LotteryService
-	authService *service.AuthService
+	service        *service.LotteryService
+	captchaService *service.LotteryCaptchaService
 }
 
-func NewLotteryHandler(lotteryService *service.LotteryService, authService *service.AuthService) *LotteryHandler {
-	return &LotteryHandler{service: lotteryService, authService: authService}
+func NewLotteryHandler(lotteryService *service.LotteryService, captchaService *service.LotteryCaptchaService) *LotteryHandler {
+	return &LotteryHandler{service: lotteryService, captchaService: captchaService}
 }
 
 type lotteryJoinRequest struct {
-	TurnstileToken        string `json:"turnstile_token"`
-	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
-	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
+	CaptchaID string `json:"captcha_id"`
+	CaptchaX  int    `json:"captcha_x"`
+	CaptchaY  int    `json:"captcha_y"`
 }
 
 type lotteryProgressRequest struct {
@@ -54,11 +54,9 @@ func (h *LotteryHandler) Join(c *gin.Context) {
 		response.BadRequest(c, "Invalid request body")
 		return
 	}
-	if err := h.authService.VerifyRequiredActionCaptcha(c.Request.Context(), service.CaptchaProof{
-		TurnstileToken: req.TurnstileToken,
-		TencentTicket:  req.TencentCaptchaTicket,
-		TencentRandstr: req.TencentCaptchaRandstr,
-	}, ip.GetClientIP(c)); err != nil {
+	if err := h.captchaService.VerifyAndConsume(
+		c.Request.Context(), subject.UserID, ip.GetClientIP(c), req.CaptchaID, req.CaptchaX, req.CaptchaY,
+	); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -68,6 +66,20 @@ func (h *LotteryHandler) Join(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *LotteryHandler) Captcha(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	challenge, err := h.captchaService.Generate(c.Request.Context(), subject.UserID, ip.GetClientIP(c))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, challenge)
 }
 
 func (h *LotteryHandler) AdminUpdateProgress(c *gin.Context) {
@@ -153,6 +165,21 @@ func (h *LotteryHandler) AdminDraw(c *gin.Context) {
 func (h *LotteryHandler) AdminRounds(c *gin.Context) {
 	page, pageSize := lotteryPagination(c)
 	result, err := h.service.ListRounds(c.Request.Context(), page, pageSize)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *LotteryHandler) AdminParticipants(c *gin.Context) {
+	roundID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || roundID <= 0 {
+		response.BadRequest(c, "Invalid round ID")
+		return
+	}
+	page, pageSize := lotteryPagination(c)
+	result, err := h.service.ListParticipants(c.Request.Context(), roundID, page, pageSize)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

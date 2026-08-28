@@ -1,0 +1,33 @@
+Changed branch/field: cdy/lottery-participant-list-20260828; lottery join proof changed from external-provider tokens to one-time captcha_id/captcha_x/captcha_y, and the administrator real_participant_count now opens the exact non-actor participant list. manual_progress_count remains separate and is never returned as a user.
+
+Artifacts:
+- MODIFIED_FILE: /private/tmp/sub2api-lottery-participant-list-20260828/release-evidence/lottery-participants-slider-20260828/MODIFIED_FILE
+- DIFF_FILE: /private/tmp/sub2api-lottery-participant-list-20260828/release-evidence/lottery-participants-slider-20260828/DIFF_FILE
+- VERIFICATION.txt: /private/tmp/sub2api-lottery-participant-list-20260828/release-evidence/lottery-participants-slider-20260828/VERIFICATION.txt
+- ROLLBACK.sh: /private/tmp/sub2api-lottery-participant-list-20260828/release-evidence/lottery-participants-slider-20260828/ROLLBACK.sh
+
+Hashes:
+- BASELINE_FILE sha256: aa1b9f1e910950dc22304b5a1c425303ee2e5ca2ab55db693f826487f6af777f
+- MODIFIED_FILE sha256: a28c3f26faacbce7ce10b745d345097cea4c00c2ad46687e9640eb3505b09b75
+- DIFF_FILE sha256: 332fe61e7af2714815cca3828ac12898e978830693335b8c4ad33f065684fe7c
+
+BASELINE
+Command: cd /private/tmp/sub2api-lottery-participant-baseline-20260828/frontend && pnpm exec vitest run src/views/admin/__tests__/LotteryView.spec.ts src/views/user/__tests__/LotteryView.spec.ts src/i18n/__tests__/localesMessageCompile.spec.ts
+Input: detached worktree at ed637a124b013cbdc1f77464b8e65fe0a2791ca7; the lottery join flow still reads Tencent/Aliyun public settings and the real participant count has no user-detail action.
+Literal output: Test Files 3 passed (3); Tests 8 passed (8); Duration 1.33s
+Result: pre-change lottery view and locale tests passed.
+Exit status: 0
+
+MODIFIED
+Command: cd /private/tmp/sub2api-lottery-participant-list-20260828/backend && go test ./... && go vet ./...; cd /private/tmp/sub2api-lottery-participant-list-20260828/frontend && pnpm install --frozen-lockfile && pnpm exec vitest run && pnpm typecheck && pnpm build
+Input: GoCaptcha 2.0.5 backend generation with Redis single-use storage; go-captcha-vue 2.0.7 participation dialog; administrator participant list filtered with p.is_actor=FALSE; version 0.1.186.
+Literal output: backend all packages passed; go vet exit 0; Test Files 258 passed (258); Tests 1824 passed (1824); vue-tsc --noEmit completed; vite built 1054 modules in 13.16s
+Result: modified backend, frontend, locale compilation, participant-detail flow, typecheck, and production build passed.
+Exit status: 0
+
+ROLLBACK
+Command: cp /private/tmp/sub2api-lottery-participant-list-20260828/release-evidence/lottery-participants-slider-20260828/MODIFIED_FILE /private/tmp/sub2api-lottery-participant-rollback-20260828.07zoZY/MODIFIED_FILE && /private/tmp/sub2api-lottery-participant-list-20260828/release-evidence/lottery-participants-slider-20260828/ROLLBACK.sh /private/tmp/sub2api-lottery-participant-rollback-20260828.07zoZY/MODIFIED_FILE && cmp -s /private/tmp/sub2api-lottery-participant-list-20260828/release-evidence/lottery-participants-slider-20260828/BASELINE_FILE /private/tmp/sub2api-lottery-participant-rollback-20260828.07zoZY/MODIFIED_FILE
+Input: another copy of MODIFIED_FILE; the release-evidence MODIFIED_FILE remains changed.
+Literal output: restored behavior: /private/tmp/sub2api-lottery-participant-rollback-20260828.07zoZY/MODIFIED_FILE matches /private/tmp/sub2api-lottery-participant-list-20260828/release-evidence/lottery-participants-slider-20260828/BASELINE_FILE; rollback_cmp=PASS; modified_artifact=CHANGED
+Result: rollback copy restored the previous external-provider lottery view; MODIFIED_FILE retained the self-hosted slider participation flow.
+Exit status: 0

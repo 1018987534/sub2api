@@ -1,0 +1,1509 @@
+diff --git a/backend/cmd/server/VERSION b/backend/cmd/server/VERSION
+index 8fe4a535a..18bcb2f87 100644
+--- a/backend/cmd/server/VERSION
++++ b/backend/cmd/server/VERSION
+@@ -1 +1 @@
+-0.1.185
++0.1.186
+diff --git a/backend/cmd/server/wire_gen.go b/backend/cmd/server/wire_gen.go
+index 831442127..a904c8131 100644
+--- a/backend/cmd/server/wire_gen.go
++++ b/backend/cmd/server/wire_gen.go
+@@ -321,7 +321,12 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
+     batchImageHandler := handler.ProvideBatchImageHandler(batchImagePublicService, batchImageDownloadService, batchImageCleanupService, openAIGatewayHandler)
+     supportChatHandler := handler.NewSupportChatHandler(db, redisClient)
+     lotteryService := service.NewLotteryService(db, apiKeyAuthCacheInvalidator, billingCacheService)
+-    lotteryHandler := handler.NewLotteryHandler(lotteryService, authService)
++    lotteryCaptchaStore := repository.NewLotteryCaptchaStore(redisClient)
++    lotteryCaptchaService, err := service.NewLotteryCaptchaService(lotteryCaptchaStore)
++    if err != nil {
++        return nil, err
++    }
++    lotteryHandler := handler.NewLotteryHandler(lotteryService, lotteryCaptchaService)
+     idempotencyCoordinator := service.ProvideIdempotencyCoordinator(idempotencyRepository, configConfig)
+     idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, configConfig)
+     openAIQuotaAutoResetService := service.ProvideOpenAIQuotaAutoResetService(accountRepository, openAIQuotaService, rateLimitService, idempotencyCoordinator, auditLogService, settingService, leaderLockCache)
+diff --git a/backend/go.mod b/backend/go.mod
+index b86368117..eacdc142f 100644
+--- a/backend/go.mod
++++ b/backend/go.mod
+@@ -48,6 +48,8 @@ require (
+     github.com/tidwall/sjson v1.2.5
+     github.com/tiktoken-go/tokenizer v0.8.0
+     github.com/wechatpay-apiv3/wechatpay-go v0.2.21
++    github.com/wenlng/go-captcha-assets v1.0.7
++    github.com/wenlng/go-captcha/v2 v2.0.5
+     github.com/zeromicro/go-zero v1.9.4
+     go.uber.org/zap v1.24.0
+     golang.org/x/crypto v0.53.0
+@@ -125,10 +127,12 @@ require (
+     github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
+     github.com/go-webauthn/x v0.2.6 // indirect
+     github.com/goccy/go-json v0.10.2 // indirect
++    github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
+     github.com/golang/protobuf v1.5.4 // indirect
+     github.com/google/go-cmp v0.7.0 // indirect
+     github.com/google/go-querystring v1.1.0 // indirect
+     github.com/google/go-tpm v0.9.8 // indirect
++    github.com/google/subcommands v1.2.0 // indirect
+     github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 // indirect
+     github.com/hashicorp/hcl v1.0.0 // indirect
+     github.com/hashicorp/hcl/v2 v2.18.1 // indirect
+diff --git a/backend/go.sum b/backend/go.sum
+index 3c46484df..45b3a78a9 100644
+--- a/backend/go.sum
++++ b/backend/go.sum
+@@ -224,6 +224,8 @@ github.com/goccy/go-json v0.10.2 h1:CrxCmQqYDkv1z7lO7Wbh2HN93uovUHgrECaO5ZrCXAU=
+ github.com/goccy/go-json v0.10.2/go.mod h1:6MelG93GURQebXPDq3khkgXZkazVtN9CRI+MGFi0w8I=
+ github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
+ github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
++github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 h1:DACJavvAHhabrF08vX0COfcOBJRhZ8lUbR+ZWIs0Y5g=
++github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0/go.mod h1:E/TSTwGwJL78qG/PmXZO1EjYhfJinVAhrmmHX6Z8B9k=
+ github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b/go.mod h1:SBH7ygxi8pfUlaOkMMuAQtPIUF8ecWP5IEl/CR7VP2Q=
+ github.com/golang/mock v1.1.1/go.mod h1:oTYuIxOrZwtPieC+H1uAHpcLFnEyAGVDL/k47Jfbm0A=
+ github.com/golang/protobuf v1.2.0/go.mod h1:6lQm79b+lXiMfvg/cZm0SGofjICqVBUtrP5yJMmIC1U=
+@@ -498,6 +500,10 @@ github.com/ugorji/go/codec v1.2.11 h1:BMaWp1Bb6fHwEtbplGBGJ498wD+LKlNSl25MjdZY4d
+ github.com/ugorji/go/codec v1.2.11/go.mod h1:UNopzCgEMSXjBc6AOMqYvWC1ktqTAfzJZUZgYf6w6lg=
+ github.com/wechatpay-apiv3/wechatpay-go v0.2.21 h1:uIyMpzvcaHA33W/QPtHstccw+X52HO1gFdvVL9O6Lfs=
+ github.com/wechatpay-apiv3/wechatpay-go v0.2.21/go.mod h1:A254AUBVB6R+EqQFo3yTgeh7HtyqRRtN2w9hQSOrd4Q=
++github.com/wenlng/go-captcha-assets v1.0.7 h1:tfF84A4un/i4p+TbRVHDqDPeQeatvddOfB2xbKvLVq8=
++github.com/wenlng/go-captcha-assets v1.0.7/go.mod h1:zinRACsdYcL/S6pHgI9Iv7FKTU41d00+43pNX+b9+MM=
++github.com/wenlng/go-captcha/v2 v2.0.5 h1:+1FpVwJZmLCqEHxOt+HvpUArFGo107nRxOeRVHkZhTc=
++github.com/wenlng/go-captcha/v2 v2.0.5/go.mod h1:5hac1em3uXoyC5ipZ0xFv9umNM/waQvYAQdr0cx/h34=
+ github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
+ github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
+ github.com/xyproto/randomstring v1.0.5 h1:YtlWPoRdgMu3NZtP45drfy1GKoojuR7hmRcnhZqKjWU=
+@@ -569,6 +575,7 @@ golang.org/x/crypto v0.53.0/go.mod h1:DNLU434OwVakk9PzuwV8w62mAJpRJL3vsgcfp4Qnsi
+ golang.org/x/exp v0.0.0-20190121172915-509febef88a4/go.mod h1:CJ0aWSM057203Lf6IL+f9T1iT9GByDxfZKAQTCR3kQA=
+ golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 h1:mgKeJMpvi0yx/sU5GsxQ7p6s2wtOnGAHZWCHUM4KGzY=
+ golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546/go.mod h1:j/pmGrbnkbPtQfxEe5D0VQhZC6qKbfKifgD0oM7sR70=
++golang.org/x/image v0.16.0/go.mod h1:ugSZItdV4nOxyqp56HmXwH0Ry0nBCpjnZdpDaIHdoPs=
+ golang.org/x/image v0.41.0 h1:8wS72eGJMJaBxK6okTzd4WaXumUlTVlb753MlsSvTCo=
+ golang.org/x/image v0.41.0/go.mod h1:uIc348UZMSvS5Z65CVZ7iDPaNobNFEPeJ4kbqTOszmA=
+ golang.org/x/lint v0.0.0-20181026193005-c67002cb31c3/go.mod h1:UVdnD1Gm6xHRNCYTkRU2/jEulfH38KcIWyp/GAMgvoE=
+diff --git a/backend/internal/handler/lottery_handler.go b/backend/internal/handler/lottery_handler.go
+index 2ac5c3228..44663fdb5 100644
+--- a/backend/internal/handler/lottery_handler.go
++++ b/backend/internal/handler/lottery_handler.go
+@@ -11,18 +11,18 @@ import (
+ )
+
+ type LotteryHandler struct {
+-    service     *service.LotteryService
+-    authService *service.AuthService
++    service        *service.LotteryService
++    captchaService *service.LotteryCaptchaService
+ }
+
+-func NewLotteryHandler(lotteryService *service.LotteryService, authService *service.AuthService) *LotteryHandler {
+-    return &LotteryHandler{service: lotteryService, authService: authService}
++func NewLotteryHandler(lotteryService *service.LotteryService, captchaService *service.LotteryCaptchaService) *LotteryHandler {
++    return &LotteryHandler{service: lotteryService, captchaService: captchaService}
+ }
+
+ type lotteryJoinRequest struct {
+-    TurnstileToken        string `json:"turnstile_token"`
+-    TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
+-    TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
++    CaptchaID string `json:"captcha_id"`
++    CaptchaX  int    `json:"captcha_x"`
++    CaptchaY  int    `json:"captcha_y"`
+ }
+
+ type lotteryProgressRequest struct {
+@@ -54,11 +54,9 @@ func (h *LotteryHandler) Join(c *gin.Context) {
+         response.BadRequest(c, "Invalid request body")
+         return
+     }
+-    if err := h.authService.VerifyRequiredActionCaptcha(c.Request.Context(), service.CaptchaProof{
+-        TurnstileToken: req.TurnstileToken,
+-        TencentTicket:  req.TencentCaptchaTicket,
+-        TencentRandstr: req.TencentCaptchaRandstr,
+-    }, ip.GetClientIP(c)); err != nil {
++    if err := h.captchaService.VerifyAndConsume(
++        c.Request.Context(), subject.UserID, ip.GetClientIP(c), req.CaptchaID, req.CaptchaX, req.CaptchaY,
++    ); err != nil {
+         response.ErrorFrom(c, err)
+         return
+     }
+@@ -70,6 +68,20 @@ func (h *LotteryHandler) Join(c *gin.Context) {
+     response.Success(c, result)
+ }
+
++func (h *LotteryHandler) Captcha(c *gin.Context) {
++    subject, ok := middleware2.GetAuthSubjectFromContext(c)
++    if !ok {
++        response.Unauthorized(c, "User not authenticated")
++        return
++    }
++    challenge, err := h.captchaService.Generate(c.Request.Context(), subject.UserID, ip.GetClientIP(c))
++    if err != nil {
++        response.ErrorFrom(c, err)
++        return
++    }
++    response.Success(c, challenge)
++}
++
+ func (h *LotteryHandler) AdminUpdateProgress(c *gin.Context) {
+     roundID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+     if err != nil || roundID <= 0 {
+@@ -160,6 +172,21 @@ func (h *LotteryHandler) AdminRounds(c *gin.Context) {
+     response.Success(c, result)
+ }
+
++func (h *LotteryHandler) AdminParticipants(c *gin.Context) {
++    roundID, err := strconv.ParseInt(c.Param("id"), 10, 64)
++    if err != nil || roundID <= 0 {
++        response.BadRequest(c, "Invalid round ID")
++        return
++    }
++    page, pageSize := lotteryPagination(c)
++    result, err := h.service.ListParticipants(c.Request.Context(), roundID, page, pageSize)
++    if err != nil {
++        response.ErrorFrom(c, err)
++        return
++    }
++    response.Success(c, result)
++}
++
+ func lotteryPagination(c *gin.Context) (int, int) {
+     page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+     pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "8"))
+diff --git a/backend/internal/repository/lottery_captcha_store.go b/backend/internal/repository/lottery_captcha_store.go
+new file mode 100644
+index 000000000..5aa1f4694
+--- /dev/null
++++ b/backend/internal/repository/lottery_captcha_store.go
+@@ -0,0 +1,55 @@
++package repository
++
++import (
++    "context"
++    "encoding/json"
++    "fmt"
++    "time"
++
++    "github.com/Wei-Shaw/sub2api/internal/service"
++    "github.com/redis/go-redis/v9"
++)
++
++const lotteryCaptchaKeyPrefix = "lottery:captcha:"
++
++var takeLotteryCaptchaScript = redis.NewScript(`
++local value = redis.call('GET', KEYS[1])
++if value then
++  redis.call('DEL', KEYS[1])
++end
++return value
++`)
++
++type lotteryCaptchaStore struct {
++    rdb *redis.Client
++}
++
++func NewLotteryCaptchaStore(rdb *redis.Client) service.LotteryCaptchaStore {
++    return &lotteryCaptchaStore{rdb: rdb}
++}
++
++func (s *lotteryCaptchaStore) Save(ctx context.Context, id string, record service.LotteryCaptchaRecord, ttl time.Duration) error {
++    data, err := json.Marshal(record)
++    if err != nil {
++        return fmt.Errorf("marshal lottery captcha record: %w", err)
++    }
++    if err := s.rdb.Set(ctx, lotteryCaptchaKeyPrefix+id, data, ttl).Err(); err != nil {
++        return fmt.Errorf("save lottery captcha record: %w", err)
++    }
++    return nil
++}
++
++func (s *lotteryCaptchaStore) Take(ctx context.Context, id string) (service.LotteryCaptchaRecord, error) {
++    value, err := takeLotteryCaptchaScript.Run(ctx, s.rdb, []string{lotteryCaptchaKeyPrefix + id}).Text()
++    if err == redis.Nil {
++        return service.LotteryCaptchaRecord{}, service.ErrLotteryCaptchaRecordNotFound
++    }
++    if err != nil {
++        return service.LotteryCaptchaRecord{}, fmt.Errorf("take lottery captcha record: %w", err)
++    }
++    var record service.LotteryCaptchaRecord
++    if err := json.Unmarshal([]byte(value), &record); err != nil {
++        return service.LotteryCaptchaRecord{}, fmt.Errorf("decode lottery captcha record: %w", err)
++    }
++    return record, nil
++}
+diff --git a/backend/internal/repository/lottery_captcha_store_test.go b/backend/internal/repository/lottery_captcha_store_test.go
+new file mode 100644
+index 000000000..d0aceab3e
+--- /dev/null
++++ b/backend/internal/repository/lottery_captcha_store_test.go
+@@ -0,0 +1,30 @@
++package repository
++
++import (
++    "context"
++    "testing"
++    "time"
++
++    "github.com/Wei-Shaw/sub2api/internal/service"
++    "github.com/alicebob/miniredis/v2"
++    "github.com/redis/go-redis/v9"
++    "github.com/stretchr/testify/require"
++)
++
++func TestLotteryCaptchaStoreIsSharedTTLAndSingleUse(t *testing.T) {
++    server := miniredis.RunT(t)
++    client := redis.NewClient(&redis.Options{Addr: server.Addr()})
++    t.Cleanup(func() { _ = client.Close() })
++    store := NewLotteryCaptchaStore(client)
++    record := service.LotteryCaptchaRecord{
++        UserID: 42, ClientIP: "203.0.113.42", TargetX: 150, TargetY: 80,
++    }
++
++    require.NoError(t, store.Save(context.Background(), "challenge", record, 2*time.Minute))
++    require.Equal(t, 2*time.Minute, server.TTL(lotteryCaptchaKeyPrefix+"challenge"))
++    got, err := store.Take(context.Background(), "challenge")
++    require.NoError(t, err)
++    require.Equal(t, record, got)
++    _, err = store.Take(context.Background(), "challenge")
++    require.ErrorIs(t, err, service.ErrLotteryCaptchaRecordNotFound)
++}
+diff --git a/backend/internal/repository/wire.go b/backend/internal/repository/wire.go
+index b81f57206..f3e61cafb 100644
+--- a/backend/internal/repository/wire.go
++++ b/backend/internal/repository/wire.go
+@@ -141,6 +141,7 @@ var ProviderSet = wire.NewSet(
+     NewErrorPassthroughCache,
+     NewTLSFingerprintProfileCache,
+     NewContentModerationHashCache,
++    NewLotteryCaptchaStore,
+
+     // Encryptors
+     NewAESEncryptor,
+diff --git a/backend/internal/server/routes/admin.go b/backend/internal/server/routes/admin.go
+index ba9766242..4229fefc3 100644
+--- a/backend/internal/server/routes/admin.go
++++ b/backend/internal/server/routes/admin.go
+@@ -141,6 +141,7 @@ func registerLotteryRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+     lottery.PUT("/config", h.Lottery.AdminUpdateConfig)
+     lottery.POST("/rounds", h.Lottery.AdminStartRound)
+     lottery.GET("/rounds", h.Lottery.AdminRounds)
++    lottery.GET("/rounds/:id/participants", h.Lottery.AdminParticipants)
+     lottery.PUT("/rounds/:id/progress", h.Lottery.AdminUpdateProgress)
+     lottery.POST("/rounds/:id/draw", h.Lottery.AdminDraw)
+ }
+diff --git a/backend/internal/server/routes/user.go b/backend/internal/server/routes/user.go
+index 93c363ab7..52fed3a88 100644
+--- a/backend/internal/server/routes/user.go
++++ b/backend/internal/server/routes/user.go
+@@ -28,6 +28,7 @@ func RegisterUserRoutes(
+         lottery := authenticated.Group("/lottery")
+         {
+             lottery.GET("/current", h.Lottery.Current)
++            lottery.GET("/captcha", h.Lottery.Captcha)
+             lottery.POST("/join", h.Lottery.Join)
+             lottery.GET("/rounds", h.Lottery.Rounds)
+         }
+diff --git a/backend/internal/service/lottery_captcha.go b/backend/internal/service/lottery_captcha.go
+new file mode 100644
+index 000000000..dcdace830
+--- /dev/null
++++ b/backend/internal/service/lottery_captcha.go
+@@ -0,0 +1,159 @@
++package service
++
++import (
++    "context"
++    "errors"
++    "fmt"
++    "log/slog"
++    "strings"
++    "sync"
++    "time"
++
++    infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
++    "github.com/google/uuid"
++    "github.com/wenlng/go-captcha-assets/resources/imagesv2"
++    "github.com/wenlng/go-captcha-assets/resources/tiles"
++    "github.com/wenlng/go-captcha/v2/slide"
++)
++
++const lotteryCaptchaTTL = 2 * time.Minute
++
++var (
++    ErrLotteryCaptchaRecordNotFound = errors.New("lottery captcha record not found")
++    ErrLotteryCaptchaInvalid        = infraerrors.BadRequest("LOTTERY_CAPTCHA_INVALID", "slider verification failed")
++    ErrLotteryCaptchaExpired        = infraerrors.BadRequest("LOTTERY_CAPTCHA_EXPIRED", "slider challenge expired; please try again")
++    ErrLotteryCaptchaUnavailable    = infraerrors.ServiceUnavailable("LOTTERY_CAPTCHA_UNAVAILABLE", "slider verification is temporarily unavailable")
++)
++
++type LotteryCaptchaRecord struct {
++    UserID   int64  `json:"user_id"`
++    ClientIP string `json:"client_ip"`
++    TargetX  int    `json:"target_x"`
++    TargetY  int    `json:"target_y"`
++}
++
++type LotteryCaptchaStore interface {
++    Save(ctx context.Context, id string, record LotteryCaptchaRecord, ttl time.Duration) error
++    Take(ctx context.Context, id string) (LotteryCaptchaRecord, error)
++}
++
++type LotteryCaptchaChallenge struct {
++    ID          string `json:"id"`
++    Image       string `json:"image"`
++    Thumb       string `json:"thumb"`
++    ThumbX      int    `json:"thumb_x"`
++    ThumbY      int    `json:"thumb_y"`
++    ThumbWidth  int    `json:"thumb_width"`
++    ThumbHeight int    `json:"thumb_height"`
++    ExpiresIn   int    `json:"expires_in"`
++}
++
++type LotteryCaptchaService struct {
++    store     LotteryCaptchaStore
++    generator slide.Captcha
++    mu        sync.Mutex
++    ttl       time.Duration
++}
++
++func NewLotteryCaptchaService(store LotteryCaptchaStore) (*LotteryCaptchaService, error) {
++    if store == nil {
++        return nil, errors.New("lottery captcha store is required")
++    }
++
++    backgrounds, err := imagesv2.GetImages()
++    if err != nil {
++        return nil, fmt.Errorf("load lottery captcha backgrounds: %w", err)
++    }
++    tileAssets, err := tiles.GetTiles()
++    if err != nil {
++        return nil, fmt.Errorf("load lottery captcha tiles: %w", err)
++    }
++    graphs := make([]*slide.GraphImage, 0, len(tileAssets))
++    for _, asset := range tileAssets {
++        graphs = append(graphs, &slide.GraphImage{
++            OverlayImage: asset.OverlayImage,
++            MaskImage:    asset.MaskImage,
++            ShadowImage:  asset.ShadowImage,
++        })
++    }
++
++    builder := slide.NewBuilder()
++    builder.SetResources(
++        slide.WithGraphImages(graphs),
++        slide.WithBackgrounds(backgrounds),
++    )
++    return &LotteryCaptchaService{
++        store: store, generator: builder.Make(), ttl: lotteryCaptchaTTL,
++    }, nil
++}
++
++func (s *LotteryCaptchaService) Generate(ctx context.Context, userID int64, clientIP string) (LotteryCaptchaChallenge, error) {
++    if s == nil || s.store == nil || s.generator == nil || userID <= 0 {
++        return LotteryCaptchaChallenge{}, ErrLotteryCaptchaUnavailable
++    }
++
++    s.mu.Lock()
++    data, err := s.generator.Generate()
++    s.mu.Unlock()
++    if err != nil || data == nil || data.GetData() == nil {
++        slog.Error("generate lottery slider challenge failed", "error", err)
++        return LotteryCaptchaChallenge{}, ErrLotteryCaptchaUnavailable
++    }
++
++    imageBase64, err := data.GetMasterImage().ToBase64()
++    if err != nil {
++        slog.Error("encode lottery slider background failed", "error", err)
++        return LotteryCaptchaChallenge{}, ErrLotteryCaptchaUnavailable
++    }
++    thumbBase64, err := data.GetTileImage().ToBase64()
++    if err != nil {
++        slog.Error("encode lottery slider tile failed", "error", err)
++        return LotteryCaptchaChallenge{}, ErrLotteryCaptchaUnavailable
++    }
++
++    block := data.GetData()
++    id := uuid.NewString()
++    record := LotteryCaptchaRecord{
++        UserID: userID, ClientIP: normalizeLotteryCaptchaIP(clientIP), TargetX: block.X, TargetY: block.Y,
++    }
++    if err := s.store.Save(ctx, id, record, s.ttl); err != nil {
++        slog.Error("save lottery slider challenge failed", "error", err)
++        return LotteryCaptchaChallenge{}, ErrLotteryCaptchaUnavailable
++    }
++
++    return LotteryCaptchaChallenge{
++        ID: id, Image: imageBase64, Thumb: thumbBase64,
++        ThumbX: block.DX, ThumbY: block.DY, ThumbWidth: block.Width, ThumbHeight: block.Height,
++        ExpiresIn: int(s.ttl.Seconds()),
++    }, nil
++}
++
++func (s *LotteryCaptchaService) VerifyAndConsume(ctx context.Context, userID int64, clientIP, challengeID string, x, y int) error {
++    challengeID = strings.TrimSpace(challengeID)
++    if s == nil || s.store == nil || userID <= 0 || challengeID == "" {
++        return ErrLotteryCaptchaInvalid
++    }
++    record, err := s.store.Take(ctx, challengeID)
++    if errors.Is(err, ErrLotteryCaptchaRecordNotFound) {
++        return ErrLotteryCaptchaExpired
++    }
++    if err != nil {
++        slog.Error("consume lottery slider challenge failed", "error", err)
++        return ErrLotteryCaptchaUnavailable
++    }
++    if record.UserID != userID || record.ClientIP != normalizeLotteryCaptchaIP(clientIP) {
++        return ErrLotteryCaptchaInvalid
++    }
++    if !slide.Validate(x, y, record.TargetX, record.TargetY, 5) {
++        return ErrLotteryCaptchaInvalid
++    }
++    return nil
++}
++
++func normalizeLotteryCaptchaIP(clientIP string) string {
++    clientIP = strings.TrimSpace(clientIP)
++    if len(clientIP) > 64 {
++        return clientIP[:64]
++    }
++    return clientIP
++}
+diff --git a/backend/internal/service/lottery_captcha_test.go b/backend/internal/service/lottery_captcha_test.go
+new file mode 100644
+index 000000000..d657a3abc
+--- /dev/null
++++ b/backend/internal/service/lottery_captcha_test.go
+@@ -0,0 +1,86 @@
++package service
++
++import (
++    "context"
++    "sync"
++    "testing"
++    "time"
++
++    "github.com/stretchr/testify/require"
++)
++
++type lotteryCaptchaMemoryStore struct {
++    mu      sync.Mutex
++    records map[string]LotteryCaptchaRecord
++}
++
++func newLotteryCaptchaMemoryStore() *lotteryCaptchaMemoryStore {
++    return &lotteryCaptchaMemoryStore{records: make(map[string]LotteryCaptchaRecord)}
++}
++
++func (s *lotteryCaptchaMemoryStore) Save(_ context.Context, id string, record LotteryCaptchaRecord, _ time.Duration) error {
++    s.mu.Lock()
++    defer s.mu.Unlock()
++    s.records[id] = record
++    return nil
++}
++
++func (s *lotteryCaptchaMemoryStore) Take(_ context.Context, id string) (LotteryCaptchaRecord, error) {
++    s.mu.Lock()
++    defer s.mu.Unlock()
++    record, ok := s.records[id]
++    if !ok {
++        return LotteryCaptchaRecord{}, ErrLotteryCaptchaRecordNotFound
++    }
++    delete(s.records, id)
++    return record, nil
++}
++
++func TestLotteryCaptchaGenerateAndConsumeOnce(t *testing.T) {
++    store := newLotteryCaptchaMemoryStore()
++    service, err := NewLotteryCaptchaService(store)
++    require.NoError(t, err)
++
++    challenge, err := service.Generate(context.Background(), 42, "203.0.113.42")
++    require.NoError(t, err)
++    require.NotEmpty(t, challenge.ID)
++    require.Contains(t, challenge.Image, "data:image/jpeg;base64,")
++    require.Contains(t, challenge.Thumb, "data:image/png;base64,")
++    require.Positive(t, challenge.ThumbWidth)
++    require.Positive(t, challenge.ThumbHeight)
++    require.Equal(t, int(lotteryCaptchaTTL.Seconds()), challenge.ExpiresIn)
++
++    record := store.records[challenge.ID]
++    require.NoError(t, service.VerifyAndConsume(
++        context.Background(), 42, "203.0.113.42", challenge.ID, record.TargetX, record.TargetY,
++    ))
++    require.ErrorIs(t, service.VerifyAndConsume(
++        context.Background(), 42, "203.0.113.42", challenge.ID, record.TargetX, record.TargetY,
++    ), ErrLotteryCaptchaExpired)
++}
++
++func TestLotteryCaptchaBindsChallengeToUserAndIP(t *testing.T) {
++    store := newLotteryCaptchaMemoryStore()
++    store.records["challenge-1"] = LotteryCaptchaRecord{
++        UserID: 42, ClientIP: "203.0.113.42", TargetX: 150, TargetY: 80,
++    }
++    service := &LotteryCaptchaService{store: store}
++
++    require.ErrorIs(t, service.VerifyAndConsume(
++        context.Background(), 43, "203.0.113.42", "challenge-1", 150, 80,
++    ), ErrLotteryCaptchaInvalid)
++    _, exists := store.records["challenge-1"]
++    require.False(t, exists, "a failed attempt must still consume the challenge")
++}
++
++func TestLotteryCaptchaRejectsWrongSliderPosition(t *testing.T) {
++    store := newLotteryCaptchaMemoryStore()
++    store.records["challenge-2"] = LotteryCaptchaRecord{
++        UserID: 42, ClientIP: "203.0.113.42", TargetX: 150, TargetY: 80,
++    }
++    service := &LotteryCaptchaService{store: store}
++
++    require.ErrorIs(t, service.VerifyAndConsume(
++        context.Background(), 42, "203.0.113.42", "challenge-2", 100, 80,
++    ), ErrLotteryCaptchaInvalid)
++}
+diff --git a/backend/internal/service/lottery_participants_test.go b/backend/internal/service/lottery_participants_test.go
+new file mode 100644
+index 000000000..eb9da8330
+--- /dev/null
++++ b/backend/internal/service/lottery_participants_test.go
+@@ -0,0 +1,52 @@
++package service
++
++import (
++    "context"
++    "database/sql"
++    "testing"
++    "time"
++
++    "github.com/DATA-DOG/go-sqlmock"
++    "github.com/stretchr/testify/require"
++)
++
++func TestLotteryListParticipantsReturnsRealUsersInJoinOrder(t *testing.T) {
++    db, mock, err := sqlmock.New()
++    require.NoError(t, err)
++    t.Cleanup(func() { _ = db.Close() })
++
++    joinedAt := time.Date(2026, 8, 28, 10, 30, 0, 0, time.UTC)
++    mock.ExpectQuery(`SELECT COUNT\(p.id\).*FROM lottery_rounds r.*p.is_actor=FALSE`).
++        WithArgs(int64(7)).
++        WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
++    mock.ExpectQuery(`SELECT p.id,p.round_id,p.user_id.*FROM lottery_participants p.*p.is_actor=FALSE.*ORDER BY p.joined_at ASC,p.id ASC`).
++        WithArgs(int64(7), 2, 2).
++        WillReturnRows(sqlmock.NewRows([]string{"id", "round_id", "user_id", "username", "email", "client_ip", "joined_at"}).
++            AddRow(int64(103), int64(7), int64(9003), "alice", "alice@example.com", "203.0.113.3", joinedAt))
++
++    service := NewLotteryService(db, nil, nil)
++    page, err := service.ListParticipants(context.Background(), 7, 2, 2)
++    require.NoError(t, err)
++    require.Equal(t, int64(3), page.Total)
++    require.Equal(t, 2, page.Page)
++    require.Equal(t, 2, page.Pages)
++    require.Equal(t, []LotteryParticipant{{
++        ID: 103, RoundID: 7, UserID: 9003, Username: "alice", Email: "alice@example.com",
++        ClientIP: "203.0.113.3", JoinedAt: joinedAt,
++    }}, page.Items)
++    require.NoError(t, mock.ExpectationsWereMet())
++}
++
++func TestLotteryListParticipantsRejectsMissingRound(t *testing.T) {
++    db, mock, err := sqlmock.New()
++    require.NoError(t, err)
++    t.Cleanup(func() { _ = db.Close() })
++    mock.ExpectQuery(`SELECT COUNT\(p.id\).*FROM lottery_rounds r`).
++        WithArgs(int64(99)).
++        WillReturnError(sql.ErrNoRows)
++
++    service := NewLotteryService(db, nil, nil)
++    _, err = service.ListParticipants(context.Background(), 99, 1, 20)
++    require.ErrorIs(t, err, ErrLotteryRoundNotFound)
++    require.NoError(t, mock.ExpectationsWereMet())
++}
+diff --git a/backend/internal/service/lottery_service.go b/backend/internal/service/lottery_service.go
+index a31991904..6726b66c3 100644
+--- a/backend/internal/service/lottery_service.go
++++ b/backend/internal/service/lottery_service.go
+@@ -30,6 +30,7 @@ var (
+     ErrLotteryAlreadyJoined                = infraerrors.Conflict("LOTTERY_ALREADY_JOINED", "you already joined this lottery round")
+     ErrLotteryProgressFull                 = infraerrors.Conflict("LOTTERY_PROGRESS_FULL", "lottery progress is already full")
+     ErrLotteryNotEligible                  = infraerrors.Forbidden("LOTTERY_NOT_ELIGIBLE", "you are not eligible for this lottery round")
++    ErrLotteryRoundNotFound                = infraerrors.NotFound("LOTTERY_ROUND_NOT_FOUND", "lottery round not found")
+     ErrLotteryInsufficientRealParticipants = infraerrors.BadRequest("LOTTERY_NOT_ENOUGH_REAL_PARTICIPANTS", "not enough real participants to draw all prizes")
+     ErrLotteryProgressInvalid              = infraerrors.BadRequest("LOTTERY_PROGRESS_INVALID", "participant progress must be between the real participant count and the draw threshold")
+ )
+@@ -122,6 +123,24 @@ type LotteryRoundPage struct {
+     Pages    int            `json:"pages"`
+ }
+
++type LotteryParticipant struct {
++    ID       int64     `json:"id"`
++    RoundID  int64     `json:"round_id"`
++    UserID   int64     `json:"user_id"`
++    Username string    `json:"username"`
++    Email    string    `json:"email"`
++    ClientIP string    `json:"client_ip"`
++    JoinedAt time.Time `json:"joined_at"`
++}
++
++type LotteryParticipantPage struct {
++    Items    []LotteryParticipant `json:"items"`
++    Total    int64                `json:"total"`
++    Page     int                  `json:"page"`
++    PageSize int                  `json:"page_size"`
++    Pages    int                  `json:"pages"`
++}
++
+ type LotteryPublicRoundPage struct {
+     Items    []LotteryPublicRound `json:"items"`
+     Total    int64                `json:"total"`
+@@ -563,6 +582,73 @@ func (s *LotteryService) ListRounds(ctx context.Context, page, pageSize int) (Lo
+     return LotteryRoundPage{Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pages}, nil
+ }
+
++func (s *LotteryService) ListParticipants(ctx context.Context, roundID int64, page, pageSize int) (LotteryParticipantPage, error) {
++    if roundID <= 0 {
++        return LotteryParticipantPage{}, ErrLotteryRoundNotFound
++    }
++    if page < 1 {
++        page = 1
++    }
++    if pageSize < 1 {
++        pageSize = 20
++    }
++    if pageSize > 100 {
++        pageSize = 100
++    }
++
++    var total int64
++    err := s.db.QueryRowContext(ctx, `
++        SELECT COUNT(p.id)
++        FROM lottery_rounds r
++        LEFT JOIN lottery_participants p ON p.round_id=r.id AND p.is_actor=FALSE
++        WHERE r.id=$1
++        GROUP BY r.id`, roundID).Scan(&total)
++    if errors.Is(err, sql.ErrNoRows) {
++        return LotteryParticipantPage{}, ErrLotteryRoundNotFound
++    }
++    if err != nil {
++        return LotteryParticipantPage{}, err
++    }
++
++    rows, err := s.db.QueryContext(ctx, `
++        SELECT p.id,p.round_id,p.user_id,COALESCE(u.username,''),u.email,
++               COALESCE(p.client_ip,''),p.joined_at
++        FROM lottery_participants p
++        JOIN users u ON u.id=p.user_id
++        WHERE p.round_id=$1 AND p.is_actor=FALSE
++        ORDER BY p.joined_at ASC,p.id ASC
++        LIMIT $2 OFFSET $3`, roundID, pageSize, (page-1)*pageSize)
++    if err != nil {
++        return LotteryParticipantPage{}, err
++    }
++    defer rows.Close()
++
++    items := make([]LotteryParticipant, 0, pageSize)
++    for rows.Next() {
++        var participant LotteryParticipant
++        if err := rows.Scan(
++            &participant.ID,
++            &participant.RoundID,
++            &participant.UserID,
++            &participant.Username,
++            &participant.Email,
++            &participant.ClientIP,
++            &participant.JoinedAt,
++        ); err != nil {
++            return LotteryParticipantPage{}, err
++        }
++        items = append(items, participant)
++    }
++    if err := rows.Err(); err != nil {
++        return LotteryParticipantPage{}, err
++    }
++
++    pages := int((total + int64(pageSize) - 1) / int64(pageSize))
++    return LotteryParticipantPage{
++        Items: items, Total: total, Page: page, PageSize: pageSize, Pages: pages,
++    }, nil
++}
++
+ func (s *LotteryService) UpdateProgress(ctx context.Context, roundID int64, participantCount int) (LotteryRound, error) {
+     tx, err := s.db.BeginTx(ctx, nil)
+     if err != nil {
+diff --git a/backend/internal/service/wire.go b/backend/internal/service/wire.go
+index 28de9a73c..482ecd7f4 100644
+--- a/backend/internal/service/wire.go
++++ b/backend/internal/service/wire.go
+@@ -951,6 +951,7 @@ var ProviderSet = wire.NewSet(
+     ProvideProxyExpiryService,
+     ProvideSubscriptionExpiryService,
+     NewLotteryService,
++    NewLotteryCaptchaService,
+     ProvideTimingWheelService,
+     ProvideDashboardAggregationService,
+     ProvideUsageCleanupService,
+diff --git a/frontend/package.json b/frontend/package.json
+index 8af7a4668..4ef262bc0 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -25,6 +25,7 @@
+     "dompurify": "^3.4.14",
+     "driver.js": "^1.4.0",
+     "file-saver": "^2.0.5",
++    "go-captcha-vue": "2.0.7",
+     "marked": "^17.0.1",
+     "pinia": "^2.1.7",
+     "qrcode": "^1.5.4",
+diff --git a/frontend/pnpm-lock.yaml b/frontend/pnpm-lock.yaml
+index fef7a9441..e4c633d28 100644
+--- a/frontend/pnpm-lock.yaml
++++ b/frontend/pnpm-lock.yaml
+@@ -44,6 +44,9 @@ importers:
+       file-saver:
+         specifier: ^2.0.5
+         version: 2.0.5
++      go-captcha-vue:
++        specifier: 2.0.7
++        version: 2.0.7(vue@3.5.26(typescript@5.6.3))
+       marked:
+         specifier: ^17.0.1
+         version: 17.0.1
+@@ -1285,56 +1288,67 @@ packages:
+     resolution: {integrity: sha512-EHMUcDwhtdRGlXZsGSIuXSYwD5kOT9NVnx9sqzYiwAc91wfYOE1g1djOEDseZJKKqtHAHGwnGPQu3kytmfaXLQ==}
+     cpu: [arm]
+     os: [linux]
++    libc: [glibc]
+
+   '@rollup/rollup-linux-arm-musleabihf@4.54.0':
+     resolution: {integrity: sha512-+pBrqEjaakN2ySv5RVrj/qLytYhPKEUwk+e3SFU5jTLHIcAtqh2rLrd/OkbNuHJpsBgxsD8ccJt5ga/SeG0JmA==}
+     cpu: [arm]
+     os: [linux]
++    libc: [musl]
+
+   '@rollup/rollup-linux-arm64-gnu@4.54.0':
+     resolution: {integrity: sha512-NSqc7rE9wuUaRBsBp5ckQ5CVz5aIRKCwsoa6WMF7G01sX3/qHUw/z4pv+D+ahL1EIKy6Enpcnz1RY8pf7bjwng==}
+     cpu: [arm64]
+     os: [linux]
++    libc: [glibc]
+
+   '@rollup/rollup-linux-arm64-musl@4.54.0':
+     resolution: {integrity: sha512-gr5vDbg3Bakga5kbdpqx81m2n9IX8M6gIMlQQIXiLTNeQW6CucvuInJ91EuCJ/JYvc+rcLLsDFcfAD1K7fMofg==}
+     cpu: [arm64]
+     os: [linux]
++    libc: [musl]
+
+   '@rollup/rollup-linux-loong64-gnu@4.54.0':
+     resolution: {integrity: sha512-gsrtB1NA3ZYj2vq0Rzkylo9ylCtW/PhpLEivlgWe0bpgtX5+9j9EZa0wtZiCjgu6zmSeZWyI/e2YRX1URozpIw==}
+     cpu: [loong64]
+     os: [linux]
++    libc: [glibc]
+
+   '@rollup/rollup-linux-ppc64-gnu@4.54.0':
+     resolution: {integrity: sha512-y3qNOfTBStmFNq+t4s7Tmc9hW2ENtPg8FeUD/VShI7rKxNW7O4fFeaYbMsd3tpFlIg1Q8IapFgy7Q9i2BqeBvA==}
+     cpu: [ppc64]
+     os: [linux]
++    libc: [glibc]
+
+   '@rollup/rollup-linux-riscv64-gnu@4.54.0':
+     resolution: {integrity: sha512-89sepv7h2lIVPsFma8iwmccN7Yjjtgz0Rj/Ou6fEqg3HDhpCa+Et+YSufy27i6b0Wav69Qv4WBNl3Rs6pwhebQ==}
+     cpu: [riscv64]
+     os: [linux]
++    libc: [glibc]
+
+   '@rollup/rollup-linux-riscv64-musl@4.54.0':
+     resolution: {integrity: sha512-ZcU77ieh0M2Q8Ur7D5X7KvK+UxbXeDHwiOt/CPSBTI1fBmeDMivW0dPkdqkT4rOgDjrDDBUed9x4EgraIKoR2A==}
+     cpu: [riscv64]
+     os: [linux]
++    libc: [musl]
+
+   '@rollup/rollup-linux-s390x-gnu@4.54.0':
+     resolution: {integrity: sha512-2AdWy5RdDF5+4YfG/YesGDDtbyJlC9LHmL6rZw6FurBJ5n4vFGupsOBGfwMRjBYH7qRQowT8D/U4LoSvVwOhSQ==}
+     cpu: [s390x]
+     os: [linux]
++    libc: [glibc]
+
+   '@rollup/rollup-linux-x64-gnu@4.54.0':
+     resolution: {integrity: sha512-WGt5J8Ij/rvyqpFexxk3ffKqqbLf9AqrTBbWDk7ApGUzaIs6V+s2s84kAxklFwmMF/vBNGrVdYgbblCOFFezMQ==}
+     cpu: [x64]
+     os: [linux]
++    libc: [glibc]
+
+   '@rollup/rollup-linux-x64-musl@4.54.0':
+     resolution: {integrity: sha512-JzQmb38ATzHjxlPHuTH6tE7ojnMKM2kYNzt44LO/jJi8BpceEC8QuXYA908n8r3CNuG/B3BV8VR3Hi1rYtmPiw==}
+     cpu: [x64]
+     os: [linux]
++    libc: [musl]
+
+   '@rollup/rollup-openharmony-arm64@4.54.0':
+     resolution: {integrity: sha512-huT3fd0iC7jigGh7n3q/+lfPcXxBi+om/Rs3yiFxjvSxbSB6aohDFXbWvlspaqjeOh+hx7DDHS+5Es5qRkWkZg==}
+@@ -2632,6 +2646,11 @@ packages:
+     resolution: {integrity: sha512-jhIXaOzy1sb8IyocaruWSn1TjmnBVs8Ayhcy83rmxNJ8q2uWKCAj3CnJY+KpGSXCueAPc0i05kVvVKtP1t9S3g==}
+     engines: {node: '>=10'}
+
++  go-captcha-vue@2.0.7:
++    resolution: {integrity: sha512-ynlb/6CJiMdsqKe+79lIVpTsNXQTgOHDJ7BH+Gx6EZQZyHSwuyLZvQwjz9vQOYhyHpREW9tapBo8ZOTyVzIQew==}
++    peerDependencies:
++      vue: '>=3'
++
+   gopd@1.2.0:
+     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
+     engines: {node: '>= 0.4'}
+@@ -7331,6 +7350,10 @@ snapshots:
+       merge2: 1.4.1
+       slash: 3.0.0
+
++  go-captcha-vue@2.0.7(vue@3.5.26(typescript@5.6.3)):
++    dependencies:
++      vue: 3.5.26(typescript@5.6.3)
++
+   gopd@1.2.0: {}
+
+   graphemer@1.4.0: {}
+diff --git a/frontend/src/api/lottery.ts b/frontend/src/api/lottery.ts
+index 2db3182cb..54ef600de 100644
+--- a/frontend/src/api/lottery.ts
++++ b/frontend/src/api/lottery.ts
+@@ -68,10 +68,38 @@ export interface LotteryDrawResult {
+   next_round?: LotteryRound
+ }
+
++export interface LotteryJoinResult {
++  round_id: number
++  round_no: number
++  participant_count: number
++  joined_at: string
++}
++
++export interface LotteryParticipant {
++  id: number
++  round_id: number
++  user_id: number
++  username: string
++  email: string
++  client_ip: string
++  joined_at: string
++}
++
++export interface LotteryCaptchaChallenge {
++  id: string
++  image: string
++  thumb: string
++  thumb_x: number
++  thumb_y: number
++  thumb_width: number
++  thumb_height: number
++  expires_in: number
++}
++
+ export interface LotteryCaptchaProof {
+-  turnstile_token?: string
+-  tencent_captcha_ticket?: string
+-  tencent_captcha_randstr?: string
++  captcha_id: string
++  captcha_x: number
++  captcha_y: number
+ }
+
+ export const lotteryAPI = {
+@@ -79,8 +107,12 @@ export const lotteryAPI = {
+     const { data } = await apiClient.get<LotteryCurrent>('/lottery/current')
+     return data
+   },
++  async getCaptcha() {
++    const { data } = await apiClient.get<LotteryCaptchaChallenge>('/lottery/captcha')
++    return data
++  },
+   async join(proof: LotteryCaptchaProof) {
+-    const { data } = await apiClient.post<{ round_id: number; round_no: number; participant_count: number; joined_at: string }>('/lottery/join', proof)
++    const { data } = await apiClient.post<LotteryJoinResult>('/lottery/join', proof)
+     return data
+   },
+   async getRounds(page = 1, pageSize = 8) {
+@@ -103,6 +135,10 @@ export const lotteryAPI = {
+     const { data } = await apiClient.get<BasePaginationResponse<LotteryRound>>('/admin/lottery/rounds', { params: { page, page_size: pageSize } })
+     return data
+   },
++  async getAdminParticipants(roundId: number, page = 1, pageSize = 20) {
++    const { data } = await apiClient.get<BasePaginationResponse<LotteryParticipant>>(`/admin/lottery/rounds/${roundId}/participants`, { params: { page, page_size: pageSize } })
++    return data
++  },
+   async updateRoundProgress(roundId: number, participantCount: number) {
+     const { data } = await apiClient.put<LotteryRound>(`/admin/lottery/rounds/${roundId}/progress`, { participant_count: participantCount })
+     return data
+diff --git a/frontend/src/components/lottery/LotteryParticipantsDialog.vue b/frontend/src/components/lottery/LotteryParticipantsDialog.vue
+new file mode 100644
+index 000000000..b0bb24ba6
+--- /dev/null
++++ b/frontend/src/components/lottery/LotteryParticipantsDialog.vue
+@@ -0,0 +1,115 @@
++<template>
++  <BaseDialog
++    :show="show"
++    :title="t('admin.lottery.participantsTitle', { round: round?.round_no ?? '-' })"
++    width="extra-wide"
++    @close="emit('close')"
++  >
++    <div class="overflow-hidden rounded-lg border border-gray-200 dark:border-dark-700">
++      <DataTable :columns="columns" :data="participants" :loading="loading" row-key="id">
++        <template #cell-username="{ value }">
++          <span>{{ value || '-' }}</span>
++        </template>
++        <template #cell-client_ip="{ value }">
++          <span class="font-mono text-xs">{{ value || '-' }}</span>
++        </template>
++        <template #cell-joined_at="{ value }">
++          <span>{{ date(value) }}</span>
++        </template>
++        <template #empty>
++          <div class="py-4 text-sm text-gray-500 dark:text-dark-400">
++            {{ t('admin.lottery.noParticipants') }}
++          </div>
++        </template>
++      </DataTable>
++      <Pagination
++        v-if="total > 0"
++        :page="page"
++        :total="total"
++        :page-size="pageSize"
++        @update:page="changePage"
++        @update:page-size="changePageSize"
++      />
++    </div>
++  </BaseDialog>
++</template>
++
++<script setup lang="ts">
++import { computed, ref, watch } from 'vue'
++import { useI18n } from 'vue-i18n'
++import lotteryAPI, { type LotteryParticipant, type LotteryRound } from '@/api/lottery'
++import BaseDialog from '@/components/common/BaseDialog.vue'
++import DataTable from '@/components/common/DataTable.vue'
++import Pagination from '@/components/common/Pagination.vue'
++import type { Column } from '@/components/common/types'
++import { useAppStore } from '@/stores/app'
++import { extractApiErrorMessage } from '@/utils/apiError'
++
++interface Props {
++  show: boolean
++  round: LotteryRound | null
++}
++
++interface Emits {
++  (event: 'close'): void
++}
++
++const props = defineProps<Props>()
++const emit = defineEmits<Emits>()
++const { t } = useI18n()
++const appStore = useAppStore()
++
++const participants = ref<LotteryParticipant[]>([])
++const loading = ref(false)
++const page = ref(1)
++const pageSize = ref(20)
++const total = ref(0)
++
++const columns = computed<Column[]>(() => [
++  { key: 'user_id', label: t('admin.lottery.participantColumns.userId') },
++  { key: 'username', label: t('admin.lottery.participantColumns.username') },
++  { key: 'email', label: t('admin.lottery.participantColumns.email') },
++  { key: 'client_ip', label: t('admin.lottery.participantColumns.ip') },
++  { key: 'joined_at', label: t('admin.lottery.participantColumns.joinedAt') }
++])
++
++function date(value: string): string {
++  return value ? new Date(value).toLocaleString() : '-'
++}
++
++async function load(): Promise<void> {
++  if (!props.show || !props.round) return
++  loading.value = true
++  try {
++    const result = await lotteryAPI.getAdminParticipants(props.round.id, page.value, pageSize.value)
++    participants.value = result.items
++    total.value = result.total
++  } catch (error) {
++    appStore.showError(extractApiErrorMessage(error, t('admin.lottery.participantsLoadFailed')))
++  } finally {
++    loading.value = false
++  }
++}
++
++function changePage(value: number): void {
++  page.value = value
++  void load()
++}
++
++function changePageSize(value: number): void {
++  pageSize.value = value
++  page.value = 1
++  void load()
++}
++
++watch(
++  () => [props.show, props.round?.id] as const,
++  ([show]) => {
++    if (!show) return
++    page.value = 1
++    participants.value = []
++    total.value = 0
++    void load()
++  }
++)
++</script>
+diff --git a/frontend/src/components/lottery/LotterySliderCaptcha.vue b/frontend/src/components/lottery/LotterySliderCaptcha.vue
+new file mode 100644
+index 000000000..f848c7504
+--- /dev/null
++++ b/frontend/src/components/lottery/LotterySliderCaptcha.vue
+@@ -0,0 +1,162 @@
++<template>
++  <BaseDialog
++    :show="show"
++    :title="t('lottery.captchaTitle')"
++    width="normal"
++    :close-on-escape="!submitting"
++    @close="handleClose"
++  >
++    <div class="flex min-h-[320px] flex-col items-center justify-center">
++      <div v-if="loading" class="flex flex-col items-center gap-3 py-12 text-sm text-gray-500 dark:text-dark-400">
++        <Icon name="refresh" size="lg" class="animate-spin" />
++        <span>{{ t('lottery.captchaLoading') }}</span>
++      </div>
++
++      <div v-else-if="loadError" class="flex flex-col items-center gap-4 py-12 text-center">
++        <p class="text-sm text-red-600 dark:text-red-400">{{ loadError }}</p>
++        <button type="button" class="btn btn-secondary" @click="loadChallenge">
++          <Icon name="refresh" size="sm" />
++          <span>{{ t('lottery.captchaRetry') }}</span>
++        </button>
++      </div>
++
++      <div v-else class="max-w-full overflow-x-auto pb-1">
++        <Slide
++          ref="slideRef"
++          :config="captchaConfig"
++          :data="captchaData"
++          :events="captchaEvents"
++        />
++      </div>
++
++      <div v-if="submitting" class="mt-3 flex items-center gap-2 text-sm text-gray-500 dark:text-dark-400">
++        <Icon name="refresh" size="sm" class="animate-spin" />
++        <span>{{ t('lottery.captchaSubmitting') }}</span>
++      </div>
++      <p v-else-if="verifyError" class="mt-3 text-center text-sm text-red-600 dark:text-red-400">
++        {{ verifyError }}
++      </p>
++    </div>
++  </BaseDialog>
++</template>
++
++<script setup lang="ts">
++import { computed, ref, watch } from 'vue'
++import { useI18n } from 'vue-i18n'
++import { Slide } from 'go-captcha-vue'
++import 'go-captcha-vue/dist/style.css'
++import lotteryAPI, { type LotteryCaptchaChallenge, type LotteryJoinResult } from '@/api/lottery'
++import BaseDialog from '@/components/common/BaseDialog.vue'
++import Icon from '@/components/icons/Icon.vue'
++import { extractApiErrorMessage } from '@/utils/apiError'
++
++interface Props {
++  show: boolean
++}
++
++interface Emits {
++  (event: 'close'): void
++  (event: 'joined', result: LotteryJoinResult): void
++  (event: 'error', error: unknown): void
++}
++
++interface SlidePoint {
++  x: number
++  y: number
++}
++
++interface SlideMethods {
++  reset: () => void
++}
++
++const props = defineProps<Props>()
++const emit = defineEmits<Emits>()
++const { t } = useI18n()
++
++const slideRef = ref<SlideMethods | null>(null)
++const challenge = ref<LotteryCaptchaChallenge | null>(null)
++const loading = ref(false)
++const submitting = ref(false)
++const loadError = ref('')
++const verifyError = ref('')
++
++const captchaConfig = computed(() => ({
++  width: 300,
++  height: 220,
++  horizontalPadding: 12,
++  verticalPadding: 12,
++  showTheme: true,
++  title: t('lottery.captchaInstruction'),
++  scope: true
++}))
++
++const captchaData = computed(() => ({
++  thumbX: challenge.value?.thumb_x ?? 0,
++  thumbY: challenge.value?.thumb_y ?? 0,
++  thumbWidth: challenge.value?.thumb_width ?? 0,
++  thumbHeight: challenge.value?.thumb_height ?? 0,
++  image: challenge.value?.image ?? '',
++  thumb: challenge.value?.thumb ?? ''
++}))
++
++const captchaEvents = computed(() => ({
++  refresh: loadChallenge,
++  close: handleClose,
++  confirm: confirm
++}))
++
++async function loadChallenge(): Promise<void> {
++  if (loading.value || submitting.value) return
++  loading.value = true
++  loadError.value = ''
++  verifyError.value = ''
++  challenge.value = null
++  try {
++    challenge.value = await lotteryAPI.getCaptcha()
++  } catch (error) {
++    loadError.value = extractApiErrorMessage(error, t('lottery.captchaLoadFailed'))
++    emit('error', error)
++  } finally {
++    loading.value = false
++  }
++}
++
++async function confirm(point: SlidePoint): Promise<void> {
++  if (!challenge.value || submitting.value) return
++  submitting.value = true
++  verifyError.value = ''
++  try {
++    const result = await lotteryAPI.join({
++      captcha_id: challenge.value.id,
++      captcha_x: point.x,
++      captcha_y: point.y
++    })
++    emit('joined', result)
++  } catch (error) {
++    verifyError.value = extractApiErrorMessage(error, t('lottery.captchaFailed'))
++    emit('error', error)
++    slideRef.value?.reset()
++    challenge.value = null
++  } finally {
++    submitting.value = false
++  }
++  if (!challenge.value && props.show) await loadChallenge()
++}
++
++function handleClose(): void {
++  if (!submitting.value) emit('close')
++}
++
++watch(
++  () => props.show,
++  (show) => {
++    if (show) void loadChallenge()
++    else {
++      challenge.value = null
++      loadError.value = ''
++      verifyError.value = ''
++      slideRef.value?.reset()
++    }
++  }
++)
++</script>
+diff --git a/frontend/src/i18n/locales/en/admin/overview.ts b/frontend/src/i18n/locales/en/admin/overview.ts
+index a7a7336f6..8f75b1d34 100644
+--- a/frontend/src/i18n/locales/en/admin/overview.ts
++++ b/frontend/src/i18n/locales/en/admin/overview.ts
+@@ -1286,6 +1286,11 @@ export default {
+       drawn: 'Draw completed',
+       loadFailed: 'Failed to load lottery management data',
+       saveFailed: 'Failed to save lottery configuration',
++      viewParticipants: 'View {count} real participants',
++      participantsTitle: 'Real participants in round {round}',
++      noParticipants: 'No real users have joined this round',
++      participantsLoadFailed: 'Failed to load participant details',
++      participantColumns: { userId: 'User ID', username: 'Username', email: 'Email', ip: 'IP', joinedAt: 'Joined at' },
+       columns: { round: 'Round', progress: 'Draw progress', real: 'Real entries', manualProgress: 'Manual addition', status: 'Status', actions: 'Actions' }
+     },
+
+diff --git a/frontend/src/i18n/locales/en/common.ts b/frontend/src/i18n/locales/en/common.ts
+index cf2c6dbbe..edfbdcd11 100644
+--- a/frontend/src/i18n/locales/en/common.ts
++++ b/frontend/src/i18n/locales/en/common.ts
+@@ -270,7 +270,12 @@ export default {
+     loadFailed: 'Failed to load lottery data',
+     joinSuccess: 'You joined successfully. Good luck!',
+     joinFailed: 'Failed to join the lottery',
+-    captchaUnavailable: 'Lottery entry is unavailable until an administrator configures slider verification',
++    captchaTitle: 'Security verification',
++    captchaInstruction: 'Drag the slider to complete the puzzle',
++    captchaLoading: 'Loading verification...',
++    captchaSubmitting: 'Verifying and joining...',
++    captchaRetry: 'Reload',
++    captchaLoadFailed: 'Failed to load slider verification',
+     captchaFailed: 'Slider verification failed. Please try again.'
+   },
+
+diff --git a/frontend/src/i18n/locales/zh/admin/overview.ts b/frontend/src/i18n/locales/zh/admin/overview.ts
+index 15570b57f..0a227dd73 100644
+--- a/frontend/src/i18n/locales/zh/admin/overview.ts
++++ b/frontend/src/i18n/locales/zh/admin/overview.ts
+@@ -1285,6 +1285,11 @@ export default {
+       drawn: '开奖完成',
+       loadFailed: '抽奖管理数据加载失败',
+       saveFailed: '保存抽奖配置失败',
++      viewParticipants: '查看 {count} 位真实参与用户',
++      participantsTitle: '第 {round} 期真实参与用户',
++      noParticipants: '本期暂无真实用户参与',
++      participantsLoadFailed: '参与用户明细加载失败',
++      participantColumns: { userId: '用户 ID', username: '用户名', email: '邮箱', ip: 'IP', joinedAt: '参与时间' },
+       columns: { round: '期数', progress: '开奖进度', real: '真实参与', manualProgress: '手动补充', status: '状态', actions: '操作' }
+     },
+
+diff --git a/frontend/src/i18n/locales/zh/common.ts b/frontend/src/i18n/locales/zh/common.ts
+index dc281c7b5..8e17bc787 100644
+--- a/frontend/src/i18n/locales/zh/common.ts
++++ b/frontend/src/i18n/locales/zh/common.ts
+@@ -270,7 +270,12 @@ export default {
+     loadFailed: '抽奖数据加载失败',
+     joinSuccess: '参与成功，祝您好运！',
+     joinFailed: '参与抽奖失败',
+-    captchaUnavailable: '管理员尚未配置滑块验证，当前暂不能参与抽奖',
++    captchaTitle: '安全验证',
++    captchaInstruction: '请拖动滑块完成拼图',
++    captchaLoading: '正在加载验证...',
++    captchaSubmitting: '正在验证并参与抽奖...',
++    captchaRetry: '重新加载',
++    captchaLoadFailed: '滑块验证加载失败',
+     captchaFailed: '滑块验证失败，请重试'
+   },
+
+diff --git a/frontend/src/views/admin/LotteryView.vue b/frontend/src/views/admin/LotteryView.vue
+index 6582b2a9f..597a5e7cb 100644
+--- a/frontend/src/views/admin/LotteryView.vue
++++ b/frontend/src/views/admin/LotteryView.vue
+@@ -25,9 +25,14 @@
+           <div class="flex justify-end"><button class="btn btn-primary w-full sm:w-auto" type="submit" :disabled="saving"><Icon v-if="saving" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="checkCircle" size="sm" /><span>{{ saving ? t('common.saving') : t('admin.lottery.save') }}</span></button></div>
+         </form>
+
+-        <section class="card overflow-hidden"><div class="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-800 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.rounds') }}</h2><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ currentOpenRound ? `#${currentOpenRound.round_no}` : t('admin.lottery.noOpenRound') }}</p></div></div><div class="overflow-x-auto"><table class="w-full min-w-[820px] text-left text-sm"><thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-900 dark:text-dark-400"><tr><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.round') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.progress') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.real') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.manualProgress') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.status') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.actions') }}</th></tr></thead><tbody class="divide-y divide-gray-100 dark:divide-dark-800"><tr v-for="round in rounds" :key="round.id"><td class="px-5 py-3 font-medium text-gray-900 dark:text-white">#{{ round.round_no }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300"><div v-if="round.status === 'open'" class="flex w-44 items-center gap-2"><input v-model.number="progressDrafts[round.id]" type="number" :min="round.real_participant_count || 0" :max="round.participant_threshold" class="input h-9 w-24" :aria-label="t('admin.lottery.progressInput')" /><span class="shrink-0 text-xs">/ {{ round.participant_threshold }}</span></div><span v-else>{{ round.participant_count }} / {{ round.participant_threshold }}</span></td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.real_participant_count || 0 }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.manual_progress_count || 0 }}</td><td class="px-5 py-3"><span class="badge" :class="round.status === 'open' ? 'badge-warning' : round.status === 'drawn' ? 'badge-success' : 'badge-gray'">{{ statusLabel(round.status) }}</span></td><td class="px-5 py-3"><div v-if="round.status === 'open'" class="flex flex-wrap gap-2"><button class="btn btn-secondary btn-sm" :disabled="updatingId === round.id || drawingId === round.id" @click="updateProgress(round)"><Icon v-if="updatingId === round.id" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="checkCircle" size="sm" /><span>{{ t('admin.lottery.updateProgress') }}</span></button><button class="btn btn-secondary btn-sm" :disabled="drawingId === round.id || updatingId === round.id" @click="draw(round)"><Icon v-if="drawingId === round.id" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="trophy" size="sm" /><span>{{ t('admin.lottery.draw') }}</span></button></div><span v-else class="text-xs text-gray-400">{{ round.drawn_at ? date(round.drawn_at) : '-' }}</span></td></tr><tr v-if="rounds.length === 0"><td colspan="6" class="px-5 py-10 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('common.noData') }}</td></tr></tbody></table></div></section>
++        <section class="card overflow-hidden"><div class="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-800 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.rounds') }}</h2><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ currentOpenRound ? `#${currentOpenRound.round_no}` : t('admin.lottery.noOpenRound') }}</p></div></div><div class="overflow-x-auto"><table class="w-full min-w-[820px] text-left text-sm"><thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-900 dark:text-dark-400"><tr><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.round') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.progress') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.real') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.manualProgress') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.status') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.actions') }}</th></tr></thead><tbody class="divide-y divide-gray-100 dark:divide-dark-800"><tr v-for="round in rounds" :key="round.id"><td class="px-5 py-3 font-medium text-gray-900 dark:text-white">#{{ round.round_no }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300"><div v-if="round.status === 'open'" class="flex w-44 items-center gap-2"><input v-model.number="progressDrafts[round.id]" type="number" :min="round.real_participant_count || 0" :max="round.participant_threshold" class="input h-9 w-24" :aria-label="t('admin.lottery.progressInput')" /><span class="shrink-0 text-xs">/ {{ round.participant_threshold }}</span></div><span v-else>{{ round.participant_count }} / {{ round.participant_threshold }}</span></td><td class="px-5 py-3 text-gray-600 dark:text-dark-300"><button type="button" class="inline-flex items-center gap-1.5 text-primary-600 hover:text-primary-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:text-primary-400" :aria-label="t('admin.lottery.viewParticipants', { count: round.real_participant_count || 0 })" @click="openParticipants(round)"><Icon name="eye" size="sm" /><span>{{ round.real_participant_count || 0 }}</span></button></td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.manual_progress_count || 0 }}</td><td class="px-5 py-3"><span class="badge" :class="round.status === 'open' ? 'badge-warning' : round.status === 'drawn' ? 'badge-success' : 'badge-gray'">{{ statusLabel(round.status) }}</span></td><td class="px-5 py-3"><div v-if="round.status === 'open'" class="flex flex-wrap gap-2"><button class="btn btn-secondary btn-sm" :disabled="updatingId === round.id || drawingId === round.id" @click="updateProgress(round)"><Icon v-if="updatingId === round.id" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="checkCircle" size="sm" /><span>{{ t('admin.lottery.updateProgress') }}</span></button><button class="btn btn-secondary btn-sm" :disabled="drawingId === round.id || updatingId === round.id" @click="draw(round)"><Icon v-if="drawingId === round.id" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="trophy" size="sm" /><span>{{ t('admin.lottery.draw') }}</span></button></div><span v-else class="text-xs text-gray-400">{{ round.drawn_at ? date(round.drawn_at) : '-' }}</span></td></tr><tr v-if="rounds.length === 0"><td colspan="6" class="px-5 py-10 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('common.noData') }}</td></tr></tbody></table></div></section>
+       </template>
+     </div>
++    <LotteryParticipantsDialog
++      :show="selectedRound !== null"
++      :round="selectedRound"
++      @close="selectedRound = null"
++    />
+   </AppLayout>
+ </template>
+
+@@ -36,6 +41,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
+ import { useI18n } from 'vue-i18n'
+ import AppLayout from '@/components/layout/AppLayout.vue'
+ import Icon from '@/components/icons/Icon.vue'
++import LotteryParticipantsDialog from '@/components/lottery/LotteryParticipantsDialog.vue'
+ import lotteryAPI, { type LotteryConfig, type LotteryRound } from '@/api/lottery'
+ import { useAppStore } from '@/stores/app'
+ import { extractApiErrorMessage } from '@/utils/apiError'
+@@ -46,6 +52,7 @@ const loading = ref(true)
+ const saving = ref(false)
+ const drawingId = ref<number | null>(null)
+ const updatingId = ref<number | null>(null)
++const selectedRound = ref<LotteryRound | null>(null)
+ const rounds = ref<LotteryRound[]>([])
+ const progressDrafts = reactive<Record<number, number>>({})
+ const form = reactive<LotteryConfig>({ enabled: false, participant_threshold: 50, prize_count: 1, prize_amount: 5, draw_mode: 'auto', next_round_mode: 'manual', require_recharge: true, min_recharge_amount: 0, min_account_age_days: 0, recent_recharge_days: 0 })
+@@ -53,6 +60,7 @@ const currentOpenRound = computed(() => rounds.value.find((round) => round.statu
+
+ function date(value: string): string { return new Date(value).toLocaleString() }
+ function statusLabel(status: string): string { return t(`lottery.statuses.${status}`, status) }
++function openParticipants(round: LotteryRound): void { selectedRound.value = round }
+
+ async function load(): Promise<void> {
+   loading.value = true
+diff --git a/frontend/src/views/admin/__tests__/LotteryView.spec.ts b/frontend/src/views/admin/__tests__/LotteryView.spec.ts
+index 8599508fa..ee061c0b4 100644
+--- a/frontend/src/views/admin/__tests__/LotteryView.spec.ts
++++ b/frontend/src/views/admin/__tests__/LotteryView.spec.ts
+@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest'
+
+ const viewPath = resolve(dirname(fileURLToPath(import.meta.url)), '../LotteryView.vue')
+ const viewSource = readFileSync(viewPath, 'utf8')
++const dialogPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/lottery/LotteryParticipantsDialog.vue')
++const dialogSource = readFileSync(dialogPath, 'utf8')
+
+ describe('Admin LotteryView progress control', () => {
+   it('updates an open round with an absolute participant count', () => {
+@@ -24,4 +26,14 @@ describe('Admin LotteryView progress control', () => {
+     expect(viewSource.match(/>USD<\/span>/g)).toHaveLength(2)
+     expect(viewSource).not.toContain('coins')
+   })
++
++  it('opens a paginated list of exact real participants', () => {
++    expect(viewSource).toContain('@click="openParticipants(round)"')
++    expect(viewSource).toContain('<LotteryParticipantsDialog')
++    expect(dialogSource).toContain('lotteryAPI.getAdminParticipants')
++    expect(dialogSource).toContain("key: 'user_id'")
++    expect(dialogSource).toContain("key: 'email'")
++    expect(dialogSource).toContain("key: 'client_ip'")
++    expect(dialogSource).toContain("key: 'joined_at'")
++  })
+ })
+diff --git a/frontend/src/views/user/LotteryView.vue b/frontend/src/views/user/LotteryView.vue
+index e660f3435..cb28b04b0 100644
+--- a/frontend/src/views/user/LotteryView.vue
++++ b/frontend/src/views/user/LotteryView.vue
+@@ -18,20 +18,6 @@
+           <span>{{ t('lottery.refresh') }}</span>
+         </button>
+       </div>
+-      <CaptchaChallenge
+-        ref="captchaRef"
+-        :turnstile-enabled="false"
+-        turnstile-site-key=""
+-        :tencent-enabled="tencentCaptchaEnabled"
+-        :tencent-app-id="publicSettings?.tencent_captcha_app_id || ''"
+-        :tencent-region="publicSettings?.tencent_captcha_region || 'cn'"
+-        :aliyun-enabled="aliyunCaptchaEnabled"
+-        :aliyun-scene-id="publicSettings?.aliyun_captcha_scene_id || ''"
+-        :aliyun-prefix="publicSettings?.aliyun_captcha_prefix || ''"
+-        :aliyun-region="publicSettings?.aliyun_captcha_region || 'cn'"
+-        @error="handleCaptchaError"
+-      />
+-
+       <div v-if="loading" class="card flex justify-center py-16">
+         <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
+       </div>
+@@ -84,10 +70,9 @@
+                 <span v-if="current.current_round.min_account_age_days > 0">{{ t('lottery.accountAge', { days: current.current_round.min_account_age_days }) }}</span>
+                 <span v-if="!current.current_round.require_recharge && current.current_round.min_recharge_amount <= 0 && current.current_round.min_account_age_days <= 0">{{ t('lottery.join') }}</span>
+               </div>
+-              <button class="btn btn-primary w-full sm:w-auto" :disabled="current.joined || !current.eligibility.eligible || joining" @click="join">
+-                <Icon v-if="joining" name="refresh" size="sm" class="animate-spin" />
+-                <Icon v-else name="gift" size="sm" />
+-                <span>{{ current.joined ? t('lottery.joined') : joining ? t('lottery.joining') : t('lottery.join') }}</span>
++              <button class="btn btn-primary w-full sm:w-auto" :disabled="current.joined || !current.eligibility.eligible || showCaptcha" @click="showCaptcha = true">
++                <Icon name="gift" size="sm" />
++                <span>{{ current.joined ? t('lottery.joined') : t('lottery.join') }}</span>
+               </button>
+             </div>
+           </section>
+@@ -139,6 +124,11 @@
+         </section>
+       </template>
+     </div>
++    <LotterySliderCaptcha
++      :show="showCaptcha"
++      @close="showCaptcha = false"
++      @joined="handleJoined"
++    />
+   </AppLayout>
+ </template>
+
+@@ -147,7 +137,7 @@ import { computed, onMounted, ref } from 'vue'
+ import { useI18n } from 'vue-i18n'
+ import AppLayout from '@/components/layout/AppLayout.vue'
+ import Icon from '@/components/icons/Icon.vue'
+-import CaptchaChallenge from '@/components/CaptchaChallenge.vue'
++import LotterySliderCaptcha from '@/components/lottery/LotterySliderCaptcha.vue'
+ import lotteryAPI, { type LotteryCurrent, type LotteryRound } from '@/api/lottery'
+ import { useAppStore } from '@/stores/app'
+ import { extractApiErrorMessage } from '@/utils/apiError'
+@@ -155,14 +145,9 @@ import { extractApiErrorMessage } from '@/utils/apiError'
+ const { t } = useI18n()
+ const appStore = useAppStore()
+ const loading = ref(true)
+-const joining = ref(false)
+-const captchaRef = ref<InstanceType<typeof CaptchaChallenge> | null>(null)
++const showCaptcha = ref(false)
+ const current = ref<LotteryCurrent | null>(null)
+ const rounds = ref<LotteryRound[]>([])
+-const publicSettings = computed(() => appStore.cachedPublicSettings)
+-const tencentCaptchaEnabled = computed(() => publicSettings.value?.tencent_captcha_enabled === true && Boolean(publicSettings.value.tencent_captcha_app_id))
+-const aliyunCaptchaEnabled = computed(() => publicSettings.value?.aliyun_captcha_enabled === true && Boolean(publicSettings.value.aliyun_captcha_scene_id) && Boolean(publicSettings.value.aliyun_captcha_prefix))
+-const sliderCaptchaConfigured = computed(() => tencentCaptchaEnabled.value || aliyunCaptchaEnabled.value)
+ const progress = computed(() => {
+   const round = current.value?.current_round
+   return round ? Math.min(100, Math.round((round.participant_count / Math.max(1, round.participant_threshold)) * 100)) : 0
+@@ -183,31 +168,12 @@ async function load(): Promise<void> {
+   } finally { loading.value = false }
+ }
+
+-async function join(): Promise<void> {
+-  if (!sliderCaptchaConfigured.value) {
+-    appStore.showError(t('lottery.captchaUnavailable'))
+-    return
+-  }
+-  joining.value = true
+-  try {
+-    const proof = await captchaRef.value?.verifyAction()
+-    if (!proof) return
+-    await lotteryAPI.join(tencentCaptchaEnabled.value
+-      ? { tencent_captcha_ticket: proof.token, tencent_captcha_randstr: proof.randstr }
+-      : { turnstile_token: proof.token })
+-    appStore.showSuccess(t('lottery.joinSuccess'))
+-    await load()
+-    window.dispatchEvent(new Event('lottery-availability-changed'))
+-  } catch (error) {
+-    appStore.showError(extractApiErrorMessage(error, t('lottery.joinFailed')))
+-  } finally { joining.value = false }
+-}
+-
+-function handleCaptchaError(): void {
+-  appStore.showError(t('lottery.captchaFailed'))
++async function handleJoined(): Promise<void> {
++  showCaptcha.value = false
++  appStore.showSuccess(t('lottery.joinSuccess'))
++  await load()
++  window.dispatchEvent(new Event('lottery-availability-changed'))
+ }
+
+-onMounted(async () => {
+-  await Promise.all([appStore.fetchPublicSettings(), load()])
+-})
++onMounted(load)
+ </script>
+diff --git a/frontend/src/views/user/__tests__/LotteryView.spec.ts b/frontend/src/views/user/__tests__/LotteryView.spec.ts
+index 6eb43e583..9494637a7 100644
+--- a/frontend/src/views/user/__tests__/LotteryView.spec.ts
++++ b/frontend/src/views/user/__tests__/LotteryView.spec.ts
+@@ -6,18 +6,24 @@ import { describe, expect, it } from 'vitest'
+
+ const viewPath = resolve(dirname(fileURLToPath(import.meta.url)), '../LotteryView.vue')
+ const viewSource = readFileSync(viewPath, 'utf8')
++const sliderPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/lottery/LotterySliderCaptcha.vue')
++const sliderSource = readFileSync(sliderPath, 'utf8')
+
+ describe('LotteryView slider verification', () => {
+-  it('requires a fresh action captcha proof before joining', () => {
+-    expect(viewSource).toContain('captchaRef.value?.verifyAction()')
+-    expect(viewSource).toContain('tencent_captcha_ticket: proof.token')
+-    expect(viewSource).toContain('turnstile_token: proof.token')
++  it('requires a fresh self-hosted slider proof before joining', () => {
++    expect(viewSource).toContain('<LotterySliderCaptcha')
++    expect(sliderSource).toContain('await lotteryAPI.getCaptcha()')
++    expect(sliderSource).toContain('captcha_id: challenge.value.id')
++    expect(sliderSource).toContain('captcha_x: point.x')
++    expect(sliderSource).toContain('captcha_y: point.y')
+     expect(viewSource).toContain("window.dispatchEvent(new Event('lottery-availability-changed'))")
+   })
+
+-  it('does not submit when no slider provider is configured', () => {
+-    expect(viewSource).toContain('if (!sliderCaptchaConfigured.value)')
+-    expect(viewSource).toContain("t('lottery.captchaUnavailable')")
++  it('does not depend on Tencent or Aliyun captcha settings', () => {
++    expect(viewSource).not.toContain('CaptchaChallenge')
++    expect(viewSource).not.toContain('tencentCaptchaEnabled')
++    expect(viewSource).not.toContain('aliyunCaptchaEnabled')
++    expect(sliderSource).toContain("from 'go-captcha-vue'")
+   })
+
+   it('formats lottery rewards in the account USD currency', () => {

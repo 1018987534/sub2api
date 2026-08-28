@@ -48,6 +48,8 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/tiktoken-go/tokenizer v0.8.0
 	github.com/wechatpay-apiv3/wechatpay-go v0.2.21
+	github.com/wenlng/go-captcha-assets v1.0.7
+	github.com/wenlng/go-captcha/v2 v2.0.5
 	github.com/zeromicro/go-zero v1.9.4
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.53.0
@@ -125,10 +127,12 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/x v0.2.6 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
+	github.com/google/subcommands v1.2.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.3 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/hashicorp/hcl/v2 v2.18.1 // indirect

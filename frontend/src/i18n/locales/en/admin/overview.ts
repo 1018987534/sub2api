@@ -1286,6 +1286,11 @@ export default {
       drawn: 'Draw completed',
       loadFailed: 'Failed to load lottery management data',
       saveFailed: 'Failed to save lottery configuration',
+      viewParticipants: 'View {count} real participants',
+      participantsTitle: 'Real participants in round {round}',
+      noParticipants: 'No real users have joined this round',
+      participantsLoadFailed: 'Failed to load participant details',
+      participantColumns: { userId: 'User ID', username: 'Username', email: 'Email', ip: 'IP', joinedAt: 'Joined at' },
       columns: { round: 'Round', progress: 'Draw progress', real: 'Real entries', manualProgress: 'Manual addition', status: 'Status', actions: 'Actions' }
     },
 

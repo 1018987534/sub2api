@@ -28,6 +28,7 @@ func RegisterUserRoutes(
 		lottery := authenticated.Group("/lottery")
 		{
 			lottery.GET("/current", h.Lottery.Current)
+			lottery.GET("/captcha", h.Lottery.Captcha)
 			lottery.POST("/join", h.Lottery.Join)
 			lottery.GET("/rounds", h.Lottery.Rounds)
 		}
