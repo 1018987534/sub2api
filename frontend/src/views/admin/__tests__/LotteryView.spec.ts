@@ -19,4 +19,9 @@ describe('Admin LotteryView progress control', () => {
     expect(viewSource).not.toContain('actor_join_min_seconds')
     expect(viewSource).not.toContain('actor_join_max_seconds')
   })
+
+  it('labels balance amounts as USD instead of coins', () => {
+    expect(viewSource.match(/>USD<\/span>/g)).toHaveLength(2)
+    expect(viewSource).not.toContain('coins')
+  })
 })

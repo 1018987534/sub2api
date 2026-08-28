@@ -250,7 +250,7 @@ export default {
     noRound: 'There is no open lottery round right now',
     eligibility: 'Eligibility',
     rechargeRequired: 'A completed recharge is required',
-    minRecharge: 'At least {amount} coins recharged',
+    minRecharge: 'At least {amount} recharged',
     accountAge: 'Account older than {days} days',
     waiting: 'The draw runs automatically after the target is reached.',
     manualWaiting: 'This round will be drawn manually by an administrator.',

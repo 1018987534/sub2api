@@ -1,0 +1,33 @@
+Changed branch/field: lottery currency presentation now uses the account balance currency; administrator amount inputs show USD and user-visible rewards/recharge thresholds show $ amounts instead of coins. Backend prize_amount continues to credit users.balance directly in USD.
+
+Artifacts:
+- MODIFIED_FILE: release-evidence/lottery-usd-currency-20260828/MODIFIED_FILE
+- DIFF_FILE: release-evidence/lottery-usd-currency-20260828/DIFF_FILE
+- VERIFICATION.txt: release-evidence/lottery-usd-currency-20260828/VERIFICATION.txt
+- ROLLBACK.sh: release-evidence/lottery-usd-currency-20260828/ROLLBACK.sh
+
+Hashes:
+- BASELINE_FILE sha256: 1978e94166b08eb6497f06a5c1d82653f5a88a0a23ecd82cf7a4081aa2debfcc
+- MODIFIED_FILE sha256: a23d6a549dbd5a3fca6497c402246917854084ac4d93a6b3a450abe089158127
+- DIFF_FILE sha256: 57fcd947e4ad05bc5af196429351b693921eeb61c5392ffb5e3b231e131a64af
+
+BASELINE
+Command: cd /private/tmp/sub2api-lottery-usd-baseline-20260828/frontend && pnpm exec vitest run src/views/admin/__tests__/LotteryView.spec.ts src/views/user/__tests__/LotteryView.spec.ts src/i18n/__tests__/localesMessageCompile.spec.ts
+Input: detached worktree at a722efadc; administrator source contains >coins</span> and user money() returns a coins suffix.
+Literal output: Test Files 3 passed (3); Tests 6 passed (6); Duration 824ms
+Result: pre-change lottery and locale baseline tests passed.
+Exit status: 0
+
+MODIFIED
+Command: cd /private/tmp/sub2api-lottery-release-20260828/frontend && pnpm exec vitest run src/views/admin/__tests__/LotteryView.spec.ts src/views/user/__tests__/LotteryView.spec.ts src/i18n/__tests__/localesMessageCompile.spec.ts && pnpm typecheck && pnpm build
+Input: administrator prize/recharge inputs labeled USD; user money() returns $5.00 style amounts; Chinese and English lottery strings contain no coin unit.
+Literal output: Test Files 3 passed (3); Tests 8 passed (8); vue-tsc --noEmit completed; vite built 1048 modules in 13.51s
+Result: modified currency presentation tests, typecheck, and production build passed.
+Exit status: 0
+
+ROLLBACK
+Command: cp release-evidence/lottery-usd-currency-20260828/MODIFIED_FILE /private/tmp/sub2api-lottery-usd-rollback-20260828/MODIFIED_FILE && ./release-evidence/lottery-usd-currency-20260828/ROLLBACK.sh /private/tmp/sub2api-lottery-usd-rollback-20260828/MODIFIED_FILE && cmp -s release-evidence/lottery-usd-currency-20260828/BASELINE_FILE /private/tmp/sub2api-lottery-usd-rollback-20260828/MODIFIED_FILE
+Input: another copy of MODIFIED_FILE; the release-evidence MODIFIED_FILE remains changed.
+Literal output: restored behavior: /private/tmp/sub2api-lottery-usd-rollback-20260828/MODIFIED_FILE matches /private/tmp/sub2api-lottery-release-20260828/release-evidence/lottery-usd-currency-20260828/BASELINE_FILE; rollback_cmp=PASS; modified_artifact=CHANGED
+Result: rollback copy restored the original coins presentation; MODIFIED_FILE retained the USD presentation.
+Exit status: 0

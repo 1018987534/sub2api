@@ -250,7 +250,7 @@ export default {
     noRound: '当前暂无进行中的抽奖',
     eligibility: '参与条件',
     rechargeRequired: '需要完成过充值',
-    minRecharge: '累计充值达到 {amount} coins',
+    minRecharge: '累计充值达到 {amount}',
     accountAge: '注册满 {days} 天',
     waiting: '达到人数后自动开奖，请耐心等待。',
     manualWaiting: '本期由管理员手动开奖。',

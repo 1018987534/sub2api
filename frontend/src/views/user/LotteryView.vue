@@ -168,7 +168,7 @@ const progress = computed(() => {
   return round ? Math.min(100, Math.round((round.participant_count / Math.max(1, round.participant_threshold)) * 100)) : 0
 })
 
-function money(value: number): string { return `${Number(value || 0).toFixed(2)} coins` }
+function money(value: number): string { return `$${Number(value || 0).toFixed(2)}` }
 function date(value: string): string { return new Date(value).toLocaleString() }
 function statusLabel(status: string): string { return t(`lottery.statuses.${status}`, status) }
 

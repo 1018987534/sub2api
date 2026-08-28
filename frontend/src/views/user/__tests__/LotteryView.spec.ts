@@ -19,4 +19,9 @@ describe('LotteryView slider verification', () => {
     expect(viewSource).toContain('if (!sliderCaptchaConfigured.value)')
     expect(viewSource).toContain("t('lottery.captchaUnavailable')")
   })
+
+  it('formats lottery rewards in the account USD currency', () => {
+    expect(viewSource).toContain('return `$${Number(value || 0).toFixed(2)}`')
+    expect(viewSource).not.toContain('coins')
+  })
 })

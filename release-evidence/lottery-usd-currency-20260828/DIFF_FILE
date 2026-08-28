@@ -1,0 +1,93 @@
+diff --git a/backend/cmd/server/VERSION b/backend/cmd/server/VERSION
+index c3ba241b6..8fe4a535a 100644
+--- a/backend/cmd/server/VERSION
++++ b/backend/cmd/server/VERSION
+@@ -1 +1 @@
+-0.1.184
++0.1.185
+diff --git a/frontend/src/i18n/locales/en/common.ts b/frontend/src/i18n/locales/en/common.ts
+index 07d689c2f..cf2c6dbbe 100644
+--- a/frontend/src/i18n/locales/en/common.ts
++++ b/frontend/src/i18n/locales/en/common.ts
+@@ -250,7 +250,7 @@ export default {
+     noRound: 'There is no open lottery round right now',
+     eligibility: 'Eligibility',
+     rechargeRequired: 'A completed recharge is required',
+-    minRecharge: 'At least {amount} coins recharged',
++    minRecharge: 'At least {amount} recharged',
+     accountAge: 'Account older than {days} days',
+     waiting: 'The draw runs automatically after the target is reached.',
+     manualWaiting: 'This round will be drawn manually by an administrator.',
+diff --git a/frontend/src/i18n/locales/zh/common.ts b/frontend/src/i18n/locales/zh/common.ts
+index 74077d9ad..dc281c7b5 100644
+--- a/frontend/src/i18n/locales/zh/common.ts
++++ b/frontend/src/i18n/locales/zh/common.ts
+@@ -250,7 +250,7 @@ export default {
+     noRound: '当前暂无进行中的抽奖',
+     eligibility: '参与条件',
+     rechargeRequired: '需要完成过充值',
+-    minRecharge: '累计充值达到 {amount} coins',
++    minRecharge: '累计充值达到 {amount}',
+     accountAge: '注册满 {days} 天',
+     waiting: '达到人数后自动开奖，请耐心等待。',
+     manualWaiting: '本期由管理员手动开奖。',
+diff --git a/frontend/src/views/admin/LotteryView.vue b/frontend/src/views/admin/LotteryView.vue
+index fa1ee0fac..6582b2a9f 100644
+--- a/frontend/src/views/admin/LotteryView.vue
++++ b/frontend/src/views/admin/LotteryView.vue
+@@ -16,12 +16,12 @@
+           <section class="card p-5 sm:p-6"><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.rules') }}</h2><div class="mt-5 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
+             <label class="space-y-1.5"><span class="label">{{ t('admin.lottery.participantThreshold') }}</span><input v-model.number="form.participant_threshold" type="number" min="2" max="100000" class="input" /></label>
+             <label class="space-y-1.5"><span class="label">{{ t('admin.lottery.prizeCount') }}</span><input v-model.number="form.prize_count" type="number" min="1" max="10000" class="input" /></label>
+-            <label class="space-y-1.5"><span class="label">{{ t('admin.lottery.prizeAmount') }}</span><div class="relative"><input v-model.number="form.prize_amount" type="number" min="0.01" step="0.01" class="input pr-16" /><span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-400">coins</span></div></label>
++            <label class="space-y-1.5"><span class="label">{{ t('admin.lottery.prizeAmount') }}</span><div class="relative"><input v-model.number="form.prize_amount" type="number" min="0.01" step="0.01" class="input pr-16" /><span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-400">USD</span></div></label>
+             <label class="space-y-1.5"><span class="label">{{ t('admin.lottery.drawMode') }}</span><select v-model="form.draw_mode" class="input"><option value="auto">{{ t('admin.lottery.automatic') }}</option><option value="manual">{{ t('admin.lottery.manual') }}</option></select></label>
+             <label class="space-y-1.5 md:col-span-2"><span class="label">{{ t('admin.lottery.nextRoundMode') }}</span><select v-model="form.next_round_mode" class="input"><option value="manual">{{ t('admin.lottery.manualNext') }}</option><option value="auto">{{ t('admin.lottery.autoNext') }}</option></select></label>
+           </div></section>
+ 
+-          <section class="card p-5 sm:p-6"><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.eligibility') }}</h2><div class="mt-5 grid gap-5 md:grid-cols-3"><label class="flex items-start gap-3 rounded-xl border border-gray-200 p-4 dark:border-dark-700"><input v-model="form.require_recharge" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" /><span><span class="block text-sm font-medium text-gray-800 dark:text-gray-200">{{ t('admin.lottery.requireRecharge') }}</span><span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.rechargeRequired') }}</span></span></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.minRecharge') }}</span><input v-model.number="form.min_recharge_amount" type="number" min="0" step="0.01" class="input" /><span class="hint">{{ t('admin.lottery.minRechargeHint') }}</span></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.minAccountAge') }}</span><input v-model.number="form.min_account_age_days" type="number" min="0" max="36500" class="input" /><span class="hint">{{ t('admin.lottery.minRechargeHint') }}</span></label><label class="space-y-1.5 md:col-span-2"><span class="label">{{ t('admin.lottery.recentRecharge') }}</span><input v-model.number="form.recent_recharge_days" type="number" min="0" max="36500" class="input" /><span class="hint">{{ t('admin.lottery.recentRechargeHint') }}</span></label></div></section>
++          <section class="card p-5 sm:p-6"><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.eligibility') }}</h2><div class="mt-5 grid gap-5 md:grid-cols-3"><label class="flex items-start gap-3 rounded-xl border border-gray-200 p-4 dark:border-dark-700"><input v-model="form.require_recharge" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" /><span><span class="block text-sm font-medium text-gray-800 dark:text-gray-200">{{ t('admin.lottery.requireRecharge') }}</span><span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.rechargeRequired') }}</span></span></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.minRecharge') }}</span><div class="relative"><input v-model.number="form.min_recharge_amount" type="number" min="0" step="0.01" class="input pr-16" /><span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-400">USD</span></div><span class="hint">{{ t('admin.lottery.minRechargeHint') }}</span></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.minAccountAge') }}</span><input v-model.number="form.min_account_age_days" type="number" min="0" max="36500" class="input" /><span class="hint">{{ t('admin.lottery.minRechargeHint') }}</span></label><label class="space-y-1.5 md:col-span-2"><span class="label">{{ t('admin.lottery.recentRecharge') }}</span><input v-model.number="form.recent_recharge_days" type="number" min="0" max="36500" class="input" /><span class="hint">{{ t('admin.lottery.recentRechargeHint') }}</span></label></div></section>
+           <div class="flex justify-end"><button class="btn btn-primary w-full sm:w-auto" type="submit" :disabled="saving"><Icon v-if="saving" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="checkCircle" size="sm" /><span>{{ saving ? t('common.saving') : t('admin.lottery.save') }}</span></button></div>
+         </form>
+ 
+diff --git a/frontend/src/views/admin/__tests__/LotteryView.spec.ts b/frontend/src/views/admin/__tests__/LotteryView.spec.ts
+index 66d9f4427..8599508fa 100644
+--- a/frontend/src/views/admin/__tests__/LotteryView.spec.ts
++++ b/frontend/src/views/admin/__tests__/LotteryView.spec.ts
+@@ -19,4 +19,9 @@ describe('Admin LotteryView progress control', () => {
+     expect(viewSource).not.toContain('actor_join_min_seconds')
+     expect(viewSource).not.toContain('actor_join_max_seconds')
+   })
++
++  it('labels balance amounts as USD instead of coins', () => {
++    expect(viewSource.match(/>USD<\/span>/g)).toHaveLength(2)
++    expect(viewSource).not.toContain('coins')
++  })
+ })
+diff --git a/frontend/src/views/user/LotteryView.vue b/frontend/src/views/user/LotteryView.vue
+index f7d45e408..e660f3435 100644
+--- a/frontend/src/views/user/LotteryView.vue
++++ b/frontend/src/views/user/LotteryView.vue
+@@ -168,7 +168,7 @@ const progress = computed(() => {
+   return round ? Math.min(100, Math.round((round.participant_count / Math.max(1, round.participant_threshold)) * 100)) : 0
+ })
+ 
+-function money(value: number): string { return `${Number(value || 0).toFixed(2)} coins` }
++function money(value: number): string { return `$${Number(value || 0).toFixed(2)}` }
+ function date(value: string): string { return new Date(value).toLocaleString() }
+ function statusLabel(status: string): string { return t(`lottery.statuses.${status}`, status) }
+ 
+diff --git a/frontend/src/views/user/__tests__/LotteryView.spec.ts b/frontend/src/views/user/__tests__/LotteryView.spec.ts
+index 4d0ea626d..6eb43e583 100644
+--- a/frontend/src/views/user/__tests__/LotteryView.spec.ts
++++ b/frontend/src/views/user/__tests__/LotteryView.spec.ts
+@@ -19,4 +19,9 @@ describe('LotteryView slider verification', () => {
+     expect(viewSource).toContain('if (!sliderCaptchaConfigured.value)')
+     expect(viewSource).toContain("t('lottery.captchaUnavailable')")
+   })
++
++  it('formats lottery rewards in the account USD currency', () => {
++    expect(viewSource).toContain('return `$${Number(value || 0).toFixed(2)}`')
++    expect(viewSource).not.toContain('coins')
++  })
+ })
