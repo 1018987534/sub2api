@@ -17,6 +17,11 @@ func RegisterUserRoutes(
 	settingService *service.SettingService,
 	panelRateLimiter *middleware.PanelRateLimiter,
 ) {
+	publicLottery := v1.Group("/lottery")
+	publicLottery.Use(middleware.BackendModeAuthGuard(settingService))
+	publicLottery.Use(panelRateLimiter.PublicIP())
+	publicLottery.GET("/announcement", h.Lottery.Announcement)
+
 	authenticated := v1.Group("")
 	authenticated.Use(gin.HandlerFunc(jwtAuth))
 	authenticated.Use(middleware.BackendModeUserGuard(settingService))

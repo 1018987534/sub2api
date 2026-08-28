@@ -50,3 +50,23 @@ func TestLotteryListParticipantsRejectsMissingRound(t *testing.T) {
 	require.ErrorIs(t, err, ErrLotteryRoundNotFound)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestListWinnersForRoundReturnsCompleteMaskedRound(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	now := time.Now()
+	mock.ExpectQuery(`WHERE w\.round_id=\$1`).
+		WithArgs(int64(9), 10000).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "round_id", "round_no", "email_snapshot", "prize_amount", "awarded_at", "joined_at"}).
+			AddRow(1, 9, 7, "first@example.com", 5.0, now, now.Add(-time.Hour)).
+			AddRow(2, 9, 7, "second@example.com", 5.0, now, now.Add(-2*time.Hour)))
+
+	lottery := NewLotteryService(db, nil, nil)
+	winners, err := lottery.listWinnersForRound(context.Background(), 9, 10000)
+	require.NoError(t, err)
+	require.Len(t, winners, 2)
+	require.Equal(t, "fi***t@example.com", winners[0].Email)
+	require.Equal(t, "se***d@example.com", winners[1].Email)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

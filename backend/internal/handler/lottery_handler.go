@@ -43,6 +43,17 @@ func (h *LotteryHandler) Current(c *gin.Context) {
 	response.Success(c, current)
 }
 
+// Announcement serves the unauthenticated, redacted payload used by the QQ
+// bot. It intentionally has no user-specific eligibility or participation data.
+func (h *LotteryHandler) Announcement(c *gin.Context) {
+	announcement, err := h.service.GetAnnouncement(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, announcement)
+}
+
 func (h *LotteryHandler) Join(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {

@@ -78,3 +78,30 @@ func TestLotteryPublicRoundIncludesDrawMode(t *testing.T) {
 	publicRound := toLotteryPublicRound(LotteryRound{DrawMode: LotteryDrawModeManual})
 	require.Equal(t, LotteryDrawModeManual, publicRound.DrawMode)
 }
+
+func TestLotteryAnnouncementPayloadContainsOnlyRedactedPublicFields(t *testing.T) {
+	publicRound := toLotteryPublicRound(LotteryRound{
+		ID:                   1,
+		RoundNo:              12,
+		ParticipantCount:     8,
+		ParticipantThreshold: 50,
+		PrizeCount:           6,
+		PrizeAmount:          5,
+		RecentRechargeDays:   30,
+	})
+	payload, err := json.Marshal(LotteryAnnouncement{
+		Enabled:      true,
+		CurrentRound: &publicRound,
+		RecentWinners: []LotteryWinner{{
+			RoundNo: 12,
+			Email:   "mh***o@example.com",
+		}},
+	})
+	require.NoError(t, err)
+	body := string(payload)
+	require.Contains(t, body, `"round_no":12`)
+	require.Contains(t, body, `"email":"mh***o@example.com"`)
+	require.NotContains(t, body, "recent_recharge_days")
+	require.NotContains(t, body, "participant_details")
+	require.NotContains(t, body, "balance")
+}

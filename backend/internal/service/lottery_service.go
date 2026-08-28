@@ -115,6 +115,15 @@ type LotteryCurrent struct {
 	MyRecentWinners []LotteryWinner     `json:"my_recent_winners"`
 }
 
+// LotteryAnnouncement is the intentionally small public payload consumed by
+// external notification integrations. It omits eligibility internals,
+// participant details, and account balances.
+type LotteryAnnouncement struct {
+	Enabled       bool                `json:"enabled"`
+	CurrentRound  *LotteryPublicRound `json:"current_round,omitempty"`
+	RecentWinners []LotteryWinner     `json:"recent_winners"`
+}
+
 type LotteryRoundPage struct {
 	Items    []LotteryRound `json:"items"`
 	Total    int64          `json:"total"`
@@ -406,6 +415,31 @@ func (s *LotteryService) GetCurrent(ctx context.Context, userID int64) (LotteryC
 		}
 	}
 	return out, nil
+}
+
+// GetAnnouncement returns the public lottery state used by the QQ notifier.
+// GetCurrent already masks winner emails and excludes the hidden recharge rule
+// from its JSON representation, so the integration cannot expose private data.
+func (s *LotteryService) GetAnnouncement(ctx context.Context) (LotteryAnnouncement, error) {
+	current, err := s.GetCurrent(ctx, 0)
+	if err != nil {
+		return LotteryAnnouncement{}, err
+	}
+	if len(current.RecentWinners) > 0 {
+		// The regular user view intentionally limits the feed to ten rows. The
+		// notifier needs the complete latest round so every winner is announced.
+		latestRoundID := current.RecentWinners[0].RoundID
+		winners, winnerErr := s.listWinnersForRound(ctx, latestRoundID, 10000)
+		if winnerErr != nil {
+			return LotteryAnnouncement{}, winnerErr
+		}
+		current.RecentWinners = winners
+	}
+	return LotteryAnnouncement{
+		Enabled:       current.Enabled,
+		CurrentRound:  current.CurrentRound,
+		RecentWinners: current.RecentWinners,
+	}, nil
 }
 
 func (s *LotteryService) hasJoined(ctx context.Context, roundID, userID int64) (bool, error) {
@@ -724,6 +758,33 @@ func (s *LotteryService) listWinners(ctx context.Context, userID int64, limit in
 	query += fmt.Sprintf(` ORDER BY w.awarded_at DESC,w.id DESC LIMIT $%d`, len(args)+1)
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]LotteryWinner, 0, limit)
+	for rows.Next() {
+		var winner LotteryWinner
+		if err := rows.Scan(&winner.ID, &winner.RoundID, &winner.RoundNo, &winner.Email, &winner.PrizeAmount, &winner.AwardedAt, &winner.ParticipatedAt); err != nil {
+			return nil, err
+		}
+		winner.Email = MaskLotteryEmail(winner.Email)
+		items = append(items, winner)
+	}
+	return items, rows.Err()
+}
+
+func (s *LotteryService) listWinnersForRound(ctx context.Context, roundID int64, limit int) ([]LotteryWinner, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT w.id,w.round_id,r.round_no,w.email_snapshot,w.prize_amount,w.awarded_at,p.joined_at
+		FROM lottery_winners w
+		JOIN lottery_rounds r ON r.id=w.round_id
+		JOIN lottery_participants p ON p.id=w.participant_id
+		WHERE w.round_id=$1
+		ORDER BY w.id ASC LIMIT $2`, roundID, limit)
 	if err != nil {
 		return nil, err
 	}
