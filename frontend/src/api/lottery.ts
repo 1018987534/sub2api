@@ -62,6 +62,12 @@ export interface LotteryCurrent {
   my_recent_winners: LotteryWinner[]
 }
 
+export interface LotteryAnnouncement {
+  enabled: boolean
+  current_round?: LotteryRound | null
+  recent_winners: LotteryWinner[]
+}
+
 export interface LotteryDrawResult {
   round: LotteryRound
   winners: LotteryWinner[]
@@ -103,6 +109,10 @@ export interface LotteryCaptchaProof {
 }
 
 export const lotteryAPI = {
+  async getAnnouncement() {
+    const { data } = await apiClient.get<LotteryAnnouncement>('/lottery/announcement')
+    return data
+  },
   async getCurrent() {
     const { data } = await apiClient.get<LotteryCurrent>('/lottery/current')
     return data

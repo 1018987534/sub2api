@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -104,4 +107,26 @@ func TestLotteryAnnouncementPayloadContainsOnlyRedactedPublicFields(t *testing.T
 	require.NotContains(t, body, "recent_recharge_days")
 	require.NotContains(t, body, "participant_details")
 	require.NotContains(t, body, "balance")
+}
+
+func TestLotteryRecentWinnerFeedIncludesMultipleRoundsAtBoundedLimit(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Date(2026, 8, 29, 13, 0, 0, 0, time.UTC)
+	mock.ExpectQuery(`ORDER BY w\.awarded_at DESC,w\.id DESC LIMIT \$1`).
+		WithArgs(lotteryRecentWinnerLimit).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "round_id", "round_no", "email_snapshot", "prize_amount", "awarded_at", "joined_at"}).
+			AddRow(1, 2, 2, "first@example.com", 5.0, now, now.Add(-time.Hour)).
+			AddRow(2, 1, 1, "second@example.com", 5.0, now.Add(-2*time.Hour), now.Add(-3*time.Hour)))
+
+	lottery := NewLotteryService(db, nil, nil)
+	winners, err := lottery.listWinners(context.Background(), 0, lotteryRecentWinnerLimit)
+	require.NoError(t, err)
+	require.Equal(t, 10000, lotteryRecentWinnerLimit)
+	require.Equal(t, []int64{2, 1}, []int64{winners[0].RoundNo, winners[1].RoundNo})
+	require.Equal(t, "fi***t@example.com", winners[0].Email)
+	require.Equal(t, "se***d@example.com", winners[1].Email)
+	require.NoError(t, mock.ExpectationsWereMet())
 }

@@ -14,13 +14,14 @@ import (
 )
 
 const (
-	LotteryDrawModeAuto           = "auto"
-	LotteryDrawModeManual         = "manual"
-	LotteryRoundModeAuto          = "auto"
-	LotteryRoundModeManual        = "manual"
-	LotteryRoundStatusOpen        = "open"
-	LotteryRoundStatusDrawn       = "drawn"
-	lotteryAdvisoryLock     int64 = 0x4c4f5454455259
+	LotteryDrawModeAuto            = "auto"
+	LotteryDrawModeManual          = "manual"
+	LotteryRoundModeAuto           = "auto"
+	LotteryRoundModeManual         = "manual"
+	LotteryRoundStatusOpen         = "open"
+	LotteryRoundStatusDrawn        = "drawn"
+	lotteryAdvisoryLock      int64 = 0x4c4f5454455259
+	lotteryRecentWinnerLimit       = 10000
 )
 
 var (
@@ -404,7 +405,7 @@ func (s *LotteryService) GetCurrent(ctx context.Context, userID int64) (LotteryC
 			}
 		}
 	}
-	out.RecentWinners, err = s.listWinners(ctx, 0, 10)
+	out.RecentWinners, err = s.listWinners(ctx, 0, lotteryRecentWinnerLimit)
 	if err != nil {
 		return LotteryCurrent{}, err
 	}
@@ -418,22 +419,12 @@ func (s *LotteryService) GetCurrent(ctx context.Context, userID int64) (LotteryC
 }
 
 // GetAnnouncement returns the public lottery state used by the QQ notifier.
-// GetCurrent already masks winner emails and excludes the hidden recharge rule
-// from its JSON representation, so the integration cannot expose private data.
+// GetCurrent masks winner emails and excludes the hidden recharge rule from its
+// JSON representation, so the integration cannot expose private data.
 func (s *LotteryService) GetAnnouncement(ctx context.Context) (LotteryAnnouncement, error) {
 	current, err := s.GetCurrent(ctx, 0)
 	if err != nil {
 		return LotteryAnnouncement{}, err
-	}
-	if len(current.RecentWinners) > 0 {
-		// The regular user view intentionally limits the feed to ten rows. The
-		// notifier needs the complete latest round so every winner is announced.
-		latestRoundID := current.RecentWinners[0].RoundID
-		winners, winnerErr := s.listWinnersForRound(ctx, latestRoundID, 10000)
-		if winnerErr != nil {
-			return LotteryAnnouncement{}, winnerErr
-		}
-		current.RecentWinners = winners
 	}
 	return LotteryAnnouncement{
 		Enabled:       current.Enabled,
