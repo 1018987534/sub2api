@@ -78,6 +78,59 @@ func TestAccountHandlerGetFirstTokenLatenciesExcludesOAuthDisabledAndUnschedulab
 	require.Equal(t, "relay", payload.Data.Items[0].AccountName)
 }
 
+func TestAccountHandlerGetFirstTokenPoolStatusesAggregatesGroupsWithoutAccountDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now().UTC()
+	plus := &service.Group{ID: 5, Name: "PLUS分组", Platform: service.PlatformOpenAI, Status: service.StatusActive}
+	pro := &service.Group{ID: 79, Name: "PRO分组", Platform: service.PlatformOpenAI, Status: service.StatusActive}
+	special := &service.Group{ID: 80, Name: "特价分组", Platform: service.PlatformOpenAI, Status: service.StatusActive}
+	fast := service.Account{
+		ID: 1, Name: "fast-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true,
+		GroupIDs: []int64{plus.ID, pro.ID}, Groups: []*service.Group{plus, pro},
+		AccountGroups: []service.AccountGroup{
+			{AccountID: 1, GroupID: plus.ID, Group: plus},
+			{AccountID: 1, GroupID: pro.ID, Group: pro},
+		},
+	}
+	slow := service.Account{
+		ID: 2, Name: "slow-account", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true,
+		GroupIDs: []int64{special.ID}, Groups: []*service.Group{special},
+		AccountGroups: []service.AccountGroup{{AccountID: 2, GroupID: special.ID, Group: special}},
+	}
+	adminSvc := newStubAdminService()
+	adminSvc.accountSchedulerScoreFilterAccounts = []service.Account{fast, slow}
+	rateLimitService := service.NewRateLimitService(nil, nil, nil, nil, nil)
+	rateLimitService.SetFirstTokenLatencyStatsCache(accountFirstTokenStatsCache{stats: map[int64]service.FirstTokenLatencyStats{
+		1: {PredictedMS: 7_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+		2: {PredictedMS: 20_000, SampleCount: 20, UpdatedAt: now, FastConfirmationTracked: true},
+	}})
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, rateLimitService, nil, nil, nil, nil, nil, nil, nil)
+	router := gin.New()
+	router.GET("/api/v1/groups/pool-status", handler.GetFirstTokenPoolStatuses)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/groups/pool-status", nil))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload struct {
+		Data struct {
+			Items []map[string]any `json:"items"`
+			Total int              `json:"total"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Equal(t, 3, payload.Data.Total)
+	require.Equal(t, []map[string]any{
+		{"group_id": float64(5), "group_name": "PLUS分组", "is_available": true},
+		{"group_id": float64(79), "group_name": "PRO分组", "is_available": true},
+		{"group_id": float64(80), "group_name": "特价分组", "is_available": false},
+	}, payload.Data.Items)
+	require.NotContains(t, recorder.Body.String(), "fast-account")
+	require.NotContains(t, recorder.Body.String(), "predicted_ms")
+}
+
 func TestAccountHandlerRequestsFirstTokenManualProbe(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	adminSvc := newStubAdminService()

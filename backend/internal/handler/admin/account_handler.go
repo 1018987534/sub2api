@@ -703,12 +703,57 @@ func (h *AccountHandler) List(c *gin.Context) {
 // total-duration scheduling predictions for enabled
 // OpenAI API-key relay accounts. OAuth accounts are intentionally excluded.
 func (h *AccountHandler) GetFirstTokenLatencies(c *gin.Context) {
-	if h.adminService == nil || h.rateLimitService == nil {
-		response.Success(c, gin.H{"items": []service.AccountFirstTokenLatencyMetric{}, "total": 0})
+	metrics, err := h.accountFirstTokenLatencyMetrics(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
 		return
 	}
+	response.Success(c, gin.H{"items": metrics, "total": len(metrics)})
+}
+
+type firstTokenPoolGroupStatus struct {
+	GroupID     int64  `json:"group_id"`
+	GroupName   string `json:"group_name"`
+	IsAvailable bool   `json:"is_available"`
+}
+
+// GetFirstTokenPoolStatuses exposes only group-level pool availability to
+// authenticated users. It intentionally omits account and latency details.
+func (h *AccountHandler) GetFirstTokenPoolStatuses(c *gin.Context) {
+	metrics, err := h.accountFirstTokenLatencyMetrics(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	statusByGroup := make(map[int64]firstTokenPoolGroupStatus)
+	for _, metric := range metrics {
+		for _, group := range metric.Groups {
+			if group.GroupID <= 0 {
+				continue
+			}
+			status := statusByGroup[group.GroupID]
+			status.GroupID = group.GroupID
+			status.GroupName = group.GroupName
+			status.IsAvailable = status.IsAvailable || metric.IsFastPool
+			statusByGroup[group.GroupID] = status
+		}
+	}
+
+	items := make([]firstTokenPoolGroupStatus, 0, len(statusByGroup))
+	for _, status := range statusByGroup {
+		items = append(items, status)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].GroupID < items[j].GroupID })
+	response.Success(c, gin.H{"items": items, "total": len(items)})
+}
+
+func (h *AccountHandler) accountFirstTokenLatencyMetrics(ctx context.Context) ([]service.AccountFirstTokenLatencyMetric, error) {
+	if h.adminService == nil || h.rateLimitService == nil {
+		return []service.AccountFirstTokenLatencyMetric{}, nil
+	}
 	accounts, err := h.adminService.ListAccountsForSchedulerScoreFilter(
-		c.Request.Context(),
+		ctx,
 		service.PlatformOpenAI,
 		service.AccountTypeAPIKey,
 		service.StatusActive,
@@ -717,15 +762,13 @@ func (h *AccountHandler) GetFirstTokenLatencies(c *gin.Context) {
 		"",
 	)
 	if err != nil {
-		response.ErrorFrom(c, err)
-		return
+		return nil, err
 	}
-	metrics, err := h.rateLimitService.AccountFirstTokenLatencyMetrics(c.Request.Context(), accounts)
+	metrics, err := h.rateLimitService.AccountFirstTokenLatencyMetrics(ctx, accounts)
 	if err != nil {
-		response.ErrorFrom(c, err)
-		return
+		return nil, err
 	}
-	response.Success(c, gin.H{"items": metrics, "total": len(metrics)})
+	return metrics, nil
 }
 
 // RequestFirstTokenManualProbe queues one account for the next fresh streaming
