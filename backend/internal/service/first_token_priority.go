@@ -11,24 +11,21 @@ import (
 )
 
 const (
-	firstTokenPriorityMinimumSamples  = 3
-	firstTokenPriorityFreshFor        = 20 * time.Minute
-	firstTokenPriorityNearTieRatio    = 0.20
-	firstTokenPriorityNearTieFloor    = 2_000.0
-	firstTokenPriorityFastThreshold   = 10_000.0
-	firstTokenPriorityStickyThreshold = 15_000.0
-	firstTokenPriorityProbeBase       = 2 * time.Minute
-	firstTokenPriorityRecoveryProbe   = 30 * time.Second
-	firstTokenPriorityProbeMax        = 6 * time.Hour
-	firstTokenPriorityProbeLease      = 10 * time.Minute
-	firstTokenPriorityManualProbeTTL  = 10 * time.Minute
-	firstTokenLatencyHiddenAccount    = "plus-xiaobaishu 生图"
-	firstTokenLatencyHiddenGroup      = "PRO 监控专用"
+	firstTokenPriorityMinimumSamples = 20
+	firstTokenPriorityFreshFor       = 6 * time.Hour
+	firstTokenPriorityFastThreshold  = 12_000.0
+	firstTokenPriorityProbeBase      = 2 * time.Minute
+	firstTokenPriorityRecoveryProbe  = 30 * time.Second
+	firstTokenPriorityProbeMax       = 6 * time.Hour
+	firstTokenPriorityProbeLease     = 10 * time.Minute
+	firstTokenPriorityManualProbeTTL = 10 * time.Minute
+	firstTokenLatencyHiddenAccount   = "plus-xiaobaishu 生图"
+	firstTokenLatencyHiddenGroup     = "PRO 监控专用"
 )
 
 var (
-	ErrFirstTokenManualProbeUnavailable = errors.New("first-token manual probe is unavailable")
-	ErrFirstTokenManualProbeIneligible  = errors.New("account is not eligible for first-token probing")
+	ErrFirstTokenManualProbeUnavailable = errors.New("total-duration manual probe is unavailable")
+	ErrFirstTokenManualProbeIneligible  = errors.New("account is not eligible for total-duration probing")
 )
 
 type firstTokenRankedAccount struct {
@@ -41,8 +38,8 @@ type firstTokenRankedAccount struct {
 type firstTokenProbeEligibilityContextKey struct{}
 
 // WithFirstTokenProbeEligibility marks whether the current request can produce
-// a first_token_ms sample. Non-stream requests must not consume the shared
-// probe lease because they cannot advance recovery confirmation.
+// a completed streaming duration sample. Non-stream requests must not consume
+// the shared probe lease because they cannot advance recovery confirmation.
 func WithFirstTokenProbeEligibility(ctx context.Context, eligible bool) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -69,11 +66,15 @@ type AccountFirstTokenLatencyMetric struct {
 	AccountID                int64                           `json:"account_id"`
 	AccountName              string                          `json:"account_name"`
 	PredictedMS              float64                         `json:"predicted_ms"`
+	NormalTotalMS            float64                         `json:"normal_total_ms"`
+	P50MS                    float64                         `json:"p50_ms"`
+	P90MS                    float64                         `json:"p90_ms"`
 	HasPrediction            bool                            `json:"has_prediction"`
 	IsFastPool               bool                            `json:"is_fast_pool"`
 	SchedulingRateMultiplier *float64                        `json:"scheduling_rate_multiplier"`
 	Groups                   []AccountFirstTokenLatencyGroup `json:"groups"`
 	SampleCount              int64                           `json:"sample_count"`
+	WindowHours              int                             `json:"window_hours"`
 	UpdatedAt                time.Time                       `json:"updated_at"`
 	SlowStreak               int                             `json:"slow_streak"`
 	RecoveryFastStreak       int                             `json:"recovery_fast_streak"`
@@ -169,11 +170,15 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 			AccountID:                account.ID,
 			AccountName:              account.Name,
 			PredictedMS:              stat.PredictedMS,
+			NormalTotalMS:            stat.PredictedMS,
+			P50MS:                    stat.P50MS,
+			P90MS:                    stat.P90MS,
 			HasPrediction:            hasPrediction,
 			IsFastPool:               firstTokenPriorityStatsFast(stat, now),
 			SchedulingRateMultiplier: schedulingRateMultiplier,
 			Groups:                   groups,
 			SampleCount:              stat.SampleCount,
+			WindowHours:              stat.WindowHours,
 			UpdatedAt:                stat.UpdatedAt,
 			SlowStreak:               stat.SlowStreak,
 			RecoveryFastStreak:       stat.RecoveryFastStreak,
@@ -250,12 +255,14 @@ func firstTokenLatencyMetricGroups(account *Account, now time.Time) ([]AccountFi
 	return groups, len(groups) > 0
 }
 
-func (s *RateLimitService) ObserveFirstTokenLatency(ctx context.Context, account *Account, requestID string, firstTokenMs *int) {
-	if s == nil || s.firstTokenLatencyStatsCache == nil || !isFirstTokenPriorityAccount(account) || firstTokenMs == nil || account.ID <= 0 || *firstTokenMs <= 0 {
+func (s *RateLimitService) ObserveTotalDurationLatency(ctx context.Context, account *Account, usageLog *UsageLog) {
+	if s == nil || s.firstTokenLatencyStatsCache == nil || !isFirstTokenPriorityAccount(account) || usageLog == nil || account.ID <= 0 ||
+		!usageLog.Stream || usageLog.EffectiveRequestType() != RequestTypeStream || usageLog.ActualCost <= 0 ||
+		usageLog.DurationMs == nil || *usageLog.DurationMs <= 0 {
 		return
 	}
-	if err := s.firstTokenLatencyStatsCache.RecordSample(ctx, account.ID, requestID, *firstTokenMs); err != nil {
-		slog.Warn("first_token_latency_stats_record_failed", "account_id", account.ID, "error", err)
+	if err := s.firstTokenLatencyStatsCache.RecordSample(ctx, account.ID, usageLog.RequestID, *usageLog.DurationMs); err != nil {
+		slog.Warn("total_duration_latency_stats_record_failed", "account_id", account.ID, "error", err)
 	}
 }
 
@@ -270,7 +277,7 @@ func (s *RateLimitService) RequestFirstTokenManualProbe(ctx context.Context, acc
 		return ErrFirstTokenManualProbeUnavailable
 	}
 	if err := cache.RequestManualProbe(ctx, account.ID, firstTokenPriorityManualProbeTTL); err != nil {
-		return fmt.Errorf("request first-token manual probe: %w", err)
+		return fmt.Errorf("request total-duration manual probe: %w", err)
 	}
 	return nil
 }
@@ -290,8 +297,8 @@ func (s *SettingService) FirstTokenPriorityEnabled(ctx context.Context) bool {
 	return gateway.openAIAdvancedSchedulerRuntimeSettings(ctx).firstTokenPriorityEnabled
 }
 
-// firstTokenPriorityOrder returns every candidate. Known/fresh accounts are
-// ordered by predicted TTFT for exploitation. When an adaptive probe is due,
+// firstTokenPriorityOrder returns every candidate. The fast pool retains the
+// caller's low-rate order and the slow pool uses normal total duration. When an adaptive probe is due,
 // a shared lease promotes exactly one account across all gateway instances.
 func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache) []int64 {
 	return firstTokenPriorityOrderWithProbe(ctx, candidates, cache, true)
@@ -344,14 +351,14 @@ func firstTokenPriorityOrderWithProbeOptions(
 			manualAccountID, claimed, claimErr := manualCache.TryClaimManualProbe(ctx, priorityAccountIDs, firstTokenPriorityProbeLease)
 			if claimErr == nil && claimed {
 				if allPriorityAccountsFast {
-					return promoteFirstTokenAccount(accountIDs, manualAccountID)
+					return promoteFirstTokenAccount(ordered, manualAccountID)
 				}
 				return promoteFirstTokenAccount(ordered, manualAccountID)
 			}
 		}
 	}
 	if allPriorityAccountsFast {
-		return accountIDs
+		return ordered
 	}
 	if !allowProbe {
 		return ordered
@@ -389,9 +396,6 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		stat, found := stats[accountID]
 		age := now.Sub(stat.UpdatedAt)
 		known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= firstTokenPriorityFreshFor && stat.PredictedMS > 0
-		if stat.FastConfirmationTracked && !stat.ReliableFast && stat.PredictedMS <= firstTokenPriorityFastThreshold {
-			known = false
-		}
 		if !known || !firstTokenPriorityStatsFast(stat, now) {
 			allFastKnown = false
 		} else {
@@ -399,10 +403,10 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		}
 		ranked = append(ranked, firstTokenRankedAccount{id: accountID, stats: stat, known: known, original: index})
 	}
-	// A reliable sub-10-second account is a separate fast pool. Keep the
+	// A confirmed account at or below 12 seconds is in a separate fast pool. Keep the
 	// caller's baseline order inside that pool (the scheduler has already
 	// applied low-rate ordering), and put slower/unknown accounts behind it.
-	// This makes the 10-second rule useful even when one account remains slow.
+	// This preserves fast-pool priority even when one account remains slow.
 	if len(fastKnownIDs) > 0 && !allFastKnown {
 		fast := make([]int64, 0, len(fastKnownIDs))
 		fastRanked := make([]firstTokenRankedAccount, 0, len(fastKnownIDs))
@@ -420,7 +424,7 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 				}
 			}
 		}
-		// Slow/unknown accounts still use TTFT ordering so the least-bad
+		// Slow/unknown accounts still use total-duration ordering so the least-bad
 		// fallback remains first, while the fast pool retains low-rate order.
 		slow = stableFirstTokenRankedOrder(slow, now)
 		if explore && len(slow) > 0 {
@@ -445,7 +449,7 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		ordered := append(fast, rankedIDs(slow)...)
 		return ordered
 	}
-	// When every candidate is already reliably below 10 seconds, latency is no
+	// When every candidate is already confirmed fast, duration is no
 	// longer the scarce signal. Preserve the caller's low-rate/baseline order.
 	// Non-selected accounts become probe candidates only after their data ages
 	// out of the fast pool, avoiding unnecessary traffic to a higher-rate fast
@@ -512,9 +516,6 @@ func firstTokenPriorityProbeAccountIDs(accountIDs []int64, stats map[int64]First
 			stat, found := stats[accountID]
 			age := now.Sub(stat.UpdatedAt)
 			known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= firstTokenPriorityFreshFor && stat.PredictedMS > 0
-			if stat.FastConfirmationTracked && !stat.ReliableFast && stat.PredictedMS <= firstTokenPriorityFastThreshold {
-				known = false
-			}
 			probeRanked = append(probeRanked, firstTokenRankedAccount{id: accountID, stats: stat, known: known, original: index})
 		}
 		if len(probeRanked) > 0 && probeRanked[0].known {
@@ -539,7 +540,10 @@ func rankedIDs(ranked []firstTokenRankedAccount) []int64 {
 }
 
 func firstTokenPriorityStatsReliable(stats FirstTokenLatencyStats) bool {
-	return stats.SampleCount >= firstTokenPriorityMinimumSamples || (stats.ReliableFast && stats.PredictedMS > 0 && stats.PredictedMS <= firstTokenPriorityFastThreshold)
+	if !stats.FastConfirmationTracked {
+		return stats.SampleCount >= 3 && stats.PredictedMS > 0
+	}
+	return stats.SampleCount >= firstTokenPriorityMinimumSamples && stats.PredictedMS > 0
 }
 
 func firstTokenPriorityStatsFast(stats FirstTokenLatencyStats, now time.Time) bool {
@@ -549,46 +553,23 @@ func firstTokenPriorityStatsFast(stats FirstTokenLatencyStats, now time.Time) bo
 	age := now.Sub(stats.UpdatedAt)
 	confirmed := stats.ReliableFast
 	if !stats.FastConfirmationTracked {
-		confirmed = stats.SampleCount >= firstTokenPriorityMinimumSamples
+		confirmed = stats.SampleCount >= 3
 	}
-	return confirmed && age >= 0 && age <= firstTokenPriorityFreshFor && stats.PredictedMS > 0 && stats.PredictedMS <= firstTokenPriorityFastThreshold
+	return confirmed && firstTokenPriorityStatsReliable(stats) && age >= 0 && age <= firstTokenPriorityFreshFor && stats.PredictedMS <= firstTokenPriorityFastThreshold
 }
 
-// firstTokenPriorityDefaultStickyEligible keeps the legacy hard session
-// affinity only while the shared, stable TTFT signal remains healthy. Unknown
-// or stale data falls back to the adaptive weighted policy instead of pinning
-// a session to an account whose current latency cannot be trusted.
+// Hard session affinity is allowed only inside the current fast pool. A slow or
+// stale sticky account must not jump ahead of a healthy fast-pool account.
 func firstTokenPriorityDefaultStickyEligible(stats FirstTokenLatencyStats, now time.Time) bool {
 	if stats.CircuitBroken {
 		return false
 	}
-	age := now.Sub(stats.UpdatedAt)
-	return firstTokenPriorityStatsReliable(stats) &&
-		age >= 0 && age <= firstTokenPriorityFreshFor &&
-		stats.PredictedMS > 0 && stats.PredictedMS <= firstTokenPriorityStickyThreshold
+	return firstTokenPriorityStatsFast(stats, now)
 }
 
-// firstTokenPriorityClearlyFaster is the ranking hysteresis gate. Crossing the
-// fast-pool boundary always wins; inside the slow pool, minor prediction
-// movement does not reshuffle accounts.
-func firstTokenPriorityClearlyFaster(left, right FirstTokenLatencyStats, now time.Time) bool {
-	leftFast := firstTokenPriorityStatsFast(left, now)
-	rightFast := firstTokenPriorityStatsFast(right, now)
-	if leftFast != rightFast {
-		return leftFast
-	}
-	if left.PredictedMS <= 0 || right.PredictedMS <= 0 || left.PredictedMS >= right.PredictedMS {
-		return false
-	}
-	delta := right.PredictedMS - left.PredictedMS
-	return delta >= firstTokenPriorityNearTieFloor && delta/right.PredictedMS >= firstTokenPriorityNearTieRatio
-}
-
-// stableFirstTokenRankedOrder uses account ID as a deterministic tie baseline,
-// rather than inheriting rate or session-sticky ordering from the caller. A
-// challenger replaces the current leader only after clearing the hysteresis
-// gate, so slow-pool ordering remains TTFT-only and stable across requests.
-func stableFirstTokenRankedOrder(ranked []firstTokenRankedAccount, now time.Time) []firstTokenRankedAccount {
+// Slow-pool ordering is strictly normal-total-duration first. Unknown accounts
+// stay behind measured accounts, with account ID as the deterministic tie-break.
+func stableFirstTokenRankedOrder(ranked []firstTokenRankedAccount, _ time.Time) []firstTokenRankedAccount {
 	known := make([]firstTokenRankedAccount, 0, len(ranked))
 	unknown := make([]firstTokenRankedAccount, 0, len(ranked))
 	for _, item := range ranked {
@@ -598,24 +579,19 @@ func stableFirstTokenRankedOrder(ranked []firstTokenRankedAccount, now time.Time
 			unknown = append(unknown, item)
 		}
 	}
-	sort.Slice(known, func(i, j int) bool { return known[i].id < known[j].id })
-	ordered := make([]firstTokenRankedAccount, 0, len(ranked))
-	for len(known) > 0 {
-		winner := 0
-		for index := 1; index < len(known); index++ {
-			if firstTokenPriorityClearlyFaster(known[index].stats, known[winner].stats, now) {
-				winner = index
-			}
+	sort.Slice(known, func(i, j int) bool {
+		if known[i].stats.PredictedMS == known[j].stats.PredictedMS {
+			return known[i].id < known[j].id
 		}
-		ordered = append(ordered, known[winner])
-		known = append(known[:winner], known[winner+1:]...)
-	}
-	return append(ordered, unknown...)
+		return known[i].stats.PredictedMS < known[j].stats.PredictedMS
+	})
+	sort.Slice(unknown, func(i, j int) bool { return unknown[i].id < unknown[j].id })
+	return append(known, unknown...)
 }
 
 // applyOpenAIFirstTokenStickyOrder reuses the legacy low-rate weighted sticky
-// policy inside the current TTFT pool. A reliable account above the 15-second
-// hard-sticky threshold may receive weighted affinity in the slow pool, but it
+// policy inside the current total-duration pool. A reliable slow account may
+// receive weighted affinity inside the slow pool, but it
 // never crosses a rate tier or lets a slow sticky account override the fast pool.
 func applyOpenAIFirstTokenStickyOrder(
 	ctx context.Context,
@@ -647,7 +623,7 @@ func applyOpenAIFirstTokenStickyOrder(
 		return
 	}
 	stickyAge := now.Sub(stickyStats.UpdatedAt)
-	if stickyAge < 0 || stickyAge > firstTokenPriorityFreshFor || stickyStats.PredictedMS <= firstTokenPriorityStickyThreshold {
+	if stickyAge < 0 || stickyAge > firstTokenPriorityFreshFor || firstTokenPriorityStatsFast(stickyStats, now) {
 		return
 	}
 	applyOpenAILegacySoftStickyOrder(
@@ -723,7 +699,7 @@ func firstTokenPriorityProbeInterval(stats FirstTokenLatencyStats, fastestMS flo
 		return firstTokenPriorityRecoveryProbe
 	}
 	if stats.SampleCount < firstTokenPriorityMinimumSamples {
-		return time.Duration(stats.SampleCount+1) * 30 * time.Second
+		return firstTokenPriorityRecoveryProbe
 	}
 	ratio := 1.0
 	if fastestMS > 0 && stats.PredictedMS > fastestMS {

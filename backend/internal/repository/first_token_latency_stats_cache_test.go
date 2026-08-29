@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"testing"
 	"time"
 
@@ -12,375 +11,211 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFirstTokenLatencyStatsCacheRecordsRecentMedian(t *testing.T) {
+func newTotalLatencyTestCache(t *testing.T) (*miniredis.Miniredis, *redis.Client, *firstTokenLatencyStatsCache) {
+	t.Helper()
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
-	ctx := context.Background()
+	return mr, rdb, &firstTokenLatencyStatsCache{rdb: rdb}
+}
 
-	for index, latency := range []int{100, 110, 120, 10000} {
-		require.NoError(t, cache.RecordSample(ctx, 42, "request-"+string(rune('a'+index)), latency))
+func recordTotalLatencySamples(t *testing.T, cache *firstTokenLatencyStatsCache, accountID int64, prefix string, values []int) {
+	t.Helper()
+	for index, durationMS := range values {
+		require.NoError(t, cache.RecordSample(context.Background(), accountID, fmt.Sprintf("%s-%d", prefix, index), durationMS))
 	}
-	// A repeated billing callback for the same request must not skew the metric.
-	require.NoError(t, cache.RecordSample(ctx, 42, "request-a", 50000))
-	// The same inbound request may fail over to another account. Dedupe is
-	// per-account so both upstream observations remain useful.
-	require.NoError(t, cache.RecordSample(ctx, 43, "request-a", 500))
-
-	stats, err := cache.GetStatsBatch(ctx, []int64{42, 99})
-	require.NoError(t, err)
-	require.NotContains(t, stats, int64(99))
-	require.Equal(t, int64(4), stats[42].SampleCount)
-	require.InDelta(t, 110, stats[42].PredictedMS, 0.001)
-	require.Equal(t, "115", mr.HGet(firstTokenLatencyStatsPrefix+"42", "median_ms"))
-	other, err := cache.GetStatsBatch(ctx, []int64{43})
-	require.NoError(t, err)
-	require.Equal(t, int64(1), other[43].SampleCount)
 }
 
-func TestFirstTokenLatencyStatsCacheRebuildsMedianFromAverageBasedSamples(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
-	ctx := context.Background()
-	key := firstTokenLatencyStatsPrefix + "44"
-	require.NoError(t, rdb.HSet(ctx, key,
-		"ewma_ms", "5000",
-		"average_ms", "5000",
-		"sample_count", "3",
-		"updated_at_ms", strconv.FormatInt(time.Now().UnixMilli(), 10),
-		"slow_streak", "0",
-		"reliable_fast", "1",
-		"recent_samples", "1000,5000,9000",
-	).Err())
-
-	stats, err := cache.GetStatsBatch(ctx, []int64{44})
-	require.NoError(t, err)
-	require.Equal(t, 5_000.0, stats[44].PredictedMS)
-	require.True(t, stats[44].ReliableFast)
-	require.True(t, stats[44].FastConfirmationTracked)
-}
-
-func TestFirstTokenLatencyStatsCacheDoesNotTrustSingleLegacyRecoverySample(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
-	ctx := context.Background()
-	key := firstTokenLatencyStatsPrefix + "45"
-	require.NoError(t, rdb.HSet(ctx, key,
-		"ewma_ms", "7000",
-		"average_ms", "7000",
-		"sample_count", "900",
-		"updated_at_ms", strconv.FormatInt(time.Now().UnixMilli(), 10),
-		"slow_streak", "0",
-		"reliable_fast", "1",
-		"recent_samples", "7000",
-	).Err())
-
-	stats, err := cache.GetStatsBatch(ctx, []int64{45})
-	require.NoError(t, err)
-	require.Equal(t, 7_000.0, stats[45].PredictedMS)
-	require.False(t, stats[45].ReliableFast)
-	require.True(t, stats[45].FastConfirmationTracked)
-
-	require.NoError(t, cache.RecordSample(ctx, 45, "confirm-2", 8_000))
-	stats, err = cache.GetStatsBatch(ctx, []int64{45})
-	require.NoError(t, err)
-	require.False(t, stats[45].ReliableFast)
-	require.Equal(t, 1, stats[45].RecoveryFastStreak)
-
-	require.NoError(t, cache.RecordSample(ctx, 45, "confirm-3", 9_000))
-	require.NoError(t, cache.RecordSample(ctx, 45, "confirm-4", 10_000))
-	stats, err = cache.GetStatsBatch(ctx, []int64{45})
-	require.NoError(t, err)
-	require.True(t, stats[45].ReliableFast)
-	require.Equal(t, 9_000.0, stats[45].PredictedMS)
-}
-
-func TestFirstTokenLatencyStatsCacheSharesStatsAcrossInstancesAndResetsSlowStreak(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	writer := &firstTokenLatencyStatsCache{rdb: rdb}
-	reader := &firstTokenLatencyStatsCache{rdb: rdb}
-	ctx := context.Background()
-
-	for index := 0; index < 3; index++ {
-		require.NoError(t, writer.RecordSample(ctx, 7, fmt.Sprintf("slow-%d", index), 10_000))
+func repeatedDurations(count, durationMS int) []int {
+	values := make([]int, count)
+	for index := range values {
+		values[index] = durationMS
 	}
-	before, err := reader.GetStatsBatch(ctx, []int64{7})
-	require.NoError(t, err)
-	require.Equal(t, int64(3), before[7].SampleCount)
-	require.Positive(t, before[7].SlowStreak)
-
-	require.NoError(t, writer.RecordSample(ctx, 7, "recovered", 1_000))
-	after, err := reader.GetStatsBatch(ctx, []int64{7})
-	require.NoError(t, err)
-	require.Equal(t, int64(4), after[7].SampleCount)
-	require.Zero(t, after[7].SlowStreak)
+	return values
 }
 
-func TestFirstTokenLatencyStatsCacheRequiresFreshSamplesAfterLongGap(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
+func TestTotalLatencyStatsCacheRequiresTwentySamplesAndThreeFastAggregates(t *testing.T) {
+	_, _, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 
-	for index := 0; index < 3; index++ {
-		require.NoError(t, cache.RecordSample(ctx, 9, fmt.Sprintf("before-gap-%d", index), 8_000))
-	}
-	statsKey := fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, 9)
-	staleUpdatedAt := time.Now().Add(-21 * time.Minute).UnixMilli()
-	require.NoError(t, rdb.HSet(ctx, statsKey, "updated_at_ms", strconv.FormatInt(staleUpdatedAt, 10)).Err())
-
-	require.NoError(t, cache.RecordSample(ctx, 9, "after-gap", 1_000))
-	stats, err := cache.GetStatsBatch(ctx, []int64{9})
-	require.NoError(t, err)
-	require.Equal(t, int64(1), stats[9].SampleCount)
-	require.Zero(t, stats[9].SlowStreak)
-}
-
-func TestFirstTokenLatencyStatsCacheProbeLeaseClearsAfterSample(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
-	ctx := context.Background()
-
-	claimed, err := cache.TryClaimProbe(ctx, 12, 10*time.Minute)
-	require.NoError(t, err)
-	require.True(t, claimed)
-	claimed, err = cache.TryClaimProbe(ctx, 12, 10*time.Minute)
-	require.NoError(t, err)
-	require.False(t, claimed)
-
-	require.NoError(t, cache.RecordSample(ctx, 12, "probe-complete", 4_000))
-	claimed, err = cache.TryClaimProbe(ctx, 12, 10*time.Minute)
-	require.NoError(t, err)
-	require.True(t, claimed)
-}
-
-func TestFirstTokenLatencyStatsCacheQueuesAndAtomicallyClaimsManualProbe(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	writer := &firstTokenLatencyStatsCache{rdb: rdb}
-	reader := &firstTokenLatencyStatsCache{rdb: rdb}
-	ctx := context.Background()
-
-	require.NoError(t, writer.RequestManualProbe(ctx, 12, 10*time.Minute))
-	accountID, claimed, err := reader.TryClaimManualProbe(ctx, []int64{11, 12}, 10*time.Minute)
-	require.NoError(t, err)
-	require.True(t, claimed)
-	require.Equal(t, int64(12), accountID)
-	require.True(t, mr.Exists(firstTokenLatencyProbePrefix+"12"))
-
-	accountID, claimed, err = writer.TryClaimManualProbe(ctx, []int64{11, 12}, 10*time.Minute)
-	require.NoError(t, err)
-	require.False(t, claimed)
-	require.Zero(t, accountID)
-
-	// A real sample also clears a manual request that was queued while another
-	// probe lease was active, avoiding an unnecessary second forced probe.
-	require.NoError(t, writer.RequestManualProbe(ctx, 12, 10*time.Minute))
-	require.NoError(t, reader.RecordSample(ctx, 12, "manual-probe-complete", 4_000))
-	require.False(t, mr.Exists(firstTokenLatencyProbePrefix+"12"))
-	require.False(t, mr.Exists(firstTokenLatencyManualProbePrefix+"12"))
-}
-
-func TestFirstTokenLatencyStatsCacheRequiresThreeConsecutiveFastRecoverySamples(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
-	ctx := context.Background()
-
-	for index := 0; index < 4; index++ {
-		require.NoError(t, cache.RecordSample(ctx, 13, fmt.Sprintf("slow-%d", index), 30_000))
-	}
-	require.NoError(t, cache.RecordSample(ctx, 13, "recovery-1", 5_000))
-	stats, err := cache.GetStatsBatch(ctx, []int64{13})
-	require.NoError(t, err)
-	require.Greater(t, stats[13].PredictedMS, 10_000.0)
-	require.False(t, stats[13].ReliableFast)
-	require.Equal(t, 1, stats[13].RecoveryFastStreak)
-
-	require.NoError(t, cache.RecordSample(ctx, 13, "recovery-2", 7_000))
-	stats, err = cache.GetStatsBatch(ctx, []int64{13})
-	require.NoError(t, err)
-	require.Greater(t, stats[13].PredictedMS, 10_000.0)
-	require.False(t, stats[13].ReliableFast)
-	require.Equal(t, 2, stats[13].RecoveryFastStreak)
-
-	require.NoError(t, cache.RecordSample(ctx, 13, "recovery-3", 9_000))
-	stats, err = cache.GetStatsBatch(ctx, []int64{13})
-	require.NoError(t, err)
-	require.Equal(t, 7_000.0, stats[13].PredictedMS)
-	require.True(t, stats[13].ReliableFast)
-	require.True(t, stats[13].FastConfirmationTracked)
-	require.Zero(t, stats[13].RecoveryFastStreak)
-	require.Zero(t, stats[13].SlowStreak)
-}
-
-func TestFirstTokenLatencyStatsCacheRecoveryStreakResetsAboveThreshold(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
-	ctx := context.Background()
-
-	for index := 0; index < 4; index++ {
-		require.NoError(t, cache.RecordSample(ctx, 14, fmt.Sprintf("slow-%d", index), 30_000))
-	}
-	require.NoError(t, cache.RecordSample(ctx, 14, "recovery-1", 10_000))
-	require.NoError(t, cache.RecordSample(ctx, 14, "recovery-reset", 10_001))
-	stats, err := cache.GetStatsBatch(ctx, []int64{14})
-	require.NoError(t, err)
-	require.Greater(t, stats[14].PredictedMS, 10_000.0)
-	require.False(t, stats[14].ReliableFast)
-	require.Zero(t, stats[14].RecoveryFastStreak)
-}
-
-func TestFirstTokenLatencyStatsCacheNewAccountNeedsThreeFastSamples(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
-	ctx := context.Background()
-
-	require.NoError(t, cache.RecordSample(ctx, 15, "fast-1", 7_500))
+	recordTotalLatencySamples(t, cache, 15, "bootstrap", repeatedDurations(19, 8_000))
 	stats, err := cache.GetStatsBatch(ctx, []int64{15})
 	require.NoError(t, err)
-	require.Equal(t, 7_500.0, stats[15].PredictedMS)
-	require.Equal(t, int64(1), stats[15].SampleCount)
+	require.Equal(t, int64(19), stats[15].SampleCount)
+	require.Zero(t, stats[15].PredictedMS)
 	require.False(t, stats[15].ReliableFast)
-	require.Equal(t, 1, stats[15].RecoveryFastStreak)
-	require.NoError(t, cache.RecordSample(ctx, 15, "fast-2", 8_500))
-	require.NoError(t, cache.RecordSample(ctx, 15, "fast-3", 9_500))
+
+	require.NoError(t, cache.RecordSample(ctx, 15, "fast-20", 8_000))
 	stats, err = cache.GetStatsBatch(ctx, []int64{15})
 	require.NoError(t, err)
-	require.Equal(t, 8_500.0, stats[15].PredictedMS)
-	require.Equal(t, int64(3), stats[15].SampleCount)
+	require.Equal(t, 8_000.0, stats[15].PredictedMS)
+	require.Equal(t, 1, stats[15].RecoveryFastStreak)
+	require.False(t, stats[15].ReliableFast)
+
+	require.NoError(t, cache.RecordSample(ctx, 15, "fast-21", 8_000))
+	require.NoError(t, cache.RecordSample(ctx, 15, "fast-22", 8_000))
+	stats, err = cache.GetStatsBatch(ctx, []int64{15})
+	require.NoError(t, err)
 	require.True(t, stats[15].ReliableFast)
+	require.Zero(t, stats[15].RecoveryFastStreak)
 }
 
-func TestFirstTokenLatencyStatsCacheStableScoreIgnoresOrdinaryBurstNoise(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
-	ctx := context.Background()
-
-	for index := 0; index < 3; index++ {
-		require.NoError(t, cache.RecordSample(ctx, 17, fmt.Sprintf("stable-%d", index), 20_000))
+func TestTotalLatencyStatsCacheUsesTenToNinetyTrimmedMeanAndPercentiles(t *testing.T) {
+	_, _, cache := newTotalLatencyTestCache(t)
+	values := make([]int, 0, 20)
+	for seconds := 1; seconds <= 20; seconds++ {
+		values = append(values, seconds*1_000)
 	}
+	recordTotalLatencySamples(t, cache, 42, "range", values)
+
+	stats, err := cache.GetStatsBatch(context.Background(), []int64{42})
+	require.NoError(t, err)
+	require.InDelta(t, 10_500, stats[42].PredictedMS, 0.001)
+	require.InDelta(t, 10_500, stats[42].P50MS, 0.001)
+	require.InDelta(t, 18_100, stats[42].P90MS, 0.001)
+	require.Equal(t, 6, stats[42].WindowHours)
+}
+
+func TestTotalLatencyStatsCacheDeduplicatesPerAccountRequest(t *testing.T) {
+	_, _, cache := newTotalLatencyTestCache(t)
+	ctx := context.Background()
+	require.NoError(t, cache.RecordSample(ctx, 42, "same-request", 8_000))
+	require.NoError(t, cache.RecordSample(ctx, 42, "same-request", 90_000))
+	require.NoError(t, cache.RecordSample(ctx, 43, "same-request", 9_000))
+
+	stats, err := cache.GetStatsBatch(ctx, []int64{42, 43})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), stats[42].SampleCount)
+	require.Equal(t, int64(1), stats[43].SampleCount)
+}
+
+func TestTotalLatencyStatsCacheSingleLongGenerationDoesNotEvictFastAccount(t *testing.T) {
+	_, _, cache := newTotalLatencyTestCache(t)
+	ctx := context.Background()
+	recordTotalLatencySamples(t, cache, 17, "fast", repeatedDurations(22, 8_000))
+
 	before, err := cache.GetStatsBatch(ctx, []int64{17})
 	require.NoError(t, err)
-	require.Equal(t, 20_000.0, before[17].PredictedMS)
+	require.True(t, before[17].ReliableFast)
 
-	for index, latency := range []int{16_000, 24_000, 15_000, 25_000} {
-		require.NoError(t, cache.RecordSample(ctx, 17, fmt.Sprintf("noise-%d", index), latency))
-	}
+	require.NoError(t, cache.RecordSample(ctx, 17, "one-long-valid-generation", 300_000))
 	after, err := cache.GetStatsBatch(ctx, []int64{17})
 	require.NoError(t, err)
-	require.InDelta(t, before[17].PredictedMS, after[17].PredictedMS, 10)
+	require.True(t, after[17].ReliableFast)
+	require.Equal(t, 8_000.0, after[17].PredictedMS)
+	require.Zero(t, after[17].SlowStreak)
 }
 
-func TestFirstTokenLatencyStatsCacheLeavesFastPoolOnlyAfterStablePredictionExceedsThreshold(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
+func TestTotalLatencyStatsCacheFastAccountNeedsThreeSlowAggregatesToExit(t *testing.T) {
+	mr, rdb, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
-	now := time.Unix(1_000, 0)
-	mr.SetTime(now)
-
-	for index := 0; index < 3; index++ {
-		require.NoError(t, cache.RecordSample(ctx, 18, fmt.Sprintf("fast-%d", index), 6_000))
+	accountID := int64(18)
+	statsKey := fmt.Sprintf("%s%d", totalLatencyStatsPrefix, accountID)
+	samplesKey := fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)
+	nowMS := time.Now().UnixMilli()
+	require.NoError(t, rdb.HSet(ctx, statsKey,
+		"is_fast", "1",
+		"updated_at_ms", fmt.Sprint(nowMS),
+		"enter_fast_streak", "0",
+		"exit_slow_streak", "0",
+	).Err())
+	for index := 0; index < 19; index++ {
+		member := fmt.Sprintf("%d:seed-%d:20000", nowMS, index)
+		require.NoError(t, rdb.ZAdd(ctx, samplesKey, redis.Z{Score: float64(nowMS), Member: member}).Err())
 	}
-	fast, err := cache.GetStatsBatch(ctx, []int64{18})
-	require.NoError(t, err)
-	require.True(t, fast[18].ReliableFast)
 
-	require.NoError(t, cache.RecordSample(ctx, 18, "isolated-slow", 60_000))
-	stillFast, err := cache.GetStatsBatch(ctx, []int64{18})
-	require.NoError(t, err)
-	require.True(t, stillFast[18].ReliableFast)
-	require.Equal(t, 6_000.0, stillFast[18].PredictedMS)
-
-	for index := 0; index < 3; index++ {
-		now = now.Add(5 * time.Minute)
-		mr.SetTime(now)
-		require.NoError(t, cache.RecordSample(ctx, 18, fmt.Sprintf("sustained-slow-%d", index), 20_000))
+	for index := 1; index <= 2; index++ {
+		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("slow-%d", index), 20_000))
+		stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
+		require.NoError(t, err)
+		require.True(t, stats[accountID].ReliableFast)
+		require.Equal(t, index, stats[accountID].SlowStreak)
 	}
-	slow, err := cache.GetStatsBatch(ctx, []int64{18})
+	require.NoError(t, cache.RecordSample(ctx, accountID, "slow-3", 20_000))
+	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
-	require.Greater(t, slow[18].PredictedMS, 10_000.0)
-	require.False(t, slow[18].ReliableFast)
+	require.False(t, stats[accountID].ReliableFast)
+	require.Equal(t, 3, stats[accountID].SlowStreak)
+	require.True(t, mr.Exists(statsKey))
 }
 
-func TestFirstTokenLatencyStatsCacheCircuitBreaksAboveTwoMinutes(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
+func TestTotalLatencyStatsCacheFallsBackToTwentyFourHours(t *testing.T) {
+	_, rdb, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
+	accountID := int64(19)
+	recordTotalLatencySamples(t, cache, accountID, "older", repeatedDurations(20, 10_000))
 
-	for index := 0; index < 3; index++ {
-		require.NoError(t, cache.RecordSample(ctx, 19, fmt.Sprintf("fast-%d", index), 6_000))
+	samplesKey := fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)
+	members, err := rdb.ZRange(ctx, samplesKey, 0, -1).Result()
+	require.NoError(t, err)
+	olderScore := float64(time.Now().Add(-7 * time.Hour).UnixMilli())
+	for _, member := range members {
+		require.NoError(t, rdb.ZAddArgs(ctx, samplesKey, redis.ZAddArgs{XX: true, Members: []redis.Z{{Score: olderScore, Member: member}}}).Err())
 	}
+	require.NoError(t, cache.RecordSample(ctx, accountID, "fresh", 10_000))
 
-	// The threshold is strict: exactly two minutes remains ordinary robust
-	// smoothing, while the first millisecond above it opens the circuit.
-	require.NoError(t, cache.RecordSample(ctx, 19, "at-threshold", firstTokenLatencyCircuitBreakThresholdMS))
-	stats, err := cache.GetStatsBatch(ctx, []int64{19})
+	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
-	require.True(t, stats[19].ReliableFast)
-	require.False(t, stats[19].CircuitBroken)
-	require.Equal(t, 6_000.0, stats[19].PredictedMS)
-
-	require.NoError(t, cache.RecordSample(ctx, 19, "over-threshold", firstTokenLatencyCircuitBreakThresholdMS+1))
-	stats, err = cache.GetStatsBatch(ctx, []int64{19})
-	require.NoError(t, err)
-	require.False(t, stats[19].ReliableFast)
-	require.True(t, stats[19].CircuitBroken)
-	require.Equal(t, 6_000.0, stats[19].PredictedMS, "circuit state must override a still-fast robust prediction")
-	require.Zero(t, stats[19].RecoveryFastStreak)
-
-	for index, latency := range []int{5_000, 7_000, 9_000} {
-		require.NoError(t, cache.RecordSample(ctx, 19, fmt.Sprintf("recovery-%d", index), latency))
-	}
-	stats, err = cache.GetStatsBatch(ctx, []int64{19})
-	require.NoError(t, err)
-	require.True(t, stats[19].ReliableFast)
-	require.False(t, stats[19].CircuitBroken)
-	require.Equal(t, 7_000.0, stats[19].PredictedMS)
-	require.Zero(t, stats[19].RecoveryFastStreak)
+	require.Equal(t, 24, stats[accountID].WindowHours)
+	require.Equal(t, int64(21), stats[accountID].SampleCount)
+	require.Equal(t, 10_000.0, stats[accountID].PredictedMS)
 }
 
-func TestFirstTokenLatencyStatsCacheFastProbeAfterStaleHistoryNeedsConfirmation(t *testing.T) {
-	mr := miniredis.RunT(t)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = rdb.Close() })
-	cache := &firstTokenLatencyStatsCache{rdb: rdb}
+func TestTotalLatencyStatsCacheStaleFastStateRequiresFreshConfirmation(t *testing.T) {
+	mr, _, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
-
-	for index := 0; index < 3; index++ {
-		require.NoError(t, cache.RecordSample(ctx, 16, fmt.Sprintf("old-%d", index), 8_000))
-	}
-	statsKey := fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, 16)
-	staleUpdatedAt := time.Now().Add(-21 * time.Minute).UnixMilli()
-	require.NoError(t, rdb.HSet(ctx, statsKey, "updated_at_ms", strconv.FormatInt(staleUpdatedAt, 10)).Err())
-
-	require.NoError(t, cache.RecordSample(ctx, 16, "stale-fast-probe", 9_000))
-	stats, err := cache.GetStatsBatch(ctx, []int64{16})
+	recordTotalLatencySamples(t, cache, 20, "fast", repeatedDurations(22, 8_000))
+	stats, err := cache.GetStatsBatch(ctx, []int64{20})
 	require.NoError(t, err)
-	require.Equal(t, 9_000.0, stats[16].PredictedMS)
-	require.Equal(t, int64(1), stats[16].SampleCount)
-	require.False(t, stats[16].ReliableFast)
-	require.Equal(t, 1, stats[16].RecoveryFastStreak)
+	require.True(t, stats[20].ReliableFast)
+
+	mr.SetTime(stats[20].UpdatedAt.Add(6*time.Hour + time.Second))
+	require.NoError(t, cache.RecordSample(ctx, 20, "after-stale-gap", 8_000))
+	stats, err = cache.GetStatsBatch(ctx, []int64{20})
+	require.NoError(t, err)
+	require.False(t, stats[20].ReliableFast)
+	require.Equal(t, 1, stats[20].RecoveryFastStreak)
+}
+
+func TestTotalLatencyStatsCacheUsesIndependentRedisNamespace(t *testing.T) {
+	mr, _, cache := newTotalLatencyTestCache(t)
+	ctx := context.Background()
+	mr.HSet("scheduler:first_token:account:21", "ewma_ms", "1000", "reliable_fast", "1")
+
+	stats, err := cache.GetStatsBatch(ctx, []int64{21})
+	require.NoError(t, err)
+	require.NotContains(t, stats, int64(21))
+
+	require.NoError(t, cache.RecordSample(ctx, 21, "duration", 9_000))
+	require.True(t, mr.Exists(totalLatencyStatsPrefix+"21"))
+	require.Equal(t, "1000", mr.HGet("scheduler:first_token:account:21", "ewma_ms"))
+}
+
+func TestTotalLatencyStatsCacheProbeLeaseClearsAfterSample(t *testing.T) {
+	mr, _, cache := newTotalLatencyTestCache(t)
+	ctx := context.Background()
+	claimed, err := cache.TryClaimProbe(ctx, 22, 10*time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	claimed, err = cache.TryClaimProbe(ctx, 22, 10*time.Minute)
+	require.NoError(t, err)
+	require.False(t, claimed)
+
+	require.NoError(t, cache.RecordSample(ctx, 22, "probe-complete", 9_000))
+	require.False(t, mr.Exists(totalLatencyProbePrefix+"22"))
+	claimed, err = cache.TryClaimProbe(ctx, 22, 10*time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+}
+
+func TestTotalLatencyStatsCacheQueuesAndAtomicallyClaimsManualProbe(t *testing.T) {
+	mr, _, cache := newTotalLatencyTestCache(t)
+	ctx := context.Background()
+	require.NoError(t, cache.RequestManualProbe(ctx, 23, 10*time.Minute))
+	accountID, claimed, err := cache.TryClaimManualProbe(ctx, []int64{22, 23}, 10*time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.Equal(t, int64(23), accountID)
+	require.True(t, mr.Exists(totalLatencyProbePrefix+"23"))
+	require.False(t, mr.Exists(totalLatencyManualProbePrefix+"23"))
 }

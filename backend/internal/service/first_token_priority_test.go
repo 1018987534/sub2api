@@ -79,7 +79,7 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 		expected []int64
 	}{
 		{
-			name: "slower than ten seconds enables latency priority",
+			name: "slow account enables total duration priority",
 			ids:  []int64{1, 2, 3},
 			stats: map[int64]FirstTokenLatencyStats{
 				1: stats(13_000, 5, time.Minute),
@@ -89,31 +89,31 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			expected: []int64{2, 3, 1},
 		},
 		{
-			name: "near tie preserves baseline",
+			name: "slow pool uses lower duration even for a near tie",
 			ids:  []int64{1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
 				1: stats(12_400, 5, time.Minute),
 				2: stats(12_000, 5, time.Minute),
 			},
-			expected: []int64{1, 2},
+			expected: []int64{2, 1},
 		},
 		{
-			name: "slow pool needs material advantage before reranking",
+			name: "slow pool always prefers lower duration",
 			ids:  []int64{1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
 				1: stats(14_500, 5, time.Minute),
 				2: stats(12_000, 5, time.Minute),
 			},
-			expected: []int64{1, 2},
+			expected: []int64{2, 1},
 		},
 		{
-			name: "slow pool near tie ignores caller sticky or rate order",
+			name: "slow pool ignores caller sticky or rate order",
 			ids:  []int64{2, 1},
 			stats: map[int64]FirstTokenLatencyStats{
 				1: stats(14_500, 5, time.Minute),
 				2: stats(12_000, 5, time.Minute),
 			},
-			expected: []int64{1, 2},
+			expected: []int64{2, 1},
 		},
 		{
 			name: "slow pool reranks on material advantage",
@@ -125,11 +125,11 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			expected: []int64{2, 1},
 		},
 		{
-			name: "crossing ten seconds overrides near tie and baseline",
+			name: "crossing twelve seconds creates a separate fast pool",
 			ids:  []int64{1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(10_100, 5, time.Minute),
-				2: stats(9_900, 5, time.Minute),
+				1: stats(12_100, 5, time.Minute),
+				2: stats(11_900, 5, time.Minute),
 			},
 			expected: []int64{2, 1},
 		},
@@ -238,11 +238,11 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 }
 
 func TestFirstTokenPriorityProbeIntervalBacksOffSlowAccounts(t *testing.T) {
-	base := firstTokenPriorityProbeInterval(FirstTokenLatencyStats{PredictedMS: 20_000, SampleCount: 5}, 5_000)
-	withStreak := firstTokenPriorityProbeInterval(FirstTokenLatencyStats{PredictedMS: 20_000, SampleCount: 5, SlowStreak: 4}, 5_000)
+	base := firstTokenPriorityProbeInterval(FirstTokenLatencyStats{PredictedMS: 20_000, SampleCount: 20}, 5_000)
+	withStreak := firstTokenPriorityProbeInterval(FirstTokenLatencyStats{PredictedMS: 20_000, SampleCount: 20, SlowStreak: 4}, 5_000)
 	require.Greater(t, withStreak, base)
 	require.Equal(t, firstTokenPriorityProbeMax, firstTokenPriorityProbeInterval(
-		FirstTokenLatencyStats{PredictedMS: 1_000_000, SampleCount: 5, SlowStreak: 20},
+		FirstTokenLatencyStats{PredictedMS: 1_000_000, SampleCount: 20, SlowStreak: 20},
 		1_000,
 	))
 	require.Equal(t, firstTokenPriorityRecoveryProbe, firstTokenPriorityProbeInterval(
@@ -300,17 +300,19 @@ func TestFirstTokenPriorityCircuitBrokenAccountEntersSlowPool(t *testing.T) {
 
 func TestFirstTokenPriorityDefaultStickyEligible(t *testing.T) {
 	now := time.Now()
-	reliable := FirstTokenLatencyStats{PredictedMS: 15_000, SampleCount: 3, UpdatedAt: now}
+	reliable := FirstTokenLatencyStats{PredictedMS: 12_000, SampleCount: 3, UpdatedAt: now}
 	require.True(t, firstTokenPriorityDefaultStickyEligible(reliable, now))
 
-	reliable.PredictedMS = 15_001
+	reliable.PredictedMS = 12_001
 	require.False(t, firstTokenPriorityDefaultStickyEligible(reliable, now))
 
 	circuitBroken := FirstTokenLatencyStats{
-		PredictedMS:   12_000,
-		SampleCount:   20,
-		UpdatedAt:     now,
-		CircuitBroken: true,
+		PredictedMS:             12_000,
+		SampleCount:             20,
+		UpdatedAt:               now,
+		ReliableFast:            true,
+		FastConfirmationTracked: true,
+		CircuitBroken:           true,
 	}
 	require.False(t, firstTokenPriorityDefaultStickyEligible(circuitBroken, now), "circuit-broken account must not bypass the slow pool through hard session affinity")
 	circuitBroken.CircuitBroken = false
@@ -398,7 +400,7 @@ func TestApplyOpenAIFirstTokenStickyOrderWeightsReliableSlowSession(t *testing.T
 	stats := map[int64]FirstTokenLatencyStats{
 		cheapSlow.ID:  {PredictedMS: 20_000, SampleCount: 5, UpdatedAt: now},
 		stickySlow.ID: {PredictedMS: 25_000, SampleCount: 5, UpdatedAt: now},
-		fast.ID:       {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+		fast.ID:       {PredictedMS: 5_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
 	}
 	cache := &staticFirstTokenLatencyStatsCache{stats: stats}
 	rateOrder := newOpenAILegacyUpstreamRateOrder([]*Account{cheapSlow, stickySlow, fast}, now, defaultOpenAIOAuthSchedulingRateMultiplier)
@@ -450,7 +452,7 @@ func TestFirstTokenProbeOnlyReordersFreshScheduling(t *testing.T) {
 		claimAllowed: true,
 		stats: map[int64]FirstTokenLatencyStats{
 			probe.ID:  {PredictedMS: 30_000, SampleCount: 5, UpdatedAt: now.Add(-firstTokenPriorityProbeMax)},
-			sticky.ID: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			sticky.ID: {PredictedMS: 5_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
 		},
 	}
 
@@ -471,7 +473,7 @@ func TestFirstTokenProbeOnlyReordersFreshScheduling(t *testing.T) {
 	require.Equal(t, []int64{probe.ID}, cache.claimedIDs)
 }
 
-func TestFirstTokenManualProbeStillRunsForStickyScheduling(t *testing.T) {
+func TestFirstTokenManualProbeWaitsForFreshScheduling(t *testing.T) {
 	now := time.Now()
 	probe := upstreamCostTestAccount(41, UpstreamBillingProbeStatusOK, 0.02, now.Add(-time.Minute), 30*time.Minute)
 	sticky := upstreamCostTestAccount(42, UpstreamBillingProbeStatusOK, 0.045, now.Add(-time.Minute), 30*time.Minute)
@@ -483,7 +485,7 @@ func TestFirstTokenManualProbeStillRunsForStickyScheduling(t *testing.T) {
 		manualProbeID: probe.ID,
 		stats: map[int64]FirstTokenLatencyStats{
 			probe.ID:  {PredictedMS: 30_000, SampleCount: 5, UpdatedAt: now},
-			sticky.ID: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			sticky.ID: {PredictedMS: 5_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
 		},
 	}
 	ordered := []openAIAccountCandidateScore{{account: sticky}, {account: probe}}
@@ -491,9 +493,9 @@ func TestFirstTokenManualProbeStillRunsForStickyScheduling(t *testing.T) {
 		FirstTokenProbeEligible: true,
 		StickyAccountID:         sticky.ID,
 	}, ordered, cache, defaultOpenAIOAuthSchedulingRateMultiplier)
-	require.Equal(t, []int64{probe.ID, sticky.ID}, candidateAccountIDs(ordered))
-	require.Zero(t, cache.manualProbeID)
-	require.Empty(t, cache.claimedIDs, "manual probe should not consume the adaptive lease")
+	require.Equal(t, []int64{sticky.ID, probe.ID}, candidateAccountIDs(ordered))
+	require.Equal(t, probe.ID, cache.manualProbeID, "sticky scheduling must leave the manual probe queued")
+	require.Empty(t, cache.claimedIDs)
 }
 
 func TestFirstTokenProbeGateTreatsPreviousResponseAsSticky(t *testing.T) {
@@ -537,8 +539,8 @@ func TestFirstTokenPriorityOrderManualProbeOverridesAllFastPool(t *testing.T) {
 	cache := &staticFirstTokenLatencyStatsCache{
 		manualProbeID: 2,
 		stats: map[int64]FirstTokenLatencyStats{
-			1: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
-			2: {PredictedMS: 7_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			1: {PredictedMS: 5_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			2: {PredictedMS: 7_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
 		},
 	}
 	accounts := []*Account{
@@ -555,8 +557,8 @@ func TestFirstTokenPriorityOrderKeepsManualProbeQueuedForNonStreamingRequest(t *
 	cache := &staticFirstTokenLatencyStatsCache{
 		manualProbeID: 2,
 		stats: map[int64]FirstTokenLatencyStats{
-			1: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
-			2: {PredictedMS: 7_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			1: {PredictedMS: 5_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			2: {PredictedMS: 7_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
 		},
 	}
 	accounts := []*Account{
@@ -585,7 +587,7 @@ func TestFirstTokenPriorityOrderSkipsProbeWhenRequestCannotProduceSample(t *test
 	cache := &staticFirstTokenLatencyStatsCache{
 		claimAllowed: true,
 		stats: map[int64]FirstTokenLatencyStats{
-			1: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			1: {PredictedMS: 5_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
 			2: {PredictedMS: 2_000, SampleCount: 1, UpdatedAt: now.Add(-time.Minute), RecoveryFastStreak: 1, FastConfirmationTracked: true},
 		},
 	}
@@ -611,7 +613,7 @@ func TestFirstTokenPriorityOrderTriesNextDueProbeWhenLeaseIsAlreadyClaimed(t *te
 	cache := &staticFirstTokenLatencyStatsCache{
 		claimResults: map[int64]bool{2: false, 3: true},
 		stats: map[int64]FirstTokenLatencyStats{
-			1: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			1: {PredictedMS: 5_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
 			2: {PredictedMS: 60_000, SampleCount: 5, SlowStreak: 8, UpdatedAt: now.Add(-firstTokenPriorityProbeMax)},
 			3: {PredictedMS: 40_000, SampleCount: 5, SlowStreak: 4, UpdatedAt: now.Add(-firstTokenPriorityProbeMax)},
 		},
@@ -631,7 +633,7 @@ func TestFirstTokenPriorityOrderConfirmsRecoveringAccountBeforeGenericSlowProbe(
 	cache := &staticFirstTokenLatencyStatsCache{
 		claimAllowed: true,
 		stats: map[int64]FirstTokenLatencyStats{
-			1: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+			1: {PredictedMS: 5_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
 			2: {PredictedMS: 50_000, SampleCount: 1, UpdatedAt: now.Add(-3 * time.Hour), FastConfirmationTracked: true},
 			3: {PredictedMS: 7_000, SampleCount: 1, UpdatedAt: now.Add(-31 * time.Second), RecoveryFastStreak: 1, FastConfirmationTracked: true},
 		},
@@ -651,7 +653,7 @@ func TestFirstTokenPriorityOrderPromotesConfirmedFastRecoveryFromSlowPool(t *tes
 	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
 		1: {PredictedMS: 18_000, SampleCount: 5, UpdatedAt: now},
 		2: {PredictedMS: 25_000, SampleCount: 5, UpdatedAt: now},
-		3: {PredictedMS: 7_500, SampleCount: 3, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+		3: {PredictedMS: 7_500, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
 	}}
 	accounts := []*Account{
 		{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
@@ -678,7 +680,7 @@ func TestFirstTokenPriorityOrderExcludesOAuthFromStatsAndUsesItAsFallback(t *tes
 	require.Equal(t, []int64{1, 2}, cache.fetchedIDs)
 }
 
-func TestFirstTokenPriorityOrderPreservesLowRateBaselineIncludingOAuthWhenAllRelaysAreFast(t *testing.T) {
+func TestFirstTokenPriorityOrderKeepsUnmeasuredOAuthBehindFastPool(t *testing.T) {
 	now := time.Now()
 	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
 		1: {PredictedMS: 8_000, SampleCount: 5, UpdatedAt: now},
@@ -690,7 +692,7 @@ func TestFirstTokenPriorityOrderPreservesLowRateBaselineIncludingOAuthWhenAllRel
 		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
 	}
 
-	require.Equal(t, []int64{3, 1, 2}, firstTokenPriorityOrder(context.Background(), accounts, cache))
+	require.Equal(t, []int64{1, 2, 3}, firstTokenPriorityOrder(context.Background(), accounts, cache))
 	require.Equal(t, []int64{1, 2}, cache.fetchedIDs)
 }
 
@@ -706,22 +708,28 @@ func TestFirstTokenPriorityOrderDoesNotProbeHigherRateRelayWhenAllRelaysAreFast(
 		{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true},
 	}
 
-	require.Equal(t, []int64{3, 1, 2}, firstTokenPriorityOrder(context.Background(), accounts, cache))
+	require.Equal(t, []int64{1, 2, 3}, firstTokenPriorityOrder(context.Background(), accounts, cache))
 	require.Zero(t, cache.claimedID)
 }
 
-func TestObserveFirstTokenLatencyOnlyRecordsEnabledOpenAIAPIKeys(t *testing.T) {
+func TestObserveTotalDurationLatencyOnlyRecordsBillableOpenAIStreams(t *testing.T) {
 	cache := &staticFirstTokenLatencyStatsCache{}
 	svc := &RateLimitService{firstTokenLatencyStatsCache: cache}
-	latency := 1_000
+	durationMS := 9_000
+	usage := func(requestID string) *UsageLog {
+		return &UsageLog{RequestID: requestID, RequestType: RequestTypeStream, Stream: true, ActualCost: 0.01, DurationMs: &durationMS}
+	}
 	oauth := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true}
 	disabled := &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusDisabled, Schedulable: true}
 	relay := &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true}
 
-	svc.ObserveFirstTokenLatency(context.Background(), oauth, "oauth", &latency)
-	svc.ObserveFirstTokenLatency(context.Background(), disabled, "disabled", &latency)
+	svc.ObserveTotalDurationLatency(context.Background(), oauth, usage("oauth"))
+	svc.ObserveTotalDurationLatency(context.Background(), disabled, usage("disabled"))
 	require.Zero(t, cache.recordedID)
-	svc.ObserveFirstTokenLatency(context.Background(), relay, "relay", &latency)
+	svc.ObserveTotalDurationLatency(context.Background(), relay, &UsageLog{RequestID: "sync", RequestType: RequestTypeSync, ActualCost: 0.01, DurationMs: &durationMS})
+	svc.ObserveTotalDurationLatency(context.Background(), relay, &UsageLog{RequestID: "free", RequestType: RequestTypeStream, Stream: true, DurationMs: &durationMS})
+	require.Zero(t, cache.recordedID)
+	svc.ObserveTotalDurationLatency(context.Background(), relay, usage("relay"))
 	require.Equal(t, relay.ID, cache.recordedID)
 }
 
@@ -800,7 +808,7 @@ func TestOpenAIFirstTokenPriorityUsesLowRateWithinFastPool(t *testing.T) {
 func TestAccountFirstTokenLatencyMetricsOnlyIncludesEnabledOpenAIAPIKeys(t *testing.T) {
 	now := time.Now()
 	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
-		1: {PredictedMS: 4_000, SampleCount: 5, UpdatedAt: now},
+		1: {PredictedMS: 4_000, P50MS: 3_500, P90MS: 9_000, SampleCount: 20, WindowHours: 6, UpdatedAt: now},
 		2: {PredictedMS: 2_000, SampleCount: 5, UpdatedAt: now},
 		3: {PredictedMS: 3_000, SampleCount: 5, UpdatedAt: now},
 		4: {PredictedMS: 1_000, SampleCount: 5, UpdatedAt: now},
@@ -823,7 +831,7 @@ func TestAccountFirstTokenLatencyMetricsOnlyIncludesEnabledOpenAIAPIKeys(t *test
 func TestAccountFirstTokenLatencyMetricsIncludesRollingCacheRate(t *testing.T) {
 	now := time.Now()
 	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
-		1: {PredictedMS: 4_000, SampleCount: 5, UpdatedAt: now},
+		1: {PredictedMS: 4_000, P50MS: 3_500, P90MS: 9_000, SampleCount: 20, WindowHours: 6, UpdatedAt: now},
 	}}
 	group := &Group{ID: 10, Name: "premium", Platform: PlatformOpenAI, Status: StatusActive}
 	account := Account{
@@ -846,6 +854,10 @@ func TestAccountFirstTokenLatencyMetricsIncludesRollingCacheRate(t *testing.T) {
 	require.InDelta(t, 0.25, *metrics[0].CacheRate, 1e-9)
 	require.Equal(t, int64(75), metrics[0].CacheReadTokens)
 	require.Equal(t, int64(300), metrics[0].CacheRateDenominator)
+	require.Equal(t, 4_000.0, metrics[0].NormalTotalMS)
+	require.Equal(t, 3_500.0, metrics[0].P50MS)
+	require.Equal(t, 9_000.0, metrics[0].P90MS)
+	require.Equal(t, 6, metrics[0].WindowHours)
 }
 
 func TestAccountFirstTokenLatencyMetricsReportsActualPoolMembership(t *testing.T) {
@@ -853,7 +865,7 @@ func TestAccountFirstTokenLatencyMetricsReportsActualPoolMembership(t *testing.T
 	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
 		1: {
 			PredictedMS:             4_000,
-			SampleCount:             5,
+			SampleCount:             20,
 			UpdatedAt:               now,
 			ReliableFast:            true,
 			FastConfirmationTracked: true,
@@ -867,14 +879,14 @@ func TestAccountFirstTokenLatencyMetricsReportsActualPoolMembership(t *testing.T
 		},
 		3: {
 			PredictedMS:             5_000,
-			SampleCount:             5,
+			SampleCount:             20,
 			UpdatedAt:               now.Add(-firstTokenPriorityFreshFor - time.Minute),
 			ReliableFast:            true,
 			FastConfirmationTracked: true,
 		},
 		4: {
 			PredictedMS:             3_000,
-			SampleCount:             5,
+			SampleCount:             20,
 			UpdatedAt:               now,
 			ReliableFast:            true,
 			FastConfirmationTracked: true,
@@ -1033,7 +1045,9 @@ func TestAccountFirstTokenLatencyMetricsHidesDedicatedDashboardEntries(t *testin
 	require.Equal(t, int64(3), metrics[0].AccountID)
 	require.Equal(t, []AccountFirstTokenLatencyGroup{{GroupID: normal.ID, GroupName: normal.Name}}, metrics[0].Groups)
 
-	firstTokenMS := 4200
-	svc.ObserveFirstTokenLatency(context.Background(), &accounts[0], "hidden-dashboard-account", &firstTokenMS)
+	durationMS := 4200
+	svc.ObserveTotalDurationLatency(context.Background(), &accounts[0], &UsageLog{
+		RequestID: "hidden-dashboard-account", RequestType: RequestTypeStream, Stream: true, ActualCost: 0.01, DurationMs: &durationMS,
+	})
 	require.Equal(t, accounts[0].ID, cache.recordedID, "dashboard-only exclusion must not disable sampling")
 }

@@ -699,7 +699,8 @@ func (h *AccountHandler) List(c *gin.Context) {
 	response.Paginated(c, result, total, page, pageSize)
 }
 
-// GetFirstTokenLatencies returns recent scheduling predictions for enabled
+// GetFirstTokenLatencies keeps the existing route name but returns recent
+// total-duration scheduling predictions for enabled
 // OpenAI API-key relay accounts. OAuth accounts are intentionally excluded.
 func (h *AccountHandler) GetFirstTokenLatencies(c *gin.Context) {
 	if h.adminService == nil || h.rateLimitService == nil {
@@ -727,8 +728,8 @@ func (h *AccountHandler) GetFirstTokenLatencies(c *gin.Context) {
 	response.Success(c, gin.H{"items": metrics, "total": len(metrics)})
 }
 
-// RequestFirstTokenManualProbe queues one account for the next streaming
-// request that can produce a first-token latency sample.
+// RequestFirstTokenManualProbe queues one account for the next fresh streaming
+// assignment that can produce a completed total-duration sample.
 func (h *AccountHandler) RequestFirstTokenManualProbe(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || accountID <= 0 {
@@ -736,7 +737,7 @@ func (h *AccountHandler) RequestFirstTokenManualProbe(c *gin.Context) {
 		return
 	}
 	if h.adminService == nil || h.rateLimitService == nil {
-		response.InternalError(c, "First-token probing is not configured")
+		response.InternalError(c, "Total-duration probing is not configured")
 		return
 	}
 	account, err := h.adminService.GetAccount(c.Request.Context(), accountID)
@@ -746,17 +747,17 @@ func (h *AccountHandler) RequestFirstTokenManualProbe(c *gin.Context) {
 	}
 	if err := h.rateLimitService.RequestFirstTokenManualProbe(c.Request.Context(), account); err != nil {
 		if errors.Is(err, service.ErrFirstTokenManualProbeIneligible) {
-			response.BadRequest(c, "Account is not eligible for first-token probing")
+			response.BadRequest(c, "Account is not eligible for total-duration probing")
 			return
 		}
 		if errors.Is(err, service.ErrFirstTokenManualProbeUnavailable) {
-			response.InternalError(c, "First-token probing is not configured")
+			response.InternalError(c, "Total-duration probing is not configured")
 			return
 		}
 		response.ErrorFrom(c, err)
 		return
 	}
-	slog.Info("first_token_manual_probe_requested", "account_id", account.ID, "account_name", account.Name)
+	slog.Info("total_duration_manual_probe_requested", "account_id", account.ID, "account_name", account.Name)
 	response.Accepted(c, gin.H{"account_id": account.ID, "queued": true})
 }
 

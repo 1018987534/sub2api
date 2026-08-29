@@ -1142,7 +1142,7 @@ func applyOpenAIFirstTokenPriorityOrder(
 			accounts,
 			cache,
 			allowProbe,
-			req.FirstTokenProbeEligible,
+			allowProbe,
 		)
 		sort.SliceStable(selectionOrder[start:end], func(i, j int) bool {
 			return ranks[selectionOrder[start+i].account.ID] < ranks[selectionOrder[start+j].account.ID]
@@ -1379,7 +1379,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 		if accountID <= 0 {
 			continue
 		}
-		// The first-token primary pass already checked the session account against
+		// The total-duration primary pass already checked the session account against
 		// the fast, minimum-rate pool. Do not reintroduce a slow or expensive
 		// session account through the generic weighted fallback.
 		if req.FirstTokenPriority && accountID == req.StickyAccountID {
@@ -2597,7 +2597,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	firstTokenPriority := s.isFirstTokenPriorityEnabled(ctx)
 	if firstTokenPriority {
 		// Session affinity is applied only after capability, fast-pool and rate
-		// ordering. It therefore cannot hold back a recovered sub-10-second or
+		// ordering. It therefore cannot hold back a recovered fast-pool or
 		// lower-rate account, while equal-rate fast accounts keep cache locality.
 		stickyWeighted = true
 	}

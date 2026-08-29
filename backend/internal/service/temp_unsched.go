@@ -58,7 +58,10 @@ type TimeoutCounterCache interface {
 
 type FirstTokenLatencyStats struct {
 	PredictedMS  float64
+	P50MS        float64
+	P90MS        float64
 	SampleCount  int64
+	WindowHours  int
 	UpdatedAt    time.Time
 	SlowStreak   int
 	ReliableFast bool

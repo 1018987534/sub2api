@@ -98,11 +98,15 @@ const createFirstTokenMetric = (
   account_id: 42,
   account_name: 'relay-fast',
   predicted_ms: 4321,
+  normal_total_ms: 4321,
+  p50_ms: 3900,
+  p90_ms: 8100,
   has_prediction: true,
   is_fast_pool: true,
   scheduling_rate_multiplier: 0.045,
   groups: [{ group_id: 10, group_name: 'Alpha' }],
   sample_count: 8,
+  window_hours: 6,
   updated_at: '2026-08-12T01:00:00Z',
   slow_streak: 0,
   recovery_fast_streak: 0,
@@ -186,11 +190,15 @@ describe('admin DashboardView', () => {
           account_id: 42,
           account_name: 'relay-fast',
           predicted_ms: 4321,
+          normal_total_ms: 7400,
+          p50_ms: 6000,
+          p90_ms: 14000,
           has_prediction: true,
           is_fast_pool: true,
           scheduling_rate_multiplier: 0.045,
           groups: [{ group_id: 10, group_name: 'Alpha' }],
           sample_count: 8,
+          window_hours: 6,
           updated_at: '2026-08-12T01:00:00Z',
           slow_streak: 0,
           recovery_fast_streak: 0,
@@ -254,7 +262,8 @@ describe('admin DashboardView', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('relay-fast')
-    expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('4.32s')
+    expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('7.40s')
+    expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('P50 6.00s / P90 14.00s')
     expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('Alpha')
     expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('Beta')
     expect(wrapper.get('[data-testid="first-token-latency-panel"]').text()).toContain('admin.dashboard.firstTokenPoolCounts')

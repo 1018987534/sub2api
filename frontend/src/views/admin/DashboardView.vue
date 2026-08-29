@@ -300,7 +300,13 @@
                     <div>
                       <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenPrediction') }}</dt>
                       <dd class="mt-0.5 font-mono text-sm font-semibold" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
-                        {{ metric.has_prediction ? formatDuration(metric.predicted_ms) : t('admin.dashboard.firstTokenPendingSample') }}
+                        {{ metric.has_prediction ? formatDuration(totalDurationScore(metric)) : t('admin.dashboard.firstTokenPendingSample') }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenPercentiles') }}</dt>
+                      <dd class="mt-0.5 font-mono text-sm text-gray-700 dark:text-gray-300">
+                        {{ totalDurationPercentiles(metric) }}
                       </dd>
                     </div>
                     <div>
@@ -317,7 +323,7 @@
                     </div>
                     <div>
                       <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenSamples') }}</dt>
-                      <dd class="mt-0.5 text-gray-700 dark:text-gray-300">{{ metric.sample_count }}</dd>
+                      <dd class="mt-0.5 text-gray-700 dark:text-gray-300">{{ metric.sample_count }} / {{ metric.window_hours || 6 }}h</dd>
                     </div>
                     <div>
                       <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenProbeInterval') }}</dt>
@@ -327,18 +333,19 @@
                 </div>
               </div>
               <div class="hidden overflow-x-auto md:block">
-                <table class="min-w-[1080px] w-full table-fixed text-left text-sm">
+                <table class="min-w-[1200px] w-full table-fixed text-left text-sm">
                   <thead class="text-xs text-gray-500 dark:text-gray-400">
                     <tr>
-                      <th class="w-[20%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
-                      <th class="w-[13%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
-                      <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPool') }}</th>
-                      <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSchedulingRate') }}</th>
-                      <th class="w-[11%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenCacheRate') }}</th>
+                      <th class="w-[17%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
+                      <th class="w-[11%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
+                      <th class="w-[15%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPercentiles') }}</th>
+                      <th class="w-[8%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPool') }}</th>
+                      <th class="w-[9%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSchedulingRate') }}</th>
+                      <th class="w-[9%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenCacheRate') }}</th>
                       <th class="w-[8%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenSamples') }}</th>
-                      <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
-                      <th class="w-[10%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenProbeInterval') }}</th>
-                      <th class="w-[8%] px-4 py-2.5 text-center font-medium">{{ t('admin.dashboard.firstTokenActions') }}</th>
+                      <th class="w-[9%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
+                      <th class="w-[8%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenProbeInterval') }}</th>
+                      <th class="w-[6%] px-4 py-2.5 text-center font-medium">{{ t('admin.dashboard.firstTokenActions') }}</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
@@ -348,7 +355,10 @@
                         <div class="text-xs text-gray-400">#{{ metric.account_id }}</div>
                       </td>
                       <td data-testid="first-token-prediction" class="px-4 py-3 font-mono font-semibold" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
-                        {{ metric.has_prediction ? formatDuration(metric.predicted_ms) : t('admin.dashboard.firstTokenPendingSample') }}
+                        {{ metric.has_prediction ? formatDuration(totalDurationScore(metric)) : t('admin.dashboard.firstTokenPendingSample') }}
+                      </td>
+                      <td class="px-4 py-3 font-mono text-xs text-gray-700 dark:text-gray-300">
+                        {{ totalDurationPercentiles(metric) }}
                       </td>
                       <td class="px-4 py-3" data-testid="first-token-pool">
                         <span class="inline-flex items-center gap-1.5 font-medium" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
@@ -362,7 +372,7 @@
                       <td class="px-4 py-3 font-mono font-semibold text-cyan-600 dark:text-cyan-400" data-testid="first-token-cache-rate">
                         {{ formatCacheRate(metric.cache_rate) }}
                       </td>
-                      <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ metric.sample_count }}</td>
+                      <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ metric.sample_count }} / {{ metric.window_hours || 6 }}h</td>
                       <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{{ metric.has_prediction ? formatFirstTokenUpdatedAt(metric.updated_at) : '-' }}</td>
                       <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ formatProbeInterval(metric.probe_interval_seconds) }}</td>
                       <td class="px-4 py-3 text-center">
@@ -642,6 +652,13 @@ const firstTokenPoolLabel = (metric: AccountFirstTokenLatencyMetric) => {
     })
   }
   return t('admin.dashboard.firstTokenSlowPool')
+}
+
+const totalDurationScore = (metric: AccountFirstTokenLatencyMetric): number => metric.normal_total_ms ?? metric.predicted_ms
+
+const totalDurationPercentiles = (metric: AccountFirstTokenLatencyMetric): string => {
+  if (!metric.has_prediction || metric.p50_ms == null || metric.p90_ms == null) return '-'
+  return `P50 ${formatDuration(metric.p50_ms)} / P90 ${formatDuration(metric.p90_ms)}`
 }
 
 const isFirstTokenManualProbeLoading = (accountID: number): boolean => firstTokenManualProbeLoading.value.has(accountID)

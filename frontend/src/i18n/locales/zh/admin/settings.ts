@@ -435,8 +435,8 @@ export default {
         accountSchedulingThresholdsDisabledHint: '100 表示禁用该平台自动停调；1–99 表示达到该利用率后暂停调度。',
         accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。',
         priorityModeTitle: 'OpenAI 调度优先模式',
-        firstTokenPriorityTitle: '首字优先',
-        firstTokenPriorityDescription: '按近期首字预测优先；会话账号稳定预测不超过 15 秒时保持默认粘性，超过 15 秒时退回加权粘性和首字排序；动态探测会对持续慢账号逐步退避。',
+        firstTokenPriorityTitle: '总耗时快慢池',
+        firstTokenPriorityDescription: '正常总耗时不超过 12 秒连续 3 次进入快池，不低于 16 秒连续 3 次退出；快池低倍率优先，慢池按总耗时优先。探测只用于没有既有粘性的新调度。',
         lowRateModeDescription: '按计费倍率优先，并自动启用同倍率内的粘性加权。'
       },
       upstreamBillingProbe: {

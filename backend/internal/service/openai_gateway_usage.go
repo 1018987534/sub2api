@@ -434,7 +434,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		)
 	}
 	if s.rateLimitService != nil {
-		s.rateLimitService.ObserveFirstTokenLatency(ctx, account, usageLog.RequestID, usageLog.FirstTokenMs)
+		s.rateLimitService.ObserveTotalDurationLatency(ctx, account, usageLog)
 	}
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
