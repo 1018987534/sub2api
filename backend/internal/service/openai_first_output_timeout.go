@@ -286,7 +286,18 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	responseHeaders http.Header,
 ) *UpstreamFailoverError {
 	elapsed := time.Since(startTime)
-	periodicPause := account != nil && account.IsInPeriodicSchedulePause(time.Now())
+	// Timer callbacks can run a few microseconds before the exact periodic
+	// boundary. Classify from the calculated deadline as well as the current
+	// wall clock so the externally visible reason remains deterministic.
+	periodicPause := false
+	if account != nil {
+		now := time.Now()
+		periodicPause = account.IsInPeriodicSchedulePause(now)
+		if !periodicPause && timeout > 0 {
+			deadlineStatus := account.PeriodicSchedulePauseStatusAt(startTime.Add(timeout).Add(time.Nanosecond))
+			periodicPause = deadlineStatus.Enabled && deadlineStatus.Paused
+		}
+	}
 	failureKind := "first_output_timeout"
 	failureMessage := "OpenAI upstream produced no semantic output before the deadline"
 	clientMessage := "Upstream produced no output before the deadline"
