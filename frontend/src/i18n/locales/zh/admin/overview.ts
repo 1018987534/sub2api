@@ -79,7 +79,7 @@ export default {
       configureSystem: '配置系统设置',
       failedToLoad: '加载仪表盘数据失败',
       firstTokenLatencyTitle: '上游中转正常请求总耗时',
-      firstTokenLatencyDescription: '只统计成功计费的真实流式请求。优先使用近 6 小时至少 20 条样本，不足时回退近 24 小时；去掉最快和最慢各 10% 后求平均。快池内低倍率优先，慢池按总耗时优先。',
+      firstTokenLatencyDescription: '只统计成功计费的真实流式请求。总耗时取最近 10 条请求的中位数；新请求达到慢阈值时立即移出快池，恢复需连续 3 次快速中位数。快池内低倍率优先，慢池按总耗时优先。',
       firstTokenCacheRateDescription: '缓存率统计近 24 小时缓存读取 token / 输入 token（输入 + 缓存创建 + 缓存读取），无有效样本显示“-”。',
       firstTokenLatencyFailed: '总耗时统计加载失败',
       firstTokenLatencyEmpty: '当前启用的上游中转账号暂无总耗时统计',
@@ -96,7 +96,7 @@ export default {
       firstTokenAllGroups: '全部调度分组',
       firstTokenUngrouped: '未分组',
       firstTokenPoolCounts: '候选 {total} · 快池 {fast} · 慢池 {slow}',
-      firstTokenSamples: '样本数 / 窗口',
+      firstTokenSamples: '样本数 / 最近请求',
       firstTokenUpdated: '最近更新',
       firstTokenProbeInterval: '动态探测间隔',
       firstTokenCacheRate: '缓存率',
@@ -1254,7 +1254,7 @@ export default {
 
     lottery: {
       title: '抽奖管理',
-      description: '配置抽奖开关、开奖规则与参与资格。轮次配置只对新轮次生效。',
+      description: '配置抽奖开关、开奖规则、群演节奏与参与资格。配置只对新轮次生效。',
       enabled: '开启抽奖活动',
       enabledHint: '关闭后用户菜单隐藏，已有轮次不会再接受参与。',
       rules: '轮次规则',
@@ -1267,6 +1267,10 @@ export default {
       nextRoundMode: '下一轮开始方式',
       autoNext: '结束后立即开始',
       manualNext: '手动开始下一轮',
+      actors: '群演设置',
+      actorPercentage: '群演比例',
+      actorInterval: '群演加入间隔（秒）',
+      actorHint: '群演只计入进度，不参与中奖；系统会按随机间隔逐个加入。',
       eligibility: '参与资格（多项同时满足）',
       requireRecharge: '完成过充值',
       minRecharge: '累计充值金额',
@@ -1294,7 +1298,7 @@ export default {
       noParticipants: '本期暂无真实用户参与',
       participantsLoadFailed: '参与用户明细加载失败',
       participantColumns: { userId: '用户 ID', username: '用户名', email: '邮箱', ip: 'IP', joinedAt: '参与时间' },
-      columns: { round: '期数', progress: '开奖进度', real: '真实参与', manualProgress: '手动补充', status: '状态', actions: '操作' }
+      columns: { round: '期数', progress: '开奖进度', real: '真实参与', actors: '群演', manualProgress: '手动补充', status: '状态', actions: '操作' }
     },
 
     // Available Channels (aggregated read-only view)

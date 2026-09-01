@@ -109,8 +109,9 @@ func TestBillingService_GPT56CacheWritePricingUsesOfficialMultiplier(t *testing.
 			require.NoError(t, err)
 			require.InDelta(t, tt.input*1.25, pricing.CacheCreationPricePerToken, 1e-12)
 			require.InDelta(t, tt.inputPriority*1.25, pricing.CacheCreationPricePerTokenPriority, 1e-12)
-			// 阶梯由目录数据驱动：条目无 above/long_context 字段时不再由策略强补。
-			require.Zero(t, pricing.LongContextInputThreshold)
+			require.Equal(t, 272000, pricing.LongContextInputThreshold)
+			require.InDelta(t, 2.0, pricing.LongContextInputMultiplier, 1e-12)
+			require.InDelta(t, 1.5, pricing.LongContextOutputMultiplier, 1e-12)
 
 			tokens := UsageTokens{InputTokens: 700, OutputTokens: 50, CacheCreationTokens: 200, CacheReadTokens: 100}
 			standard, err := svc.CalculateCostWithServiceTier(tt.model, tokens, 1, "")
@@ -146,12 +147,12 @@ const gpt56LadderCatalogJSON = `{
 		"output_cost_per_token_above_272k_tokens": 1.8e-05,
 		"cache_read_input_token_cost_above_272k_tokens": 4e-07},
 	"gpt-5.6-luna": {"litellm_provider": "openai", "mode": "chat",
-		"input_cost_per_token": 2e-07, "input_cost_per_token_priority": 4e-07,
-		"output_cost_per_token": 1.2e-06, "output_cost_per_token_priority": 2.4e-06,
-		"cache_read_input_token_cost": 2e-08, "cache_read_input_token_cost_priority": 4e-08,
-		"input_cost_per_token_above_272k_tokens": 4e-07,
-		"output_cost_per_token_above_272k_tokens": 1.8e-06,
-		"cache_read_input_token_cost_above_272k_tokens": 4e-08}
+		"input_cost_per_token": 1e-06, "input_cost_per_token_priority": 2e-06,
+		"output_cost_per_token": 6e-06, "output_cost_per_token_priority": 1.2e-05,
+		"cache_read_input_token_cost": 1e-07, "cache_read_input_token_cost_priority": 2e-07,
+		"input_cost_per_token_above_272k_tokens": 2e-06,
+		"output_cost_per_token_above_272k_tokens": 9e-06,
+		"cache_read_input_token_cost_above_272k_tokens": 2e-07}
 }`
 
 func TestBillingService_GPT56UsesLongContextPricingAcrossModelsAndTiers(t *testing.T) {
@@ -309,8 +310,9 @@ func assertGPT56FallbackPricing(t *testing.T, pricing *ModelPricing, input, cach
 	require.InDelta(t, cached, pricing.CacheReadPricePerToken, 1e-12)
 	require.InDelta(t, cacheWrite, pricing.CacheCreationPricePerToken, 1e-12)
 	require.InDelta(t, output, pricing.OutputPricePerToken, 1e-12)
-	// 静态兜底只兜基础价；阶梯由目录数据（above_272k 折算或显式字段）驱动。
-	require.Zero(t, pricing.LongContextInputThreshold)
+	require.Equal(t, 272000, pricing.LongContextInputThreshold)
+	require.InDelta(t, 2.0, pricing.LongContextInputMultiplier, 1e-12)
+	require.InDelta(t, 1.5, pricing.LongContextOutputMultiplier, 1e-12)
 }
 
 func TestParsePricingData_KeepsImageOnlyPricing(t *testing.T) {
@@ -400,14 +402,14 @@ func TestPricingService_MergesFallbackOnlyModelsAndOnlyOverridesLuna(t *testing.
 			"mode": "chat"
 		},
 		"gpt-5.6-luna": {
-			"input_cost_per_token": 0.0000002,
-			"input_cost_per_token_priority": 0.0000004,
-			"output_cost_per_token": 0.0000012,
-			"output_cost_per_token_priority": 0.0000024,
-			"cache_creation_input_token_cost": 0.00000025,
-			"cache_creation_input_token_cost_priority": 0.0000005,
-			"cache_read_input_token_cost": 0.00000002,
-			"cache_read_input_token_cost_priority": 0.00000004,
+			"input_cost_per_token": 0.000001,
+			"input_cost_per_token_priority": 0.000002,
+			"output_cost_per_token": 0.000006,
+			"output_cost_per_token_priority": 0.000012,
+			"cache_creation_input_token_cost": 0.00000125,
+			"cache_creation_input_token_cost_priority": 0.0000025,
+			"cache_read_input_token_cost": 0.0000001,
+			"cache_read_input_token_cost_priority": 0.0000002,
 			"litellm_provider": "remote-provider",
 			"mode": "chat"
 		},
@@ -494,8 +496,9 @@ func TestGetModelPricing_Gpt54UsesStaticFallbackWhenRemoteMissing(t *testing.T) 
 	require.InDelta(t, 2.5e-6, got.InputCostPerToken, 1e-12)
 	require.InDelta(t, 1.5e-5, got.OutputCostPerToken, 1e-12)
 	require.InDelta(t, 2.5e-7, got.CacheReadInputTokenCost, 1e-12)
-	// 静态兜底只兜基础价，不携带长上下文阶梯（阶梯由目录数据驱动）。
-	require.Zero(t, got.LongContextInputTokenThreshold)
+	require.Equal(t, 272000, got.LongContextInputTokenThreshold)
+	require.InDelta(t, 2.0, got.LongContextInputCostMultiplier, 1e-12)
+	require.InDelta(t, 1.5, got.LongContextOutputCostMultiplier, 1e-12)
 }
 
 func TestGetModelPricing_OpenAICompactAliasUsesStaticFallback(t *testing.T) {

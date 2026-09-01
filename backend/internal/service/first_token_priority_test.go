@@ -808,7 +808,7 @@ func TestOpenAIFirstTokenPriorityUsesLowRateWithinFastPool(t *testing.T) {
 func TestAccountFirstTokenLatencyMetricsOnlyIncludesEnabledOpenAIAPIKeys(t *testing.T) {
 	now := time.Now()
 	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
-		1: {PredictedMS: 4_000, P50MS: 3_500, P90MS: 9_000, SampleCount: 20, WindowHours: 6, UpdatedAt: now},
+		1: {PredictedMS: 4_000, P50MS: 3_500, P90MS: 9_000, SampleCount: 10, SampleWindowSize: 10, UpdatedAt: now},
 		2: {PredictedMS: 2_000, SampleCount: 5, UpdatedAt: now},
 		3: {PredictedMS: 3_000, SampleCount: 5, UpdatedAt: now},
 		4: {PredictedMS: 1_000, SampleCount: 5, UpdatedAt: now},
@@ -831,7 +831,7 @@ func TestAccountFirstTokenLatencyMetricsOnlyIncludesEnabledOpenAIAPIKeys(t *test
 func TestAccountFirstTokenLatencyMetricsIncludesRollingCacheRate(t *testing.T) {
 	now := time.Now()
 	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
-		1: {PredictedMS: 4_000, P50MS: 3_500, P90MS: 9_000, SampleCount: 20, WindowHours: 6, UpdatedAt: now},
+		1: {PredictedMS: 4_000, P50MS: 3_500, P90MS: 9_000, SampleCount: 10, SampleWindowSize: 10, UpdatedAt: now},
 	}}
 	group := &Group{ID: 10, Name: "premium", Platform: PlatformOpenAI, Status: StatusActive}
 	account := Account{
@@ -857,7 +857,7 @@ func TestAccountFirstTokenLatencyMetricsIncludesRollingCacheRate(t *testing.T) {
 	require.Equal(t, 4_000.0, metrics[0].NormalTotalMS)
 	require.Equal(t, 3_500.0, metrics[0].P50MS)
 	require.Equal(t, 9_000.0, metrics[0].P90MS)
-	require.Equal(t, 6, metrics[0].WindowHours)
+	require.Equal(t, 10, metrics[0].SampleWindowSize)
 }
 
 func TestAccountFirstTokenLatencyMetricsReportsActualPoolMembership(t *testing.T) {

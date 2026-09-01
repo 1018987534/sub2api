@@ -323,7 +323,7 @@
                     </div>
                     <div>
                       <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenSamples') }}</dt>
-                      <dd class="mt-0.5 text-gray-700 dark:text-gray-300">{{ metric.sample_count }} / {{ metric.window_hours || 6 }}h</dd>
+                      <dd class="mt-0.5 text-gray-700 dark:text-gray-300">{{ metric.sample_count }} / {{ metric.sample_window_size || 10 }}</dd>
                     </div>
                     <div>
                       <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenProbeInterval') }}</dt>
@@ -372,7 +372,7 @@
                       <td class="px-4 py-3 font-mono font-semibold text-cyan-600 dark:text-cyan-400" data-testid="first-token-cache-rate">
                         {{ formatCacheRate(metric.cache_rate) }}
                       </td>
-                      <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ metric.sample_count }} / {{ metric.window_hours || 6 }}h</td>
+                      <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ metric.sample_count }} / {{ metric.sample_window_size || 10 }}</td>
                       <td class="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{{ metric.has_prediction ? formatFirstTokenUpdatedAt(metric.updated_at) : '-' }}</td>
                       <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ formatProbeInterval(metric.probe_interval_seconds) }}</td>
                       <td class="px-4 py-3 text-center">

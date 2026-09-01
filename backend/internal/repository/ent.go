@@ -130,12 +130,14 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 	}
 	applyDBPoolSettings(drv.DB(), cfg)
 
-	// 确保数据库 schema 已准备就绪。
-	// SQL 迁移文件是 schema 的权威来源（source of truth）。
-	// 这种方式比 Ent 的自动迁移更可控，支持复杂的迁移场景。
+	// 确保数据库 schema 已准备就绪。gateway 只校验共享 schema，control 负责
+	// 应用迁移；两种角色必须保持该分工，避免多个 gateway 并发写迁移。
 	migrationCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	if err := initializeDatabaseWithRetry(migrationCtx, func(ctx context.Context) error {
+		if cfg.IsGateway() {
+			return validateMigrationsFS(ctx, drv.DB(), migrations.FS)
+		}
 		return applyMigrationsFS(ctx, drv.DB(), migrations.FS)
 	}); err != nil {
 		_ = drv.Close() // 迁移失败时关闭驱动，避免资源泄露
@@ -145,10 +147,16 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 	// 创建 Ent 客户端，绑定到已配置的数据库驱动。
 	client := ent.NewClient(ent.Driver(drv))
 
-	// 启动阶段：从配置或数据库中确保系统密钥可用。
-	if err := ensureBootstrapSecrets(migrationCtx, client, cfg); err != nil {
+	// gateway 只读取 control 已建立的密钥；control 负责从配置或数据库补齐密钥。
+	var secretErr error
+	if cfg.IsGateway() {
+		secretErr = loadBootstrapSecrets(migrationCtx, client, cfg)
+	} else {
+		secretErr = ensureBootstrapSecrets(migrationCtx, client, cfg)
+	}
+	if secretErr != nil {
 		_ = client.Close()
-		return nil, nil, err
+		return nil, nil, secretErr
 	}
 
 	// 在密钥补齐后执行完整配置校验，避免空 jwt.secret 导致服务运行时失败。

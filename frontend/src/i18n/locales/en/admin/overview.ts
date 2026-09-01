@@ -79,7 +79,7 @@ export default {
       configureSystem: 'Configure system settings',
       failedToLoad: 'Failed to load dashboard statistics',
       firstTokenLatencyTitle: 'Relay Normal Request Duration',
-      firstTokenLatencyDescription: 'Uses completed, billable streams only. The score is the 10%-90% trimmed mean from at least 20 samples in the last 6 hours, falling back to 24 hours. The fast pool prefers lower rates; the slow pool prefers shorter duration.',
+      firstTokenLatencyDescription: 'Uses completed, billable streams only. The score is the median of the latest 10 requests. A newly completed request at the slow threshold immediately leaves the fast pool; recovery requires three consecutive fast medians. The fast pool prefers lower rates; the slow pool prefers shorter duration.',
       firstTokenCacheRateDescription: 'Cache rate covers the last 24 hours: cache-read tokens / (input + cache-creation + cache-read tokens). "-" means there is no valid sample.',
       firstTokenLatencyFailed: 'Failed to load total-duration statistics',
       firstTokenLatencyEmpty: 'No total-duration data for enabled relay accounts yet',
@@ -96,7 +96,7 @@ export default {
       firstTokenAllGroups: 'All scheduling groups',
       firstTokenUngrouped: 'Ungrouped',
       firstTokenPoolCounts: 'Candidates {total} · Fast {fast} · Slow {slow}',
-      firstTokenSamples: 'Samples / window',
+      firstTokenSamples: 'Samples / latest requests',
       firstTokenUpdated: 'Updated',
       firstTokenProbeInterval: 'Dynamic probe interval',
       firstTokenCacheRate: 'Cache rate',
@@ -1255,7 +1255,7 @@ export default {
 
     lottery: {
       title: 'Lottery Management',
-      description: 'Configure the lottery switch, draw rules, and eligibility. Round configuration changes apply to new rounds.',
+      description: 'Configure the lottery switch, draw rules, actor pacing, and eligibility. Changes apply to new rounds.',
       enabled: 'Enable lottery activity',
       enabledHint: 'When disabled, the user menu is hidden and existing rounds stop accepting entries.',
       rules: 'Round rules',
@@ -1268,6 +1268,10 @@ export default {
       nextRoundMode: 'Next round mode',
       autoNext: 'Start immediately after draw',
       manualNext: 'Start next round manually',
+      actors: 'Actor pacing',
+      actorPercentage: 'Actor percentage',
+      actorInterval: 'Actor join interval (seconds)',
+      actorHint: 'Actors count toward progress but never win. They join one at a time at randomized intervals.',
       eligibility: 'Eligibility (all selected rules apply)',
       requireRecharge: 'Has completed a recharge',
       minRecharge: 'Cumulative recharge amount',
@@ -1295,7 +1299,7 @@ export default {
       noParticipants: 'No real users have joined this round',
       participantsLoadFailed: 'Failed to load participant details',
       participantColumns: { userId: 'User ID', username: 'Username', email: 'Email', ip: 'IP', joinedAt: 'Joined at' },
-      columns: { round: 'Round', progress: 'Draw progress', real: 'Real entries', manualProgress: 'Manual addition', status: 'Status', actions: 'Actions' }
+      columns: { round: 'Round', progress: 'Draw progress', real: 'Real entries', actors: 'Actors', manualProgress: 'Manual addition', status: 'Status', actions: 'Actions' }
     },
 
     // Available Channels (aggregated read-only view)

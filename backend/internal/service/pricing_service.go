@@ -37,12 +37,15 @@ var (
 	// 组 1 为基础价字段名主干，组 2 为 1h 缓存时长段（可为空），组 3 为服务档后缀（可为空）。
 	cacheTierPricePattern      = regexp.MustCompile(`^(cache_(?:creation|read)_input_token_cost)(_above_1hr)?_above_\d+k_tokens((?:_[a-z]+)?)$`)
 	openAIGPT54FallbackPricing = &LiteLLMModelPricing{
-		InputCostPerToken:       2.5e-06, // $2.5 per MTok
-		OutputCostPerToken:      1.5e-05, // $15 per MTok
-		CacheReadInputTokenCost: 2.5e-07, // $0.25 per MTok
-		LiteLLMProvider:         "openai",
-		Mode:                    "chat",
-		SupportsPromptCaching:   true,
+		InputCostPerToken:               2.5e-06, // $2.5 per MTok
+		OutputCostPerToken:              1.5e-05, // $15 per MTok
+		CacheReadInputTokenCost:         2.5e-07, // $0.25 per MTok
+		LongContextInputTokenThreshold:  272000,
+		LongContextInputCostMultiplier:  2.0,
+		LongContextOutputCostMultiplier: 1.5,
+		LiteLLMProvider:                 "openai",
+		Mode:                            "chat",
+		SupportsPromptCaching:           true,
 	}
 	openAIGPT56SolFallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:                   5e-06,
@@ -53,6 +56,9 @@ var (
 		CacheCreationInputTokenCostPriority: 1.25e-05,
 		CacheReadInputTokenCost:             5e-07,
 		CacheReadInputTokenCostPriority:     1e-06,
+		LongContextInputTokenThreshold:      272000,
+		LongContextInputCostMultiplier:      2.0,
+		LongContextOutputCostMultiplier:     1.5,
 		SupportsServiceTier:                 true,
 		LiteLLMProvider:                     "openai",
 		Mode:                                "chat",
@@ -67,20 +73,26 @@ var (
 		CacheCreationInputTokenCostPriority: 5e-06,
 		CacheReadInputTokenCost:             2e-07,
 		CacheReadInputTokenCostPriority:     4e-07,
+		LongContextInputTokenThreshold:      272000,
+		LongContextInputCostMultiplier:      2.0,
+		LongContextOutputCostMultiplier:     1.5,
 		SupportsServiceTier:                 true,
 		LiteLLMProvider:                     "openai",
 		Mode:                                "chat",
 		SupportsPromptCaching:               true,
 	}
 	openAIGPT56LunaFallbackPricing = &LiteLLMModelPricing{
-		InputCostPerToken:                   2e-07,
-		InputCostPerTokenPriority:           4e-07,
-		OutputCostPerToken:                  1.2e-06,
-		OutputCostPerTokenPriority:          2.4e-06,
-		CacheCreationInputTokenCost:         2.5e-07,
-		CacheCreationInputTokenCostPriority: 5e-07,
-		CacheReadInputTokenCost:             2e-08,
-		CacheReadInputTokenCostPriority:     4e-08,
+		InputCostPerToken:                   1e-06,
+		InputCostPerTokenPriority:           2e-06,
+		OutputCostPerToken:                  6e-06,
+		OutputCostPerTokenPriority:          1.2e-05,
+		CacheCreationInputTokenCost:         1.25e-06,
+		CacheCreationInputTokenCostPriority: 2.5e-06,
+		CacheReadInputTokenCost:             1e-07,
+		CacheReadInputTokenCostPriority:     2e-07,
+		LongContextInputTokenThreshold:      272000,
+		LongContextInputCostMultiplier:      2.0,
+		LongContextOutputCostMultiplier:     1.5,
 		SupportsServiceTier:                 true,
 		LiteLLMProvider:                     "openai",
 		Mode:                                "chat",
@@ -119,6 +131,7 @@ type LiteLLMModelPricing struct {
 	LongContextInputTokenThreshold      int     `json:"long_context_input_token_threshold,omitempty"`
 	LongContextInputCostMultiplier      float64 `json:"long_context_input_cost_multiplier,omitempty"`
 	LongContextOutputCostMultiplier     float64 `json:"long_context_output_cost_multiplier,omitempty"`
+	LongContextExplicit                 bool    `json:"-"`
 	SupportsServiceTier                 bool    `json:"supports_service_tier"`
 	LiteLLMProvider                     string  `json:"litellm_provider"`
 	Mode                                string  `json:"mode"`
@@ -507,6 +520,7 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		hasExplicitLongContext := entry.LongContextInputTokenThreshold != nil ||
 			entry.LongContextInputCostMultiplier != nil ||
 			entry.LongContextOutputCostMultiplier != nil
+		pricing.LongContextExplicit = hasExplicitLongContext
 		if !hasExplicitLongContext {
 			deriveLongContextFromAboveTierFields(rawEntry, pricing)
 			if isLopsidedLongContextLadder(pricing) {
@@ -839,17 +853,17 @@ func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelP
 		data = make(map[string]*LiteLLMModelPricing)
 	}
 	if s == nil || s.cfg == nil || strings.TrimSpace(s.cfg.Pricing.FallbackFile) == "" {
-		return data
+		return applyLunaManualPricing(data)
 	}
 	fallbackBody, err := os.ReadFile(s.cfg.Pricing.FallbackFile)
 	if err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge skipped: %v", err)
-		return data
+		return applyLunaManualPricing(data)
 	}
 	fallbackData, err := s.parsePricingData(fallbackBody)
 	if err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Fallback merge parse skipped: %v", err)
-		return data
+		return applyLunaManualPricing(data)
 	}
 	merged := 0
 	for modelName, pricing := range fallbackData {
@@ -862,6 +876,30 @@ func (s *PricingService) mergeFallbackPricingData(data map[string]*LiteLLMModelP
 	if merged > 0 {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Merged %d fallback-only models", merged)
 	}
+	return applyLunaManualPricing(data)
+}
+
+func applyLunaManualPricing(data map[string]*LiteLLMModelPricing) map[string]*LiteLLMModelPricing {
+	const model = "gpt-5.6-luna"
+	current, ok := data[model]
+	if !ok || current == nil {
+		return data
+	}
+	overridden := *current
+	overridden.InputCostPerToken = openAIGPT56LunaFallbackPricing.InputCostPerToken
+	overridden.InputCostPerTokenPriority = openAIGPT56LunaFallbackPricing.InputCostPerTokenPriority
+	overridden.OutputCostPerToken = openAIGPT56LunaFallbackPricing.OutputCostPerToken
+	overridden.OutputCostPerTokenPriority = openAIGPT56LunaFallbackPricing.OutputCostPerTokenPriority
+	overridden.CacheCreationInputTokenCost = openAIGPT56LunaFallbackPricing.CacheCreationInputTokenCost
+	overridden.CacheCreationInputTokenCostPriority = openAIGPT56LunaFallbackPricing.CacheCreationInputTokenCostPriority
+	overridden.CacheReadInputTokenCost = openAIGPT56LunaFallbackPricing.CacheReadInputTokenCost
+	overridden.CacheReadInputTokenCostPriority = openAIGPT56LunaFallbackPricing.CacheReadInputTokenCostPriority
+	if overridden.LongContextInputTokenThreshold <= 0 {
+		overridden.LongContextInputTokenThreshold = openAIGPT56LunaFallbackPricing.LongContextInputTokenThreshold
+		overridden.LongContextInputCostMultiplier = openAIGPT56LunaFallbackPricing.LongContextInputCostMultiplier
+		overridden.LongContextOutputCostMultiplier = openAIGPT56LunaFallbackPricing.LongContextOutputCostMultiplier
+	}
+	data[model] = &overridden
 	return data
 }
 

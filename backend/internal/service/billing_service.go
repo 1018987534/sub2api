@@ -110,11 +110,18 @@ type ModelPricing struct {
 	SupportsCacheBreakdown             bool     // 是否支持详细的缓存分类
 	LongContextInputThreshold          int      // 超过阈值后按整次会话提升输入价格
 	LongContextThresholdInclusive      bool     // 达到阈值即应用（xAI）；默认保持严格大于以兼容既有模型
+	LongContextExplicit                bool     // 目录显式提供 long_context 字段（含显式 0）
 	LongContextInputMultiplier         float64  // 长上下文整次会话输入倍率
 	LongContextOutputMultiplier        float64  // 长上下文整次会话输出倍率
 	ImageOutputPricePerToken           float64  // 图片输出 token 价格 (USD)
 	ImageOutputPriceExplicit           bool     // 是否由渠道定价显式设定（为 true 时即使 == 0 也不回退）
 }
+
+const (
+	openAIGPT54LongContextInputThreshold   = 272000
+	openAIGPT54LongContextInputMultiplier  = 2.0
+	openAIGPT54LongContextOutputMultiplier = 1.5
+)
 
 func normalizeBillingServiceTier(serviceTier string) string {
 	return strings.ToLower(strings.TrimSpace(serviceTier))
@@ -389,6 +396,9 @@ func (s *BillingService) initFallbackPricing() {
 		CacheReadPricePerToken:         0.25e-6, // $0.25 per MTok
 		CacheReadPricePerTokenPriority: 0.5e-6,  // $0.5 per MTok
 		SupportsCacheBreakdown:         false,
+		LongContextInputThreshold:      openAIGPT54LongContextInputThreshold,
+		LongContextInputMultiplier:     openAIGPT54LongContextInputMultiplier,
+		LongContextOutputMultiplier:    openAIGPT54LongContextOutputMultiplier,
 	}
 	// OpenAI GPT-5.5 官方价格；Fast 为标准价 2.5 倍。
 	// Source: https://platform.openai.com/docs/pricing
@@ -396,18 +406,24 @@ func (s *BillingService) initFallbackPricing() {
 		InputPricePerToken:  5e-6,
 		OutputPricePerToken: 30e-6,
 		// 官方未列独立 cache-write 价；内部出现 cache creation token 时按输入价兜底。
-		CacheCreationPricePerToken: 5e-6,
-		CacheReadPricePerToken:     0.5e-6,
-		SupportsCacheBreakdown:     false,
+		CacheCreationPricePerToken:  5e-6,
+		CacheReadPricePerToken:      0.5e-6,
+		SupportsCacheBreakdown:      false,
+		LongContextInputThreshold:   openAIGPT54LongContextInputThreshold,
+		LongContextInputMultiplier:  openAIGPT54LongContextInputMultiplier,
+		LongContextOutputMultiplier: openAIGPT54LongContextOutputMultiplier,
 	}, 2.5)
 	// GPT-5.5 Pro 当前不提供 Fast；保留标准、Flex 和长上下文 fallback 价格。
 	s.fallbackPrices["gpt-5.5-pro"] = &ModelPricing{
 		InputPricePerToken:  30e-6,
 		OutputPricePerToken: 180e-6,
 		// 官方未列独立 cached-input/cache-write 价；内部出现对应 token 时按输入价兜底。
-		CacheCreationPricePerToken: 30e-6,
-		CacheReadPricePerToken:     30e-6,
-		SupportsCacheBreakdown:     false,
+		CacheCreationPricePerToken:  30e-6,
+		CacheReadPricePerToken:      30e-6,
+		SupportsCacheBreakdown:      false,
+		LongContextInputThreshold:   openAIGPT54LongContextInputThreshold,
+		LongContextInputMultiplier:  openAIGPT54LongContextInputMultiplier,
+		LongContextOutputMultiplier: openAIGPT54LongContextOutputMultiplier,
 	}
 
 	// OpenAI GPT-5.6 官方价格（USD/token）。缓存写入为输入价的 1.25 倍。
@@ -420,6 +436,9 @@ func (s *BillingService) initFallbackPricing() {
 		CacheCreationPricePerTokenPriority: 12.5e-6,
 		CacheReadPricePerToken:             0.5e-6,
 		CacheReadPricePerTokenPriority:     1e-6,
+		LongContextInputThreshold:          openAIGPT54LongContextInputThreshold,
+		LongContextInputMultiplier:         openAIGPT54LongContextInputMultiplier,
+		LongContextOutputMultiplier:        openAIGPT54LongContextOutputMultiplier,
 	}
 	s.fallbackPrices["gpt-5.6-terra"] = &ModelPricing{
 		InputPricePerToken:                 2e-6,
@@ -430,16 +449,22 @@ func (s *BillingService) initFallbackPricing() {
 		CacheCreationPricePerTokenPriority: 5e-6,
 		CacheReadPricePerToken:             0.2e-6,
 		CacheReadPricePerTokenPriority:     0.4e-6,
+		LongContextInputThreshold:          openAIGPT54LongContextInputThreshold,
+		LongContextInputMultiplier:         openAIGPT54LongContextInputMultiplier,
+		LongContextOutputMultiplier:        openAIGPT54LongContextOutputMultiplier,
 	}
 	s.fallbackPrices["gpt-5.6-luna"] = &ModelPricing{
-		InputPricePerToken:                 0.2e-6,
-		InputPricePerTokenPriority:         0.4e-6,
-		OutputPricePerToken:                1.2e-6,
-		OutputPricePerTokenPriority:        2.4e-6,
-		CacheCreationPricePerToken:         0.25e-6,
-		CacheCreationPricePerTokenPriority: 0.5e-6,
-		CacheReadPricePerToken:             0.02e-6,
-		CacheReadPricePerTokenPriority:     0.04e-6,
+		InputPricePerToken:                 1e-6,
+		InputPricePerTokenPriority:         2e-6,
+		OutputPricePerToken:                6e-6,
+		OutputPricePerTokenPriority:        12e-6,
+		CacheCreationPricePerToken:         1.25e-6,
+		CacheCreationPricePerTokenPriority: 2.5e-6,
+		CacheReadPricePerToken:             0.1e-6,
+		CacheReadPricePerTokenPriority:     0.2e-6,
+		LongContextInputThreshold:          openAIGPT54LongContextInputThreshold,
+		LongContextInputMultiplier:         openAIGPT54LongContextInputMultiplier,
+		LongContextOutputMultiplier:        openAIGPT54LongContextOutputMultiplier,
 	}
 
 	s.fallbackPrices["gpt-5.4-mini"] = &ModelPricing{
@@ -1103,6 +1128,7 @@ func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
 				LongContextInputThreshold:          litellmPricing.LongContextInputTokenThreshold,
 				// xAI 的长上下文阈值语义为"达到即进高档"（LiteLLM 同口径），其余提供商为严格大于。
 				LongContextThresholdInclusive: strings.EqualFold(litellmPricing.LiteLLMProvider, "xai"),
+				LongContextExplicit:           litellmPricing.LongContextExplicit,
 				LongContextInputMultiplier:    litellmPricing.LongContextInputCostMultiplier,
 				LongContextOutputMultiplier:   litellmPricing.LongContextOutputCostMultiplier,
 				ImageInputPricePerToken:       litellmPricing.InputCostPerImageToken,
@@ -1591,10 +1617,13 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 	}
 	normalized := normalizeKnownOpenAICodexModel(model)
 	isGPT56 := isOpenAIGPT56Model(normalized)
+	usesLegacyLongContextPricing := usesOpenAILegacyLongContextPricing(normalized)
 	needsCacheCreationPolicy := isGPT56 && !pricing.CacheCreationPriceExplicit && (pricing.CacheCreationPricePerToken <= 0 ||
 		(pricing.InputPricePerTokenPriority > 0 && pricing.CacheCreationPricePerTokenPriority <= 0))
 	fastRatio := openAIModelFastPricingRatio(normalized)
-	if !needsCacheCreationPolicy && fastRatio <= 0 {
+	needsLongContextPolicy := (isGPT56 || usesLegacyLongContextPricing) &&
+		(pricing.LongContextInputThreshold <= 0 || pricing.LongContextInputMultiplier <= 0 || pricing.LongContextOutputMultiplier <= 0)
+	if !needsLongContextPolicy && !needsCacheCreationPolicy && fastRatio <= 0 {
 		return pricing
 	}
 	cloned := *pricing
@@ -1604,6 +1633,17 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 		}
 		if cloned.CacheCreationPricePerTokenPriority <= 0 {
 			cloned.CacheCreationPricePerTokenPriority = cloned.InputPricePerTokenPriority * 1.25
+		}
+	}
+	if (isGPT56 || usesLegacyLongContextPricing) && !pricing.LongContextExplicit {
+		if cloned.LongContextInputThreshold <= 0 {
+			cloned.LongContextInputThreshold = openAIGPT54LongContextInputThreshold
+		}
+		if cloned.LongContextInputMultiplier <= 0 {
+			cloned.LongContextInputMultiplier = openAIGPT54LongContextInputMultiplier
+		}
+		if cloned.LongContextOutputMultiplier <= 0 {
+			cloned.LongContextOutputMultiplier = openAIGPT54LongContextOutputMultiplier
 		}
 	}
 	if fastRatio > 0 {
@@ -1651,6 +1691,10 @@ func longContextMultiplierOrOne(m float64) float64 {
 		return 1
 	}
 	return m
+}
+
+func usesOpenAILegacyLongContextPricing(normalized string) bool {
+	return normalized == "gpt-5.4" || normalized == "gpt-5.5" || normalized == "gpt-5.5-pro"
 }
 
 func (s *BillingService) shouldApplySessionLongContextPricing(tokens UsageTokens, pricing *ModelPricing) bool {
