@@ -922,7 +922,7 @@ export interface AccountFirstTokenLatencyMetric {
   scheduling_rate_multiplier: number | null
   groups: AccountFirstTokenLatencyGroup[]
   sample_count: number
-  sample_window_size?: number
+  window_hours?: number
   updated_at: string
   slow_streak: number
   recovery_fast_streak: number

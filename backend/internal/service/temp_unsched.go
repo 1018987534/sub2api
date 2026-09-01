@@ -57,16 +57,14 @@ type TimeoutCounterCache interface {
 }
 
 type FirstTokenLatencyStats struct {
-	PredictedMS float64
-	P50MS       float64
-	P90MS       float64
-	SampleCount int64
-	// SampleWindowSize is the bounded number of most recent requests used for
-	// the median score. It is not a wall-clock duration.
-	SampleWindowSize int
-	UpdatedAt        time.Time
-	SlowStreak       int
-	ReliableFast     bool
+	PredictedMS  float64
+	P50MS        float64
+	P90MS        float64
+	SampleCount  int64
+	WindowHours  int
+	UpdatedAt    time.Time
+	SlowStreak   int
+	ReliableFast bool
 	// FastConfirmationTracked distinguishes new three-sample confirmation data
 	// from legacy Redis hashes created before confirmation was introduced.
 	FastConfirmationTracked bool

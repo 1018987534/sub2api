@@ -13,34 +13,30 @@ import (
 
 const totalLatencyStatsPrefix = "scheduler:total_duration:account:"
 const totalLatencySamplesPrefix = "scheduler:total_duration:samples:"
-const totalLatencyRecentSamplesPrefix = "scheduler:total_duration:recent_samples:"
 const totalLatencyProbePrefix = "scheduler:total_duration:probe:"
 const totalLatencyManualProbePrefix = "scheduler:total_duration:manual_probe:"
-const totalLatencyMaxSamples = 10
-const totalLatencyMinimumSamples = 10
 
-// Each completed, billable stream updates a bounded latest-request sample set
-// and atomically derives the scheduling score. The score is the direct median
-// of the latest ten requests; no wall-clock window or trimming is involved.
-// Fast-pool exit reacts to a short burst of slow requests in the latest
-// five-minute slice, or to three consecutive slow median updates. Recovery
-// still requires three consecutive fast medians.
+// Each completed, billable stream updates one timestamped 24-hour window and
+// atomically derives the scheduling score. The score is the 10%-90% trimmed
+// mean of the latest six hours, falling back to 24 hours until six hours has
+// enough observations. Pool transitions require three consecutive qualifying
+// aggregate results, so one long but valid generation cannot flip an account.
 var totalLatencyStatsRecordScript = redis.NewScript(`
 	local stats_key = KEYS[1]
 	local samples_key = KEYS[2]
-	local recent_samples_key = KEYS[3]
-	local dedupe_key = KEYS[4]
-	local probe_key = KEYS[5]
-	local manual_probe_key = KEYS[6]
+	local dedupe_key = KEYS[3]
+	local probe_key = KEYS[4]
+	local manual_probe_key = KEYS[5]
 	local duration_ms = tonumber(ARGV[1])
 	local stats_ttl_seconds = tonumber(ARGV[2])
 	local dedupe_ttl_seconds = tonumber(ARGV[3])
-	local max_samples = tonumber(ARGV[4])
-	local minimum_samples = tonumber(ARGV[5])
-	local fast_threshold_ms = tonumber(ARGV[6])
-	local slow_threshold_ms = tonumber(ARGV[7])
-	local confirmations = tonumber(ARGV[8])
-	local request_id = ARGV[9]
+	local minimum_samples = tonumber(ARGV[4])
+	local primary_window_ms = tonumber(ARGV[5])
+	local fallback_window_ms = tonumber(ARGV[6])
+	local fast_threshold_ms = tonumber(ARGV[7])
+	local slow_threshold_ms = tonumber(ARGV[8])
+	local confirmations = tonumber(ARGV[9])
+	local request_id = ARGV[10]
 	local now = redis.call('TIME')
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 
@@ -48,136 +44,85 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 		return 0
 	end
 
-	local latest = redis.call('ZREVRANGE', samples_key, 0, 0, 'WITHSCORES')
-	local event_score = 1
-	if #latest >= 2 then event_score = tonumber(latest[2]) + 1 end
-	-- Keep the completion timestamp in the member so the bounded latest-request
-	-- set can also answer the short five-minute anomaly question.
-	local member = tostring(event_score) .. ':' .. tostring(now_ms) .. ':' .. request_id .. ':' .. tostring(duration_ms)
-	redis.call('ZADD', samples_key, event_score, member)
-	local retained_count = redis.call('ZCARD', samples_key)
-	if retained_count > max_samples then
-		redis.call('ZREMRANGEBYRANK', samples_key, 0, retained_count - max_samples - 1)
-	end
+	redis.call('ZREMRANGEBYSCORE', samples_key, '-inf', now_ms - fallback_window_ms)
+	local member = tostring(now_ms) .. ':' .. request_id .. ':' .. tostring(duration_ms)
+	redis.call('ZADD', samples_key, now_ms, member)
 	redis.call('EXPIRE', samples_key, stats_ttl_seconds)
-	-- Keep an independent wall-clock slice for burst detection. It is not
-	-- bounded to ten entries because busy accounts can exceed ten requests.
-	local recent_member = tostring(now_ms) .. ':' .. tostring(event_score) .. ':' .. request_id .. ':' .. tostring(duration_ms)
-	redis.call('ZADD', recent_samples_key, now_ms, recent_member)
-	redis.call('ZREMRANGEBYSCORE', recent_samples_key, '-inf', now_ms - 5 * 60 * 1000)
-	redis.call('EXPIRE', recent_samples_key, 10 * 60)
 
-	local function decode(raw_members, recent_format)
+	local function decode(raw_members)
 		local values = {}
 		for _, raw in ipairs(raw_members) do
-			local timestamp, sequence, value
-			if recent_format then
-				timestamp, sequence, value = string.match(raw, '^(%d+):(%d+):.*:(%d+)$')
-			else
-				timestamp, value = string.match(raw, '^%d+:(%d+):.*:(%d+)$')
-			end
-			if value then
-				table.insert(values, {duration_ms = tonumber(value), timestamp_ms = tonumber(timestamp) or 0, sequence = tonumber(sequence) or 0})
-			else
-				-- Read members written by the previous latest-ten draft. They still
-				-- contribute to the median, but cannot be classified as recent.
-				value = string.match(raw, ':(%d+)$')
-				if value then table.insert(values, {duration_ms = tonumber(value), timestamp_ms = 0}) end
-			end
+			local value = tonumber(string.match(raw, ':(%d+)$'))
+			if value then table.insert(values, value) end
 		end
 		return values
 	end
 
-	local samples = decode(redis.call('ZRANGE', samples_key, 0, -1), false)
-	local recent_samples = decode(redis.call('ZRANGE', recent_samples_key, 0, -1), true)
-	local durations = {}
-	local recent_count = #recent_samples
-	local recent_slow_count = 0
-	local consecutive_slow = 0
-	local max_consecutive_slow = 0
-	table.sort(recent_samples, function(left, right)
-		if left.sequence == right.sequence then return left.timestamp_ms < right.timestamp_ms end
-		return left.sequence < right.sequence
-	end)
-	for _, sample in ipairs(recent_samples) do
-		if sample.duration_ms >= slow_threshold_ms then
-			recent_slow_count = recent_slow_count + 1
-			consecutive_slow = consecutive_slow + 1
-			if consecutive_slow > max_consecutive_slow then max_consecutive_slow = consecutive_slow end
-		else
-			consecutive_slow = 0
-		end
+	local primary = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - primary_window_ms, '+inf'))
+	local samples = primary
+	local window_hours = 6
+	if #samples < minimum_samples then
+		samples = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - fallback_window_ms, '+inf'))
+		window_hours = 24
 	end
-	for _, sample in ipairs(samples) do table.insert(durations, sample.duration_ms) end
 
 	local old_updated = tonumber(redis.call('HGET', stats_key, 'updated_at_ms'))
 	local is_fast = tonumber(redis.call('HGET', stats_key, 'is_fast')) or 0
 	local enter_fast_streak = tonumber(redis.call('HGET', stats_key, 'enter_fast_streak')) or 0
 	local exit_slow_streak = tonumber(redis.call('HGET', stats_key, 'exit_slow_streak')) or 0
-	if not old_updated or now_ms - old_updated > 6 * 60 * 60 * 1000 then
+	if not old_updated or now_ms - old_updated > primary_window_ms then
 		is_fast = 0
 		enter_fast_streak = 0
 		exit_slow_streak = 0
 	end
-	local short_slowdown = is_fast == 1 and recent_count >= 3 and
-		(recent_slow_count * 100 >= recent_count * 60 or max_consecutive_slow >= 3)
 
 	if #samples < minimum_samples then
 		redis.call('HDEL', stats_key, 'normal_total_ms', 'p50_ms', 'p90_ms')
 		redis.call('HSET', stats_key,
 			'sample_count', tostring(#samples),
-			'sample_window_size', tostring(max_samples),
+			'window_hours', tostring(window_hours),
 			'is_fast', '0',
 			'enter_fast_streak', '0',
 			'exit_slow_streak', '0',
 			'updated_at_ms', tostring(now_ms),
-			'score_version', '4')
+			'score_version', '3')
 	else
-		table.sort(durations)
+		table.sort(samples)
+		local trim = math.floor(#samples * 0.10)
+		local sum = 0
+		for index = trim + 1, #samples - trim do sum = sum + samples[index] end
+		local normal_total = sum / (#samples - 2 * trim)
+
 		local function percentile(p)
-			local position = (#durations - 1) * p + 1
+			local position = (#samples - 1) * p + 1
 			local lower = math.floor(position)
 			local upper = math.ceil(position)
-			if lower == upper then return durations[lower] end
-			return durations[lower] + (position - lower) * (durations[upper] - durations[lower])
+			if lower == upper then return samples[lower] end
+			return samples[lower] + (position - lower) * (samples[upper] - samples[lower])
 		end
-		local normal_total = percentile(0.50)
 		local p50 = percentile(0.50)
 		local p90 = percentile(0.90)
 
-		if short_slowdown then
-			-- The short window already supplies the three-request confirmation;
-			-- do not wait for three more aggregate updates.
-			is_fast = 0
-			enter_fast_streak = 0
-			exit_slow_streak = confirmations
-		else
-			if normal_total <= fast_threshold_ms then
-				-- Preserve the short-window eviction marker while the triggering
-				-- slow samples are still inside the five-minute slice. Clear it
-				-- only after that slice has no slow observations left.
-				if recent_slow_count == 0 or exit_slow_streak < confirmations then
-					exit_slow_streak = 0
-				end
-				if is_fast == 0 then
-					enter_fast_streak = enter_fast_streak + 1
-					if enter_fast_streak >= confirmations then
-						is_fast = 1
-						enter_fast_streak = 0
-					end
-				else
+		if normal_total <= fast_threshold_ms then
+			exit_slow_streak = 0
+			if is_fast == 0 then
+				enter_fast_streak = enter_fast_streak + 1
+				if enter_fast_streak >= confirmations then
+					is_fast = 1
 					enter_fast_streak = 0
-				end
-			elseif normal_total >= slow_threshold_ms then
-				enter_fast_streak = 0
-				exit_slow_streak = exit_slow_streak + 1
-				if is_fast == 1 and exit_slow_streak >= confirmations then
-					is_fast = 0
 				end
 			else
 				enter_fast_streak = 0
-				exit_slow_streak = 0
 			end
+		elseif normal_total >= slow_threshold_ms then
+			enter_fast_streak = 0
+			exit_slow_streak = exit_slow_streak + 1
+			if is_fast == 1 and exit_slow_streak >= confirmations then
+				is_fast = 0
+			end
+		else
+			enter_fast_streak = 0
+			exit_slow_streak = 0
 		end
 
 		redis.call('HSET', stats_key,
@@ -185,16 +130,15 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'p50_ms', tostring(p50),
 			'p90_ms', tostring(p90),
 			'sample_count', tostring(#samples),
-			'sample_window_size', tostring(max_samples),
+			'window_hours', tostring(window_hours),
 			'is_fast', tostring(is_fast),
 			'enter_fast_streak', tostring(enter_fast_streak),
 			'exit_slow_streak', tostring(exit_slow_streak),
 			'updated_at_ms', tostring(now_ms),
-			'score_version', '4')
+			'score_version', '3')
 	end
 
 	redis.call('EXPIRE', stats_key, stats_ttl_seconds)
-	redis.call('EXPIRE', recent_samples_key, 10 * 60)
 	redis.call('DEL', probe_key)
 	redis.call('DEL', manual_probe_key)
 	return 1
@@ -232,19 +176,19 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 	const dedupeTTL = 26 * time.Hour
 	statsKey := fmt.Sprintf("%s%d", totalLatencyStatsPrefix, accountID)
 	samplesKey := fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)
-	recentSamplesKey := fmt.Sprintf("%s%d", totalLatencyRecentSamplesPrefix, accountID)
 	dedupeKey := fmt.Sprintf("scheduler:total_duration:event:%d:%s", accountID, requestID)
 	probeKey := fmt.Sprintf("%s%d", totalLatencyProbePrefix, accountID)
 	manualProbeKey := fmt.Sprintf("%s%d", totalLatencyManualProbePrefix, accountID)
 	if _, err := totalLatencyStatsRecordScript.Run(
 		ctx,
 		c.rdb,
-		[]string{statsKey, samplesKey, recentSamplesKey, dedupeKey, probeKey, manualProbeKey},
+		[]string{statsKey, samplesKey, dedupeKey, probeKey, manualProbeKey},
 		durationMs,
 		int(statsTTL.Seconds()),
 		int(dedupeTTL.Seconds()),
-		totalLatencyMaxSamples,
-		totalLatencyMinimumSamples,
+		20,
+		int64((6*time.Hour)/time.Millisecond),
+		int64((24*time.Hour)/time.Millisecond),
 		12_000,
 		16_000,
 		3,
@@ -317,7 +261,7 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 			continue
 		}
 		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", totalLatencyStatsPrefix, accountID),
-			"normal_total_ms", "p50_ms", "p90_ms", "sample_count", "sample_window_size",
+			"normal_total_ms", "p50_ms", "p90_ms", "sample_count", "window_hours",
 			"updated_at_ms", "exit_slow_streak", "is_fast", "enter_fast_streak", "score_version")
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
@@ -325,7 +269,7 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 	}
 	for accountID, cmd := range commands {
 		values, err := cmd.Result()
-		if err != nil || len(values) != 10 || values[3] == nil || values[5] == nil || values[9] == nil || fmt.Sprint(values[9]) != "4" {
+		if err != nil || len(values) != 10 || values[3] == nil || values[5] == nil {
 			continue
 		}
 		count, countErr := strconv.ParseInt(fmt.Sprint(values[3]), 10, 64)
@@ -349,7 +293,7 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 			stat.P90MS, _ = strconv.ParseFloat(fmt.Sprint(values[2]), 64)
 		}
 		if values[4] != nil {
-			stat.SampleWindowSize, _ = strconv.Atoi(fmt.Sprint(values[4]))
+			stat.WindowHours, _ = strconv.Atoi(fmt.Sprint(values[4]))
 		}
 		if values[6] != nil {
 			stat.SlowStreak, _ = strconv.Atoi(fmt.Sprint(values[6]))

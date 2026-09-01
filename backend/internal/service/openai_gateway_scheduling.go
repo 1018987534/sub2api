@@ -1168,6 +1168,9 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, true) {
 			continue
 		}
+		if index < len(routing.routes)-1 && !s.apiKeyRouteFastPoolAvailable(ctx, group) {
+			continue
+		}
 		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
 		if err != nil {
 			return nil, err

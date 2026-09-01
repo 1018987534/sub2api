@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	firstTokenPriorityMinimumSamples = 10
+	firstTokenPriorityMinimumSamples = 20
 	firstTokenPriorityFreshFor       = 6 * time.Hour
 	firstTokenPriorityFastThreshold  = 12_000.0
 	firstTokenPriorityProbeBase      = 2 * time.Minute
@@ -74,7 +74,7 @@ type AccountFirstTokenLatencyMetric struct {
 	SchedulingRateMultiplier *float64                        `json:"scheduling_rate_multiplier"`
 	Groups                   []AccountFirstTokenLatencyGroup `json:"groups"`
 	SampleCount              int64                           `json:"sample_count"`
-	SampleWindowSize         int                             `json:"sample_window_size"`
+	WindowHours              int                             `json:"window_hours"`
 	UpdatedAt                time.Time                       `json:"updated_at"`
 	SlowStreak               int                             `json:"slow_streak"`
 	RecoveryFastStreak       int                             `json:"recovery_fast_streak"`
@@ -178,7 +178,7 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 			SchedulingRateMultiplier: schedulingRateMultiplier,
 			Groups:                   groups,
 			SampleCount:              stat.SampleCount,
-			SampleWindowSize:         stat.SampleWindowSize,
+			WindowHours:              stat.WindowHours,
 			UpdatedAt:                stat.UpdatedAt,
 			SlowStreak:               stat.SlowStreak,
 			RecoveryFastStreak:       stat.RecoveryFastStreak,

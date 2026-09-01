@@ -34,46 +34,46 @@ func repeatedDurations(count, durationMS int) []int {
 	return values
 }
 
-func TestTotalLatencyStatsCacheRequiresTenSamplesAndThreeFastAggregates(t *testing.T) {
+func TestTotalLatencyStatsCacheRequiresTwentySamplesAndThreeFastAggregates(t *testing.T) {
 	_, _, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 
-	recordTotalLatencySamples(t, cache, 15, "bootstrap", repeatedDurations(9, 8_000))
+	recordTotalLatencySamples(t, cache, 15, "bootstrap", repeatedDurations(19, 8_000))
 	stats, err := cache.GetStatsBatch(ctx, []int64{15})
 	require.NoError(t, err)
-	require.Equal(t, int64(9), stats[15].SampleCount)
+	require.Equal(t, int64(19), stats[15].SampleCount)
 	require.Zero(t, stats[15].PredictedMS)
 	require.False(t, stats[15].ReliableFast)
 
-	require.NoError(t, cache.RecordSample(ctx, 15, "fast-10", 8_000))
+	require.NoError(t, cache.RecordSample(ctx, 15, "fast-20", 8_000))
 	stats, err = cache.GetStatsBatch(ctx, []int64{15})
 	require.NoError(t, err)
 	require.Equal(t, 8_000.0, stats[15].PredictedMS)
 	require.Equal(t, 1, stats[15].RecoveryFastStreak)
 	require.False(t, stats[15].ReliableFast)
 
-	require.NoError(t, cache.RecordSample(ctx, 15, "fast-11", 8_000))
-	require.NoError(t, cache.RecordSample(ctx, 15, "fast-12", 8_000))
+	require.NoError(t, cache.RecordSample(ctx, 15, "fast-21", 8_000))
+	require.NoError(t, cache.RecordSample(ctx, 15, "fast-22", 8_000))
 	stats, err = cache.GetStatsBatch(ctx, []int64{15})
 	require.NoError(t, err)
 	require.True(t, stats[15].ReliableFast)
 	require.Zero(t, stats[15].RecoveryFastStreak)
 }
 
-func TestTotalLatencyStatsCacheUsesLatestTenMedianAndPercentiles(t *testing.T) {
+func TestTotalLatencyStatsCacheUsesTenToNinetyTrimmedMeanAndPercentiles(t *testing.T) {
 	_, _, cache := newTotalLatencyTestCache(t)
-	values := make([]int, 0, 10)
-	for seconds := 1; seconds <= 10; seconds++ {
+	values := make([]int, 0, 20)
+	for seconds := 1; seconds <= 20; seconds++ {
 		values = append(values, seconds*1_000)
 	}
 	recordTotalLatencySamples(t, cache, 42, "range", values)
 
 	stats, err := cache.GetStatsBatch(context.Background(), []int64{42})
 	require.NoError(t, err)
-	require.InDelta(t, 5_500, stats[42].PredictedMS, 0.001)
-	require.InDelta(t, 5_500, stats[42].P50MS, 0.001)
-	require.InDelta(t, 9_100, stats[42].P90MS, 0.001)
-	require.Equal(t, 10, stats[42].SampleWindowSize)
+	require.InDelta(t, 10_500, stats[42].PredictedMS, 0.001)
+	require.InDelta(t, 10_500, stats[42].P50MS, 0.001)
+	require.InDelta(t, 18_100, stats[42].P90MS, 0.001)
+	require.Equal(t, 6, stats[42].WindowHours)
 }
 
 func TestTotalLatencyStatsCacheDeduplicatesPerAccountRequest(t *testing.T) {
@@ -89,7 +89,7 @@ func TestTotalLatencyStatsCacheDeduplicatesPerAccountRequest(t *testing.T) {
 	require.Equal(t, int64(1), stats[43].SampleCount)
 }
 
-func TestTotalLatencyStatsCacheSingleSlowGenerationDoesNotEvictFastAccount(t *testing.T) {
+func TestTotalLatencyStatsCacheSingleLongGenerationDoesNotEvictFastAccount(t *testing.T) {
 	_, _, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 	recordTotalLatencySamples(t, cache, 17, "fast", repeatedDurations(22, 8_000))
@@ -106,68 +106,59 @@ func TestTotalLatencyStatsCacheSingleSlowGenerationDoesNotEvictFastAccount(t *te
 	require.Zero(t, after[17].SlowStreak)
 }
 
-func TestTotalLatencyStatsCacheFastAccountExitsAfterShortSlowBurst(t *testing.T) {
-	_, _, cache := newTotalLatencyTestCache(t)
+func TestTotalLatencyStatsCacheFastAccountNeedsThreeSlowAggregatesToExit(t *testing.T) {
+	mr, rdb, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 	accountID := int64(18)
-	recordTotalLatencySamples(t, cache, accountID, "fast", repeatedDurations(22, 8_000))
-	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
-	require.NoError(t, err)
-	require.True(t, stats[accountID].ReliableFast)
+	statsKey := fmt.Sprintf("%s%d", totalLatencyStatsPrefix, accountID)
+	samplesKey := fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)
+	nowMS := time.Now().UnixMilli()
+	require.NoError(t, rdb.HSet(ctx, statsKey,
+		"is_fast", "1",
+		"updated_at_ms", fmt.Sprint(nowMS),
+		"enter_fast_streak", "0",
+		"exit_slow_streak", "0",
+	).Err())
+	for index := 0; index < 19; index++ {
+		member := fmt.Sprintf("%d:seed-%d:20000", nowMS, index)
+		require.NoError(t, rdb.ZAdd(ctx, samplesKey, redis.Z{Score: float64(nowMS), Member: member}).Err())
+	}
 
 	for index := 1; index <= 2; index++ {
 		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("slow-%d", index), 20_000))
-		stats, err = cache.GetStatsBatch(ctx, []int64{accountID})
+		stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 		require.NoError(t, err)
-		require.True(t, stats[accountID].ReliableFast, "two slow requests are not enough for the short-window confirmation")
+		require.True(t, stats[accountID].ReliableFast)
+		require.Equal(t, index, stats[accountID].SlowStreak)
 	}
-
 	require.NoError(t, cache.RecordSample(ctx, accountID, "slow-3", 20_000))
-	stats, err = cache.GetStatsBatch(ctx, []int64{accountID})
-	require.NoError(t, err)
-	require.False(t, stats[accountID].ReliableFast)
-	require.Equal(t, 3, stats[accountID].SlowStreak)
-}
-
-func TestTotalLatencyStatsCacheShortWindowIncludesMoreThanLatestTenRequests(t *testing.T) {
-	_, _, cache := newTotalLatencyTestCache(t)
-	ctx := context.Background()
-	accountID := int64(24)
-	recordTotalLatencySamples(t, cache, accountID, "bootstrap", repeatedDurations(12, 8_000))
 	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
-	require.True(t, stats[accountID].ReliableFast)
-
-	// Add two fast requests after three slow requests. The latest-ten median
-	// is fast again, but the five-minute burst still contains three consecutive
-	// slow completions and must remove the account from the fast pool.
-	recordTotalLatencySamples(t, cache, accountID, "slow-burst", repeatedDurations(3, 20_000))
-	recordTotalLatencySamples(t, cache, accountID, "fast-tail", repeatedDurations(2, 8_000))
-	stats, err = cache.GetStatsBatch(ctx, []int64{accountID})
-	require.NoError(t, err)
 	require.False(t, stats[accountID].ReliableFast)
 	require.Equal(t, 3, stats[accountID].SlowStreak)
+	require.True(t, mr.Exists(statsKey))
 }
 
-func TestTotalLatencyStatsCacheKeepsOnlyLatestTenRequests(t *testing.T) {
+func TestTotalLatencyStatsCacheFallsBackToTwentyFourHours(t *testing.T) {
 	_, rdb, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 	accountID := int64(19)
-	values := make([]int, 0, 15)
-	for i := 1; i <= 15; i++ {
-		values = append(values, i*1_000)
-	}
-	recordTotalLatencySamples(t, cache, accountID, "latest", values)
+	recordTotalLatencySamples(t, cache, accountID, "older", repeatedDurations(20, 10_000))
 
 	samplesKey := fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)
-	count, err := rdb.ZCard(ctx, samplesKey).Result()
+	members, err := rdb.ZRange(ctx, samplesKey, 0, -1).Result()
 	require.NoError(t, err)
-	require.Equal(t, int64(10), count)
+	olderScore := float64(time.Now().Add(-7 * time.Hour).UnixMilli())
+	for _, member := range members {
+		require.NoError(t, rdb.ZAddArgs(ctx, samplesKey, redis.ZAddArgs{XX: true, Members: []redis.Z{{Score: olderScore, Member: member}}}).Err())
+	}
+	require.NoError(t, cache.RecordSample(ctx, accountID, "fresh", 10_000))
+
 	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
-	require.Equal(t, int64(10), stats[accountID].SampleCount)
-	require.Equal(t, 10_500.0, stats[accountID].PredictedMS)
-	require.Equal(t, 10, stats[accountID].SampleWindowSize)
+	require.Equal(t, 24, stats[accountID].WindowHours)
+	require.Equal(t, int64(21), stats[accountID].SampleCount)
+	require.Equal(t, 10_000.0, stats[accountID].PredictedMS)
 }
 
 func TestTotalLatencyStatsCacheStaleFastStateRequiresFreshConfirmation(t *testing.T) {

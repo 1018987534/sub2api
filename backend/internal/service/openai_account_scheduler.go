@@ -2351,6 +2351,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, true) {
 			continue
 		}
+		if index < len(routing.routes)-1 && !s.apiKeyRouteFastPoolAvailable(ctx, group) {
+			continue
+		}
 		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
 		if err != nil {
 			return nil, lastDecision, err
@@ -2390,6 +2393,47 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		return nil, lastDecision, lastNoAccount
 	}
 	return nil, lastDecision, ErrNoAvailableAccounts
+}
+
+// apiKeyRouteFastPoolAvailable keeps ordered API-key routes on groups that
+// currently have at least one confirmed fast-pool OpenAI API-key account.
+// When total-duration scheduling is disabled or its shared stats cache is not
+// available, the legacy route behavior remains unchanged.
+func (s *OpenAIGatewayService) apiKeyRouteFastPoolAvailable(ctx context.Context, group *Group) bool {
+	if s == nil || group == nil || NormalizeOpenAICompatiblePlatform(group.Platform) != PlatformOpenAI ||
+		!s.isFirstTokenPriorityEnabled(ctx) || s.rateLimitService == nil || s.rateLimitService.firstTokenLatencyStatsCache == nil {
+		return true
+	}
+
+	groupID := group.ID
+	accounts, err := s.listSchedulableAccounts(ctx, &groupID, PlatformOpenAI)
+	if err != nil {
+		// A temporary snapshot/Redis failure must not turn a configured backup
+		// route into an outage; the scheduler still applies its normal gates.
+		slog.Warn("api_key_route_fast_pool_check_failed", "group_id", group.ID, "error", err)
+		return true
+	}
+	accountIDs := make([]int64, 0, len(accounts))
+	for i := range accounts {
+		if isFirstTokenPriorityAccount(&accounts[i]) {
+			accountIDs = append(accountIDs, accounts[i].ID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return false
+	}
+	stats, err := s.rateLimitService.firstTokenLatencyStatsCache.GetStatsBatch(ctx, accountIDs)
+	if err != nil {
+		slog.Warn("api_key_route_fast_pool_stats_failed", "group_id", group.ID, "error", err)
+		return true
+	}
+	now := time.Now()
+	for _, accountID := range accountIDs {
+		if stat, ok := stats[accountID]; ok && firstTokenPriorityStatsFast(stat, now) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *OpenAIGatewayService) selectAccountWithSchedulerSingleGroup(
