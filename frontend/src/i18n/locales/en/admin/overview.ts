@@ -79,7 +79,7 @@ export default {
       configureSystem: 'Configure system settings',
       failedToLoad: 'Failed to load dashboard statistics',
       firstTokenLatencyTitle: 'Relay Normal Request Duration',
-      firstTokenLatencyDescription: 'Uses completed, billable streams only. The score is the median of the latest 10 requests. A newly completed request at the slow threshold immediately leaves the fast pool; recovery requires three consecutive fast medians. The fast pool prefers lower rates; the slow pool prefers shorter duration.',
+      firstTokenLatencyDescription: 'Uses completed, billable streams only. The score is the median of the latest 10 requests. A fast account leaves the fast pool when the latest 5 minutes contain at least 3 requests and 60% are slow, or when 3 slow requests complete consecutively; recovery requires three consecutive fast medians. The fast pool prefers lower rates; the slow pool prefers shorter duration.',
       firstTokenCacheRateDescription: 'Cache rate covers the last 24 hours: cache-read tokens / (input + cache-creation + cache-read tokens). "-" means there is no valid sample.',
       firstTokenLatencyFailed: 'Failed to load total-duration statistics',
       firstTokenLatencyEmpty: 'No total-duration data for enabled relay accounts yet',
