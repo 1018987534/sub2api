@@ -5,7 +5,10 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -17,6 +20,69 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/lib/pq"
 )
+
+const (
+	maxDatabaseInitializationRetries = 8
+	databaseInitializationRetryBase  = time.Second
+	databaseInitializationRetryMax   = 30 * time.Second
+)
+
+// initializeDatabaseWithRetry retries only errors that indicate PostgreSQL is
+// temporarily unavailable during startup. Permanent configuration, migration,
+// and data errors are returned immediately so they remain visible to operators.
+func initializeDatabaseWithRetry(ctx context.Context, initialize func(context.Context) error) error {
+	return initializeDatabaseWithRetryWithWait(ctx, initialize, waitForDatabaseInitializationRetry)
+}
+
+func initializeDatabaseWithRetryWithWait(
+	ctx context.Context,
+	initialize func(context.Context) error,
+	wait func(context.Context, time.Duration) error,
+) error {
+	for attempt := 1; ; attempt++ {
+		if err := initialize(ctx); err == nil {
+			return nil
+		} else {
+			if !isTransientDatabaseInitializationError(err) || attempt > maxDatabaseInitializationRetries {
+				return err
+			}
+
+			delay := databaseInitializationRetryBase * time.Duration(1<<(attempt-1))
+			if delay > databaseInitializationRetryMax {
+				delay = databaseInitializationRetryMax
+			}
+			slog.Warn("database initialization temporarily unavailable; retrying",
+				"retry", attempt,
+				"max_retries", maxDatabaseInitializationRetries,
+				"retry_in", delay,
+				"error", err,
+			)
+			if err := wait(ctx, delay); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func waitForDatabaseInitializationRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func isTransientDatabaseInitializationError(err error) bool {
+	var pqErr *pq.Error
+	if !errors.As(err, &pqErr) {
+		return false
+	}
+	code := string(pqErr.Code)
+	return code == "57P03" || strings.HasPrefix(code, "08")
+}
 
 // InitEnt 初始化 Ent ORM 客户端并返回客户端实例和底层的 *sql.DB。
 //
@@ -69,30 +135,20 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 	// 这种方式比 Ent 的自动迁移更可控，支持复杂的迁移场景。
 	migrationCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	var migrationErr error
-	if cfg.IsGateway() {
-		migrationErr = validateMigrationsFS(migrationCtx, drv.DB(), migrations.FS)
-	} else {
-		migrationErr = applyMigrationsFS(migrationCtx, drv.DB(), migrations.FS)
-	}
-	if migrationErr != nil {
+	if err := initializeDatabaseWithRetry(migrationCtx, func(ctx context.Context) error {
+		return applyMigrationsFS(ctx, drv.DB(), migrations.FS)
+	}); err != nil {
 		_ = drv.Close() // 迁移失败时关闭驱动，避免资源泄露
-		return nil, nil, migrationErr
+		return nil, nil, err
 	}
 
 	// 创建 Ent 客户端，绑定到已配置的数据库驱动。
 	client := ent.NewClient(ent.Driver(drv))
 
 	// 启动阶段：从配置或数据库中确保系统密钥可用。
-	var secretErr error
-	if cfg.IsGateway() {
-		secretErr = loadBootstrapSecrets(migrationCtx, client, cfg)
-	} else {
-		secretErr = ensureBootstrapSecrets(migrationCtx, client, cfg)
-	}
-	if secretErr != nil {
+	if err := ensureBootstrapSecrets(migrationCtx, client, cfg); err != nil {
 		_ = client.Close()
-		return nil, nil, secretErr
+		return nil, nil, err
 	}
 
 	// 在密钥补齐后执行完整配置校验，避免空 jwt.secret 导致服务运行时失败。
