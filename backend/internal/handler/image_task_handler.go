@@ -33,9 +33,9 @@ func NewAsyncImageHandler(tasks *service.ImageTaskService, openAI *OpenAIGateway
 	return h
 }
 
-// enabled reports whether the async image task feature is available. Object
-// storage is the enablement gate: without it the endpoints are fully disabled
-// so that large base64 results never land in Redis.
+// enabled reports whether the async image task feature is available. Generated
+// results are held in process memory, so object-storage configuration is not a
+// prerequisite for one-time browser delivery.
 func (h *AsyncImageHandler) enabled() bool {
 	return h != nil && h.tasks != nil && h.tasks.Enabled()
 }
@@ -76,6 +76,7 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.OpenAIImagesMaxRequestBodyBytes)
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
@@ -88,6 +89,16 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 	if len(body) == 0 {
 		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
+	}
+	if isMultipartImagesContentType(c.GetHeader("Content-Type")) && strings.Contains(c.Request.URL.Path, "/images/edits") {
+		compressedBody, compressedContentType, compressErr := service.CompressOpenAIImagesMultipartRequest(body, c.GetHeader("Content-Type"))
+		if compressErr != nil {
+			imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", compressErr.Error())
+			return
+		}
+		body = compressedBody
+		c.Request.Header.Set("Content-Type", compressedContentType)
+		c.Request.ContentLength = int64(len(body))
 	}
 	if asyncImageRequestStreams(c.GetHeader("Content-Type"), body) {
 		imageTaskJSONError(c, http.StatusBadRequest, "invalid_request_error", "streaming image requests cannot be submitted as asynchronous tasks")
@@ -168,10 +179,8 @@ func (h *AsyncImageHandler) checkSecurityAuditBeforeSubmit(c *gin.Context, apiKe
 }
 
 func (h *AsyncImageHandler) Get(c *gin.Context) {
-	// Polling deliberately does not require the feature to be enabled, only that
-	// the task store is reachable. Turning the switch off in the admin UI must not
-	// strand tasks that were already accepted — their results are still in Redis
-	// and their submitters are still polling.
+	// Polling only needs the task store and the in-process result buffer. A
+	// completed result is consumed by the first successful poll.
 	if !h.pollable() {
 		imageTaskJSONError(c, http.StatusNotFound, "not_found_error", "async image tasks are not enabled")
 		return

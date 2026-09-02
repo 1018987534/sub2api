@@ -48,6 +48,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 		return
 	}
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.OpenAIImagesMaxRequestBodyBytes)
 	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
@@ -60,6 +61,16 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 	if len(body) == 0 {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
 		return
+	}
+	if isMultipartImagesContentType(c.GetHeader("Content-Type")) && strings.Contains(c.Request.URL.Path, "/images/edits") {
+		compressedBody, compressedContentType, compressErr := service.CompressOpenAIImagesMultipartRequest(body, c.GetHeader("Content-Type"))
+		if compressErr != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", compressErr.Error())
+			return
+		}
+		body = compressedBody
+		c.Request.Header.Set("Content-Type", compressedContentType)
+		c.Request.ContentLength = int64(len(body))
 	}
 
 	if isMultipartImagesContentType(c.GetHeader("Content-Type")) {

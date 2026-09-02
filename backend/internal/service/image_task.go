@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -19,7 +20,8 @@ const (
 	ImageTaskStatusCompleted  = "completed"
 	ImageTaskStatusFailed     = "failed"
 
-	defaultImageTaskTTL              = 24 * time.Hour
+	// Task metadata is short-lived; generated image bytes never enter the store.
+	defaultImageTaskTTL              = time.Hour
 	defaultImageTaskExecutionTimeout = 30 * time.Minute
 )
 
@@ -104,6 +106,9 @@ type ImageTaskService struct {
 	uploader         *ImageResultUploader
 	enabled          bool
 	resolve          ImageStorageResolver
+	ephemeral        bool
+	ephemeralMu      sync.Mutex
+	ephemeralResults map[string]json.RawMessage
 	ttl              time.Duration
 	executionTimeout time.Duration
 }
@@ -120,6 +125,17 @@ func NewImageTaskServiceWithOptions(store ImageTaskStore, ttl, executionTimeout 
 		executionTimeout = defaultImageTaskExecutionTimeout
 	}
 	return &ImageTaskService{store: store, ttl: ttl, executionTimeout: executionTimeout}
+}
+
+// NewImageTaskServiceBrowserMemory stores generated image results only in the
+// process memory and consumes each result on its first successful poll. Redis
+// keeps task status and metadata so the browser can continue polling, but never
+// receives image bytes.
+func NewImageTaskServiceBrowserMemory(store ImageTaskStore, ttl, executionTimeout time.Duration) *ImageTaskService {
+	s := NewImageTaskServiceWithOptions(store, ttl, executionTimeout)
+	s.ephemeral = true
+	s.ephemeralResults = make(map[string]json.RawMessage)
+	return s
 }
 
 // NewImageTaskServiceWithUploader 构造一个已启用的图片任务服务：结果会先经 uploader
@@ -156,6 +172,9 @@ func (s *ImageTaskService) current() (*ImageResultUploader, bool) {
 func (s *ImageTaskService) Enabled() bool {
 	if s == nil || s.store == nil {
 		return false
+	}
+	if s.ephemeral {
+		return true
 	}
 	_, enabled := s.current()
 	return enabled
@@ -243,7 +262,16 @@ func (s *ImageTaskService) Get(ctx context.Context, owner ImageTaskOwner, id str
 		// Do not reveal whether a random task ID exists for another caller.
 		return nil, ErrImageTaskNotFound
 	}
-	return imageTaskToPublic(task), nil
+	public := imageTaskToPublic(task)
+	if s.ephemeral && task.Status == ImageTaskStatusCompleted {
+		s.ephemeralMu.Lock()
+		result := append(json.RawMessage(nil), s.ephemeralResults[task.ID]...)
+		delete(s.ephemeralResults, task.ID)
+		s.ephemeralMu.Unlock()
+		public.Result = result
+		public.ImageURL = firstImageTaskURL(result)
+	}
+	return public, nil
 }
 
 func (s *ImageTaskService) List(ctx context.Context, owner ImageTaskOwner, limit int) ([]*ImageTask, error) {
@@ -265,7 +293,12 @@ func (s *ImageTaskService) List(ctx context.Context, owner ImageTaskOwner, limit
 		if record == nil || record.UserID != owner.UserID || record.APIKeyID != owner.APIKeyID {
 			continue
 		}
-		tasks = append(tasks, imageTaskToPublic(record))
+		public := imageTaskToPublic(record)
+		if s.ephemeral {
+			public.Result = nil
+			public.ImageURL = ""
+		}
+		tasks = append(tasks, public)
 	}
 	return tasks, nil
 }
@@ -290,6 +323,11 @@ func (s *ImageTaskService) Delete(ctx context.Context, owner ImageTaskOwner, id 
 	if err := s.store.Delete(ctx, record); err != nil {
 		return ErrImageTaskUnavailable.WithCause(err)
 	}
+	if s.ephemeral {
+		s.ephemeralMu.Lock()
+		delete(s.ephemeralResults, record.ID)
+		s.ephemeralMu.Unlock()
+	}
 	return nil
 }
 
@@ -297,14 +335,16 @@ func (s *ImageTaskService) Complete(ctx context.Context, id string, statusCode i
 	if !json.Valid(result) {
 		return s.Fail(ctx, id, http.StatusBadGateway, imageTaskErrorJSON("api_error", "upstream returned a non-JSON image response"))
 	}
-	if uploader, _ := s.current(); uploader != nil {
-		rewritten, err := uploader.Rewrite(ctx, id, result)
-		if err != nil {
-			// 转存失败不回退存 base64，避免大 blob 撑爆 Redis：直接把任务标记为失败。
-			logger.L().Error("image_task.offload_failed", zap.String("task_id", id), zap.Error(err))
-			return s.Fail(ctx, id, http.StatusBadGateway, imageTaskErrorJSON("api_error", "failed to store generated image to object storage"))
+	if !s.ephemeral {
+		if uploader, _ := s.current(); uploader != nil {
+			rewritten, err := uploader.Rewrite(ctx, id, result)
+			if err != nil {
+				// 转存失败不回退存 base64，避免大 blob 撑爆 Redis：直接把任务标记为失败。
+				logger.L().Error("image_task.offload_failed", zap.String("task_id", id), zap.Error(err))
+				return s.Fail(ctx, id, http.StatusBadGateway, imageTaskErrorJSON("api_error", "failed to store generated image to object storage"))
+			}
+			result = rewritten
 		}
-		result = rewritten
 	}
 	return s.finish(ctx, id, ImageTaskStatusCompleted, statusCode, result, nil)
 }
@@ -331,12 +371,33 @@ func (s *ImageTaskService) finish(ctx context.Context, id, status string, status
 	completedAt := now.Unix()
 	task.Status = status
 	task.HTTPStatus = statusCode
-	task.Result = result
+	if s.ephemeral && status == ImageTaskStatusCompleted {
+		task.Result = nil
+	} else {
+		task.Result = result
+	}
 	task.Error = taskErr
 	task.CompletedAt = &completedAt
 	task.ExpiresAt = now.Add(s.ttl).Unix()
+	if s.ephemeral && status == ImageTaskStatusCompleted {
+		s.ephemeralMu.Lock()
+		s.ephemeralResults[task.ID] = append(json.RawMessage(nil), result...)
+		s.ephemeralMu.Unlock()
+	}
 	if err := s.store.Save(ctx, task, s.ttl); err != nil {
+		if s.ephemeral && status == ImageTaskStatusCompleted {
+			s.ephemeralMu.Lock()
+			delete(s.ephemeralResults, task.ID)
+			s.ephemeralMu.Unlock()
+		}
 		return ErrImageTaskUnavailable.WithCause(err)
+	}
+	if s.ephemeral && status == ImageTaskStatusCompleted {
+		time.AfterFunc(s.ttl, func() {
+			s.ephemeralMu.Lock()
+			delete(s.ephemeralResults, task.ID)
+			s.ephemeralMu.Unlock()
+		})
 	}
 	return nil
 }

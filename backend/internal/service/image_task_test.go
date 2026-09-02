@@ -134,3 +134,40 @@ func TestImageTaskServiceDoesNotDeleteProcessingTask(t *testing.T) {
 
 	require.ErrorIs(t, svc.Delete(context.Background(), owner, created.ID), ErrImageTaskProcessing)
 }
+
+func TestImageTaskServiceBrowserMemoryConsumesCompletedResultOnce(t *testing.T) {
+	store := &imageTaskMemoryStore{}
+	svc := NewImageTaskServiceBrowserMemory(store, time.Hour, time.Minute)
+	owner := ImageTaskOwner{UserID: 4, APIKeyID: 5}
+	created, err := svc.Create(context.Background(), owner)
+	require.NoError(t, err)
+
+	result := json.RawMessage(`{"created":123,"data":[{"url":"data:image/png;base64,aW1hZ2U="}]}`)
+	require.NoError(t, svc.Complete(context.Background(), created.ID, http.StatusOK, result))
+	require.Empty(t, store.task.Result)
+
+	first, err := svc.Get(context.Background(), owner, created.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, string(result), string(first.Result))
+	require.Equal(t, "data:image/png;base64,aW1hZ2U=", first.ImageURL)
+
+	second, err := svc.Get(context.Background(), owner, created.ID)
+	require.NoError(t, err)
+	require.Empty(t, second.Result)
+	require.Empty(t, second.ImageURL)
+
+	listed, err := svc.List(context.Background(), owner, 10)
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Empty(t, listed[0].Result)
+}
+
+func TestProvideImageTaskServiceUsesBrowserMemoryMode(t *testing.T) {
+	store := &imageTaskMemoryStore{}
+	svc := ProvideImageTaskService(store, nil)
+	require.True(t, svc.Enabled())
+	created, err := svc.Create(context.Background(), ImageTaskOwner{UserID: 1, APIKeyID: 2})
+	require.NoError(t, err)
+	require.NoError(t, svc.Complete(context.Background(), created.ID, http.StatusOK, json.RawMessage(`{"data":[{"url":"https://example.test/image.png"}]}`)))
+	require.Empty(t, store.task.Result)
+}
