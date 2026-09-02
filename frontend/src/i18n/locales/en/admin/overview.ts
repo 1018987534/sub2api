@@ -79,7 +79,7 @@ export default {
       configureSystem: 'Configure system settings',
       failedToLoad: 'Failed to load dashboard statistics',
       firstTokenLatencyTitle: 'Relay Normal Request Duration',
-      firstTokenLatencyDescription: 'Uses completed, billable streams only. The score is the 10%-90% trimmed mean from at least 20 samples in the last 6 hours, falling back to 24 hours. The fast pool prefers lower rates; the slow pool prefers shorter duration.',
+      firstTokenLatencyDescription: 'Uses completed, billable streams only. Normal total duration is the median of the latest 50 samples, or all available samples when fewer than 50 exist; no fastest or slowest samples are removed. The fast pool prefers lower rates; the slow pool prefers shorter duration.',
       firstTokenCacheRateDescription: 'Cache rate covers the last 24 hours: cache-read tokens / (input + cache-creation + cache-read tokens). "-" means there is no valid sample.',
       firstTokenLatencyFailed: 'Failed to load total-duration statistics',
       firstTokenLatencyEmpty: 'No total-duration data for enabled relay accounts yet',

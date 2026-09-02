@@ -79,7 +79,7 @@ export default {
       configureSystem: '配置系统设置',
       failedToLoad: '加载仪表盘数据失败',
       firstTokenLatencyTitle: '上游中转正常请求总耗时',
-      firstTokenLatencyDescription: '只统计成功计费的真实流式请求。优先使用近 6 小时至少 20 条样本，不足时回退近 24 小时；去掉最快和最慢各 10% 后求平均。快池内低倍率优先，慢池按总耗时优先。',
+      firstTokenLatencyDescription: '只统计成功计费的真实流式请求。正常总耗时取最近 50 条样本的中位数，不足 50 条时使用已有样本，不剔除最快或最慢样本。快池内低倍率优先，慢池按总耗时优先。',
       firstTokenCacheRateDescription: '缓存率统计近 24 小时缓存读取 token / 输入 token（输入 + 缓存创建 + 缓存读取），无有效样本显示“-”。',
       firstTokenLatencyFailed: '总耗时统计加载失败',
       firstTokenLatencyEmpty: '当前启用的上游中转账号暂无总耗时统计',
