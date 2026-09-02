@@ -1559,9 +1559,10 @@ func TestOpenAIStreamingTimeout(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "stream data interval timeout") {
 		t.Fatalf("expected stream timeout error, got %v", err)
 	}
-	if !strings.Contains(rec.Body.String(), "\"type\":\"error\"") || !strings.Contains(rec.Body.String(), "stream_timeout") {
-		t.Fatalf("expected OpenAI-compatible error SSE event, got %q", rec.Body.String())
-	}
+	body := rec.Body.String()
+	require.Equal(t, 1, strings.Count(body, `"type":"response.failed"`))
+	require.Contains(t, body, "stream_timeout")
+	require.NotContains(t, body, `"type":"error"`)
 }
 
 func TestOpenAIStreamingContextCanceledReturnsIncompleteErrorWithoutInjectingErrorEvent(t *testing.T) {
@@ -1672,7 +1673,11 @@ func TestOpenAIStreamingPostOutputDisconnectQuarantinesSharedProxyWithoutSameStr
 		require.Error(t, err)
 		var failoverErr *UpstreamFailoverError
 		require.False(t, errors.As(err, &failoverErr), "post-output disconnect must not fail over inside the same stream")
-		require.Contains(t, rec.Body.String(), "partial")
+		body := rec.Body.String()
+		require.Contains(t, body, "partial")
+		require.Equal(t, 1, strings.Count(body, `"type":"response.failed"`))
+		require.Contains(t, body, "stream_read_error")
+		require.NotContains(t, body, `"type":"error"`)
 	}
 
 	scheduler := &defaultOpenAIAccountScheduler{service: svc}
@@ -2392,6 +2397,9 @@ func TestOpenAIStreamingMissingTerminalEventReturnsIncompleteError(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "missing terminal event") {
 		t.Fatalf("expected missing terminal event error, got %v", err)
 	}
+	body := rec.Body.String()
+	require.Equal(t, 1, strings.Count(body, `"type":"response.failed"`))
+	require.Contains(t, body, "stream_interrupted")
 }
 
 func TestOpenAIStreamingPassthroughMissingTerminalEventReturnsIncompleteError(t *testing.T) {
@@ -2424,6 +2432,9 @@ func TestOpenAIStreamingPassthroughMissingTerminalEventReturnsIncompleteError(t 
 	if err == nil || !strings.Contains(err.Error(), "missing terminal event") {
 		t.Fatalf("expected missing terminal event error, got %v", err)
 	}
+	body := rec.Body.String()
+	require.Equal(t, 1, strings.Count(body, `"type":"response.failed"`))
+	require.Contains(t, body, "stream_interrupted")
 }
 
 func TestOpenAIStreamingPassthroughPostOutputDisconnectQuarantinesSharedProxy(t *testing.T) {
@@ -2457,7 +2468,10 @@ func TestOpenAIStreamingPassthroughPostOutputDisconnectQuarantinesSharedProxy(t 
 		require.Error(t, err)
 		var failoverErr *UpstreamFailoverError
 		require.False(t, errors.As(err, &failoverErr), "post-output disconnect must not fail over inside the same stream")
-		require.Contains(t, rec.Body.String(), "partial")
+		body := rec.Body.String()
+		require.Contains(t, body, "partial")
+		require.Equal(t, 1, strings.Count(body, `"type":"response.failed"`))
+		require.Contains(t, body, "stream_read_error")
 	}
 
 	require.True(t, svc.isOpenAIProxyStreamQuarantined(context.Background(), account))
@@ -2740,9 +2754,8 @@ func TestOpenAIStreamingTooLong(t *testing.T) {
 	if !errors.Is(err, bufio.ErrTooLong) {
 		t.Fatalf("expected ErrTooLong, got %v", err)
 	}
-	if !strings.Contains(rec.Body.String(), "\"type\":\"error\"") || !strings.Contains(rec.Body.String(), "response_too_large") {
-		t.Fatalf("expected OpenAI-compatible error SSE event, got %q", rec.Body.String())
-	}
+	require.Equal(t, 1, strings.Count(rec.Body.String(), `"type":"response.failed"`))
+	require.Contains(t, rec.Body.String(), "response_too_large")
 }
 
 func TestOpenAINonStreamingContentTypePassThrough(t *testing.T) {

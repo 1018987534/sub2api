@@ -338,6 +338,15 @@ func (l *openAIWSPassthroughTurnLifecycle) cancelResponseCreate() {
 	l.mu.Unlock()
 }
 
+func (l *openAIWSPassthroughTurnLifecycle) isInFlight() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.inFlight
+}
+
 func (l *openAIWSPassthroughTurnLifecycle) beginTerminalWrite() {
 	if l != nil {
 		l.mu.Lock()
@@ -1257,6 +1266,33 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			BeforeRelayCancel: func(exit openaiwsv2.RelayExit) {
 				if context.Cause(ctx) != nil {
 					return
+				}
+				if exit.Stage == "read_upstream" && exit.WroteDownstream && turnLifecycle.isInFlight() {
+					requestModelForFailure, _ := usageMeta.turnModels("")
+					if requestModelForFailure == "" {
+						requestModelForFailure = initialRequestModel
+					}
+					failedEvent := buildOpenAIWSSyntheticFailedEvent(
+						"",
+						requestModelForFailure,
+						"stream_read_error",
+						"Upstream response stream was interrupted",
+					)
+					turnLifecycle.beginTerminalWrite()
+					writeCtx, cancelWrite := newOpenAIWSDownstreamWriteContext(ctx, hooks, s.openAIWSWriteTimeout())
+					writeErr := clientConn.Write(writeCtx, coderws.MessageText, failedEvent)
+					cancelWrite()
+					turnLifecycle.finishTerminalWrite(writeErr == nil, clientFrameConn.markTurnCompleted)
+					if writeErr == nil {
+						markOpenAIWSClientVisibleFailure(c, "response.failed", failedEvent)
+						MarkOpsStreamFailure(c, "upstream_error", "stream_read_error", "Upstream response stream was interrupted", http.StatusBadGateway)
+					} else {
+						logOpenAIWSV2Passthrough(
+							"failed_terminal_write_failed account_id=%d err=%s",
+							account.ID,
+							truncateOpenAIWSLogValue(writeErr.Error(), openAIWSLogValueMaxLen),
+						)
+					}
 				}
 				status, reason, ok := openAIWSPassthroughRelayClientClose(exit, int(completedTurns.Load()))
 				if !ok {

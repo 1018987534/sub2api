@@ -280,9 +280,11 @@ func TestOpenAIStreamingPassthroughScannerErrorFlushesWrittenResidual(t *testing
 	}, -1)
 
 	require.ErrorIs(t, err, readErr)
-	wantBody := string(upstream) + "\n"
-	require.Equal(t, wantBody, recorder.Body.String())
-	require.Equal(t, []int{len(wantBody)}, writer.flushBodyLengths)
+	body := recorder.Body.String()
+	require.Contains(t, body, string(upstream)+"\n")
+	require.Equal(t, 1, strings.Count(body, `"type":"response.failed"`))
+	require.Contains(t, body, "stream_read_error")
+	require.Len(t, writer.flushBodyLengths, 1)
 }
 
 func TestOpenAIStreamingPassthroughNamespaceRestoreErrorFlushesWrittenResidualOnce(t *testing.T) {

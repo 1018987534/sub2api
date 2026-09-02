@@ -366,6 +366,7 @@ func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
 }
 
 func buildOpenAIWSHTTPBridgeFailedEvent(responseID, model string, source []byte, fallbackMessage string) []byte {
+	responseID = ensureOpenAIResponseID(responseID)
 	errorType := strings.TrimSpace(gjson.GetBytes(source, "error.type").String())
 	if errorType == "" {
 		errorType = strings.TrimSpace(gjson.GetBytes(source, "response.error.type").String())
@@ -400,6 +401,15 @@ func buildOpenAIWSHTTPBridgeFailedEvent(responseID, model string, source []byte,
 		return []byte(`{"type":"response.failed","response":{"status":"failed","output":[],"error":{"code":"upstream_error","message":"Upstream response failed"}}}`)
 	}
 	return body
+}
+
+func buildOpenAIWSSyntheticFailedEvent(responseID string, model string, code string, message string) []byte {
+	return buildOpenAIWSHTTPBridgeFailedEvent(
+		responseID,
+		model,
+		buildOpenAISyntheticFailureSource(code, message),
+		message,
+	)
 }
 
 func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
