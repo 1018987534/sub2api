@@ -20,7 +20,6 @@ const (
 	totalLatencyManualProbePrefix = "scheduler:total_duration:manual_probe:"
 
 	totalLatencyTransitionWindow         = 3 * time.Minute
-	totalLatencyExitMinimumSamples       = 10
 	totalLatencyExitMinimumSpan          = 2 * time.Minute
 	totalLatencyExitRatioNumerator       = 7
 	totalLatencyExitRatioDenominator     = 10
@@ -36,8 +35,10 @@ const (
 // Each completed, billable stream updates one timestamped 24-hour window and
 // atomically derives a stable bounded rolling average plus a bounded three-minute
 // transition window. Fast-pool entry still requires confirmation; exit needs
-// broad, abrupt degradation, while one fast slow-pool sample opens a short
-// recovery-probe state without immediately promoting the account.
+// broad, abrupt degradation (without a fixed transition sample-count gate), while
+// one fast slow-pool sample opens a short recovery-probe state without immediately
+// promoting the account. A single completed request over the circuit threshold
+// immediately removes an already-fast account from the fast pool.
 var totalLatencyStatsRecordScript = redis.NewScript(`
 	local stats_key = KEYS[1]
 	local samples_key = KEYS[2]
@@ -56,17 +57,17 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local fast_threshold_ms = tonumber(ARGV[8])
 	local slow_threshold_ms = tonumber(ARGV[9])
 	local transition_window_ms = tonumber(ARGV[10])
-	local exit_minimum_samples = tonumber(ARGV[11])
-	local exit_minimum_span_ms = tonumber(ARGV[12])
-	local exit_ratio_numerator = tonumber(ARGV[13])
-	local exit_ratio_denominator = tonumber(ARGV[14])
-	local exit_relative_numerator = tonumber(ARGV[15])
-	local exit_relative_denominator = tonumber(ARGV[16])
-	local exit_minimum_delta_ms = tonumber(ARGV[17])
-	local recovery_minimum_samples = tonumber(ARGV[18])
-	local recovery_minimum_span_ms = tonumber(ARGV[19])
-	local recovery_ratio_numerator = tonumber(ARGV[20])
-	local recovery_ratio_denominator = tonumber(ARGV[21])
+	local exit_minimum_span_ms = tonumber(ARGV[11])
+	local exit_ratio_numerator = tonumber(ARGV[12])
+	local exit_ratio_denominator = tonumber(ARGV[13])
+	local exit_relative_numerator = tonumber(ARGV[14])
+	local exit_relative_denominator = tonumber(ARGV[15])
+	local exit_minimum_delta_ms = tonumber(ARGV[16])
+	local recovery_minimum_samples = tonumber(ARGV[17])
+	local recovery_minimum_span_ms = tonumber(ARGV[18])
+	local recovery_ratio_numerator = tonumber(ARGV[19])
+	local recovery_ratio_denominator = tonumber(ARGV[20])
+	local single_sample_circuit_ms = tonumber(ARGV[21])
 	local request_id = ARGV[22]
 	local now = redis.call('TIME')
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
@@ -147,11 +148,13 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local old_normal_total = tonumber(redis.call('HGET', stats_key, 'normal_total_ms')) or 0
 	local old_updated = tonumber(redis.call('HGET', stats_key, 'updated_at_ms'))
 	local is_fast = tonumber(redis.call('HGET', stats_key, 'is_fast')) or 0
+	local circuit_broken = tonumber(redis.call('HGET', stats_key, 'circuit_broken')) or 0
 	local enter_fast_streak = tonumber(redis.call('HGET', stats_key, 'enter_fast_streak')) or 0
 	local recovery_fast_streak = tonumber(redis.call('HGET', stats_key, 'recovery_fast_streak')) or 0
 	local exit_slow_streak = tonumber(redis.call('HGET', stats_key, 'exit_slow_streak')) or 0
 	if not old_updated or now_ms - old_updated > primary_window_ms then
 		is_fast = 0
+		circuit_broken = 0
 		enter_fast_streak = 0
 		recovery_fast_streak = 0
 		exit_slow_streak = 0
@@ -164,8 +167,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local abrupt_difference = baseline_total <= 0 or
 		(recent_total * exit_relative_denominator >= baseline_total * exit_relative_numerator and
 		recent_total >= baseline_total + exit_minimum_delta_ms)
-	if transition_sample_count >= exit_minimum_samples and
-		transition_span_ms >= exit_minimum_span_ms and
+	if transition_span_ms >= exit_minimum_span_ms and
 		transition_slow_count * exit_ratio_denominator >= transition_sample_count * exit_ratio_numerator and
 		recent_total >= slow_threshold_ms and abrupt_difference then
 		exit_window_degraded = 1
@@ -193,6 +195,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'enter_fast_streak', '0',
 			'recovery_fast_streak', '0',
 			'exit_slow_streak', '0',
+			'circuit_broken', tostring(circuit_broken),
 			'updated_at_ms', tostring(now_ms),
 			'baseline_total_ms', tostring(baseline_total),
 			'recent_total_ms', tostring(recent_total),
@@ -203,12 +206,22 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'exit_window_degraded', tostring(exit_window_degraded),
 			'recovery_candidate', tostring(recovery_candidate),
 			'recovery_window_confirmed', tostring(recovery_window_confirmed),
-			'score_version', '7')
+			'score_version', '8')
 	else
 		table.sort(samples)
 		local normal_total = average(samples)
 		local p50 = percentile(samples, 0.50)
 		local p90 = percentile(samples, 0.90)
+		local single_sample_circuit = is_fast == 1 and duration_ms > single_sample_circuit_ms
+		if single_sample_circuit then
+			is_fast = 0
+			circuit_broken = 1
+			enter_fast_streak = 0
+			recovery_fast_streak = 0
+			exit_slow_streak = 0
+			recovery_candidate = 0
+			recovery_window_confirmed = 0
+		end
 
 		if #samples < minimum_samples then
 			is_fast = 0
@@ -239,6 +252,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			end
 			if recovery_window_confirmed == 1 then
 				is_fast = 1
+				circuit_broken = 0
 				enter_fast_streak = 0
 				recovery_fast_streak = 0
 				exit_slow_streak = 0
@@ -263,6 +277,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'enter_fast_streak', tostring(enter_fast_streak),
 			'recovery_fast_streak', tostring(recovery_fast_streak),
 			'exit_slow_streak', tostring(exit_slow_streak),
+			'circuit_broken', tostring(circuit_broken),
 			'updated_at_ms', tostring(now_ms),
 			'baseline_total_ms', tostring(baseline_total),
 			'recent_total_ms', tostring(recent_total),
@@ -273,7 +288,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'exit_window_degraded', tostring(exit_window_degraded),
 			'recovery_candidate', tostring(recovery_candidate),
 			'recovery_window_confirmed', tostring(recovery_window_confirmed),
-			'score_version', '7')
+			'score_version', '8')
 	end
 
 	redis.call('EXPIRE', stats_key, stats_ttl_seconds)
@@ -334,7 +349,6 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 		settings.FastThresholdSeconds*1000,
 		settings.SlowThresholdSeconds*1000,
 		int64(totalLatencyTransitionWindow/time.Millisecond),
-		totalLatencyExitMinimumSamples,
 		int64(totalLatencyExitMinimumSpan/time.Millisecond),
 		totalLatencyExitRatioNumerator,
 		totalLatencyExitRatioDenominator,
@@ -345,6 +359,7 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 		int64(totalLatencyRecoveryMinimumSpan/time.Millisecond),
 		totalLatencyRecoveryRatioNumerator,
 		totalLatencyRecoveryRatioDenominator,
+		settings.SingleSampleCircuitSeconds*1000,
 		requestID,
 	).Result(); err != nil {
 		return fmt.Errorf("record total-duration stats: %w", err)
@@ -415,14 +430,14 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		}
 		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", totalLatencyStatsPrefix, accountID),
 			"normal_total_ms", "p50_ms", "p90_ms", "sample_count", "window_hours",
-			"updated_at_ms", "exit_slow_streak", "is_fast", "enter_fast_streak", "recovery_fast_streak", "score_version")
+			"updated_at_ms", "exit_slow_streak", "is_fast", "enter_fast_streak", "recovery_fast_streak", "score_version", "circuit_broken")
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("get total-duration stats: %w", err)
 	}
 	for accountID, cmd := range commands {
 		values, err := cmd.Result()
-		if err != nil || len(values) != 11 || values[3] == nil || values[5] == nil {
+		if err != nil || len(values) != 12 || values[3] == nil || values[5] == nil {
 			continue
 		}
 		count, countErr := strconv.ParseInt(fmt.Sprint(values[3]), 10, 64)
@@ -457,6 +472,9 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		}
 		if recoveryValue != nil {
 			stat.RecoveryFastStreak, _ = strconv.Atoi(fmt.Sprint(recoveryValue))
+		}
+		if values[11] != nil {
+			stat.CircuitBroken = fmt.Sprint(values[11]) == "1"
 		}
 		result[accountID] = stat
 	}

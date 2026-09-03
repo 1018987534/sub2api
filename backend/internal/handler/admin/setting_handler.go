@@ -394,14 +394,15 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 
 		AffiliateEnabled: settings.AffiliateEnabled,
 
-		AccountSchedulingThresholds:       settings.AccountSchedulingThresholds,
-		FirstTokenPriorityEnabled:         settings.FirstTokenPriorityEnabled,
-		TotalDurationFastThresholdSeconds: settings.TotalDurationFastThresholdSeconds,
-		TotalDurationSlowThresholdSeconds: settings.TotalDurationSlowThresholdSeconds,
-		TotalDurationSampleLimit:          settings.TotalDurationSampleLimit,
-		TotalDurationMinimumSamples:       settings.TotalDurationMinimumSamples,
-		TotalDurationPrimaryWindowHours:   settings.TotalDurationPrimaryWindowHours,
-		AllowUserViewErrorRequests:        settings.AllowUserViewErrorRequests,
+		AccountSchedulingThresholds:             settings.AccountSchedulingThresholds,
+		FirstTokenPriorityEnabled:               settings.FirstTokenPriorityEnabled,
+		TotalDurationFastThresholdSeconds:       settings.TotalDurationFastThresholdSeconds,
+		TotalDurationSlowThresholdSeconds:       settings.TotalDurationSlowThresholdSeconds,
+		TotalDurationSampleLimit:                settings.TotalDurationSampleLimit,
+		TotalDurationMinimumSamples:             settings.TotalDurationMinimumSamples,
+		TotalDurationPrimaryWindowHours:         settings.TotalDurationPrimaryWindowHours,
+		TotalDurationSingleSampleCircuitSeconds: settings.TotalDurationSingleSampleCircuitSeconds,
+		AllowUserViewErrorRequests:              settings.AllowUserViewErrorRequests,
 	}
 
 	// OpenAI fast policy (stored under a dedicated setting key)

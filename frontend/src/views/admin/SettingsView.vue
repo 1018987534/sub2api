@@ -9895,6 +9895,7 @@ const form = reactive<SettingsForm>({
   total_duration_sample_limit: 50,
   total_duration_minimum_samples: 20,
   total_duration_primary_window_hours: 6,
+  total_duration_single_sample_circuit_seconds: 60,
   affiliate_rebate_rate: 20,
   affiliate_rebate_freeze_hours: 0,
   affiliate_rebate_duration_days: 0,

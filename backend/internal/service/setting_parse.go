@@ -270,6 +270,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyTotalDurationSampleLimit:                           strconv.Itoa(DefaultTotalDurationSampleLimit),
 		SettingKeyTotalDurationMinimumSamples:                        strconv.Itoa(DefaultTotalDurationMinimumSamples),
 		SettingKeyTotalDurationPrimaryWindowHours:                    strconv.Itoa(DefaultTotalDurationPrimaryWindowHours),
+		SettingKeyTotalDurationSingleSampleCircuitSeconds:            strconv.Itoa(DefaultTotalDurationSingleSampleCircuitSeconds),
 
 		SettingKeyAllowUserViewErrorRequests: "false",
 	}
@@ -963,7 +964,8 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 		result.TotalDurationMinimumSamples = result.TotalDurationSampleLimit
 	}
 	result.TotalDurationPrimaryWindowHours = parseTotalDurationPrimaryWindowHours(settings[SettingKeyTotalDurationPrimaryWindowHours], DefaultTotalDurationPrimaryWindowHours)
-	setCurrentTotalDurationSettings(result.TotalDurationFastThresholdSeconds, result.TotalDurationSlowThresholdSeconds, result.TotalDurationSampleLimit, result.TotalDurationMinimumSamples, result.TotalDurationPrimaryWindowHours)
+	result.TotalDurationSingleSampleCircuitSeconds = parseTotalDurationSingleSampleCircuitSeconds(settings[SettingKeyTotalDurationSingleSampleCircuitSeconds], DefaultTotalDurationSingleSampleCircuitSeconds)
+	setCurrentTotalDurationSettings(result.TotalDurationFastThresholdSeconds, result.TotalDurationSlowThresholdSeconds, result.TotalDurationSampleLimit, result.TotalDurationMinimumSamples, result.TotalDurationPrimaryWindowHours, result.TotalDurationSingleSampleCircuitSeconds)
 	normalizeOpenAISchedulerPriorityMode(result)
 	result.OpenAIAdvancedSchedulerEffectiveLBTopK = s.openAIAdvancedSchedulerEffectiveLBTopK()
 	effectiveWeights := s.openAIAdvancedSchedulerEffectiveWeights()
@@ -1050,6 +1052,14 @@ func parseTotalDurationMinimumSamples(raw string, fallback int) int {
 func parseTotalDurationPrimaryWindowHours(raw string, fallback int) int {
 	value, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || value < MinTotalDurationPrimaryWindowHours || value > MaxTotalDurationPrimaryWindowHours {
+		return fallback
+	}
+	return value
+}
+
+func parseTotalDurationSingleSampleCircuitSeconds(raw string, fallback int) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < MinTotalDurationSingleSampleCircuitSeconds || value > MaxTotalDurationSingleSampleCircuitSeconds {
 		return fallback
 	}
 	return value

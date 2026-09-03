@@ -45,38 +45,40 @@ const (
 )
 
 type cachedOpenAIAdvancedSchedulerSetting struct {
-	lowUpstreamRatePriorityEnabled       bool
-	lowUpstreamRateStickyWeightedEnabled bool
-	oauthSchedulingRateMultiplier        float64
-	enabled                              bool
-	stickyWeightedEnabled                bool
-	subscriptionPriorityEnabled          bool
-	firstTokenPriorityEnabled            bool
-	totalDurationFastThresholdSeconds    int
-	totalDurationSlowThresholdSeconds    int
-	totalDurationSampleLimit             int
-	totalDurationMinimumSamples          int
-	totalDurationPrimaryWindowHours      int
-	lbTopKOverride                       int
-	weightOverrides                      map[string]float64
-	expiresAt                            int64
+	lowUpstreamRatePriorityEnabled          bool
+	lowUpstreamRateStickyWeightedEnabled    bool
+	oauthSchedulingRateMultiplier           float64
+	enabled                                 bool
+	stickyWeightedEnabled                   bool
+	subscriptionPriorityEnabled             bool
+	firstTokenPriorityEnabled               bool
+	totalDurationFastThresholdSeconds       int
+	totalDurationSlowThresholdSeconds       int
+	totalDurationSampleLimit                int
+	totalDurationMinimumSamples             int
+	totalDurationPrimaryWindowHours         int
+	totalDurationSingleSampleCircuitSeconds int
+	lbTopKOverride                          int
+	weightOverrides                         map[string]float64
+	expiresAt                               int64
 }
 
 type openAIAdvancedSchedulerRuntimeSettings struct {
-	lowUpstreamRatePriorityEnabled       bool
-	lowUpstreamRateStickyWeightedEnabled bool
-	oauthSchedulingRateMultiplier        float64
-	enabled                              bool
-	stickyWeightedEnabled                bool
-	subscriptionPriorityEnabled          bool
-	firstTokenPriorityEnabled            bool
-	totalDurationFastThresholdSeconds    int
-	totalDurationSlowThresholdSeconds    int
-	totalDurationSampleLimit             int
-	totalDurationMinimumSamples          int
-	totalDurationPrimaryWindowHours      int
-	lbTopKOverride                       int
-	weightOverrides                      map[string]float64
+	lowUpstreamRatePriorityEnabled          bool
+	lowUpstreamRateStickyWeightedEnabled    bool
+	oauthSchedulingRateMultiplier           float64
+	enabled                                 bool
+	stickyWeightedEnabled                   bool
+	subscriptionPriorityEnabled             bool
+	firstTokenPriorityEnabled               bool
+	totalDurationFastThresholdSeconds       int
+	totalDurationSlowThresholdSeconds       int
+	totalDurationSampleLimit                int
+	totalDurationMinimumSamples             int
+	totalDurationPrimaryWindowHours         int
+	totalDurationSingleSampleCircuitSeconds int
+	lbTopKOverride                          int
+	weightOverrides                         map[string]float64
 }
 
 var openAIAdvancedSchedulerSettingCache atomic.Value // *cachedOpenAIAdvancedSchedulerSetting
@@ -1999,20 +2001,21 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 	if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
 			return normalizeOpenAISchedulerRuntimeSettings(openAIAdvancedSchedulerRuntimeSettings{
-				lowUpstreamRatePriorityEnabled:       cached.lowUpstreamRatePriorityEnabled,
-				lowUpstreamRateStickyWeightedEnabled: cached.lowUpstreamRateStickyWeightedEnabled,
-				oauthSchedulingRateMultiplier:        cached.oauthSchedulingRateMultiplier,
-				enabled:                              cached.enabled,
-				stickyWeightedEnabled:                cached.stickyWeightedEnabled,
-				subscriptionPriorityEnabled:          cached.subscriptionPriorityEnabled,
-				firstTokenPriorityEnabled:            cached.firstTokenPriorityEnabled,
-				totalDurationFastThresholdSeconds:    cached.totalDurationFastThresholdSeconds,
-				totalDurationSlowThresholdSeconds:    cached.totalDurationSlowThresholdSeconds,
-				totalDurationSampleLimit:             cached.totalDurationSampleLimit,
-				totalDurationMinimumSamples:          cached.totalDurationMinimumSamples,
-				totalDurationPrimaryWindowHours:      cached.totalDurationPrimaryWindowHours,
-				lbTopKOverride:                       cached.lbTopKOverride,
-				weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
+				lowUpstreamRatePriorityEnabled:          cached.lowUpstreamRatePriorityEnabled,
+				lowUpstreamRateStickyWeightedEnabled:    cached.lowUpstreamRateStickyWeightedEnabled,
+				oauthSchedulingRateMultiplier:           cached.oauthSchedulingRateMultiplier,
+				enabled:                                 cached.enabled,
+				stickyWeightedEnabled:                   cached.stickyWeightedEnabled,
+				subscriptionPriorityEnabled:             cached.subscriptionPriorityEnabled,
+				firstTokenPriorityEnabled:               cached.firstTokenPriorityEnabled,
+				totalDurationFastThresholdSeconds:       cached.totalDurationFastThresholdSeconds,
+				totalDurationSlowThresholdSeconds:       cached.totalDurationSlowThresholdSeconds,
+				totalDurationSampleLimit:                cached.totalDurationSampleLimit,
+				totalDurationMinimumSamples:             cached.totalDurationMinimumSamples,
+				totalDurationPrimaryWindowHours:         cached.totalDurationPrimaryWindowHours,
+				totalDurationSingleSampleCircuitSeconds: cached.totalDurationSingleSampleCircuitSeconds,
+				lbTopKOverride:                          cached.lbTopKOverride,
+				weightOverrides:                         cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
 			})
 		}
 	}
@@ -2021,20 +2024,21 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		if cached, ok := openAIAdvancedSchedulerSettingCache.Load().(*cachedOpenAIAdvancedSchedulerSetting); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
 				return normalizeOpenAISchedulerRuntimeSettings(openAIAdvancedSchedulerRuntimeSettings{
-					lowUpstreamRatePriorityEnabled:       cached.lowUpstreamRatePriorityEnabled,
-					lowUpstreamRateStickyWeightedEnabled: cached.lowUpstreamRateStickyWeightedEnabled,
-					oauthSchedulingRateMultiplier:        cached.oauthSchedulingRateMultiplier,
-					enabled:                              cached.enabled,
-					stickyWeightedEnabled:                cached.stickyWeightedEnabled,
-					subscriptionPriorityEnabled:          cached.subscriptionPriorityEnabled,
-					firstTokenPriorityEnabled:            cached.firstTokenPriorityEnabled,
-					totalDurationFastThresholdSeconds:    cached.totalDurationFastThresholdSeconds,
-					totalDurationSlowThresholdSeconds:    cached.totalDurationSlowThresholdSeconds,
-					totalDurationSampleLimit:             cached.totalDurationSampleLimit,
-					totalDurationMinimumSamples:          cached.totalDurationMinimumSamples,
-					totalDurationPrimaryWindowHours:      cached.totalDurationPrimaryWindowHours,
-					lbTopKOverride:                       cached.lbTopKOverride,
-					weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
+					lowUpstreamRatePriorityEnabled:          cached.lowUpstreamRatePriorityEnabled,
+					lowUpstreamRateStickyWeightedEnabled:    cached.lowUpstreamRateStickyWeightedEnabled,
+					oauthSchedulingRateMultiplier:           cached.oauthSchedulingRateMultiplier,
+					enabled:                                 cached.enabled,
+					stickyWeightedEnabled:                   cached.stickyWeightedEnabled,
+					subscriptionPriorityEnabled:             cached.subscriptionPriorityEnabled,
+					firstTokenPriorityEnabled:               cached.firstTokenPriorityEnabled,
+					totalDurationFastThresholdSeconds:       cached.totalDurationFastThresholdSeconds,
+					totalDurationSlowThresholdSeconds:       cached.totalDurationSlowThresholdSeconds,
+					totalDurationSampleLimit:                cached.totalDurationSampleLimit,
+					totalDurationMinimumSamples:             cached.totalDurationMinimumSamples,
+					totalDurationPrimaryWindowHours:         cached.totalDurationPrimaryWindowHours,
+					totalDurationSingleSampleCircuitSeconds: cached.totalDurationSingleSampleCircuitSeconds,
+					lbTopKOverride:                          cached.lbTopKOverride,
+					weightOverrides:                         cloneOpenAIAdvancedSchedulerWeightOverrides(cached.weightOverrides),
 				}), nil
 			}
 		}
@@ -2051,6 +2055,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		totalDurationSampleLimit := DefaultTotalDurationSampleLimit
 		totalDurationMinimumSamples := DefaultTotalDurationMinimumSamples
 		totalDurationPrimaryWindowHours := DefaultTotalDurationPrimaryWindowHours
+		totalDurationSingleSampleCircuitSeconds := DefaultTotalDurationSingleSampleCircuitSeconds
 		lbTopKOverride := 0
 		weightOverrides := map[string]float64{}
 		if repo := s.openAIAdvancedSchedulerSettingRepo(); repo != nil {
@@ -2070,6 +2075,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				totalDurationSampleLimit = parseTotalDurationSampleLimit(values[SettingKeyTotalDurationSampleLimit], DefaultTotalDurationSampleLimit)
 				totalDurationMinimumSamples = parseTotalDurationMinimumSamples(values[SettingKeyTotalDurationMinimumSamples], DefaultTotalDurationMinimumSamples)
 				totalDurationPrimaryWindowHours = parseTotalDurationPrimaryWindowHours(values[SettingKeyTotalDurationPrimaryWindowHours], DefaultTotalDurationPrimaryWindowHours)
+				totalDurationSingleSampleCircuitSeconds = parseTotalDurationSingleSampleCircuitSeconds(values[SettingKeyTotalDurationSingleSampleCircuitSeconds], DefaultTotalDurationSingleSampleCircuitSeconds)
 				lbTopKOverride = parsePositiveIntOverride(values[SettingKeyOpenAIAdvancedSchedulerLBTopK])
 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(values)
 			} else {
@@ -2094,6 +2100,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				totalDurationSampleLimit = parseTotalDurationSampleLimit(fallbackValues[SettingKeyTotalDurationSampleLimit], DefaultTotalDurationSampleLimit)
 				totalDurationMinimumSamples = parseTotalDurationMinimumSamples(fallbackValues[SettingKeyTotalDurationMinimumSamples], DefaultTotalDurationMinimumSamples)
 				totalDurationPrimaryWindowHours = parseTotalDurationPrimaryWindowHours(fallbackValues[SettingKeyTotalDurationPrimaryWindowHours], DefaultTotalDurationPrimaryWindowHours)
+				totalDurationSingleSampleCircuitSeconds = parseTotalDurationSingleSampleCircuitSeconds(fallbackValues[SettingKeyTotalDurationSingleSampleCircuitSeconds], DefaultTotalDurationSingleSampleCircuitSeconds)
 				lbTopKOverride = parsePositiveIntOverride(fallbackValues[SettingKeyOpenAIAdvancedSchedulerLBTopK])
 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(fallbackValues)
 			}
@@ -2101,7 +2108,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		if totalDurationMinimumSamples > totalDurationSampleLimit {
 			totalDurationMinimumSamples = totalDurationSampleLimit
 		}
-		setCurrentTotalDurationSettings(totalDurationFastThresholdSeconds, totalDurationSlowThresholdSeconds, totalDurationSampleLimit, totalDurationMinimumSamples, totalDurationPrimaryWindowHours)
+		setCurrentTotalDurationSettings(totalDurationFastThresholdSeconds, totalDurationSlowThresholdSeconds, totalDurationSampleLimit, totalDurationMinimumSamples, totalDurationPrimaryWindowHours, totalDurationSingleSampleCircuitSeconds)
 		if firstTokenPriorityEnabled {
 			lowUpstreamRatePriorityEnabled = false
 			lowUpstreamRateStickyWeightedEnabled = false
@@ -2111,37 +2118,39 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 		}
 
 		openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
-			lowUpstreamRatePriorityEnabled:       lowUpstreamRatePriorityEnabled,
-			lowUpstreamRateStickyWeightedEnabled: lowUpstreamRateStickyWeightedEnabled,
-			oauthSchedulingRateMultiplier:        oauthSchedulingRateMultiplier,
-			enabled:                              enabled,
-			stickyWeightedEnabled:                stickyWeightedEnabled,
-			subscriptionPriorityEnabled:          subscriptionPriorityEnabled,
-			firstTokenPriorityEnabled:            firstTokenPriorityEnabled,
-			totalDurationFastThresholdSeconds:    totalDurationFastThresholdSeconds,
-			totalDurationSlowThresholdSeconds:    totalDurationSlowThresholdSeconds,
-			totalDurationSampleLimit:             totalDurationSampleLimit,
-			totalDurationMinimumSamples:          totalDurationMinimumSamples,
-			totalDurationPrimaryWindowHours:      totalDurationPrimaryWindowHours,
-			lbTopKOverride:                       lbTopKOverride,
-			weightOverrides:                      cloneOpenAIAdvancedSchedulerWeightOverrides(weightOverrides),
-			expiresAt:                            time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
+			lowUpstreamRatePriorityEnabled:          lowUpstreamRatePriorityEnabled,
+			lowUpstreamRateStickyWeightedEnabled:    lowUpstreamRateStickyWeightedEnabled,
+			oauthSchedulingRateMultiplier:           oauthSchedulingRateMultiplier,
+			enabled:                                 enabled,
+			stickyWeightedEnabled:                   stickyWeightedEnabled,
+			subscriptionPriorityEnabled:             subscriptionPriorityEnabled,
+			firstTokenPriorityEnabled:               firstTokenPriorityEnabled,
+			totalDurationFastThresholdSeconds:       totalDurationFastThresholdSeconds,
+			totalDurationSlowThresholdSeconds:       totalDurationSlowThresholdSeconds,
+			totalDurationSampleLimit:                totalDurationSampleLimit,
+			totalDurationMinimumSamples:             totalDurationMinimumSamples,
+			totalDurationPrimaryWindowHours:         totalDurationPrimaryWindowHours,
+			totalDurationSingleSampleCircuitSeconds: totalDurationSingleSampleCircuitSeconds,
+			lbTopKOverride:                          lbTopKOverride,
+			weightOverrides:                         cloneOpenAIAdvancedSchedulerWeightOverrides(weightOverrides),
+			expiresAt:                               time.Now().Add(openAIAdvancedSchedulerSettingCacheTTL).UnixNano(),
 		})
 		return normalizeOpenAISchedulerRuntimeSettings(openAIAdvancedSchedulerRuntimeSettings{
-			lowUpstreamRatePriorityEnabled:       lowUpstreamRatePriorityEnabled,
-			lowUpstreamRateStickyWeightedEnabled: lowUpstreamRateStickyWeightedEnabled,
-			oauthSchedulingRateMultiplier:        oauthSchedulingRateMultiplier,
-			enabled:                              enabled,
-			stickyWeightedEnabled:                stickyWeightedEnabled,
-			subscriptionPriorityEnabled:          subscriptionPriorityEnabled,
-			firstTokenPriorityEnabled:            firstTokenPriorityEnabled,
-			totalDurationFastThresholdSeconds:    totalDurationFastThresholdSeconds,
-			totalDurationSlowThresholdSeconds:    totalDurationSlowThresholdSeconds,
-			totalDurationSampleLimit:             totalDurationSampleLimit,
-			totalDurationMinimumSamples:          totalDurationMinimumSamples,
-			totalDurationPrimaryWindowHours:      totalDurationPrimaryWindowHours,
-			lbTopKOverride:                       lbTopKOverride,
-			weightOverrides:                      weightOverrides,
+			lowUpstreamRatePriorityEnabled:          lowUpstreamRatePriorityEnabled,
+			lowUpstreamRateStickyWeightedEnabled:    lowUpstreamRateStickyWeightedEnabled,
+			oauthSchedulingRateMultiplier:           oauthSchedulingRateMultiplier,
+			enabled:                                 enabled,
+			stickyWeightedEnabled:                   stickyWeightedEnabled,
+			subscriptionPriorityEnabled:             subscriptionPriorityEnabled,
+			firstTokenPriorityEnabled:               firstTokenPriorityEnabled,
+			totalDurationFastThresholdSeconds:       totalDurationFastThresholdSeconds,
+			totalDurationSlowThresholdSeconds:       totalDurationSlowThresholdSeconds,
+			totalDurationSampleLimit:                totalDurationSampleLimit,
+			totalDurationMinimumSamples:             totalDurationMinimumSamples,
+			totalDurationPrimaryWindowHours:         totalDurationPrimaryWindowHours,
+			totalDurationSingleSampleCircuitSeconds: totalDurationSingleSampleCircuitSeconds,
+			lbTopKOverride:                          lbTopKOverride,
+			weightOverrides:                         weightOverrides,
 		}), nil
 	})
 
@@ -2215,6 +2224,7 @@ func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
 		SettingKeyTotalDurationSampleLimit,
 		SettingKeyTotalDurationMinimumSamples,
 		SettingKeyTotalDurationPrimaryWindowHours,
+		SettingKeyTotalDurationSingleSampleCircuitSeconds,
 		SettingKeyOpenAIAdvancedSchedulerLBTopK,
 	}
 	for _, spec := range openAIAdvancedSchedulerWeightOverrideSpecs() {

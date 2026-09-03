@@ -640,6 +640,8 @@ const (
 	SettingKeyTotalDurationMinimumSamples = "total_duration_minimum_samples"
 	// SettingKeyTotalDurationPrimaryWindowHours controls the preferred rolling sample window; 24h remains the fallback.
 	SettingKeyTotalDurationPrimaryWindowHours = "total_duration_primary_window_hours"
+	// SettingKeyTotalDurationSingleSampleCircuitSeconds evicts a fast-pool account after one completed request exceeds this duration.
+	SettingKeyTotalDurationSingleSampleCircuitSeconds = "total_duration_single_sample_circuit_seconds"
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
@@ -711,17 +713,20 @@ const (
 )
 
 const (
-	DefaultTotalDurationFastThresholdSeconds = 12
-	DefaultTotalDurationSlowThresholdSeconds = 16
-	DefaultTotalDurationSampleLimit          = 50
-	DefaultTotalDurationMinimumSamples       = 20
-	DefaultTotalDurationPrimaryWindowHours   = 6
-	MinTotalDurationThresholdSeconds         = 1
-	MaxTotalDurationThresholdSeconds         = 3600
-	MinTotalDurationSampleLimit              = 5
-	MaxTotalDurationSampleLimit              = 500
-	MinTotalDurationPrimaryWindowHours       = 1
-	MaxTotalDurationPrimaryWindowHours       = 24
+	DefaultTotalDurationFastThresholdSeconds       = 12
+	DefaultTotalDurationSlowThresholdSeconds       = 16
+	DefaultTotalDurationSampleLimit                = 50
+	DefaultTotalDurationMinimumSamples             = 20
+	DefaultTotalDurationPrimaryWindowHours         = 6
+	DefaultTotalDurationSingleSampleCircuitSeconds = 60
+	MinTotalDurationThresholdSeconds               = 1
+	MaxTotalDurationThresholdSeconds               = 3600
+	MinTotalDurationSampleLimit                    = 5
+	MaxTotalDurationSampleLimit                    = 500
+	MinTotalDurationPrimaryWindowHours             = 1
+	MaxTotalDurationPrimaryWindowHours             = 24
+	MinTotalDurationSingleSampleCircuitSeconds     = 1
+	MaxTotalDurationSingleSampleCircuitSeconds     = 3600
 )
 
 // SettingKeyDefaultPlatformQuotas —— 系统全局：每用户 × 平台日/周/月 USD 上限（JSON）。

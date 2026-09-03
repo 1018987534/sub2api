@@ -160,7 +160,8 @@ describe('admin DashboardView', () => {
       total_duration_slow_threshold_seconds: 16,
       total_duration_sample_limit: 50,
       total_duration_minimum_samples: 20,
-      total_duration_primary_window_hours: 6
+      total_duration_primary_window_hours: 6,
+      total_duration_single_sample_circuit_seconds: 60
     })
     updateSettings.mockImplementation(async (payload) => payload)
   })
@@ -218,6 +219,7 @@ describe('admin DashboardView', () => {
     await wrapper.get('[data-testid="total-duration-sample-limit"]').setValue('80')
     await wrapper.get('[data-testid="total-duration-minimum-samples"]').setValue('24')
     await wrapper.get('[data-testid="total-duration-primary-window"]').setValue('8')
+    await wrapper.get('[data-testid="total-duration-single-sample-circuit"]').setValue('90')
     await wrapper.get('[data-testid="save-total-duration-thresholds"]').trigger('click')
     await flushPromises()
 
@@ -226,7 +228,8 @@ describe('admin DashboardView', () => {
       total_duration_slow_threshold_seconds: 20,
       total_duration_sample_limit: 80,
       total_duration_minimum_samples: 24,
-      total_duration_primary_window_hours: 8
+      total_duration_primary_window_hours: 8,
+      total_duration_single_sample_circuit_seconds: 90
     })
     wrapper.unmount()
   })

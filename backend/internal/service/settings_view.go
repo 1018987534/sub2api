@@ -298,6 +298,7 @@ type SystemSettings struct {
 	TotalDurationSampleLimit                               int
 	TotalDurationMinimumSamples                            int
 	TotalDurationPrimaryWindowHours                        int
+	TotalDurationSingleSampleCircuitSeconds                int
 
 	// 余额不足提醒
 	BalanceLowNotifyEnabled     bool

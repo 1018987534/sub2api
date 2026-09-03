@@ -115,11 +115,17 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	if settings.TotalDurationPrimaryWindowHours == 0 {
 		settings.TotalDurationPrimaryWindowHours = DefaultTotalDurationPrimaryWindowHours
 	}
+	if settings.TotalDurationSingleSampleCircuitSeconds == 0 {
+		settings.TotalDurationSingleSampleCircuitSeconds = DefaultTotalDurationSingleSampleCircuitSeconds
+	}
 	if err := validateTotalDurationThresholds(settings.TotalDurationFastThresholdSeconds, settings.TotalDurationSlowThresholdSeconds); err != nil {
 		return nil, err
 	}
 	if err := validateTotalDurationSampling(settings.TotalDurationSampleLimit, settings.TotalDurationMinimumSamples, settings.TotalDurationPrimaryWindowHours); err != nil {
 		return nil, err
+	}
+	if settings.TotalDurationSingleSampleCircuitSeconds < MinTotalDurationSingleSampleCircuitSeconds || settings.TotalDurationSingleSampleCircuitSeconds > MaxTotalDurationSingleSampleCircuitSeconds {
+		return nil, infraerrors.BadRequest("INVALID_TOTAL_DURATION_SINGLE_SAMPLE_CIRCUIT", fmt.Sprintf("total_duration_single_sample_circuit_seconds must be between %d and %d", MinTotalDurationSingleSampleCircuitSeconds, MaxTotalDurationSingleSampleCircuitSeconds))
 	}
 	if err := s.validateDefaultSignupAPIKeyGroup(ctx, settings.DefaultSignupAPIKeyGroupID); err != nil {
 		return nil, err
@@ -551,6 +557,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyTotalDurationSampleLimit] = strconv.Itoa(settings.TotalDurationSampleLimit)
 	updates[SettingKeyTotalDurationMinimumSamples] = strconv.Itoa(settings.TotalDurationMinimumSamples)
 	updates[SettingKeyTotalDurationPrimaryWindowHours] = strconv.Itoa(settings.TotalDurationPrimaryWindowHours)
+	updates[SettingKeyTotalDurationSingleSampleCircuitSeconds] = strconv.Itoa(settings.TotalDurationSingleSampleCircuitSeconds)
 
 	// 余额、订阅到期与账号限额通知
 	updates[SettingKeyBalanceLowNotifyEnabled] = strconv.FormatBool(settings.BalanceLowNotifyEnabled)
@@ -741,7 +748,7 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	if settings == nil {
 		return
 	}
-	setCurrentTotalDurationSettings(settings.TotalDurationFastThresholdSeconds, settings.TotalDurationSlowThresholdSeconds, settings.TotalDurationSampleLimit, settings.TotalDurationMinimumSamples, settings.TotalDurationPrimaryWindowHours)
+	setCurrentTotalDurationSettings(settings.TotalDurationFastThresholdSeconds, settings.TotalDurationSlowThresholdSeconds, settings.TotalDurationSampleLimit, settings.TotalDurationMinimumSamples, settings.TotalDurationPrimaryWindowHours, settings.TotalDurationSingleSampleCircuitSeconds)
 
 	// 先使 inflight singleflight 失效，再刷新缓存，缩小旧值覆盖新值的竞态窗口
 	versionBoundsSF.Forget("version_bounds")

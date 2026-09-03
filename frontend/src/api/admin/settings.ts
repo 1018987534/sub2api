@@ -610,6 +610,7 @@ export interface SystemSettings {
   total_duration_sample_limit: number;
   total_duration_minimum_samples: number;
   total_duration_primary_window_hours: number;
+  total_duration_single_sample_circuit_seconds: number;
 
   // Identity patch configuration (Claude -> Gemini)
   enable_identity_patch: boolean;
@@ -946,6 +947,7 @@ export interface UpdateSettingsRequest {
   total_duration_sample_limit?: number;
   total_duration_minimum_samples?: number;
   total_duration_primary_window_hours?: number;
+  total_duration_single_sample_circuit_seconds?: number;
   enable_identity_patch?: boolean;
   identity_patch_prompt?: string;
   ops_monitoring_enabled?: boolean;

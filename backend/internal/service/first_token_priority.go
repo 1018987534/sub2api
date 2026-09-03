@@ -34,22 +34,24 @@ var (
 )
 
 type TotalDurationSettings struct {
-	FastThresholdSeconds int
-	SlowThresholdSeconds int
-	SampleLimit          int
-	MinimumSamples       int
-	PrimaryWindowHours   int
+	FastThresholdSeconds       int
+	SlowThresholdSeconds       int
+	SampleLimit                int
+	MinimumSamples             int
+	PrimaryWindowHours         int
+	SingleSampleCircuitSeconds int
 }
 
 var totalDurationSettings atomic.Value // TotalDurationSettings
 
 func init() {
 	totalDurationSettings.Store(TotalDurationSettings{
-		FastThresholdSeconds: DefaultTotalDurationFastThresholdSeconds,
-		SlowThresholdSeconds: DefaultTotalDurationSlowThresholdSeconds,
-		SampleLimit:          DefaultTotalDurationSampleLimit,
-		MinimumSamples:       DefaultTotalDurationMinimumSamples,
-		PrimaryWindowHours:   DefaultTotalDurationPrimaryWindowHours,
+		FastThresholdSeconds:       DefaultTotalDurationFastThresholdSeconds,
+		SlowThresholdSeconds:       DefaultTotalDurationSlowThresholdSeconds,
+		SampleLimit:                DefaultTotalDurationSampleLimit,
+		MinimumSamples:             DefaultTotalDurationMinimumSamples,
+		PrimaryWindowHours:         DefaultTotalDurationPrimaryWindowHours,
+		SingleSampleCircuitSeconds: DefaultTotalDurationSingleSampleCircuitSeconds,
 	})
 }
 
@@ -59,11 +61,12 @@ func CurrentTotalDurationSettings() TotalDurationSettings {
 	settings, _ := totalDurationSettings.Load().(TotalDurationSettings)
 	if validateTotalDurationSettings(settings) != nil {
 		return TotalDurationSettings{
-			FastThresholdSeconds: DefaultTotalDurationFastThresholdSeconds,
-			SlowThresholdSeconds: DefaultTotalDurationSlowThresholdSeconds,
-			SampleLimit:          DefaultTotalDurationSampleLimit,
-			MinimumSamples:       DefaultTotalDurationMinimumSamples,
-			PrimaryWindowHours:   DefaultTotalDurationPrimaryWindowHours,
+			FastThresholdSeconds:       DefaultTotalDurationFastThresholdSeconds,
+			SlowThresholdSeconds:       DefaultTotalDurationSlowThresholdSeconds,
+			SampleLimit:                DefaultTotalDurationSampleLimit,
+			MinimumSamples:             DefaultTotalDurationMinimumSamples,
+			PrimaryWindowHours:         DefaultTotalDurationPrimaryWindowHours,
+			SingleSampleCircuitSeconds: DefaultTotalDurationSingleSampleCircuitSeconds,
 		}
 	}
 	return settings
@@ -80,16 +83,17 @@ func setCurrentTotalDurationThresholds(fastSeconds, slowSeconds int) {
 	settings := CurrentTotalDurationSettings()
 	settings.FastThresholdSeconds = fastSeconds
 	settings.SlowThresholdSeconds = slowSeconds
-	setCurrentTotalDurationSettings(fastSeconds, slowSeconds, settings.SampleLimit, settings.MinimumSamples, settings.PrimaryWindowHours)
+	setCurrentTotalDurationSettings(fastSeconds, slowSeconds, settings.SampleLimit, settings.MinimumSamples, settings.PrimaryWindowHours, settings.SingleSampleCircuitSeconds)
 }
 
-func setCurrentTotalDurationSettings(fastSeconds, slowSeconds, sampleLimit, minimumSamples, primaryWindowHours int) {
+func setCurrentTotalDurationSettings(fastSeconds, slowSeconds, sampleLimit, minimumSamples, primaryWindowHours, singleSampleCircuitSeconds int) {
 	settings := TotalDurationSettings{
-		FastThresholdSeconds: fastSeconds,
-		SlowThresholdSeconds: slowSeconds,
-		SampleLimit:          sampleLimit,
-		MinimumSamples:       minimumSamples,
-		PrimaryWindowHours:   primaryWindowHours,
+		FastThresholdSeconds:       fastSeconds,
+		SlowThresholdSeconds:       slowSeconds,
+		SampleLimit:                sampleLimit,
+		MinimumSamples:             minimumSamples,
+		PrimaryWindowHours:         primaryWindowHours,
+		SingleSampleCircuitSeconds: singleSampleCircuitSeconds,
 	}
 	if validateTotalDurationSettings(settings) == nil {
 		totalDurationSettings.Store(settings)
@@ -108,6 +112,9 @@ func validateTotalDurationSettings(settings TotalDurationSettings) error {
 	}
 	if settings.PrimaryWindowHours < MinTotalDurationPrimaryWindowHours || settings.PrimaryWindowHours > MaxTotalDurationPrimaryWindowHours {
 		return fmt.Errorf("primary window out of range")
+	}
+	if settings.SingleSampleCircuitSeconds < MinTotalDurationSingleSampleCircuitSeconds || settings.SingleSampleCircuitSeconds > MaxTotalDurationSingleSampleCircuitSeconds {
+		return fmt.Errorf("single sample circuit out of range")
 	}
 	return nil
 }
