@@ -1026,6 +1026,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if headerGuard != nil {
 				headerGuard.close()
 			}
+			if reqStream {
+				s.observeOpenAIStreamFailureLatency(c, account, "", http.StatusBadGateway, nil, err.Error())
+			}
 			// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
 			// a failover so the handler switches to a healthy account, and temporarily
 			// unschedule the account on durable faults (e.g. rejected proxy credentials).
@@ -1117,6 +1120,9 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					Message:            upstreamMsg,
 					Detail:             upstreamDetail,
 				})
+				if reqStream {
+					s.observeOpenAIStreamFailureLatency(c, account, resp.Header.Get("x-request-id"), resp.StatusCode, respBody, upstreamMsg)
+				}
 
 				shouldDisable := s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
 				return nil, s.newOpenAIAccountFailoverError(

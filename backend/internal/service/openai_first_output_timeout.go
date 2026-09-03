@@ -320,6 +320,7 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	})
 	if !periodicPause && s.rateLimitService != nil {
 		s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
+		s.observeOpenAIStreamFailureLatency(c, account, requestID, http.StatusGatewayTimeout, nil, failureMessage)
 	}
 	return &UpstreamFailoverError{
 		StatusCode:      http.StatusGatewayTimeout,
