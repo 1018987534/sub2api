@@ -79,3 +79,10 @@ type FirstTokenLatencyStatsCache interface {
 	GetStatsBatch(ctx context.Context, accountIDs []int64) (map[int64]FirstTokenLatencyStats, error)
 	TryClaimProbe(ctx context.Context, accountID int64, lease time.Duration) (bool, error)
 }
+
+// FirstTokenLatencyFailureStatsCache is an optional extension for caches that
+// can record an account-attributable upstream failure without treating it as a
+// billable successful usage sample.
+type FirstTokenLatencyFailureStatsCache interface {
+	RecordFailure(ctx context.Context, accountID int64, requestID string, durationMs int) error
+}

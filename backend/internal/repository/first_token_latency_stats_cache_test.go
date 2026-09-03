@@ -144,6 +144,33 @@ func TestTotalLatencyStatsCacheDeduplicatesPerAccountRequest(t *testing.T) {
 	require.Equal(t, int64(1), stats[43].SampleCount)
 }
 
+func TestTotalLatencyStatsCacheRecordFailureRemovesFastPoolAndRaisesPrediction(t *testing.T) {
+	mr, _, cache := newTotalLatencyTestCache(t)
+	ctx := context.Background()
+	accountID := int64(45)
+	base := time.Unix(1_699_960_000, 0)
+	recordSustainedFastTotalLatencySamples(t, mr, cache, accountID, "fast", base)
+
+	before, err := cache.GetStatsBatch(ctx, []int64{accountID})
+	require.NoError(t, err)
+	require.True(t, before[accountID].ReliableFast)
+
+	mr.SetTime(base.Add(2 * time.Minute))
+	require.NoError(t, cache.RecordFailure(ctx, accountID, "failed-request", 60_001))
+	after, err := cache.GetStatsBatch(ctx, []int64{accountID})
+	require.NoError(t, err)
+	require.False(t, after[accountID].ReliableFast)
+	require.GreaterOrEqual(t, after[accountID].PredictedMS, 60_001.0)
+	require.False(t, after[accountID].CircuitBroken, "semantic failures use the slow-pool staircase instead of the rapid circuit probe")
+
+	// The same upstream request can reach more than one terminal-event handler;
+	// account/request dedupe must keep it to one observation.
+	require.NoError(t, cache.RecordFailure(ctx, accountID, "failed-request", 90_001))
+	afterDuplicate, err := cache.GetStatsBatch(ctx, []int64{accountID})
+	require.NoError(t, err)
+	require.Equal(t, after[accountID].SampleCount, afterDuplicate[accountID].SampleCount)
+}
+
 func TestTotalLatencyStatsCacheSingleSampleCircuitUsesStrictGreaterThanBoundary(t *testing.T) {
 	mr, _, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()

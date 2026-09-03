@@ -357,6 +357,23 @@ func (s *RateLimitService) ObserveTotalDurationLatency(ctx context.Context, acco
 	}
 }
 
+// ObserveTotalDurationFailure records an account-attributable upstream
+// failure as a synthetic high-latency observation. It is deliberately an
+// optional cache extension so existing implementations and test doubles keep
+// the successful-usage contract unchanged.
+func (s *RateLimitService) ObserveTotalDurationFailure(ctx context.Context, account *Account, requestID string, durationMs int) {
+	if s == nil || s.firstTokenLatencyStatsCache == nil || !isFirstTokenPriorityAccount(account) || account.ID <= 0 || durationMs <= 0 {
+		return
+	}
+	failureCache, ok := s.firstTokenLatencyStatsCache.(FirstTokenLatencyFailureStatsCache)
+	if !ok || failureCache == nil {
+		return
+	}
+	if err := failureCache.RecordFailure(ctx, account.ID, requestID, durationMs); err != nil {
+		slog.Warn("total_duration_latency_failure_record_failed", "account_id", account.ID, "error", err)
+	}
+}
+
 // RequestFirstTokenManualProbe queues the account for the next eligible real
 // streaming request. It does not synthesize a billable upstream request.
 func (s *RateLimitService) RequestFirstTokenManualProbe(ctx context.Context, account *Account) error {
