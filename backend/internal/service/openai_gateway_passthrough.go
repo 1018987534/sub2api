@@ -402,7 +402,8 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			}
 			headerGuard.close()
 			return nil, s.newOpenAIFirstOutputTimeoutError(
-				ctx, c, account, startTime, reqModel, reasoningEffortValue,
+				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+				startTime, reqModel, reasoningEffortValue,
 				firstOutputTimeout, "response_headers", nil,
 			)
 		}
@@ -932,7 +933,10 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
 	reqModel, _, _ := extractOpenAIRequestMetaFromBody(requestBody)
 	canonicalModel := canonicalOpenAIAccountSchedulingModel(account, reqModel)
-	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
+	shouldDisable := false
+	if !deferOpenAIAPIKey429AccountSideEffects(c, account, resp.StatusCode) {
+		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
+	}
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		ProxyID:              opsUpstreamProxyID(account),
 		ProxyName:            opsUpstreamProxyName(account),
@@ -947,7 +951,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
-	return s.newOpenAIAccountFailoverError(
+	failoverErr := s.newOpenAIAccountFailoverError(
 		account,
 		resp.StatusCode,
 		resp.Header,
@@ -956,6 +960,8 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		shouldDisable,
 		!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 	)
+	applyOpenAIResponsesSameAccountRetryPolicy(c, account, resp.StatusCode, shouldDisable, failoverErr)
+	return failoverErr
 }
 
 func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
@@ -1649,6 +1655,9 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 	canonicalModel ...string,
 ) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
+	if deferOpenAIAPIKey429AccountSideEffects(c, account, statusCode) {
+		return statusCode, false
+	}
 	switch statusCode {
 	case http.StatusForbidden:
 		if !openAIStream403AccountFailure(payload, message) {
@@ -1674,6 +1683,56 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 	default:
 		return statusCode, false
 	}
+}
+
+const openAIAPIKey429RetryStateContextKey = "openai_api_key_429_retry_state"
+
+// deferOpenAIAPIKey429AccountSideEffects keeps the first 429 retryable on the
+// selected API-key account. The second 429 is processed normally, which parks
+// the exhausted account before the handler switches to another credential.
+func deferOpenAIAPIKey429AccountSideEffects(c *gin.Context, account *Account, statusCode int) bool {
+	if c == nil || account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeAPIKey ||
+		account.IsPoolMode() || statusCode != http.StatusTooManyRequests {
+		return false
+	}
+
+	state := map[int64]int{}
+	if current, ok := c.Get(openAIAPIKey429RetryStateContextKey); ok {
+		if typed, typedOK := current.(map[int64]int); typedOK {
+			state = typed
+		}
+	}
+	if state[account.ID] > 0 {
+		return false
+	}
+	state[account.ID] = 1
+	c.Set(openAIAPIKey429RetryStateContextKey, state)
+	return true
+}
+
+// applyOpenAIResponsesSameAccountRetryPolicy limits transient non-pool
+// Responses failures to one local replay before switching credentials. Pool
+// accounts retain their configured retry count/status policy; OAuth 429 and
+// request-scoped capacity shedding retain their existing specialized windows.
+func applyOpenAIResponsesSameAccountRetryPolicy(c *gin.Context, account *Account, statusCode int, shouldDisable bool, failoverErr *UpstreamFailoverError) {
+	if account == nil || failoverErr == nil || shouldDisable || account.Platform != PlatformOpenAI || account.IsPoolMode() ||
+		failoverErr.RequestScopedTransient || !failoverErr.SameAccountRetryDeadline.IsZero() {
+		return
+	}
+	if c != nil && c.Request != nil && OpenAIImagesEndpointFromContext(c.Request.Context()) {
+		return
+	}
+
+	shouldRetry := statusCode >= http.StatusInternalServerError
+	if statusCode == http.StatusTooManyRequests {
+		shouldRetry = account.Type == AccountTypeAPIKey
+	}
+	if !shouldRetry {
+		return
+	}
+
+	failoverErr.RetryableOnSameAccount = true
+	failoverErr.SameAccountRetryMax = 1
 }
 
 func openAIStreamFailedEventRetryableOnSameAccount(account *Account, payload []byte, message string) bool {
@@ -1793,6 +1852,7 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 		classificationHeaders = nil
 	}
 	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, headers, classificationHeaders, payload, message, shouldDisable, retryableOnSameAccount)
+	applyOpenAIResponsesSameAccountRetryPolicy(c, account, statusCode, shouldDisable, failoverErr)
 	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient {
 		return failoverErr
 	}
@@ -2295,7 +2355,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	if err := documentScanner.Err(); err != nil {
 		if firstOutputDeadlineReached() {
 			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(
-				ctx, c, account, startTime, originalModel, reasoningEffort,
+				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+				startTime, originalModel, reasoningEffort,
 				firstOutputTimeout, "semantic_output", resp.Header,
 			)
 		}
@@ -2335,7 +2396,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 	}
 	if firstOutputDeadlineReached() {
 		return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(
-			ctx, c, account, startTime, originalModel, reasoningEffort,
+			ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
+			startTime, originalModel, reasoningEffort,
 			firstOutputTimeout, "semantic_output", resp.Header,
 		)
 	}

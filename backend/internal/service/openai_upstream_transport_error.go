@@ -144,14 +144,22 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	// Transport attempt reached the network path; count as Ollama Cloud activity.
 	scheduleOllamaCloudUsageActivity(s.deferredService, account)
 
-	if account.GetTempUnschedulableMode() != TempUnschedulableModeConsecutiveFailures && classifyOpenAITransportError(err).Persistent {
+	transportClass := classifyUpstreamTransportError(err)
+	if transportClass.Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
 	}
 
-	return &UpstreamFailoverError{
+	failoverErr := &UpstreamFailoverError{
 		StatusCode:   http.StatusBadGateway,
 		ResponseBody: openAITransportFailoverBody,
 	}
+	if !transportClass.Persistent && account != nil {
+		failoverErr.RetryableOnSameAccount = true
+		if !account.IsPoolMode() {
+			failoverErr.SameAccountRetryMax = 1
+		}
+	}
+	return failoverErr
 }
 
 // tempUnscheduleOpenAITransportError marks an account temporarily unschedulable

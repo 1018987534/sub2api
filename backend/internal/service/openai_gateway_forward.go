@@ -1121,8 +1121,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					Detail:             upstreamDetail,
 				})
 
-				shouldDisable := s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
-				return nil, s.newOpenAIAccountFailoverError(
+				shouldDisable := false
+				if !deferOpenAIAPIKey429AccountSideEffects(c, account, resp.StatusCode) {
+					shouldDisable = s.handleFailoverSideEffects(ctx, resp, account, respBody, upstreamModel)
+				}
+				failoverErr := s.newOpenAIAccountFailoverError(
 					account,
 					resp.StatusCode,
 					resp.Header,
@@ -1131,6 +1134,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					shouldDisable,
 					!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(resp.StatusCode) || isOpenAITransientProcessingError(resp.StatusCode, upstreamMsg, respBody)),
 				)
+				applyOpenAIResponsesSameAccountRetryPolicy(c, account, resp.StatusCode, shouldDisable, failoverErr)
+				return nil, failoverErr
 			}
 			return s.handleErrorResponse(ctx, resp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 		}
@@ -1186,11 +1191,16 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 							Kind:               "failover",
 							Message:            signal.message,
 						})
-						shouldDisable := s.handleFailoverSideEffects(ctx, compactResp, account, compactBody, upstreamModel)
-						return nil, s.newOpenAIAccountFailoverError(
+						shouldDisable := false
+						if !deferOpenAIAPIKey429AccountSideEffects(c, account, compactResp.StatusCode) {
+							shouldDisable = s.handleFailoverSideEffects(ctx, compactResp, account, compactBody, upstreamModel)
+						}
+						failoverErr := s.newOpenAIAccountFailoverError(
 							account, compactResp.StatusCode, compactResp.Header, compactBody, signal.message, shouldDisable,
 							!shouldDisable && account.IsPoolMode() && (account.IsPoolModeRetryableStatus(compactResp.StatusCode) || isOpenAITransientProcessingError(compactResp.StatusCode, signal.message, compactBody)),
 						)
+						applyOpenAIResponsesSameAccountRetryPolicy(c, account, compactResp.StatusCode, shouldDisable, failoverErr)
+						return nil, failoverErr
 					}
 					return s.handleErrorResponse(ctx, compactResp, c, account, body, resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel))
 				}
