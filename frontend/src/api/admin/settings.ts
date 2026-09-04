@@ -605,11 +605,6 @@ export interface SystemSettings {
   // Per-platform account auto-pause thresholds (100 = disabled)
   account_scheduling_thresholds: AccountSchedulingThresholdsMap;
   first_token_priority_enabled: boolean;
-  total_duration_fast_threshold_seconds: number;
-  total_duration_slow_threshold_seconds: number;
-  total_duration_sample_limit: number;
-  total_duration_minimum_samples: number;
-  total_duration_primary_window_hours: number;
 
   // Identity patch configuration (Claude -> Gemini)
   enable_identity_patch: boolean;
@@ -941,11 +936,6 @@ export interface UpdateSettingsRequest {
   grok_default_base_url_mode?: string;
   account_scheduling_thresholds?: AccountSchedulingThresholdsMap;
   first_token_priority_enabled?: boolean;
-  total_duration_fast_threshold_seconds?: number;
-  total_duration_slow_threshold_seconds?: number;
-  total_duration_sample_limit?: number;
-  total_duration_minimum_samples?: number;
-  total_duration_primary_window_hours?: number;
   enable_identity_patch?: boolean;
   identity_patch_prompt?: string;
   ops_monitoring_enabled?: boolean;

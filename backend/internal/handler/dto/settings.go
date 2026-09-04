@@ -267,11 +267,6 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse string  `json:"openai_advanced_scheduler_effective_weight_previous_response"`
 	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string  `json:"openai_advanced_scheduler_effective_weight_session_sticky"`
 	FirstTokenPriorityEnabled                              bool    `json:"first_token_priority_enabled"`
-	TotalDurationFastThresholdSeconds                      int     `json:"total_duration_fast_threshold_seconds"`
-	TotalDurationSlowThresholdSeconds                      int     `json:"total_duration_slow_threshold_seconds"`
-	TotalDurationSampleLimit                               int     `json:"total_duration_sample_limit"`
-	TotalDurationMinimumSamples                            int     `json:"total_duration_minimum_samples"`
-	TotalDurationPrimaryWindowHours                        int     `json:"total_duration_primary_window_hours"`
 
 	// Payment configuration
 	PaymentEnabled                   bool     `json:"payment_enabled"`

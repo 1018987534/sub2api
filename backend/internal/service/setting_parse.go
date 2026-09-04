@@ -265,11 +265,6 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse:      "",
 		SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky:         "",
 		SettingKeyFirstTokenPriorityEnabled:                          "false",
-		SettingKeyTotalDurationFastThresholdSeconds:                  strconv.Itoa(DefaultTotalDurationFastThresholdSeconds),
-		SettingKeyTotalDurationSlowThresholdSeconds:                  strconv.Itoa(DefaultTotalDurationSlowThresholdSeconds),
-		SettingKeyTotalDurationSampleLimit:                           strconv.Itoa(DefaultTotalDurationSampleLimit),
-		SettingKeyTotalDurationMinimumSamples:                        strconv.Itoa(DefaultTotalDurationMinimumSamples),
-		SettingKeyTotalDurationPrimaryWindowHours:                    strconv.Itoa(DefaultTotalDurationPrimaryWindowHours),
 
 		SettingKeyAllowUserViewErrorRequests: "false",
 	}
@@ -945,25 +940,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAIAdvancedSchedulerWeightPreviousResponse = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse])
 	result.OpenAIAdvancedSchedulerWeightSessionSticky = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky])
 	result.FirstTokenPriorityEnabled = settings[SettingKeyFirstTokenPriorityEnabled] == "true"
-	result.TotalDurationFastThresholdSeconds = parseTotalDurationThresholdSeconds(
-		settings[SettingKeyTotalDurationFastThresholdSeconds],
-		DefaultTotalDurationFastThresholdSeconds,
-	)
-	result.TotalDurationSlowThresholdSeconds = parseTotalDurationThresholdSeconds(
-		settings[SettingKeyTotalDurationSlowThresholdSeconds],
-		DefaultTotalDurationSlowThresholdSeconds,
-	)
-	if result.TotalDurationSlowThresholdSeconds <= result.TotalDurationFastThresholdSeconds {
-		result.TotalDurationFastThresholdSeconds = DefaultTotalDurationFastThresholdSeconds
-		result.TotalDurationSlowThresholdSeconds = DefaultTotalDurationSlowThresholdSeconds
-	}
-	result.TotalDurationSampleLimit = parseTotalDurationSampleLimit(settings[SettingKeyTotalDurationSampleLimit], DefaultTotalDurationSampleLimit)
-	result.TotalDurationMinimumSamples = parseTotalDurationMinimumSamples(settings[SettingKeyTotalDurationMinimumSamples], DefaultTotalDurationMinimumSamples)
-	if result.TotalDurationMinimumSamples > result.TotalDurationSampleLimit {
-		result.TotalDurationMinimumSamples = result.TotalDurationSampleLimit
-	}
-	result.TotalDurationPrimaryWindowHours = parseTotalDurationPrimaryWindowHours(settings[SettingKeyTotalDurationPrimaryWindowHours], DefaultTotalDurationPrimaryWindowHours)
-	setCurrentTotalDurationSettings(result.TotalDurationFastThresholdSeconds, result.TotalDurationSlowThresholdSeconds, result.TotalDurationSampleLimit, result.TotalDurationMinimumSamples, result.TotalDurationPrimaryWindowHours)
 	normalizeOpenAISchedulerPriorityMode(result)
 	result.OpenAIAdvancedSchedulerEffectiveLBTopK = s.openAIAdvancedSchedulerEffectiveLBTopK()
 	effectiveWeights := s.openAIAdvancedSchedulerEffectiveWeights()
@@ -1021,38 +997,6 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	})
 
 	return result
-}
-
-func parseTotalDurationThresholdSeconds(raw string, fallback int) int {
-	value, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || value < MinTotalDurationThresholdSeconds || value > MaxTotalDurationThresholdSeconds {
-		return fallback
-	}
-	return value
-}
-
-func parseTotalDurationSampleLimit(raw string, fallback int) int {
-	value, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || value < MinTotalDurationSampleLimit || value > MaxTotalDurationSampleLimit {
-		return fallback
-	}
-	return value
-}
-
-func parseTotalDurationMinimumSamples(raw string, fallback int) int {
-	value, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || value < 1 || value > MaxTotalDurationSampleLimit {
-		return fallback
-	}
-	return value
-}
-
-func parseTotalDurationPrimaryWindowHours(raw string, fallback int) int {
-	value, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || value < MinTotalDurationPrimaryWindowHours || value > MaxTotalDurationPrimaryWindowHours {
-		return fallback
-	}
-	return value
 }
 
 func normalizeOpenAITTFTMode(mode string) string {

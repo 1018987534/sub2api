@@ -100,27 +100,6 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
 	normalizeOpenAISchedulerPriorityMode(settings)
-	if settings.TotalDurationFastThresholdSeconds == 0 {
-		settings.TotalDurationFastThresholdSeconds = DefaultTotalDurationFastThresholdSeconds
-	}
-	if settings.TotalDurationSlowThresholdSeconds == 0 {
-		settings.TotalDurationSlowThresholdSeconds = DefaultTotalDurationSlowThresholdSeconds
-	}
-	if settings.TotalDurationSampleLimit == 0 {
-		settings.TotalDurationSampleLimit = DefaultTotalDurationSampleLimit
-	}
-	if settings.TotalDurationMinimumSamples == 0 {
-		settings.TotalDurationMinimumSamples = DefaultTotalDurationMinimumSamples
-	}
-	if settings.TotalDurationPrimaryWindowHours == 0 {
-		settings.TotalDurationPrimaryWindowHours = DefaultTotalDurationPrimaryWindowHours
-	}
-	if err := validateTotalDurationThresholds(settings.TotalDurationFastThresholdSeconds, settings.TotalDurationSlowThresholdSeconds); err != nil {
-		return nil, err
-	}
-	if err := validateTotalDurationSampling(settings.TotalDurationSampleLimit, settings.TotalDurationMinimumSamples, settings.TotalDurationPrimaryWindowHours); err != nil {
-		return nil, err
-	}
 	if err := s.validateDefaultSignupAPIKeyGroup(ctx, settings.DefaultSignupAPIKeyGroupID); err != nil {
 		return nil, err
 	}
@@ -546,11 +525,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse] = settings.OpenAIAdvancedSchedulerWeightPreviousResponse
 	updates[SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky] = settings.OpenAIAdvancedSchedulerWeightSessionSticky
 	updates[SettingKeyFirstTokenPriorityEnabled] = strconv.FormatBool(settings.FirstTokenPriorityEnabled)
-	updates[SettingKeyTotalDurationFastThresholdSeconds] = strconv.Itoa(settings.TotalDurationFastThresholdSeconds)
-	updates[SettingKeyTotalDurationSlowThresholdSeconds] = strconv.Itoa(settings.TotalDurationSlowThresholdSeconds)
-	updates[SettingKeyTotalDurationSampleLimit] = strconv.Itoa(settings.TotalDurationSampleLimit)
-	updates[SettingKeyTotalDurationMinimumSamples] = strconv.Itoa(settings.TotalDurationMinimumSamples)
-	updates[SettingKeyTotalDurationPrimaryWindowHours] = strconv.Itoa(settings.TotalDurationPrimaryWindowHours)
 
 	// 余额、订阅到期与账号限额通知
 	updates[SettingKeyBalanceLowNotifyEnabled] = strconv.FormatBool(settings.BalanceLowNotifyEnabled)
@@ -741,7 +715,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	if settings == nil {
 		return
 	}
-	setCurrentTotalDurationSettings(settings.TotalDurationFastThresholdSeconds, settings.TotalDurationSlowThresholdSeconds, settings.TotalDurationSampleLimit, settings.TotalDurationMinimumSamples, settings.TotalDurationPrimaryWindowHours)
 
 	// 先使 inflight singleflight 失效，再刷新缓存，缩小旧值覆盖新值的竞态窗口
 	versionBoundsSF.Forget("version_bounds")
@@ -849,40 +822,6 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 		s.onUpdate() // Invalidate cache after settings update
 	}
 	s.notifyChannelMonitorRuntimeListeners()
-}
-
-func validateTotalDurationThresholds(fastSeconds, slowSeconds int) error {
-	if fastSeconds < MinTotalDurationThresholdSeconds || fastSeconds > MaxTotalDurationThresholdSeconds {
-		return infraerrors.BadRequest("INVALID_TOTAL_DURATION_FAST_THRESHOLD", fmt.Sprintf(
-			"total_duration_fast_threshold_seconds must be between %d and %d",
-			MinTotalDurationThresholdSeconds,
-			MaxTotalDurationThresholdSeconds,
-		))
-	}
-	if slowSeconds < MinTotalDurationThresholdSeconds || slowSeconds > MaxTotalDurationThresholdSeconds {
-		return infraerrors.BadRequest("INVALID_TOTAL_DURATION_SLOW_THRESHOLD", fmt.Sprintf(
-			"total_duration_slow_threshold_seconds must be between %d and %d",
-			MinTotalDurationThresholdSeconds,
-			MaxTotalDurationThresholdSeconds,
-		))
-	}
-	if slowSeconds <= fastSeconds {
-		return infraerrors.BadRequest("INVALID_TOTAL_DURATION_THRESHOLDS", "total_duration_slow_threshold_seconds must be greater than total_duration_fast_threshold_seconds")
-	}
-	return nil
-}
-
-func validateTotalDurationSampling(sampleLimit, minimumSamples, primaryWindowHours int) error {
-	if sampleLimit < MinTotalDurationSampleLimit || sampleLimit > MaxTotalDurationSampleLimit {
-		return infraerrors.BadRequest("INVALID_TOTAL_DURATION_SAMPLE_LIMIT", fmt.Sprintf("total_duration_sample_limit must be between %d and %d", MinTotalDurationSampleLimit, MaxTotalDurationSampleLimit))
-	}
-	if minimumSamples < 1 || minimumSamples > sampleLimit {
-		return infraerrors.BadRequest("INVALID_TOTAL_DURATION_MINIMUM_SAMPLES", "total_duration_minimum_samples must be between 1 and the sample limit")
-	}
-	if primaryWindowHours < MinTotalDurationPrimaryWindowHours || primaryWindowHours > MaxTotalDurationPrimaryWindowHours {
-		return infraerrors.BadRequest("INVALID_TOTAL_DURATION_PRIMARY_WINDOW", fmt.Sprintf("total_duration_primary_window_hours must be between %d and %d", MinTotalDurationPrimaryWindowHours, MaxTotalDurationPrimaryWindowHours))
-	}
-	return nil
 }
 
 func (s *SettingService) defaultRewriteMessageCacheControl() bool {

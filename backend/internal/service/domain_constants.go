@@ -630,16 +630,6 @@ const (
 	SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky         = "openai_advanced_scheduler_weight_session_sticky"
 	// SettingKeyFirstTokenPriorityEnabled makes recent TTFT the primary non-sticky scheduling order.
 	SettingKeyFirstTokenPriorityEnabled = "first_token_priority_enabled"
-	// SettingKeyTotalDurationFastThresholdSeconds controls fast-pool eligibility by completed request duration.
-	SettingKeyTotalDurationFastThresholdSeconds = "total_duration_fast_threshold_seconds"
-	// SettingKeyTotalDurationSlowThresholdSeconds controls broad slowdown detection by completed request duration.
-	SettingKeyTotalDurationSlowThresholdSeconds = "total_duration_slow_threshold_seconds"
-	// SettingKeyTotalDurationSampleLimit controls the maximum number of samples used for the normal duration score.
-	SettingKeyTotalDurationSampleLimit = "total_duration_sample_limit"
-	// SettingKeyTotalDurationMinimumSamples controls the minimum samples required for a stable pool decision.
-	SettingKeyTotalDurationMinimumSamples = "total_duration_minimum_samples"
-	// SettingKeyTotalDurationPrimaryWindowHours controls the preferred rolling sample window; 24h remains the fallback.
-	SettingKeyTotalDurationPrimaryWindowHours = "total_duration_primary_window_hours"
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
@@ -708,20 +698,6 @@ const (
 
 	// Web Search Emulation
 	SettingKeyWebSearchEmulationConfig = "web_search_emulation_config" // JSON 配置
-)
-
-const (
-	DefaultTotalDurationFastThresholdSeconds = 12
-	DefaultTotalDurationSlowThresholdSeconds = 16
-	DefaultTotalDurationSampleLimit          = 50
-	DefaultTotalDurationMinimumSamples       = 20
-	DefaultTotalDurationPrimaryWindowHours   = 6
-	MinTotalDurationThresholdSeconds         = 1
-	MaxTotalDurationThresholdSeconds         = 3600
-	MinTotalDurationSampleLimit              = 5
-	MaxTotalDurationSampleLimit              = 500
-	MinTotalDurationPrimaryWindowHours       = 1
-	MaxTotalDurationPrimaryWindowHours       = 24
 )
 
 // SettingKeyDefaultPlatformQuotas —— 系统全局：每用户 × 平台日/周/月 USD 上限（JSON）。

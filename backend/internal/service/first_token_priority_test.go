@@ -9,26 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCurrentTotalDurationSettingsUsesValidatedDynamicValues(t *testing.T) {
-	previous := CurrentTotalDurationSettings()
-	t.Cleanup(func() {
-		setCurrentTotalDurationSettings(previous.FastThresholdSeconds, previous.SlowThresholdSeconds, previous.SampleLimit, previous.MinimumSamples, previous.PrimaryWindowHours)
-	})
-
-	setCurrentTotalDurationSettings(14, 20, 80, 24, 8)
-	got := CurrentTotalDurationSettings()
-	require.Equal(t, TotalDurationSettings{
-		FastThresholdSeconds: 14,
-		SlowThresholdSeconds: 20,
-		SampleLimit:          80,
-		MinimumSamples:       24,
-		PrimaryWindowHours:   8,
-	}, got)
-
-	setCurrentTotalDurationSettings(14, 20, 5, 6, 8)
-	require.Equal(t, got, CurrentTotalDurationSettings(), "invalid minimum/sample-limit relation must not replace the active configuration")
-}
-
 type staticFirstTokenLatencyStatsCache struct {
 	stats          map[int64]FirstTokenLatencyStats
 	claimAllowed   bool
@@ -109,29 +89,29 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			expected: []int64{2, 3, 1},
 		},
 		{
-			name: "slow pool near tie preserves baseline",
+			name: "slow pool uses lower duration even for a near tie",
 			ids:  []int64{1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(14_400, 5, time.Minute),
-				2: stats(14_000, 5, time.Minute),
+				1: stats(12_400, 5, time.Minute),
+				2: stats(12_000, 5, time.Minute),
 			},
-			expected: []int64{1, 2},
+			expected: []int64{2, 1},
 		},
 		{
-			name: "slow pool needs material advantage before reranking",
+			name: "slow pool always prefers lower duration",
 			ids:  []int64{1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(15_000, 5, time.Minute),
-				2: stats(12_500, 5, time.Minute),
+				1: stats(14_500, 5, time.Minute),
+				2: stats(12_000, 5, time.Minute),
 			},
-			expected: []int64{1, 2},
+			expected: []int64{2, 1},
 		},
 		{
-			name: "slow pool near tie preserves caller baseline order",
+			name: "slow pool ignores caller sticky or rate order",
 			ids:  []int64{2, 1},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(15_000, 5, time.Minute),
-				2: stats(12_500, 5, time.Minute),
+				1: stats(14_500, 5, time.Minute),
+				2: stats(12_000, 5, time.Minute),
 			},
 			expected: []int64{2, 1},
 		},
@@ -139,8 +119,8 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			name: "slow pool reranks on material advantage",
 			ids:  []int64{1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(16_000, 5, time.Minute),
-				2: stats(12_500, 5, time.Minute),
+				1: stats(15_500, 5, time.Minute),
+				2: stats(12_000, 5, time.Minute),
 			},
 			expected: []int64{2, 1},
 		},
@@ -257,31 +237,11 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 	}
 }
 
-func TestFirstTokenPriorityStatsFastTrustsTrackedPoolStateUntilWindowExit(t *testing.T) {
-	now := time.Now()
-	tracked := FirstTokenLatencyStats{
-		PredictedMS:             15_999,
-		SampleCount:             50,
-		UpdatedAt:               now,
-		ReliableFast:            true,
-		FastConfirmationTracked: true,
-	}
-	require.True(t, firstTokenPriorityStatsFast(tracked, now), "tracked pool membership must not exit at the entry threshold")
-
-	tracked.ReliableFast = false
-	require.False(t, firstTokenPriorityStatsFast(tracked, now))
-
-	legacy := tracked
-	legacy.ReliableFast = true
-	legacy.FastConfirmationTracked = false
-	require.False(t, firstTokenPriorityStatsFast(legacy, now), "legacy untracked stats still use the twelve-second threshold")
-}
-
 func TestFirstTokenPriorityProbeIntervalBacksOffSlowAccounts(t *testing.T) {
 	base := firstTokenPriorityProbeInterval(FirstTokenLatencyStats{PredictedMS: 20_000, SampleCount: 20}, 5_000)
 	withStreak := firstTokenPriorityProbeInterval(FirstTokenLatencyStats{PredictedMS: 20_000, SampleCount: 20, SlowStreak: 4}, 5_000)
 	require.Greater(t, withStreak, base)
-	require.Equal(t, firstTokenPriorityProbeStairMax, firstTokenPriorityProbeInterval(
+	require.Equal(t, firstTokenPriorityProbeMax, firstTokenPriorityProbeInterval(
 		FirstTokenLatencyStats{PredictedMS: 1_000_000, SampleCount: 20, SlowStreak: 20},
 		1_000,
 	))
@@ -572,43 +532,6 @@ func TestFirstTokenPriorityOrderUsesSharedLeaseForDueProbe(t *testing.T) {
 
 	cache.claimAllowed = false
 	require.Equal(t, []int64{1, 2}, firstTokenPriorityOrder(context.Background(), accounts, cache))
-}
-
-func TestFirstTokenPriorityAllSlowPoolStillProbesFifthAccount(t *testing.T) {
-	now := time.Now()
-	cache := &staticFirstTokenLatencyStatsCache{
-		claimResults: map[int64]bool{5: true},
-		stats: map[int64]FirstTokenLatencyStats{
-			1: {PredictedMS: 20_000, SampleCount: 20, UpdatedAt: now},
-			2: {PredictedMS: 24_000, SampleCount: 20, UpdatedAt: now},
-			3: {PredictedMS: 26_000, SampleCount: 20, UpdatedAt: now},
-			4: {PredictedMS: 28_000, SampleCount: 20, UpdatedAt: now},
-			5: {PredictedMS: 60_000, SampleCount: 20, UpdatedAt: now.Add(-4 * time.Minute), SlowStreak: 20},
-		},
-	}
-	accounts := make([]*Account, 0, 5)
-	for id := int64(1); id <= 5; id++ {
-		accounts = append(accounts, &Account{ID: id, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true})
-	}
-
-	cache.claimResults = map[int64]bool{5: false}
-	ordered := firstTokenPriorityOrder(context.Background(), accounts, cache)
-	require.Equal(t, []int64{1, 2, 3, 4, 5}, ordered, "a four-minute-old persistently slow account is not probed every three minutes")
-	require.Zero(t, cache.claimedID)
-
-	// The probe-only rotation must not replace the slow-pool duration order when
-	// no account successfully claims the shared probe lease.
-	cache.claimResults = map[int64]bool{5: false}
-	reorderedAccounts := []*Account{accounts[4], accounts[0], accounts[3], accounts[1], accounts[2]}
-	baselineOrder := firstTokenPriorityOrderWithProbe(context.Background(), reorderedAccounts, cache, false)
-	ordered = firstTokenPriorityOrder(context.Background(), reorderedAccounts, cache)
-	require.Equal(t, baselineOrder, ordered)
-
-	cache.stats[5] = FirstTokenLatencyStats{PredictedMS: 60_000, SampleCount: 20, UpdatedAt: now.Add(-11 * time.Minute), SlowStreak: 20}
-	cache.claimResults = map[int64]bool{5: true}
-	ordered = firstTokenPriorityOrder(context.Background(), accounts, cache)
-	require.Equal(t, []int64{5, 1, 2, 3, 4}, ordered, "an all-slow group must give an overdue fifth account a probe before reusing account one")
-	require.Equal(t, int64(5), cache.claimedID)
 }
 
 func TestFirstTokenPriorityOrderManualProbeOverridesAllFastPool(t *testing.T) {

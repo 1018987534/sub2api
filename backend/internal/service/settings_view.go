@@ -293,11 +293,6 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse string
 	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string
 	FirstTokenPriorityEnabled                              bool
-	TotalDurationFastThresholdSeconds                      int
-	TotalDurationSlowThresholdSeconds                      int
-	TotalDurationSampleLimit                               int
-	TotalDurationMinimumSamples                            int
-	TotalDurationPrimaryWindowHours                        int
 
 	// 余额不足提醒
 	BalanceLowNotifyEnabled     bool

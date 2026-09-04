@@ -5,14 +5,12 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { AccountFirstTokenLatencyMetric, DashboardStats } from '@/types'
 import DashboardView from '../DashboardView.vue'
 
-const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, getSettings, updateSettings, showSuccess, showError } = vi.hoisted(() => ({
+const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, showSuccess, showError } = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
   getUserUsageTrend: vi.fn(),
   getUserSpendingRanking: vi.fn(),
   getFirstTokenLatencies: vi.fn(),
   requestFirstTokenManualProbe: vi.fn(),
-  getSettings: vi.fn(),
-  updateSettings: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn()
 }))
@@ -24,8 +22,7 @@ vi.mock('@/api/admin', () => ({
       getUserUsageTrend,
       getUserSpendingRanking
     },
-    accounts: { getFirstTokenLatencies, requestFirstTokenManualProbe },
-    settings: { getSettings, updateSettings }
+    accounts: { getFirstTokenLatencies, requestFirstTokenManualProbe }
   }
 }))
 
@@ -129,8 +126,6 @@ describe('admin DashboardView', () => {
     getUserSpendingRanking.mockReset()
     getFirstTokenLatencies.mockReset()
     requestFirstTokenManualProbe.mockReset()
-    getSettings.mockReset()
-    updateSettings.mockReset()
     showSuccess.mockReset()
     showError.mockReset()
 
@@ -155,14 +150,6 @@ describe('admin DashboardView', () => {
     })
     getFirstTokenLatencies.mockResolvedValue({ items: [], total: 0 })
     requestFirstTokenManualProbe.mockResolvedValue({ account_id: 42, queued: true })
-    getSettings.mockResolvedValue({
-      total_duration_fast_threshold_seconds: 12,
-      total_duration_slow_threshold_seconds: 16,
-      total_duration_sample_limit: 50,
-      total_duration_minimum_samples: 20,
-      total_duration_primary_window_hours: 6
-    })
-    updateSettings.mockImplementation(async (payload) => payload)
   })
 
   it('uses today as default dashboard range', async () => {
@@ -193,41 +180,6 @@ describe('admin DashboardView', () => {
       granularity: 'hour'
     }))
     expect(getFirstTokenLatencies).toHaveBeenCalledTimes(1)
-    wrapper.unmount()
-  })
-
-  it('saves dynamic total-duration sampling settings from the dashboard', async () => {
-    const wrapper = mount(DashboardView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          LoadingSpinner: true,
-          Icon: true,
-          DateRangePicker: true,
-          Select: true,
-          ModelDistributionChart: true,
-          TokenUsageTrend: true,
-          Line: true
-        }
-      }
-    })
-    await flushPromises()
-
-    await wrapper.get('[data-testid="total-duration-fast-threshold"]').setValue('14')
-    await wrapper.get('[data-testid="total-duration-slow-threshold"]').setValue('20')
-    await wrapper.get('[data-testid="total-duration-sample-limit"]').setValue('80')
-    await wrapper.get('[data-testid="total-duration-minimum-samples"]').setValue('24')
-    await wrapper.get('[data-testid="total-duration-primary-window"]').setValue('8')
-    await wrapper.get('[data-testid="save-total-duration-thresholds"]').trigger('click')
-    await flushPromises()
-
-    expect(updateSettings).toHaveBeenCalledWith({
-      total_duration_fast_threshold_seconds: 14,
-      total_duration_slow_threshold_seconds: 20,
-      total_duration_sample_limit: 80,
-      total_duration_minimum_samples: 24,
-      total_duration_primary_window_hours: 8
-    })
     wrapper.unmount()
   })
 

@@ -229,34 +229,7 @@
                 {{ t('admin.dashboard.firstTokenCacheRateDescription') }}
               </p>
             </div>
-            <div class="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-              <label class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.dashboard.firstTokenFastThreshold') }}
-                <input v-model.number="totalDurationFastThresholdSeconds" type="number" min="1" max="3600" class="h-8 w-16 rounded-md border border-gray-200 bg-white px-2 text-right text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200" data-testid="total-duration-fast-threshold" />
-                <span>s</span>
-              </label>
-              <label class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.dashboard.firstTokenSlowThreshold') }}
-                <input v-model.number="totalDurationSlowThresholdSeconds" type="number" min="1" max="3600" class="h-8 w-16 rounded-md border border-gray-200 bg-white px-2 text-right text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200" data-testid="total-duration-slow-threshold" />
-                <span>s</span>
-              </label>
-              <label class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.dashboard.firstTokenSampleLimit') }}
-                <input v-model.number="totalDurationSampleLimit" type="number" min="5" max="500" class="h-8 w-16 rounded-md border border-gray-200 bg-white px-2 text-right text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200" data-testid="total-duration-sample-limit" />
-              </label>
-              <label class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.dashboard.firstTokenMinimumSamples') }}
-                <input v-model.number="totalDurationMinimumSamples" type="number" min="1" max="500" class="h-8 w-16 rounded-md border border-gray-200 bg-white px-2 text-right text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200" data-testid="total-duration-minimum-samples" />
-              </label>
-              <label class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.dashboard.firstTokenPrimaryWindow') }}
-                <input v-model.number="totalDurationPrimaryWindowHours" type="number" min="1" max="24" class="h-8 w-16 rounded-md border border-gray-200 bg-white px-2 text-right text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200" data-testid="total-duration-primary-window" />
-                <span>h</span>
-              </label>
-              <button type="button" class="btn btn-secondary inline-flex h-8 shrink-0 items-center gap-1" :disabled="thresholdSaving" data-testid="save-total-duration-thresholds" @click="saveTotalDurationThresholds">
-                <Icon name="check" size="sm" />
-                {{ t('common.save') }}
-              </button>
+            <div class="flex w-full items-center gap-2 sm:w-auto">
               <div class="min-w-0 flex-1 sm:w-52 sm:flex-none" data-testid="first-token-group-filter">
                 <Select
                   v-model="firstTokenGroupFilter"
@@ -610,12 +583,6 @@ const firstTokenError = ref(false)
 const firstTokenMetrics = ref<AccountFirstTokenLatencyMetric[]>([])
 const firstTokenGroupFilter = ref<string | number>('all')
 const firstTokenManualProbeLoading = ref<Set<number>>(new Set())
-const totalDurationFastThresholdSeconds = ref(12)
-const totalDurationSlowThresholdSeconds = ref(16)
-const totalDurationSampleLimit = ref(50)
-const totalDurationMinimumSamples = ref(20)
-const totalDurationPrimaryWindowHours = ref(6)
-const thresholdSaving = ref(false)
 let firstTokenRefreshInFlight = false
 let firstTokenRefreshTimer: ReturnType<typeof setInterval> | null = null
 
@@ -680,8 +647,8 @@ const firstTokenPoolLabel = (metric: AccountFirstTokenLatencyMetric) => {
   if (metric.is_fast_pool) return t('admin.dashboard.firstTokenFastPool')
   if (metric.recovery_fast_streak > 0) {
     return t('admin.dashboard.firstTokenSlowPoolRecovering', {
-      current: Math.min(metric.recovery_fast_streak, 4),
-      total: 4
+      current: Math.min(metric.recovery_fast_streak, 2),
+      total: 3
     })
   }
   return t('admin.dashboard.firstTokenSlowPool')
@@ -715,52 +682,6 @@ const requestFirstTokenManualProbe = async (metric: AccountFirstTokenLatencyMetr
     appStore.showError(t('admin.dashboard.firstTokenManualProbeFailed'))
   } finally {
     setFirstTokenManualProbeLoading(metric.account_id, false)
-  }
-}
-
-const loadTotalDurationThresholds = async () => {
-  try {
-    const settings = await adminAPI.settings.getSettings()
-    totalDurationFastThresholdSeconds.value = settings.total_duration_fast_threshold_seconds || 12
-    totalDurationSlowThresholdSeconds.value = settings.total_duration_slow_threshold_seconds || 16
-    totalDurationSampleLimit.value = settings.total_duration_sample_limit || 50
-    totalDurationMinimumSamples.value = settings.total_duration_minimum_samples || 20
-    totalDurationPrimaryWindowHours.value = settings.total_duration_primary_window_hours || 6
-  } catch (error) {
-    console.error('Error loading total-duration thresholds:', error)
-  }
-}
-
-const saveTotalDurationThresholds = async () => {
-  const fast = Math.trunc(Number(totalDurationFastThresholdSeconds.value))
-  const slow = Math.trunc(Number(totalDurationSlowThresholdSeconds.value))
-  const sampleLimit = Math.trunc(Number(totalDurationSampleLimit.value))
-  const minimumSamples = Math.trunc(Number(totalDurationMinimumSamples.value))
-  const primaryWindowHours = Math.trunc(Number(totalDurationPrimaryWindowHours.value))
-  if (!Number.isFinite(fast) || !Number.isFinite(slow) || fast < 1 || slow < 1 || fast > 3600 || slow > 3600 || slow <= fast || !Number.isFinite(sampleLimit) || sampleLimit < 5 || sampleLimit > 500 || !Number.isFinite(minimumSamples) || minimumSamples < 1 || minimumSamples > sampleLimit || !Number.isFinite(primaryWindowHours) || primaryWindowHours < 1 || primaryWindowHours > 24) {
-    appStore.showError(t('admin.dashboard.firstTokenThresholdInvalid'))
-    return
-  }
-  thresholdSaving.value = true
-  try {
-    const settings = await adminAPI.settings.updateSettings({
-      total_duration_fast_threshold_seconds: fast,
-      total_duration_slow_threshold_seconds: slow,
-      total_duration_sample_limit: sampleLimit,
-      total_duration_minimum_samples: minimumSamples,
-      total_duration_primary_window_hours: primaryWindowHours
-    })
-    totalDurationFastThresholdSeconds.value = settings.total_duration_fast_threshold_seconds
-    totalDurationSlowThresholdSeconds.value = settings.total_duration_slow_threshold_seconds
-    totalDurationSampleLimit.value = settings.total_duration_sample_limit
-    totalDurationMinimumSamples.value = settings.total_duration_minimum_samples
-    totalDurationPrimaryWindowHours.value = settings.total_duration_primary_window_hours
-    appStore.showSuccess(t('admin.dashboard.firstTokenThresholdSaved'))
-  } catch (error) {
-    console.error('Error saving total-duration thresholds:', error)
-    appStore.showError(t('admin.dashboard.firstTokenThresholdSaveFailed'))
-  } finally {
-    thresholdSaving.value = false
   }
 }
 
@@ -1161,7 +1082,7 @@ const loadChartData = async () => {
 
 onMounted(() => {
   void refreshBatchImageAccess()
-  void Promise.all([loadDashboardStats(), loadFirstTokenLatencies(), loadTotalDurationThresholds()])
+  void Promise.all([loadDashboardStats(), loadFirstTokenLatencies()])
   firstTokenRefreshTimer = setInterval(() => {
     void loadFirstTokenLatencies(true)
   }, 30_000)

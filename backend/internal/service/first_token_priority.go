@@ -7,21 +7,16 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
 const (
-	firstTokenPriorityMinimumSamples = DefaultTotalDurationMinimumSamples
-	firstTokenPriorityFreshFor       = DefaultTotalDurationPrimaryWindowHours * time.Hour
-	firstTokenPriorityFastThreshold  = DefaultTotalDurationFastThresholdSeconds * 1000.0
-	firstTokenPriorityNearTieRatio   = 0.20
-	firstTokenPriorityNearTieFloor   = 2_000.0
+	firstTokenPriorityMinimumSamples = 20
+	firstTokenPriorityFreshFor       = 6 * time.Hour
+	firstTokenPriorityFastThreshold  = 12_000.0
 	firstTokenPriorityProbeBase      = 2 * time.Minute
 	firstTokenPriorityRecoveryProbe  = 30 * time.Second
 	firstTokenPriorityProbeMax       = 6 * time.Hour
-	firstTokenPriorityAllSlowSlot    = 2 * time.Minute
-	firstTokenPriorityProbeStairMax  = time.Hour
 	firstTokenPriorityProbeLease     = 10 * time.Minute
 	firstTokenPriorityManualProbeTTL = 10 * time.Minute
 	firstTokenLatencyHiddenAccount   = "plus-xiaobaishu 生图"
@@ -32,85 +27,6 @@ var (
 	ErrFirstTokenManualProbeUnavailable = errors.New("total-duration manual probe is unavailable")
 	ErrFirstTokenManualProbeIneligible  = errors.New("account is not eligible for total-duration probing")
 )
-
-type TotalDurationSettings struct {
-	FastThresholdSeconds int
-	SlowThresholdSeconds int
-	SampleLimit          int
-	MinimumSamples       int
-	PrimaryWindowHours   int
-}
-
-var totalDurationSettings atomic.Value // TotalDurationSettings
-
-func init() {
-	totalDurationSettings.Store(TotalDurationSettings{
-		FastThresholdSeconds: DefaultTotalDurationFastThresholdSeconds,
-		SlowThresholdSeconds: DefaultTotalDurationSlowThresholdSeconds,
-		SampleLimit:          DefaultTotalDurationSampleLimit,
-		MinimumSamples:       DefaultTotalDurationMinimumSamples,
-		PrimaryWindowHours:   DefaultTotalDurationPrimaryWindowHours,
-	})
-}
-
-// CurrentTotalDurationSettings returns the validated settings shared by the
-// scheduler and the Redis sample classifier.
-func CurrentTotalDurationSettings() TotalDurationSettings {
-	settings, _ := totalDurationSettings.Load().(TotalDurationSettings)
-	if validateTotalDurationSettings(settings) != nil {
-		return TotalDurationSettings{
-			FastThresholdSeconds: DefaultTotalDurationFastThresholdSeconds,
-			SlowThresholdSeconds: DefaultTotalDurationSlowThresholdSeconds,
-			SampleLimit:          DefaultTotalDurationSampleLimit,
-			MinimumSamples:       DefaultTotalDurationMinimumSamples,
-			PrimaryWindowHours:   DefaultTotalDurationPrimaryWindowHours,
-		}
-	}
-	return settings
-}
-
-// CurrentTotalDurationThresholds returns the validated thresholds shared by
-// the scheduler and the Redis sample classifier.
-func CurrentTotalDurationThresholds() (fastSeconds, slowSeconds int) {
-	settings := CurrentTotalDurationSettings()
-	return settings.FastThresholdSeconds, settings.SlowThresholdSeconds
-}
-
-func setCurrentTotalDurationThresholds(fastSeconds, slowSeconds int) {
-	settings := CurrentTotalDurationSettings()
-	settings.FastThresholdSeconds = fastSeconds
-	settings.SlowThresholdSeconds = slowSeconds
-	setCurrentTotalDurationSettings(fastSeconds, slowSeconds, settings.SampleLimit, settings.MinimumSamples, settings.PrimaryWindowHours)
-}
-
-func setCurrentTotalDurationSettings(fastSeconds, slowSeconds, sampleLimit, minimumSamples, primaryWindowHours int) {
-	settings := TotalDurationSettings{
-		FastThresholdSeconds: fastSeconds,
-		SlowThresholdSeconds: slowSeconds,
-		SampleLimit:          sampleLimit,
-		MinimumSamples:       minimumSamples,
-		PrimaryWindowHours:   primaryWindowHours,
-	}
-	if validateTotalDurationSettings(settings) == nil {
-		totalDurationSettings.Store(settings)
-	}
-}
-
-func validateTotalDurationSettings(settings TotalDurationSettings) error {
-	if err := validateTotalDurationThresholds(settings.FastThresholdSeconds, settings.SlowThresholdSeconds); err != nil {
-		return err
-	}
-	if settings.SampleLimit < MinTotalDurationSampleLimit || settings.SampleLimit > MaxTotalDurationSampleLimit {
-		return fmt.Errorf("sample limit out of range")
-	}
-	if settings.MinimumSamples < 1 || settings.MinimumSamples > settings.SampleLimit {
-		return fmt.Errorf("minimum samples out of range")
-	}
-	if settings.PrimaryWindowHours < MinTotalDurationPrimaryWindowHours || settings.PrimaryWindowHours > MaxTotalDurationPrimaryWindowHours {
-		return fmt.Errorf("primary window out of range")
-	}
-	return nil
-}
 
 type firstTokenRankedAccount struct {
 	id       int64
@@ -434,6 +350,9 @@ func firstTokenPriorityOrderWithProbeOptions(
 		if manualCache, ok := cache.(FirstTokenManualProbeCache); ok {
 			manualAccountID, claimed, claimErr := manualCache.TryClaimManualProbe(ctx, priorityAccountIDs, firstTokenPriorityProbeLease)
 			if claimErr == nil && claimed {
+				if allPriorityAccountsFast {
+					return promoteFirstTokenAccount(ordered, manualAccountID)
+				}
 				return promoteFirstTokenAccount(ordered, manualAccountID)
 			}
 		}
@@ -476,7 +395,7 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 	for index, accountID := range accountIDs {
 		stat, found := stats[accountID]
 		age := now.Sub(stat.UpdatedAt)
-		known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= time.Duration(CurrentTotalDurationSettings().PrimaryWindowHours)*time.Hour && stat.PredictedMS > 0
+		known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= firstTokenPriorityFreshFor && stat.PredictedMS > 0
 		if !known || !firstTokenPriorityStatsFast(stat, now) {
 			allFastKnown = false
 		} else {
@@ -484,9 +403,9 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		}
 		ranked = append(ranked, firstTokenRankedAccount{id: accountID, stats: stat, known: known, original: index})
 	}
-	// Confirmed accounts are in a separate fast pool. Keep the caller's baseline
-	// order inside that pool (the scheduler has already applied low-rate ordering),
-	// and put slower/unknown accounts behind it.
+	// A confirmed account at or below 12 seconds is in a separate fast pool. Keep the
+	// caller's baseline order inside that pool (the scheduler has already
+	// applied low-rate ordering), and put slower/unknown accounts behind it.
 	// This preserves fast-pool priority even when one account remains slow.
 	if len(fastKnownIDs) > 0 && !allFastKnown {
 		fast := make([]int64, 0, len(fastKnownIDs))
@@ -519,7 +438,7 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 			// scans only the slow/unknown tail, so a higher-rate fast account can
 			// never displace the low-rate winner merely because its probe is due.
 			probeCandidates := append([]firstTokenRankedAccount{fastRanked[0]}, slow...)
-			probeIndex := dynamicFirstTokenProbeIndexWithMode(probeCandidates, fastestMS, now, false)
+			probeIndex := dynamicFirstTokenProbeIndex(probeCandidates, fastestMS, now)
 			if probeIndex > 0 {
 				probe := probeCandidates[probeIndex]
 				// A due probe is intentionally moved ahead of the fast pool for
@@ -546,7 +465,7 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		if len(ranked) > 0 && ranked[0].known {
 			fastestMS = ranked[0].stats.PredictedMS
 		}
-		probeIndex := dynamicFirstTokenProbeIndexWithMode(ranked, fastestMS, now, len(fastKnownIDs) == 0)
+		probeIndex := dynamicFirstTokenProbeIndex(ranked, fastestMS, now)
 		if probeIndex > 0 {
 			probe := ranked[probeIndex]
 			copy(ranked[1:probeIndex+1], ranked[0:probeIndex])
@@ -596,7 +515,7 @@ func firstTokenPriorityProbeAccountIDs(accountIDs []int64, stats map[int64]First
 		for index, accountID := range baseline {
 			stat, found := stats[accountID]
 			age := now.Sub(stat.UpdatedAt)
-			known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= time.Duration(CurrentTotalDurationSettings().PrimaryWindowHours)*time.Hour && stat.PredictedMS > 0
+			known := found && firstTokenPriorityStatsReliable(stat) && age >= 0 && age <= firstTokenPriorityFreshFor && stat.PredictedMS > 0
 			probeRanked = append(probeRanked, firstTokenRankedAccount{id: accountID, stats: stat, known: known, original: index})
 		}
 		if len(probeRanked) > 0 && probeRanked[0].known {
@@ -604,11 +523,7 @@ func firstTokenPriorityProbeAccountIDs(accountIDs []int64, stats map[int64]First
 		}
 	}
 
-	// When no account is in the fast pool, probing is a group-level fairness
-	// mechanism. It must not turn the slow pool into a fixed per-account
-	// cadence, and it must not alter the duration-ranked baseline unless a
-	// shared lease is actually acquired by the caller.
-	indexes := dynamicFirstTokenProbeIndexesWithMode(probeRanked, fastestMS, now, len(fastIDs) == 0)
+	indexes := dynamicFirstTokenProbeIndexes(probeRanked, fastestMS, now)
 	result := make([]int64, 0, len(indexes))
 	for _, index := range indexes {
 		result = append(result, probeRanked[index].id)
@@ -628,7 +543,7 @@ func firstTokenPriorityStatsReliable(stats FirstTokenLatencyStats) bool {
 	if !stats.FastConfirmationTracked {
 		return stats.SampleCount >= 3 && stats.PredictedMS > 0
 	}
-	return stats.SampleCount >= int64(CurrentTotalDurationSettings().MinimumSamples) && stats.PredictedMS > 0
+	return stats.SampleCount >= firstTokenPriorityMinimumSamples && stats.PredictedMS > 0
 }
 
 func firstTokenPriorityStatsFast(stats FirstTokenLatencyStats, now time.Time) bool {
@@ -636,15 +551,11 @@ func firstTokenPriorityStatsFast(stats FirstTokenLatencyStats, now time.Time) bo
 		return false
 	}
 	age := now.Sub(stats.UpdatedAt)
-	fastSeconds, _ := CurrentTotalDurationThresholds()
-	// Tracked membership is authoritative until the Redis three-minute exit
-	// gate removes it; applying the entry threshold here would churn on one
-	// noisy average sample. Legacy untracked stats still need the threshold.
 	confirmed := stats.ReliableFast
 	if !stats.FastConfirmationTracked {
-		confirmed = stats.SampleCount >= 3 && stats.PredictedMS <= float64(fastSeconds*1000)
+		confirmed = stats.SampleCount >= 3
 	}
-	return confirmed && firstTokenPriorityStatsReliable(stats) && age >= 0 && age <= time.Duration(CurrentTotalDurationSettings().PrimaryWindowHours)*time.Hour
+	return confirmed && firstTokenPriorityStatsReliable(stats) && age >= 0 && age <= firstTokenPriorityFreshFor && stats.PredictedMS <= firstTokenPriorityFastThreshold
 }
 
 // Hard session affinity is allowed only inside the current fast pool. A slow or
@@ -656,25 +567,9 @@ func firstTokenPriorityDefaultStickyEligible(stats FirstTokenLatencyStats, now t
 	return firstTokenPriorityStatsFast(stats, now)
 }
 
-// A challenger in the same pool must be at least 2 seconds and 20 percent
-// faster. This hysteresis keeps small score movement from switching accounts.
-func firstTokenPriorityClearlyFaster(left, right FirstTokenLatencyStats, now time.Time) bool {
-	leftFast := firstTokenPriorityStatsFast(left, now)
-	rightFast := firstTokenPriorityStatsFast(right, now)
-	if leftFast != rightFast {
-		return leftFast
-	}
-	if left.PredictedMS <= 0 || right.PredictedMS <= 0 || left.PredictedMS >= right.PredictedMS {
-		return false
-	}
-	delta := right.PredictedMS - left.PredictedMS
-	return delta >= firstTokenPriorityNearTieFloor && delta/right.PredictedMS >= firstTokenPriorityNearTieRatio
-}
-
-// Slow-pool ranking starts from the caller's stable low-rate order. A measured
-// challenger moves ahead only after clearing the hysteresis gate; unknown
-// accounts remain behind measured accounts without arbitrary reordering.
-func stableFirstTokenRankedOrder(ranked []firstTokenRankedAccount, now time.Time) []firstTokenRankedAccount {
+// Slow-pool ordering is strictly normal-total-duration first. Unknown accounts
+// stay behind measured accounts, with account ID as the deterministic tie-break.
+func stableFirstTokenRankedOrder(ranked []firstTokenRankedAccount, _ time.Time) []firstTokenRankedAccount {
 	known := make([]firstTokenRankedAccount, 0, len(ranked))
 	unknown := make([]firstTokenRankedAccount, 0, len(ranked))
 	for _, item := range ranked {
@@ -684,18 +579,14 @@ func stableFirstTokenRankedOrder(ranked []firstTokenRankedAccount, now time.Time
 			unknown = append(unknown, item)
 		}
 	}
-	ordered := make([]firstTokenRankedAccount, 0, len(ranked))
-	for len(known) > 0 {
-		winner := 0
-		for index := 1; index < len(known); index++ {
-			if firstTokenPriorityClearlyFaster(known[index].stats, known[winner].stats, now) {
-				winner = index
-			}
+	sort.Slice(known, func(i, j int) bool {
+		if known[i].stats.PredictedMS == known[j].stats.PredictedMS {
+			return known[i].id < known[j].id
 		}
-		ordered = append(ordered, known[winner])
-		known = append(known[:winner], known[winner+1:]...)
-	}
-	return append(ordered, unknown...)
+		return known[i].stats.PredictedMS < known[j].stats.PredictedMS
+	})
+	sort.Slice(unknown, func(i, j int) bool { return unknown[i].id < unknown[j].id })
+	return append(known, unknown...)
 }
 
 // applyOpenAIFirstTokenStickyOrder reuses the legacy low-rate weighted sticky
@@ -732,7 +623,7 @@ func applyOpenAIFirstTokenStickyOrder(
 		return
 	}
 	stickyAge := now.Sub(stickyStats.UpdatedAt)
-	if stickyAge < 0 || stickyAge > time.Duration(CurrentTotalDurationSettings().PrimaryWindowHours)*time.Hour || firstTokenPriorityStatsFast(stickyStats, now) {
+	if stickyAge < 0 || stickyAge > firstTokenPriorityFreshFor || firstTokenPriorityStatsFast(stickyStats, now) {
 		return
 	}
 	applyOpenAILegacySoftStickyOrder(
@@ -755,11 +646,7 @@ func applyOpenAIFirstTokenStickyOrder(
 }
 
 func dynamicFirstTokenProbeIndex(ranked []firstTokenRankedAccount, fastestMS float64, now time.Time) int {
-	return dynamicFirstTokenProbeIndexWithMode(ranked, fastestMS, now, false)
-}
-
-func dynamicFirstTokenProbeIndexWithMode(ranked []firstTokenRankedAccount, fastestMS float64, now time.Time, allSlowPool bool) int {
-	indexes := dynamicFirstTokenProbeIndexesWithMode(ranked, fastestMS, now, allSlowPool)
+	indexes := dynamicFirstTokenProbeIndexes(ranked, fastestMS, now)
 	if len(indexes) == 0 {
 		return -1
 	}
@@ -767,13 +654,6 @@ func dynamicFirstTokenProbeIndexWithMode(ranked []firstTokenRankedAccount, faste
 }
 
 func dynamicFirstTokenProbeIndexes(ranked []firstTokenRankedAccount, fastestMS float64, now time.Time) []int {
-	return dynamicFirstTokenProbeIndexesWithMode(ranked, fastestMS, now, false)
-}
-
-func dynamicFirstTokenProbeIndexesWithMode(ranked []firstTokenRankedAccount, fastestMS float64, now time.Time, allSlowPool bool) []int {
-	if allSlowPool {
-		return allSlowPoolProbeIndexes(ranked, now)
-	}
 	type dueProbe struct {
 		index          int
 		recoveryStreak int
@@ -814,56 +694,11 @@ func dynamicFirstTokenProbeIndexesWithMode(ranked []firstTokenRankedAccount, fas
 	return indexes
 }
 
-// allSlowPoolProbeIndexes provides a group-level fairness queue for an all-slow
-// pool. The normal duration winner remains the baseline winner. The remaining
-// accounts accrue one group cycle of probe debt before they can be tried; the
-// cycle grows with the number of tail accounts (capped at one hour), so a
-// persistently slow account is not retried every two minutes while the group
-// still receives eventual exploration opportunities.
-func allSlowPoolProbeIndexes(ranked []firstTokenRankedAccount, now time.Time) []int {
-	if len(ranked) <= 1 {
-		return nil
-	}
-	candidateCount := len(ranked) - 1
-	cycle := time.Duration(candidateCount) * firstTokenPriorityAllSlowSlot
-	if cycle > firstTokenPriorityProbeStairMax {
-		cycle = firstTokenPriorityProbeStairMax
-	}
-	type dueProbe struct {
-		index   int
-		age     time.Duration
-		overdue float64
-	}
-	due := make([]dueProbe, 0, candidateCount)
-	for index := 1; index <= candidateCount; index++ {
-		item := ranked[index]
-		age := firstTokenPriorityProbeMax
-		if !item.stats.UpdatedAt.IsZero() {
-			age = now.Sub(item.stats.UpdatedAt)
-		}
-		if age < cycle {
-			continue
-		}
-		due = append(due, dueProbe{index: index, age: age, overdue: float64(age) / float64(cycle)})
-	}
-	sort.SliceStable(due, func(i, j int) bool {
-		if due[i].overdue != due[j].overdue {
-			return due[i].overdue > due[j].overdue
-		}
-		return due[i].age > due[j].age
-	})
-	indexes := make([]int, 0, len(due))
-	for _, probe := range due {
-		indexes = append(indexes, probe.index)
-	}
-	return indexes
-}
-
 func firstTokenPriorityProbeInterval(stats FirstTokenLatencyStats, fastestMS float64) time.Duration {
 	if stats.CircuitBroken || stats.RecoveryFastStreak > 0 {
 		return firstTokenPriorityRecoveryProbe
 	}
-	if stats.SampleCount < int64(CurrentTotalDurationSettings().MinimumSamples) {
+	if stats.SampleCount < firstTokenPriorityMinimumSamples {
 		return firstTokenPriorityRecoveryProbe
 	}
 	ratio := 1.0
@@ -876,9 +711,6 @@ func firstTokenPriorityProbeInterval(stats FirstTokenLatencyStats, fastestMS flo
 	}
 	streakFactor := 1.0 + float64(streak)*0.75
 	interval := time.Duration(float64(firstTokenPriorityProbeBase) * ratio * ratio * streakFactor)
-	if interval > firstTokenPriorityProbeStairMax {
-		return firstTokenPriorityProbeStairMax
-	}
 	if interval > firstTokenPriorityProbeMax {
 		return firstTokenPriorityProbeMax
 	}
