@@ -120,18 +120,18 @@ func TestTotalLatencyStatsCacheFastAccountNeedsThreeSlowAggregatesToExit(t *test
 		"exit_slow_streak", "0",
 	).Err())
 	for index := 0; index < 19; index++ {
-		member := fmt.Sprintf("%d:seed-%d:20000", nowMS, index)
+		member := fmt.Sprintf("%d:seed-%d:21000", nowMS, index)
 		require.NoError(t, rdb.ZAdd(ctx, samplesKey, redis.Z{Score: float64(nowMS), Member: member}).Err())
 	}
 
 	for index := 1; index <= 2; index++ {
-		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("slow-%d", index), 20_000))
+		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("slow-%d", index), 21_000))
 		stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 		require.NoError(t, err)
 		require.True(t, stats[accountID].ReliableFast)
 		require.Equal(t, index, stats[accountID].SlowStreak)
 	}
-	require.NoError(t, cache.RecordSample(ctx, accountID, "slow-3", 20_000))
+	require.NoError(t, cache.RecordSample(ctx, accountID, "slow-3", 21_000))
 	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
 	require.False(t, stats[accountID].ReliableFast)

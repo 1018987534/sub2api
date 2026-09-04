@@ -2424,7 +2424,7 @@ func TestOpenAIGatewayService_TotalDurationPriorityDoesNotLetSlowStickyCrossFast
 	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_slow_sticky": slowSticky.ID}}
 	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
 		fast.ID:       {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
-		slowSticky.ID: {PredictedMS: 12_001, SampleCount: 5, UpdatedAt: now},
+		slowSticky.ID: {PredictedMS: 17_001, SampleCount: 5, UpdatedAt: now},
 	}}
 	repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyFirstTokenPriorityEnabled: "true"}}
 	svc := &OpenAIGatewayService{

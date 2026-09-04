@@ -443,7 +443,7 @@ export default {
         accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.',
         priorityModeTitle: 'OpenAI Scheduling Priority',
         firstTokenPriorityTitle: 'Total-Duration Pools',
-        firstTokenPriorityDescription: 'Enter the fast pool after three normal totals at or below 12 seconds and leave after three at or above 16 seconds. Fast accounts prefer lower rates; slow accounts prefer shorter duration. Probes only affect fresh scheduling.',
+        firstTokenPriorityDescription: 'Enter the fast pool after three normal totals at or below 17 seconds and leave after three at or above 21 seconds. Fast accounts prefer lower rates; slow accounts prefer shorter duration. Probes only affect fresh scheduling.',
         lowRateModeDescription: 'Prioritize billing rate and automatically use sticky weighting within the same rate tier.'
       },
       upstreamBillingProbe: {

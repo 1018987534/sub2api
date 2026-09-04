@@ -82,7 +82,7 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			name: "slow account enables total duration priority",
 			ids:  []int64{1, 2, 3},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(13_000, 5, time.Minute),
+				1: stats(18_000, 5, time.Minute),
 				2: stats(4_000, 5, time.Minute),
 				3: stats(8_000, 5, time.Minute),
 			},
@@ -92,8 +92,8 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			name: "slow pool uses lower duration even for a near tie",
 			ids:  []int64{1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(12_400, 5, time.Minute),
-				2: stats(12_000, 5, time.Minute),
+				1: stats(17_400, 5, time.Minute),
+				2: stats(17_000, 5, time.Minute),
 			},
 			expected: []int64{2, 1},
 		},
@@ -101,8 +101,8 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			name: "slow pool always prefers lower duration",
 			ids:  []int64{1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(14_500, 5, time.Minute),
-				2: stats(12_000, 5, time.Minute),
+				1: stats(19_500, 5, time.Minute),
+				2: stats(17_000, 5, time.Minute),
 			},
 			expected: []int64{2, 1},
 		},
@@ -110,8 +110,8 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			name: "slow pool ignores caller sticky or rate order",
 			ids:  []int64{2, 1},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(14_500, 5, time.Minute),
-				2: stats(12_000, 5, time.Minute),
+				1: stats(19_500, 5, time.Minute),
+				2: stats(17_000, 5, time.Minute),
 			},
 			expected: []int64{2, 1},
 		},
@@ -119,17 +119,17 @@ func TestFirstTokenPriorityOrderWithStats(t *testing.T) {
 			name: "slow pool reranks on material advantage",
 			ids:  []int64{1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(15_500, 5, time.Minute),
-				2: stats(12_000, 5, time.Minute),
+				1: stats(20_500, 5, time.Minute),
+				2: stats(17_000, 5, time.Minute),
 			},
 			expected: []int64{2, 1},
 		},
 		{
-			name: "crossing twelve seconds creates a separate fast pool",
+			name: "crossing seventeen seconds creates a separate fast pool",
 			ids:  []int64{1, 2},
 			stats: map[int64]FirstTokenLatencyStats{
-				1: stats(12_100, 5, time.Minute),
-				2: stats(11_900, 5, time.Minute),
+				1: stats(17_100, 5, time.Minute),
+				2: stats(16_900, 5, time.Minute),
 			},
 			expected: []int64{2, 1},
 		},
@@ -300,14 +300,14 @@ func TestFirstTokenPriorityCircuitBrokenAccountEntersSlowPool(t *testing.T) {
 
 func TestFirstTokenPriorityDefaultStickyEligible(t *testing.T) {
 	now := time.Now()
-	reliable := FirstTokenLatencyStats{PredictedMS: 12_000, SampleCount: 3, UpdatedAt: now}
+	reliable := FirstTokenLatencyStats{PredictedMS: 17_000, SampleCount: 3, UpdatedAt: now}
 	require.True(t, firstTokenPriorityDefaultStickyEligible(reliable, now))
 
-	reliable.PredictedMS = 12_001
+	reliable.PredictedMS = 17_001
 	require.False(t, firstTokenPriorityDefaultStickyEligible(reliable, now))
 
 	circuitBroken := FirstTokenLatencyStats{
-		PredictedMS:             12_000,
+		PredictedMS:             17_000,
 		SampleCount:             20,
 		UpdatedAt:               now,
 		ReliableFast:            true,
@@ -318,7 +318,7 @@ func TestFirstTokenPriorityDefaultStickyEligible(t *testing.T) {
 	circuitBroken.CircuitBroken = false
 	require.True(t, firstTokenPriorityDefaultStickyEligible(circuitBroken, now))
 
-	reliable.PredictedMS = 12_000
+	reliable.PredictedMS = 17_000
 	reliable.SampleCount = 2
 	require.False(t, firstTokenPriorityDefaultStickyEligible(reliable, now))
 

@@ -13,7 +13,7 @@ import (
 const (
 	firstTokenPriorityMinimumSamples = 20
 	firstTokenPriorityFreshFor       = 6 * time.Hour
-	firstTokenPriorityFastThreshold  = 12_000.0
+	firstTokenPriorityFastThreshold  = 17_000.0
 	firstTokenPriorityProbeBase      = 2 * time.Minute
 	firstTokenPriorityRecoveryProbe  = 30 * time.Second
 	firstTokenPriorityProbeMax       = 6 * time.Hour
@@ -403,7 +403,7 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		}
 		ranked = append(ranked, firstTokenRankedAccount{id: accountID, stats: stat, known: known, original: index})
 	}
-	// A confirmed account at or below 12 seconds is in a separate fast pool. Keep the
+	// A confirmed account at or below 17 seconds is in a separate fast pool. Keep the
 	// caller's baseline order inside that pool (the scheduler has already
 	// applied low-rate ordering), and put slower/unknown accounts behind it.
 	// This preserves fast-pool priority even when one account remains slow.
