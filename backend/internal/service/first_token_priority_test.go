@@ -12,25 +12,21 @@ import (
 func TestCurrentTotalDurationSettingsUsesValidatedDynamicValues(t *testing.T) {
 	previous := CurrentTotalDurationSettings()
 	t.Cleanup(func() {
-		setCurrentTotalDurationSettings(previous.FastThresholdSeconds, previous.SlowThresholdSeconds, previous.SampleLimit, previous.MinimumSamples, previous.PrimaryWindowHours, previous.SingleSampleCircuitSeconds)
+		setCurrentTotalDurationSettings(previous.FastThresholdSeconds, previous.SlowThresholdSeconds, previous.SampleLimit, previous.MinimumSamples, previous.PrimaryWindowHours)
 	})
 
-	setCurrentTotalDurationSettings(14, 20, 80, 24, 8, 90)
+	setCurrentTotalDurationSettings(14, 20, 80, 24, 8)
 	got := CurrentTotalDurationSettings()
 	require.Equal(t, TotalDurationSettings{
-		FastThresholdSeconds:       14,
-		SlowThresholdSeconds:       20,
-		SampleLimit:                80,
-		MinimumSamples:             24,
-		PrimaryWindowHours:         8,
-		SingleSampleCircuitSeconds: 90,
+		FastThresholdSeconds: 14,
+		SlowThresholdSeconds: 20,
+		SampleLimit:          80,
+		MinimumSamples:       24,
+		PrimaryWindowHours:   8,
 	}, got)
 
-	setCurrentTotalDurationSettings(14, 20, 5, 6, 8, 90)
+	setCurrentTotalDurationSettings(14, 20, 5, 6, 8)
 	require.Equal(t, got, CurrentTotalDurationSettings(), "invalid minimum/sample-limit relation must not replace the active configuration")
-
-	setCurrentTotalDurationSettings(14, 20, 80, 24, 8, MaxTotalDurationSingleSampleCircuitSeconds+1)
-	require.Equal(t, got, CurrentTotalDurationSettings(), "invalid single-sample circuit value must not replace the active configuration")
 }
 
 type staticFirstTokenLatencyStatsCache struct {

@@ -225,9 +225,6 @@
               <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.dashboard.firstTokenLatencyDescription') }}
               </p>
-              <p class="mt-1 max-w-5xl text-xs leading-5 text-gray-400 dark:text-gray-500">
-                {{ t('admin.dashboard.firstTokenAlgorithmDescription') }}
-              </p>
               <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
                 {{ t('admin.dashboard.firstTokenCacheRateDescription') }}
               </p>
@@ -255,11 +252,6 @@
                 {{ t('admin.dashboard.firstTokenPrimaryWindow') }}
                 <input v-model.number="totalDurationPrimaryWindowHours" type="number" min="1" max="24" class="h-8 w-16 rounded-md border border-gray-200 bg-white px-2 text-right text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200" data-testid="total-duration-primary-window" />
                 <span>h</span>
-              </label>
-              <label class="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                {{ t('admin.dashboard.firstTokenSingleSampleCircuit') }}
-                <input v-model.number="totalDurationSingleSampleCircuitSeconds" type="number" min="1" max="3600" class="h-8 w-16 rounded-md border border-gray-200 bg-white px-2 text-right text-sm text-gray-700 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200" data-testid="total-duration-single-sample-circuit" />
-                <span>s</span>
               </label>
               <button type="button" class="btn btn-secondary inline-flex h-8 shrink-0 items-center gap-1" :disabled="thresholdSaving" data-testid="save-total-duration-thresholds" @click="saveTotalDurationThresholds">
                 <Icon name="check" size="sm" />
@@ -623,7 +615,6 @@ const totalDurationSlowThresholdSeconds = ref(16)
 const totalDurationSampleLimit = ref(50)
 const totalDurationMinimumSamples = ref(20)
 const totalDurationPrimaryWindowHours = ref(6)
-const totalDurationSingleSampleCircuitSeconds = ref(60)
 const thresholdSaving = ref(false)
 let firstTokenRefreshInFlight = false
 let firstTokenRefreshTimer: ReturnType<typeof setInterval> | null = null
@@ -735,7 +726,6 @@ const loadTotalDurationThresholds = async () => {
     totalDurationSampleLimit.value = settings.total_duration_sample_limit || 50
     totalDurationMinimumSamples.value = settings.total_duration_minimum_samples || 20
     totalDurationPrimaryWindowHours.value = settings.total_duration_primary_window_hours || 6
-    totalDurationSingleSampleCircuitSeconds.value = settings.total_duration_single_sample_circuit_seconds || 60
   } catch (error) {
     console.error('Error loading total-duration thresholds:', error)
   }
@@ -747,8 +737,7 @@ const saveTotalDurationThresholds = async () => {
   const sampleLimit = Math.trunc(Number(totalDurationSampleLimit.value))
   const minimumSamples = Math.trunc(Number(totalDurationMinimumSamples.value))
   const primaryWindowHours = Math.trunc(Number(totalDurationPrimaryWindowHours.value))
-  const singleSampleCircuitSeconds = Math.trunc(Number(totalDurationSingleSampleCircuitSeconds.value))
-  if (!Number.isFinite(fast) || !Number.isFinite(slow) || fast < 1 || slow < 1 || fast > 3600 || slow > 3600 || slow <= fast || !Number.isFinite(sampleLimit) || sampleLimit < 5 || sampleLimit > 500 || !Number.isFinite(minimumSamples) || minimumSamples < 1 || minimumSamples > sampleLimit || !Number.isFinite(primaryWindowHours) || primaryWindowHours < 1 || primaryWindowHours > 24 || !Number.isFinite(singleSampleCircuitSeconds) || singleSampleCircuitSeconds < 1 || singleSampleCircuitSeconds > 3600) {
+  if (!Number.isFinite(fast) || !Number.isFinite(slow) || fast < 1 || slow < 1 || fast > 3600 || slow > 3600 || slow <= fast || !Number.isFinite(sampleLimit) || sampleLimit < 5 || sampleLimit > 500 || !Number.isFinite(minimumSamples) || minimumSamples < 1 || minimumSamples > sampleLimit || !Number.isFinite(primaryWindowHours) || primaryWindowHours < 1 || primaryWindowHours > 24) {
     appStore.showError(t('admin.dashboard.firstTokenThresholdInvalid'))
     return
   }
@@ -759,15 +748,13 @@ const saveTotalDurationThresholds = async () => {
       total_duration_slow_threshold_seconds: slow,
       total_duration_sample_limit: sampleLimit,
       total_duration_minimum_samples: minimumSamples,
-      total_duration_primary_window_hours: primaryWindowHours,
-      total_duration_single_sample_circuit_seconds: singleSampleCircuitSeconds
+      total_duration_primary_window_hours: primaryWindowHours
     })
     totalDurationFastThresholdSeconds.value = settings.total_duration_fast_threshold_seconds
     totalDurationSlowThresholdSeconds.value = settings.total_duration_slow_threshold_seconds
     totalDurationSampleLimit.value = settings.total_duration_sample_limit
     totalDurationMinimumSamples.value = settings.total_duration_minimum_samples
     totalDurationPrimaryWindowHours.value = settings.total_duration_primary_window_hours
-    totalDurationSingleSampleCircuitSeconds.value = settings.total_duration_single_sample_circuit_seconds
     appStore.showSuccess(t('admin.dashboard.firstTokenThresholdSaved'))
   } catch (error) {
     console.error('Error saving total-duration thresholds:', error)

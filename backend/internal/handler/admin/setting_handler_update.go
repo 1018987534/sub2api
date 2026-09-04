@@ -374,13 +374,12 @@ type UpdateSettingsRequest struct {
 	// 各平台账号自动停调阈值（整体替换语义：nil = 不修改，non-nil = 整体覆盖）。
 	AccountSchedulingThresholds map[string]int `json:"account_scheduling_thresholds"`
 
-	FirstTokenPriorityEnabled               *bool `json:"first_token_priority_enabled"`
-	TotalDurationFastThresholdSeconds       *int  `json:"total_duration_fast_threshold_seconds"`
-	TotalDurationSlowThresholdSeconds       *int  `json:"total_duration_slow_threshold_seconds"`
-	TotalDurationSampleLimit                *int  `json:"total_duration_sample_limit"`
-	TotalDurationMinimumSamples             *int  `json:"total_duration_minimum_samples"`
-	TotalDurationPrimaryWindowHours         *int  `json:"total_duration_primary_window_hours"`
-	TotalDurationSingleSampleCircuitSeconds *int  `json:"total_duration_single_sample_circuit_seconds"`
+	FirstTokenPriorityEnabled         *bool `json:"first_token_priority_enabled"`
+	TotalDurationFastThresholdSeconds *int  `json:"total_duration_fast_threshold_seconds"`
+	TotalDurationSlowThresholdSeconds *int  `json:"total_duration_slow_threshold_seconds"`
+	TotalDurationSampleLimit          *int  `json:"total_duration_sample_limit"`
+	TotalDurationMinimumSamples       *int  `json:"total_duration_minimum_samples"`
+	TotalDurationPrimaryWindowHours   *int  `json:"total_duration_primary_window_hours"`
 
 	// auth-source 层 platform quota 覆盖（override 语义：nil = 不修改，non-nil = 整体覆盖该 source 的 quota 配置）。
 	AuthSourceEmailPlatformQuotas    map[string]*service.DefaultPlatformQuotaSetting `json:"auth_source_default_email_platform_quotas"`
@@ -1560,12 +1559,6 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			return previousSettings.TotalDurationPrimaryWindowHours
 		}(),
-		TotalDurationSingleSampleCircuitSeconds: func() int {
-			if req.TotalDurationSingleSampleCircuitSeconds != nil {
-				return *req.TotalDurationSingleSampleCircuitSeconds
-			}
-			return previousSettings.TotalDurationSingleSampleCircuitSeconds
-		}(),
 
 		RegistrationEnabled:                 req.RegistrationEnabled,
 		EmailVerifyEnabled:                  req.EmailVerifyEnabled,
@@ -2466,18 +2459,17 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 		AffiliateEnabled: updatedSettings.AffiliateEnabled,
 
-		RiskControlEnabled:                      updatedSettings.RiskControlEnabled,
-		CyberSessionBlockEnabled:                updatedSettings.CyberSessionBlockEnabled,
-		CyberSessionBlockTTLSeconds:             updatedSettings.CyberSessionBlockTTLSeconds,
-		AccountSchedulingThresholds:             updatedSettings.AccountSchedulingThresholds,
-		FirstTokenPriorityEnabled:               updatedSettings.FirstTokenPriorityEnabled,
-		TotalDurationFastThresholdSeconds:       updatedSettings.TotalDurationFastThresholdSeconds,
-		TotalDurationSlowThresholdSeconds:       updatedSettings.TotalDurationSlowThresholdSeconds,
-		TotalDurationSampleLimit:                updatedSettings.TotalDurationSampleLimit,
-		TotalDurationMinimumSamples:             updatedSettings.TotalDurationMinimumSamples,
-		TotalDurationPrimaryWindowHours:         updatedSettings.TotalDurationPrimaryWindowHours,
-		TotalDurationSingleSampleCircuitSeconds: updatedSettings.TotalDurationSingleSampleCircuitSeconds,
-		AllowUserViewErrorRequests:              updatedSettings.AllowUserViewErrorRequests,
+		RiskControlEnabled:                updatedSettings.RiskControlEnabled,
+		CyberSessionBlockEnabled:          updatedSettings.CyberSessionBlockEnabled,
+		CyberSessionBlockTTLSeconds:       updatedSettings.CyberSessionBlockTTLSeconds,
+		AccountSchedulingThresholds:       updatedSettings.AccountSchedulingThresholds,
+		FirstTokenPriorityEnabled:         updatedSettings.FirstTokenPriorityEnabled,
+		TotalDurationFastThresholdSeconds: updatedSettings.TotalDurationFastThresholdSeconds,
+		TotalDurationSlowThresholdSeconds: updatedSettings.TotalDurationSlowThresholdSeconds,
+		TotalDurationSampleLimit:          updatedSettings.TotalDurationSampleLimit,
+		TotalDurationMinimumSamples:       updatedSettings.TotalDurationMinimumSamples,
+		TotalDurationPrimaryWindowHours:   updatedSettings.TotalDurationPrimaryWindowHours,
+		AllowUserViewErrorRequests:        updatedSettings.AllowUserViewErrorRequests,
 	}
 	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
 		slog.Error("openai_fast_policy_settings_get_failed", "error", err)

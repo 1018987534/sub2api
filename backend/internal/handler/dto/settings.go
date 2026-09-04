@@ -272,7 +272,6 @@ type SystemSettings struct {
 	TotalDurationSampleLimit                               int     `json:"total_duration_sample_limit"`
 	TotalDurationMinimumSamples                            int     `json:"total_duration_minimum_samples"`
 	TotalDurationPrimaryWindowHours                        int     `json:"total_duration_primary_window_hours"`
-	TotalDurationSingleSampleCircuitSeconds                int     `json:"total_duration_single_sample_circuit_seconds"`
 
 	// Payment configuration
 	PaymentEnabled                   bool     `json:"payment_enabled"`

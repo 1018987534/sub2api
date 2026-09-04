@@ -144,7 +144,7 @@ func TestTotalLatencyStatsCacheDeduplicatesPerAccountRequest(t *testing.T) {
 	require.Equal(t, int64(1), stats[43].SampleCount)
 }
 
-func TestTotalLatencyStatsCacheSingleSampleCircuitUsesStrictGreaterThanBoundary(t *testing.T) {
+func TestTotalLatencyStatsCacheSingleLongGenerationDoesNotEvictFastAccount(t *testing.T) {
 	mr, _, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 	base := time.Unix(1_699_950_000, 0)
@@ -155,17 +155,13 @@ func TestTotalLatencyStatsCacheSingleSampleCircuitUsesStrictGreaterThanBoundary(
 	require.True(t, before[17].ReliableFast)
 
 	mr.SetTime(base.Add(90 * time.Second))
-	require.NoError(t, cache.RecordSample(ctx, 17, "circuit-boundary", 60_000))
+	require.NoError(t, cache.RecordSample(ctx, 17, "one-long-valid-generation", 300_000))
 	after, err := cache.GetStatsBatch(ctx, []int64{17})
 	require.NoError(t, err)
 	require.True(t, after[17].ReliableFast)
-
-	mr.SetTime(base.Add(91 * time.Second))
-	require.NoError(t, cache.RecordSample(ctx, 17, "circuit-trigger", 60_001))
-	after, err = cache.GetStatsBatch(ctx, []int64{17})
-	require.NoError(t, err)
-	require.False(t, after[17].ReliableFast, "one completed request strictly above the circuit threshold must evict the fast account")
-	require.True(t, after[17].CircuitBroken)
+	// A single long sample cannot evict a confirmed fast account or rewrite its
+	// stable score until the three-minute exit gate is satisfied.
+	require.Equal(t, 8_000.0, after[17].PredictedMS)
 	require.Zero(t, after[17].SlowStreak)
 }
 
@@ -198,29 +194,8 @@ func TestTotalLatencyStatsCacheFastAccountRequiresThreeMinuteLargeAreaDegradatio
 	require.False(t, stats[accountID].ReliableFast)
 	require.Equal(t, 11, stats[accountID].SlowStreak)
 	require.Equal(t, "1", rdb.HGet(ctx, statsKey, "exit_window_degraded").Val())
-	require.Equal(t, "8", rdb.HGet(ctx, statsKey, "score_version").Val())
+	require.Equal(t, "7", rdb.HGet(ctx, statsKey, "score_version").Val())
 	require.True(t, mr.Exists(statsKey))
-}
-
-func TestTotalLatencyStatsCacheFastExitDoesNotRequireTenTransitionSamples(t *testing.T) {
-	mr, rdb, cache := newTotalLatencyTestCache(t)
-	ctx := context.Background()
-	accountID := int64(28)
-	statsKey := fmt.Sprintf("%s%d", totalLatencyStatsPrefix, accountID)
-	base := time.Unix(1_700_050_000, 0)
-	recordSustainedFastTotalLatencySamples(t, mr, cache, accountID, "fast", base)
-
-	mr.SetTime(base.Add(4 * time.Minute))
-	require.NoError(t, cache.RecordSample(ctx, accountID, "slow-start", 20_000))
-	mr.SetTime(base.Add(6*time.Minute + time.Second))
-	require.NoError(t, cache.RecordSample(ctx, accountID, "slow-confirm", 20_000))
-
-	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
-	require.NoError(t, err)
-	require.False(t, stats[accountID].ReliableFast, "two slow samples spanning more than two minutes are sufficient once the ten-sample gate is removed")
-	require.Equal(t, "2", rdb.HGet(ctx, statsKey, "exit_window_sample_count").Val())
-	require.Equal(t, "2", rdb.HGet(ctx, statsKey, "exit_window_slow_count").Val())
-	require.Equal(t, "1", rdb.HGet(ctx, statsKey, "exit_window_degraded").Val())
 }
 
 func TestTotalLatencyStatsCacheFastExitRequiresSeventyPercentSlowRequests(t *testing.T) {
