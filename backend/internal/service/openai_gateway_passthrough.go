@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
@@ -1772,7 +1771,6 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 		headers = responseHeaders[0].Clone()
 	}
 	statusCode, shouldDisable := s.handleOpenAIStreamTerminalAccountSideEffects(c, account, payload, message, headers, canonicalModel)
-	s.observeOpenAIStreamFailureLatency(c, account, upstreamRequestID, statusCode, payload, message)
 	// 流内 failed 事件承载于 HTTP 200；使用事件的语义状态更新账号健康，
 	// 再由 failover 引擎按 StatusCode/RetryableOnSameAccount 决定恢复策略。
 	message = s.recordOpenAIStreamUpstreamError(c, account, passthrough, upstreamRequestID, "failover", payload, message)
@@ -1802,56 +1800,6 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 	// only typed access/capacity failures need the original payload downstream.
 	failoverErr.ResponseBody = body
 	return failoverErr
-}
-
-func openAIStreamFailureShouldRecordLatency(ctx context.Context, account *Account, statusCode int, payload []byte, message string) bool {
-	if ctx != nil && ctx.Err() != nil {
-		return false
-	}
-	if !isFirstTokenPriorityAccount(account) || (statusCode != http.StatusTooManyRequests && statusCode < http.StatusInternalServerError) {
-		return false
-	}
-	if isOpenAIUpstreamCapacityShedEvent(payload) || openAIStreamCredentialAuthFailure(payload) {
-		return false
-	}
-	return openAIStreamFailedEventShouldFailover(payload, message)
-}
-
-func openAIStreamFailureRequestID(c *gin.Context, upstreamRequestID string) string {
-	if requestID := strings.TrimSpace(upstreamRequestID); requestID != "" {
-		return requestID
-	}
-	if c == nil || c.Request == nil {
-		return ""
-	}
-	ctx := c.Request.Context()
-	if requestID, _ := ctx.Value(ctxkey.RequestID).(string); strings.TrimSpace(requestID) != "" {
-		return strings.TrimSpace(requestID)
-	}
-	return strings.TrimSpace(c.GetHeader("X-Request-ID"))
-}
-
-func (s *OpenAIGatewayService) observeOpenAIStreamFailureLatency(c *gin.Context, account *Account, upstreamRequestID string, statusCode int, payload []byte, message string) {
-	if s == nil || s.rateLimitService == nil || account == nil {
-		return
-	}
-	ctx := context.Background()
-	if c != nil && c.Request != nil {
-		ctx = c.Request.Context()
-	}
-	if !openAIStreamFailureShouldRecordLatency(ctx, account, statusCode, payload, message) {
-		return
-	}
-	requestID := openAIStreamFailureRequestID(c, upstreamRequestID)
-	if requestID == "" {
-		return
-	}
-	settings := CurrentTotalDurationSettings()
-	failureSeconds := settings.SlowThresholdSeconds
-	if settings.SingleSampleCircuitSeconds >= failureSeconds {
-		failureSeconds = settings.SingleSampleCircuitSeconds
-	}
-	s.rateLimitService.ObserveTotalDurationFailure(ctx, account, requestID, failureSeconds*1000+1)
 }
 
 // nonStreamingTerminalFailureFailover applies the streaming path's terminal-event

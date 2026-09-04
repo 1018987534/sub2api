@@ -68,8 +68,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local recovery_ratio_numerator = tonumber(ARGV[19])
 	local recovery_ratio_denominator = tonumber(ARGV[20])
 	local single_sample_circuit_ms = tonumber(ARGV[21])
-	local semantic_failure = tonumber(ARGV[22]) == 1
-	local request_id = ARGV[23]
+	local request_id = ARGV[22]
 	local now = redis.call('TIME')
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 
@@ -214,20 +213,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 		local p50 = percentile(samples, 0.50)
 		local p90 = percentile(samples, 0.90)
 		local single_sample_circuit = is_fast == 1 and duration_ms > single_sample_circuit_ms
-		if semantic_failure then
-			-- A semantic upstream failure is not billable usage, but it is a
-			-- definitive account-health observation. Remove fast-pool membership
-			-- immediately and keep the slow-pool score visibly worse until healthy
-			-- samples establish recovery.
-			is_fast = 0
-			circuit_broken = 0
-			enter_fast_streak = 0
-			recovery_fast_streak = 0
-			exit_slow_streak = transition_slow_count
-			recovery_candidate = 0
-			recovery_window_confirmed = 0
-			if normal_total < duration_ms then normal_total = duration_ms end
-		elseif single_sample_circuit then
+		if single_sample_circuit then
 			is_fast = 0
 			circuit_broken = 1
 			enter_fast_streak = 0
@@ -239,17 +225,12 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 
 		if #samples < minimum_samples then
 			is_fast = 0
-			if semantic_failure then
-				recovery_fast_streak = 0
-				exit_slow_streak = transition_slow_count
-			elseif recovery_candidate == 1 then
+			if recovery_candidate == 1 then
 				recovery_fast_streak = transition_fast_count
 			else
 				recovery_fast_streak = 0
 			end
-			if not semantic_failure then
-				exit_slow_streak = 0
-			end
+			exit_slow_streak = 0
 		elseif is_fast == 1 and exit_window_degraded == 1 then
 			is_fast = 0
 			enter_fast_streak = 0
@@ -339,7 +320,7 @@ func NewFirstTokenLatencyStatsCache(rdb *redis.Client) service.FirstTokenLatency
 	return &firstTokenLatencyStatsCache{rdb: rdb}
 }
 
-func (c *firstTokenLatencyStatsCache) record(ctx context.Context, accountID int64, requestID string, durationMs int, semanticFailure bool) error {
+func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountID int64, requestID string, durationMs int) error {
 	requestID = strings.TrimSpace(requestID)
 	if accountID <= 0 || requestID == "" || durationMs <= 0 {
 		return nil
@@ -379,20 +360,11 @@ func (c *firstTokenLatencyStatsCache) record(ctx context.Context, accountID int6
 		totalLatencyRecoveryRatioNumerator,
 		totalLatencyRecoveryRatioDenominator,
 		settings.SingleSampleCircuitSeconds*1000,
-		map[bool]int{false: 0, true: 1}[semanticFailure],
 		requestID,
 	).Result(); err != nil {
 		return fmt.Errorf("record total-duration stats: %w", err)
 	}
 	return nil
-}
-
-func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountID int64, requestID string, durationMs int) error {
-	return c.record(ctx, accountID, requestID, durationMs, false)
-}
-
-func (c *firstTokenLatencyStatsCache) RecordFailure(ctx context.Context, accountID int64, requestID string, durationMs int) error {
-	return c.record(ctx, accountID, requestID, durationMs, true)
 }
 
 func (c *firstTokenLatencyStatsCache) RequestManualProbe(ctx context.Context, accountID int64, ttl time.Duration) error {
