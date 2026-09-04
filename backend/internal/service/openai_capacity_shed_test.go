@@ -363,6 +363,34 @@ func TestSanitizeOpenAICapacityShedErrorCodeForClient(t *testing.T) {
 	}
 }
 
+func TestSanitizeOpenAIRetryableErrorForClient(t *testing.T) {
+	cases := []struct {
+		name       string
+		payload    string
+		wantStatus string
+	}{
+		{
+			name:       "response_failed rate limit",
+			payload:    `{"type":"response.failed","response":{"status":"failed","error":{"type":"rate_limit_error","code":"rate_limit_exceeded","status_code":429,"message":"quota reached"}}}`,
+			wantStatus: `"status_code":503`,
+		},
+		{
+			name:       "error frame rate limit",
+			payload:    `{"type":"error","error":{"type":"rate_limit_error","code":"rate_limit_exceeded","message":"quota reached"}}`,
+			wantStatus: `"code":"server_error"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, changed := sanitizeOpenAIRetryableErrorForClient([]byte(tc.payload))
+			require.True(t, changed)
+			require.Contains(t, string(out), tc.wantStatus)
+			require.Contains(t, string(out), "Upstream rate limit temporarily unavailable")
+			require.NotContains(t, string(out), "rate_limit_exceeded")
+		})
+	}
+}
+
 // 出站身份的版本声明只能有一个来源：UA 的版本段、version 头、探针版本三处必须同源，
 // 各自硬编码会漂移成互相矛盾的身份，而自相矛盾或陈旧的身份会被上游优先降载。
 func TestCodexOutboundVersionHasSingleSource(t *testing.T) {

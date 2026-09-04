@@ -834,16 +834,18 @@ func (s *GeminiMessagesCompatService) writeGeminiChatCompletionsMappedError(
 		})
 	}
 
-	if status, errType, errMsg, matched := applyErrorPassthroughRule(
-		c,
-		PlatformGemini,
-		upstreamStatus,
-		body,
-		http.StatusBadGateway,
-		"upstream_error",
-		"Upstream request failed",
-	); matched {
-		return s.writeChatCompletionsError(c, status, errType, errMsg)
+	if upstreamStatus != http.StatusTooManyRequests {
+		if status, errType, errMsg, matched := applyErrorPassthroughRule(
+			c,
+			PlatformGemini,
+			upstreamStatus,
+			body,
+			http.StatusBadGateway,
+			"upstream_error",
+			"Upstream request failed",
+		); matched {
+			return s.writeChatCompletionsError(c, status, errType, errMsg)
+		}
 	}
 
 	statusCode := http.StatusBadGateway
@@ -886,12 +888,12 @@ func (s *GeminiMessagesCompatService) writeGeminiChatCompletionsMappedError(
 			errMsg = "Resource not found"
 		}
 	case http.StatusTooManyRequests:
-		statusCode = http.StatusTooManyRequests
+		statusCode = http.StatusServiceUnavailable
 		if errType == "upstream_error" {
-			errType = "rate_limit_error"
+			errType = "api_error"
 		}
 		if errMsg == "Upstream request failed" {
-			errMsg = "Upstream rate limit exceeded, please retry later"
+			errMsg = "Upstream rate limit temporarily unavailable; please retry later."
 		}
 	case 529:
 		statusCode = http.StatusServiceUnavailable

@@ -162,10 +162,20 @@ func TestOpenAIGatewayService_Forward_WSv2ErrorEventUsageLimitPersistsRateLimit(
 	result, err := svc.Forward(context.Background(), c, &account, body)
 	require.Error(t, err)
 	require.Nil(t, result)
-	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	// The service returns a structured failover after the five same-account
+	// retries; the handler owns account switching and final 503 rendering.
+	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.Equal(t, http.StatusOK, rec.Code)
 	require.Nil(t, upstream.lastReq, "WS 限流 error event 不应回退到同账号 HTTP")
-	require.Len(t, repo.rateLimitCalls, 1)
-	require.WithinDuration(t, time.Unix(resetAt, 0), repo.rateLimitCalls[0], 2*time.Second)
+	// The service retries the same account five times after the initial
+	// semantic 429; each attempt records the upstream account signal.
+	require.Len(t, repo.rateLimitCalls, openAIWSReconnectRetryLimit+1)
+	for _, got := range repo.rateLimitCalls {
+		require.WithinDuration(t, time.Unix(resetAt, 0), got, 2*time.Second)
+	}
 }
 
 func TestOpenAIGatewayService_Forward_WSv2Handshake429PersistsRateLimit(t *testing.T) {
@@ -232,9 +242,17 @@ func TestOpenAIGatewayService_Forward_WSv2Handshake429PersistsRateLimit(t *testi
 	result, err := svc.Forward(context.Background(), c, &account, body)
 	require.Error(t, err)
 	require.Nil(t, result)
-	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	// The handler must switch accounts after this structured failover; it is
+	// responsible for the final client-visible 503 if the pool is exhausted.
+	require.Equal(t, http.StatusTooManyRequests, failoverErr.StatusCode)
+	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.Equal(t, http.StatusOK, rec.Code)
 	require.Nil(t, upstream.lastReq, "WS 握手 429 不应回退到同账号 HTTP")
-	require.Len(t, repo.rateLimitCalls, 1)
+	// The service retries the same account five times after the initial
+	// handshake 429 before the handler is allowed to switch accounts.
+	require.Len(t, repo.rateLimitCalls, openAIWSReconnectRetryLimit+1)
 	require.NotEmpty(t, repo.updateExtra, "握手 429 的 x-codex 头应立即落库")
 	require.Contains(t, repo.updateExtra[0], "codex_usage_updated_at")
 }
@@ -575,7 +593,7 @@ func TestOpenAIWSRateLimitFailoverError_OAuthKeepsSameAccountDeadline(t *testing
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeAPIKey,
 	}, headers, body, "limited")
-	require.False(t, apiKeyErr.RetryableOnSameAccount)
+	require.True(t, apiKeyErr.RetryableOnSameAccount)
 	require.True(t, apiKeyErr.SameAccountRetryDeadline.IsZero())
 	require.Zero(t, apiKeyErr.SameAccountRetryDelay)
 }

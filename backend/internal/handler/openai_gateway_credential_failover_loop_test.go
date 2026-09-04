@@ -585,7 +585,7 @@ func TestResponsesGrok429FailoverIsBounded(t *testing.T) {
 
 		router.ServeHTTP(recorder, req)
 
-		require.Equal(t, http.StatusTooManyRequests, recorder.Code, recorder.Body.String())
+		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 		require.Equal(t, []int64{801, 802}, upstream.accountHits())
 		require.Equal(t, []int64{801, 802}, repo.rateLimitedAccountIDs())
 		require.NotContains(t, recorder.Body.String(), "expired")
@@ -689,7 +689,7 @@ func TestGrokMedia429FailoverIsBounded(t *testing.T) {
 
 		router.ServeHTTP(recorder, req)
 
-		require.Equal(t, http.StatusTooManyRequests, recorder.Code, recorder.Body.String())
+		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 		require.Equal(t, []int64{801, 802}, upstream.accountHits())
 		require.NotContains(t, recorder.Body.String(), "rate limited")
 	})

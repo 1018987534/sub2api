@@ -715,6 +715,10 @@ func openAIWSSemantic429Headers(account *Account, model string, headers http.Hea
 }
 
 func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Account, headers http.Header, responseBody []byte, message string) *UpstreamFailoverError {
+	return s.newOpenAIWSRateLimitFailoverErrorWithRetry(account, headers, responseBody, message, true)
+}
+
+func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverErrorWithRetry(account *Account, headers http.Header, responseBody []byte, message string, retryableOnSameAccount bool) *UpstreamFailoverError {
 	return s.newOpenAIAccountFailoverError(
 		account,
 		http.StatusTooManyRequests,
@@ -722,7 +726,7 @@ func (s *OpenAIGatewayService) newOpenAIWSRateLimitFailoverError(account *Accoun
 		responseBody,
 		strings.TrimSpace(message),
 		false,
-		false,
+		retryableOnSameAccount,
 	)
 }
 
@@ -744,7 +748,11 @@ func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (stri
 		return "previous_response_not_found", true
 	}
 	if isOpenAIWSRateLimitError(codeRaw, errTypeRaw, msgRaw) {
-		return "upstream_rate_limited", false
+		// Rate-limit error events are upstream account signals. Keep the
+		// original 429 for cooldown bookkeeping, but let the outer WS retry
+		// loop retry the same account before account switching. The exhausted
+		// fallback is normalized to a client-visible 503.
+		return "upstream_rate_limited", true
 	}
 	if strings.Contains(msg, "upgrade required") || strings.Contains(msg, "status 426") {
 		return "upgrade_required", true

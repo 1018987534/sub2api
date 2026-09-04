@@ -1914,7 +1914,7 @@ func (h *GatewayHandler) mapUpstreamError(statusCode int) (int, string, string) 
 	case 403:
 		return http.StatusBadGateway, "upstream_error", "Upstream access forbidden, please contact administrator"
 	case 429:
-		return http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"
+		return http.StatusServiceUnavailable, "upstream_error", "Upstream rate limit temporarily unavailable; please retry later."
 	case 529:
 		return http.StatusServiceUnavailable, "overloaded_error", "Upstream service overloaded, please retry later"
 	case 500, 502, 503, 504:

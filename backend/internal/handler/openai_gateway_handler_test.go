@@ -2333,7 +2333,7 @@ func TestOpenAIResponses_APIKeyPassthroughPool5xxRetriesThenExhaustsMaxSwitches(
 
 	h.Responses(c)
 
-	require.Equal(t, []int64{9910, 9910, 9911, 9911}, upstream.calls())
+	require.Equal(t, []int64{9910, 9910, 9911, 9911, 9911, 9911, 9911, 9911}, upstream.calls())
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
 	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
@@ -2604,7 +2604,7 @@ func TestOpenAIResponses_APIKeyPassthrough429RetriesOnceThenSwitchesToHealthyAcc
 
 	h.Responses(c)
 
-	require.Equal(t, []int64{9910, 9910, 9911}, upstream.calls())
+	require.Equal(t, []int64{9910, 9910, 9910, 9910, 9910, 9910, 9911}, upstream.calls())
 	require.Equal(t, []int64{9910}, accountRepo.rateLimitedIDs, "the account is parked only after its retry also returns 429")
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "resp_healthy", gjson.GetBytes(rec.Body.Bytes(), "id").String())
@@ -2686,10 +2686,10 @@ func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t 
 	h.Responses(c)
 
 	require.Equal(t, []int64{9912, 9912}, upstream.calls())
-	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	require.Equal(t, "1", rec.Header().Get("Retry-After"))
-	require.Equal(t, "rate_limit_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
-	require.Equal(t, "Upstream rate limit exceeded, please retry later", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
+	require.Equal(t, "upstream_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+	require.Equal(t, "Upstream rate limit temporarily unavailable; please retry later.", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 }
 
 func TestOpenAIResponses_DefaultPoolRetriesFiveThenSwitchesWhileSendingPreHeaderKeepalive(t *testing.T) {

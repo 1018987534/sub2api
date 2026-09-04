@@ -1138,7 +1138,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				// sanitizeOpenAICapacityShedErrorCodeForClient 注释里写明的前提。
 				clientMessage := upstreamMessage
 				if eventType == "error" || eventType == "response.failed" {
-					if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientMessage); changed {
+					if rewritten, changed := sanitizeOpenAIRetryableErrorForClient(clientMessage); changed {
 						clientMessage = rewritten
 					}
 				}

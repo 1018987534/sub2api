@@ -3286,7 +3286,7 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 	}
 
 	// 先检查透传规则
-	if h.errorPassthroughService != nil && len(responseBody) > 0 {
+	if statusCode != http.StatusTooManyRequests && h.errorPassthroughService != nil && len(responseBody) > 0 {
 		if rule := h.errorPassthroughService.MatchRule("openai", statusCode, responseBody); rule != nil {
 			// 确定响应状态码
 			respCode := statusCode
@@ -3376,7 +3376,7 @@ func (h *OpenAIGatewayHandler) mapUpstreamError(statusCode int) (int, string, st
 	case 403:
 		return http.StatusBadGateway, "upstream_error", "Upstream access forbidden, please contact administrator"
 	case 429:
-		return http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"
+		return http.StatusServiceUnavailable, "upstream_error", "Upstream rate limit temporarily unavailable; please retry later."
 	case 529:
 		return http.StatusServiceUnavailable, "upstream_error", "Upstream service overloaded, please retry later"
 	case 500, 502, 503, 504:
@@ -3668,9 +3668,12 @@ func closeOpenAIWSFailoverExhausted(c *gin.Context, conn *coderws.Conn, failover
 		} else {
 			switch failoverErr.StatusCode {
 			case http.StatusTooManyRequests:
-				intendedStatus = http.StatusTooManyRequests
-				errorType = "rate_limit_error"
-				message = "upstream rate limit exceeded, please retry later"
+				// The upstream 429 was already retried and account failover is
+				// exhausted. Keep the retryable close code, but report the failure
+				// as a temporary service outage rather than a client quota error.
+				intendedStatus = http.StatusServiceUnavailable
+				errorType = "upstream_error"
+				message = "upstream rate limit temporarily unavailable, please retry later"
 				closeStatus = coderws.StatusTryAgainLater
 			case 529, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 				intendedStatus = failoverErr.StatusCode

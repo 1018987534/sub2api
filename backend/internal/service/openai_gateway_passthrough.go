@@ -882,6 +882,9 @@ func writeSanitizedOpenAIPassthroughError(c *gin.Context, upstreamStatus int, up
 	case http.StatusForbidden:
 		downstreamStatus = http.StatusBadGateway
 		message = "Upstream access denied"
+	case http.StatusTooManyRequests:
+		downstreamStatus = http.StatusServiceUnavailable
+		message = "Upstream rate limit temporarily unavailable; please retry later."
 	default:
 		if upstreamStatus >= http.StatusInternalServerError {
 			message = "Upstream service temporarily unavailable"
@@ -1024,7 +1027,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	// context-window 超限是确定性请求失败（shouldFailoverOpenAIPassthroughResponse
 	// 已保证不切号），其文案对客户端可操作（如触发自动压缩）；在净化信封内保留
 	// 脱敏后的上游消息，而不是抹成通用文案。
-	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" {
+	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" && resp.StatusCode != http.StatusTooManyRequests {
 		writeOpenAIPassthroughErrorEnvelope(c, resp.StatusCode, resp.Header, upstreamMsg)
 	} else {
 		writeSanitizedOpenAIPassthroughError(c, resp.StatusCode, resp.Header)
@@ -1383,8 +1386,8 @@ const openAICapacityShedRetryableClientCode = "server_error"
 // error / response.failed 事件中的容量降载错误码改写为客户端可重试的错误码。
 // 走到转发这一步说明网关侧 failover 已不可用（流中途）或已用尽；保留原始降载码
 // 只会让客户端就地终止会话。错误消息原样保留；监控与账号状态判定都基于改写前
-// 的原始 payload，不受影响。rate_limit 等其他错误码一律不动（客户端依赖
-// rate_limit_exceeded 原码解析重试延时）。
+// 的原始 payload，不受影响。上游 rate_limit 也在客户端副本中归一成
+// server_error，避免 Codex 把它当成本地配额耗尽而中断当前任务。
 func sanitizeOpenAICapacityShedErrorCodeForClient(payload []byte) ([]byte, bool) {
 	if len(payload) == 0 || !gjson.ValidBytes(payload) || !isOpenAIUpstreamCapacityShedEvent(payload) {
 		return payload, false
@@ -1408,6 +1411,49 @@ func sanitizeOpenAICapacityShedErrorCodeForClient(payload []byte) ([]byte, bool)
 		changed = true
 	}
 	return updated, changed
+}
+
+// sanitizeOpenAIRetryableErrorForClient rewrites transient upstream failures
+// only in the copy delivered to the client. Account state, failover decisions,
+// and ops attribution continue to use the original payload.
+func sanitizeOpenAIRetryableErrorForClient(payload []byte) ([]byte, bool) {
+	updated, changed := sanitizeOpenAICapacityShedErrorCodeForClient(payload)
+	if len(payload) == 0 || !gjson.ValidBytes(payload) ||
+		openAIStreamFailedEventSemanticStatus(payload, extractOpenAISSEErrorMessage(payload)) != http.StatusTooManyRequests {
+		return updated, changed
+	}
+
+	errorPath := ""
+	switch {
+	case gjson.GetBytes(updated, "response.error").Exists():
+		errorPath = "response.error"
+	case gjson.GetBytes(updated, "error").Exists():
+		errorPath = "error"
+	}
+	if errorPath != "" {
+		for path, value := range map[string]any{
+			errorPath + ".type":    "upstream_error",
+			errorPath + ".code":    openAICapacityShedRetryableClientCode,
+			errorPath + ".message": "Upstream rate limit temporarily unavailable; please retry later.",
+		} {
+			next, err := sjson.SetBytes(updated, path, value)
+			if err != nil {
+				return payload, false
+			}
+			updated = next
+		}
+	}
+	for _, path := range []string{"response.error.status_code", "error.status_code", "status_code", "status"} {
+		if !gjson.GetBytes(updated, path).Exists() {
+			continue
+		}
+		next, err := sjson.SetBytes(updated, path, http.StatusServiceUnavailable)
+		if err != nil {
+			return payload, false
+		}
+		updated = next
+	}
+	return updated, !bytes.Equal(updated, payload) || changed
 }
 
 func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
@@ -1687,9 +1733,10 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 
 const openAIAPIKey429RetryStateContextKey = "openai_api_key_429_retry_state"
 
-// deferOpenAIAPIKey429AccountSideEffects keeps the first 429 retryable on the
-// selected API-key account. The second 429 is processed normally, which parks
-// the exhausted account before the handler switches to another credential.
+// deferOpenAIAPIKey429AccountSideEffects keeps the first five 429 responses
+// retryable on the selected non-pool API-key account. The sixth response is
+// processed normally, which parks the exhausted account before the handler
+// switches to another credential.
 func deferOpenAIAPIKey429AccountSideEffects(c *gin.Context, account *Account, statusCode int) bool {
 	if c == nil || account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeAPIKey ||
 		account.IsPoolMode() || statusCode != http.StatusTooManyRequests {
@@ -1702,16 +1749,16 @@ func deferOpenAIAPIKey429AccountSideEffects(c *gin.Context, account *Account, st
 			state = typed
 		}
 	}
-	if state[account.ID] > 0 {
+	if state[account.ID] >= defaultPoolModeRetryCount {
 		return false
 	}
-	state[account.ID] = 1
+	state[account.ID]++
 	c.Set(openAIAPIKey429RetryStateContextKey, state)
 	return true
 }
 
 // applyOpenAIResponsesSameAccountRetryPolicy limits transient non-pool
-// Responses failures to one local replay before switching credentials. Pool
+// Responses failures to five local replays before switching credentials. Pool
 // accounts retain their configured retry count/status policy; OAuth 429 and
 // request-scoped capacity shedding retain their existing specialized windows.
 func applyOpenAIResponsesSameAccountRetryPolicy(c *gin.Context, account *Account, statusCode int, shouldDisable bool, failoverErr *UpstreamFailoverError) {
@@ -1720,6 +1767,11 @@ func applyOpenAIResponsesSameAccountRetryPolicy(c *gin.Context, account *Account
 		return
 	}
 	if c != nil && c.Request != nil && OpenAIImagesEndpointFromContext(c.Request.Context()) {
+		return
+	}
+	// A provider can wrap a deterministic model-routing rejection in a 5xx.
+	// Replaying the same account cannot change its model capability.
+	if isOpenAIExplicitModelNotFoundBody(failoverErr.ResponseBody) {
 		return
 	}
 
@@ -1732,7 +1784,7 @@ func applyOpenAIResponsesSameAccountRetryPolicy(c *gin.Context, account *Account
 	}
 
 	failoverErr.RetryableOnSameAccount = true
-	failoverErr.SameAccountRetryMax = 1
+	failoverErr.SameAccountRetryMax = defaultPoolModeRetryCount
 }
 
 func openAIStreamFailedEventRetryableOnSameAccount(account *Account, payload []byte, message string) bool {

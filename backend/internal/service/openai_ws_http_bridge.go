@@ -343,6 +343,9 @@ func (c *openAIWSToolCallReplayCollector) addItem(item gjson.Result) {
 }
 
 func buildOpenAIWSHTTPBridgeErrorEvent(statusCode int, message string) []byte {
+	if statusCode == http.StatusTooManyRequests {
+		statusCode = http.StatusServiceUnavailable
+	}
 	message = strings.TrimSpace(message)
 	if message == "" {
 		message = http.StatusText(statusCode)
@@ -699,7 +702,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return nil
 		}
 		clientMessage := buildOpenAIWSHTTPBridgeFailedEvent(responseID, originalModel, bareErrorPayload, bareErrorMessage)
-		if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientMessage); changed {
+		if rewritten, changed := sanitizeOpenAIRetryableErrorForClient(clientMessage); changed {
 			clientMessage = rewritten
 		}
 		messages := append(pendingClientMessages, clientMessage)
@@ -849,7 +852,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		// 仍使用未改写的 upstreamMessage。
 		clientMessage := upstreamMessage
 		if eventType == "error" || eventType == "response.failed" {
-			if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(clientMessage); changed {
+			if rewritten, changed := sanitizeOpenAIRetryableErrorForClient(clientMessage); changed {
 				clientMessage = rewritten
 			}
 		}

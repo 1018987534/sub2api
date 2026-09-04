@@ -959,6 +959,21 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return wsResult, nil
 		}
+		// A semantic/handshake upstream 429 has already consumed the WS
+		// same-account retry budget above. Return a structured failover error so
+		// the handler can switch credentials; only the handler's final
+		// account-exhausted path emits the client-visible 503.
+		if reason, _ := classifyOpenAIWSReconnectReason(wsErr); reason == "upstream_rate_limited" {
+			var responseHeaders http.Header
+			var fallbackErr *openAIWSFallbackError
+			if errors.As(wsErr, &fallbackErr) && fallbackErr != nil {
+				var dialErr *openAIWSDialError
+				if errors.As(fallbackErr.Err, &dialErr) && dialErr != nil {
+					responseHeaders = dialErr.ResponseHeaders
+				}
+			}
+			return nil, s.newOpenAIWSRateLimitFailoverErrorWithRetry(account, responseHeaders, nil, wsErr.Error(), false)
+		}
 		s.writeOpenAIWSFallbackErrorResponse(c, account, wsErr)
 		return nil, wsErr
 	}

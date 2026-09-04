@@ -1931,7 +1931,7 @@ func sanitizeOpenAIResponseFailedEventForClient(payload []byte, eventType string
 	// 容量降载码对 Codex CLI 是致命错误；事件既然要写给客户端（failover 已不可用），
 	// 就改写为客户端可重试的错误码。error 帧与 response.failed 都要改：上游降载
 	// 总是先推 error 帧再收 failed，两帧携带同一个错误。
-	if rewritten, changed := sanitizeOpenAICapacityShedErrorCodeForClient(updated); changed {
+	if rewritten, changed := sanitizeOpenAIRetryableErrorForClient(updated); changed {
 		updated = rewritten
 	}
 	if !isFailedEvent {

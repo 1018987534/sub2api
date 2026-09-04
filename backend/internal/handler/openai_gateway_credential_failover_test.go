@@ -156,8 +156,8 @@ func TestResponsesFailoverExhaustedAfterForwardedTerminalMarksOpsWithoutDuplicat
 	require.Equal(t, 1, strings.Count(markerRecorder.Body.String(), "event: response.failed"))
 	streamErr, ok = service.GetOpsStreamError(markerContext)
 	require.True(t, ok)
-	require.Equal(t, http.StatusTooManyRequests, streamErr.IntendedStatus)
-	require.Equal(t, "rate_limit_error", streamErr.ErrType)
+	require.Equal(t, http.StatusServiceUnavailable, streamErr.IntendedStatus)
+	require.Equal(t, "upstream_error", streamErr.ErrType)
 
 	heartbeatRecorder := httptest.NewRecorder()
 	heartbeatContext, _ := gin.CreateTestContext(heartbeatRecorder)
@@ -182,7 +182,7 @@ func TestGatewayChatInferenceExhaustionRestoresRetryAfter(t *testing.T) {
 		ResponseHeaders: http.Header{"Retry-After": []string{"45"}},
 	}, false)
 
-	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.Equal(t, "45", recorder.Header().Get("Retry-After"))
 }
 
@@ -219,7 +219,7 @@ func TestInferenceFailoverExhaustionRestoresRetryAfter(t *testing.T) {
 		ResponseHeaders: http.Header{"Retry-After": []string{"17"}},
 	}, false)
 
-	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.Equal(t, "17", recorder.Header().Get("Retry-After"))
 }
 
@@ -234,7 +234,7 @@ func TestFailoverExhaustionRejectsSecretBearingRetryAfter(t *testing.T) {
 		ResponseHeaders: http.Header{"Retry-After": []string{"refresh_token=must-not-leak"}},
 	}, false)
 
-	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.Empty(t, recorder.Header().Get("Retry-After"))
 	require.NotContains(t, recorder.Body.String(), "must-not-leak")
 }
@@ -252,7 +252,7 @@ func TestFailoverExhaustionRejectsFarFutureRetryAfterDate(t *testing.T) {
 		},
 	}, false)
 
-	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.Empty(t, recorder.Header().Get("Retry-After"))
 }
 
@@ -268,7 +268,7 @@ func TestFailoverExhaustionAllowsBoundedRetryAfterDate(t *testing.T) {
 		ResponseHeaders: http.Header{"Retry-After": []string{retryAfter}},
 	}, false)
 
-	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.Equal(t, retryAfter, recorder.Header().Get("Retry-After"))
 }
 

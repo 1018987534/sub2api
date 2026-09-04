@@ -31,6 +31,21 @@ func isModelNotFoundError(statusCode int, body []byte) bool {
 	return isUpstreamModelNotFoundError(statusCode, body) || statusCode == http.StatusNotFound
 }
 
+// isOpenAIExplicitModelNotFoundBody detects a structured model-routing error
+// even when an intermediary incorrectly wraps it in a 5xx. It only guards
+// same-account transient retries; normal account failover still handles it.
+func isOpenAIExplicitModelNotFoundBody(body []byte) bool {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return false
+	}
+	for _, path := range []string{"error.code", "response.error.code", "code"} {
+		if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, path).String()), "model_not_found") {
+			return true
+		}
+	}
+	return false
+}
+
 // openAICodexPlanGatedModelPhrase matches the deterministic Codex 400 returned
 // when a ChatGPT OAuth account's plan cannot serve the requested model, e.g.
 // {"detail":"The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account."}

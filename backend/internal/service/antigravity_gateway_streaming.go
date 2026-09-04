@@ -744,9 +744,9 @@ func (s *AntigravityGatewayService) writeMappedClaudeError(c *gin.Context, accou
 		errType = "permission_error"
 		errMsg = "Upstream access forbidden"
 	case 429:
-		statusCode = http.StatusTooManyRequests
-		errType = "rate_limit_error"
-		errMsg = "Upstream rate limit exceeded"
+		statusCode = http.StatusServiceUnavailable
+		errType = "upstream_error"
+		errMsg = "Upstream rate limit temporarily unavailable; please retry later."
 	case 529:
 		statusCode = http.StatusServiceUnavailable
 		errType = "overloaded_error"

@@ -636,7 +636,7 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 	responseBody := failoverErr.ResponseBody
 
 	// 先检查透传规则
-	if h.errorPassthroughService != nil && len(responseBody) > 0 {
+	if statusCode != http.StatusTooManyRequests && h.errorPassthroughService != nil && len(responseBody) > 0 {
 		if rule := h.errorPassthroughService.MatchRule(service.PlatformGemini, statusCode, responseBody); rule != nil {
 			// 确定响应状态码
 			respCode := statusCode
@@ -675,7 +675,7 @@ func mapGeminiUpstreamError(statusCode int) (int, string) {
 	case 403:
 		return http.StatusBadGateway, "Upstream access forbidden, please contact administrator"
 	case 429:
-		return http.StatusTooManyRequests, "Upstream rate limit exceeded, please retry later"
+		return http.StatusServiceUnavailable, "Upstream rate limit temporarily unavailable; please retry later."
 	case 529:
 		return http.StatusServiceUnavailable, "Upstream service overloaded, please retry later"
 	case 500, 502, 503, 504:

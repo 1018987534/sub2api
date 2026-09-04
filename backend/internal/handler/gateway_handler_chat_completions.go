@@ -401,10 +401,17 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	if lastErr != nil && lastErr.StatusCode > 0 {
 		statusCode = lastErr.StatusCode
 	}
+	if statusCode == http.StatusTooManyRequests {
+		statusCode = http.StatusServiceUnavailable
+	}
 	if lastErr != nil && service.IsOpenAISilentRefusalErrorBody(lastErr.ResponseBody) {
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
 		h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage())
 		return
 	}
-	h.chatCompletionsErrorResponse(c, statusCode, "server_error", "All available accounts exhausted")
+	message := "All available accounts exhausted"
+	if lastErr != nil && lastErr.StatusCode == http.StatusTooManyRequests {
+		message = "Upstream rate limit temporarily unavailable; please retry later."
+	}
+	h.chatCompletionsErrorResponse(c, statusCode, "server_error", message)
 }

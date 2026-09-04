@@ -1867,26 +1867,28 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 		logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini] upstream error %d: %s", upstreamStatus, truncateForLog(body, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes))
 	}
 
-	if status, errType, errMsg, matched := applyErrorPassthroughRule(
-		c,
-		PlatformGemini,
-		upstreamStatus,
-		body,
-		http.StatusBadGateway,
-		"upstream_error",
-		"Upstream request failed",
-	); matched {
-		c.JSON(status, gin.H{
-			"type":  "error",
-			"error": gin.H{"type": errType, "message": errMsg},
-		})
-		if upstreamMsg == "" {
-			upstreamMsg = errMsg
+	if upstreamStatus != http.StatusTooManyRequests {
+		if status, errType, errMsg, matched := applyErrorPassthroughRule(
+			c,
+			PlatformGemini,
+			upstreamStatus,
+			body,
+			http.StatusBadGateway,
+			"upstream_error",
+			"Upstream request failed",
+		); matched {
+			c.JSON(status, gin.H{
+				"type":  "error",
+				"error": gin.H{"type": errType, "message": errMsg},
+			})
+			if upstreamMsg == "" {
+				upstreamMsg = errMsg
+			}
+			if upstreamMsg == "" {
+				return fmt.Errorf("upstream error: %d (passthrough rule matched)", upstreamStatus)
+			}
+			return fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", upstreamStatus, upstreamMsg)
 		}
-		if upstreamMsg == "" {
-			return fmt.Errorf("upstream error: %d (passthrough rule matched)", upstreamStatus)
-		}
-		return fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", upstreamStatus, upstreamMsg)
 	}
 
 	var statusCode int
@@ -1948,14 +1950,12 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 			errMsg = "Resource not found"
 		}
 	case 429:
-		if statusCode == 0 {
-			statusCode = http.StatusTooManyRequests
-		}
+		statusCode = http.StatusServiceUnavailable
 		if errType == "" {
-			errType = "rate_limit_error"
+			errType = "api_error"
 		}
 		if errMsg == "" {
-			errMsg = "Upstream rate limit exceeded, please retry later"
+			errMsg = "Upstream rate limit temporarily unavailable; please retry later."
 		}
 	case 529:
 		if statusCode == 0 {

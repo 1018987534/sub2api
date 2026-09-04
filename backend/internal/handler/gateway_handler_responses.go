@@ -386,7 +386,11 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
 		status, code, message = http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage()
 	} else if lastErr != nil && statusCode == http.StatusTooManyRequests {
-		status, code, message = http.StatusTooManyRequests, "rate_limit_error", "All available accounts are currently rate-limited. Please retry later."
+		// This is an upstream account-pool exhaustion after internal retries.
+		// Do not expose it as a client quota failure: SDKs commonly stop the
+		// current task on 429. Keep the original status in ops fields and expose
+		// a retryable 503 instead.
+		status, code, message = http.StatusServiceUnavailable, "upstream_error", "Upstream rate limit temporarily unavailable; please retry later."
 	}
 	if streamStarted {
 		// A slot-wait heartbeat commits HTTP 200 before any upstream response.

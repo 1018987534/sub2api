@@ -774,6 +774,11 @@ func classifyOpenAIWSReconnectReason(err error) (string, bool) {
 		"event_error",
 		"error_event",
 		"upstream_error_event",
+		// A semantic upstream rate-limit event is an account-level signal,
+		// not the client's quota. Let the outer WS retry loop retry this
+		// account before the scheduler switches accounts; only the exhausted
+		// result is exposed as a retryable 503.
+		"upstream_rate_limited",
 		"ws_connection_limit_reached",
 		"missing_final_response":
 		return reason, true
@@ -837,9 +842,12 @@ func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType st
 			statusCode = http.StatusUnauthorized
 		}
 	case "upstream_rate_limited":
-		if statusCode == 0 {
-			statusCode = http.StatusTooManyRequests
-		}
+		// The 429 is an upstream account signal used for cooldown/failover. The
+		// public response is a transient 503 so retry-capable clients do not stop
+		// the active task as if their own quota were exhausted.
+		statusCode = http.StatusServiceUnavailable
+		errType = "upstream_error"
+		upstreamMessage = "Upstream rate limit temporarily unavailable; please retry later."
 	default:
 		if statusCode == 0 {
 			return 0, "", "", "", false
@@ -865,11 +873,7 @@ func resolveOpenAIWSFallbackErrorResponse(err error) (statusCode int, errType st
 	}
 
 	if errType == "" {
-		if statusCode == http.StatusTooManyRequests {
-			errType = "rate_limit_error"
-		} else {
-			errType = "upstream_error"
-		}
+		errType = "upstream_error"
 	}
 	clientMessage = upstreamMessage
 	return statusCode, errType, clientMessage, upstreamMessage, true

@@ -131,6 +131,20 @@ func TestOpenAIWSErrorHTTPStatus(t *testing.T) {
 }
 
 func TestResolveOpenAIWSFallbackErrorResponse(t *testing.T) {
+	t.Run("upstream_rate_limited_is_publicly_retryable", func(t *testing.T) {
+		statusCode, errType, clientMessage, upstreamMessage, ok := resolveOpenAIWSFallbackErrorResponse(
+			wrapOpenAIWSFallback("upstream_rate_limited", &openAIWSDialError{
+				StatusCode: http.StatusTooManyRequests,
+				Err:        errors.New("rate limited"),
+			}),
+		)
+		require.True(t, ok)
+		require.Equal(t, http.StatusServiceUnavailable, statusCode)
+		require.Equal(t, "upstream_error", errType)
+		require.Equal(t, "Upstream rate limit temporarily unavailable; please retry later.", clientMessage)
+		require.Equal(t, clientMessage, upstreamMessage)
+	})
+
 	t.Run("previous_response_not_found", func(t *testing.T) {
 		statusCode, errType, clientMessage, upstreamMessage, ok := resolveOpenAIWSFallbackErrorResponse(
 			wrapOpenAIWSFallback("previous_response_not_found", errors.New("previous response not found")),

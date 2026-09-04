@@ -436,32 +436,35 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		)
 	}
 
-	// 非 failover 错误也支持错误透传规则匹配。
-	if status, errType, errMsg, matched := applyErrorPassthroughRule(
-		c,
-		account.Platform,
-		resp.StatusCode,
-		body,
-		http.StatusBadGateway,
-		"upstream_error",
-		"Upstream request failed",
-	); matched {
-		c.JSON(status, gin.H{
-			"type": "error",
-			"error": gin.H{
-				"type":    errType,
-				"message": errMsg,
-			},
-		})
+	// An upstream 429 has already gone through account failover/cooldown. Do not
+	// let a passthrough rule turn it back into a client quota response.
+	if resp.StatusCode != http.StatusTooManyRequests {
+		if status, errType, errMsg, matched := applyErrorPassthroughRule(
+			c,
+			account.Platform,
+			resp.StatusCode,
+			body,
+			http.StatusBadGateway,
+			"upstream_error",
+			"Upstream request failed",
+		); matched {
+			c.JSON(status, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"type":    errType,
+					"message": errMsg,
+				},
+			})
 
-		summary := upstreamMsg
-		if summary == "" {
-			summary = errMsg
+			summary := upstreamMsg
+			if summary == "" {
+				summary = errMsg
+			}
+			if summary == "" {
+				return nil, fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
+			}
+			return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, summary)
 		}
-		if summary == "" {
-			return nil, fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, summary)
 	}
 
 	// 根据状态码返回适当的自定义错误响应（不透传上游详细信息）
@@ -488,9 +491,9 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		errType = "upstream_error"
 		errMsg = "Upstream access forbidden, please contact administrator"
 	case 429:
-		statusCode = http.StatusTooManyRequests
-		errType = "rate_limit_error"
-		errMsg = "Upstream rate limit exceeded, please retry later"
+		statusCode = http.StatusServiceUnavailable
+		errType = "upstream_error"
+		errMsg = "Upstream rate limit temporarily unavailable; please retry later."
 	case 529:
 		statusCode = http.StatusServiceUnavailable
 		errType = "overloaded_error"
@@ -602,39 +605,48 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 		)
 	}
 
-	if status, errType, errMsg, matched := applyErrorPassthroughRule(
-		c,
-		account.Platform,
-		resp.StatusCode,
-		respBody,
-		http.StatusBadGateway,
-		"upstream_error",
-		"Upstream request failed after retries",
-	); matched {
-		c.JSON(status, gin.H{
-			"type": "error",
-			"error": gin.H{
-				"type":    errType,
-				"message": errMsg,
-			},
-		})
+	if resp.StatusCode != http.StatusTooManyRequests {
+		if status, errType, errMsg, matched := applyErrorPassthroughRule(
+			c,
+			account.Platform,
+			resp.StatusCode,
+			respBody,
+			http.StatusBadGateway,
+			"upstream_error",
+			"Upstream request failed after retries",
+		); matched {
+			c.JSON(status, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"type":    errType,
+					"message": errMsg,
+				},
+			})
 
-		summary := upstreamMsg
-		if summary == "" {
-			summary = errMsg
+			summary := upstreamMsg
+			if summary == "" {
+				summary = errMsg
+			}
+			if summary == "" {
+				return nil, fmt.Errorf("upstream error: %d (retries exhausted, passthrough rule matched)", resp.StatusCode)
+			}
+			return nil, fmt.Errorf("upstream error: %d (retries exhausted, passthrough rule matched) message=%s", resp.StatusCode, summary)
 		}
-		if summary == "" {
-			return nil, fmt.Errorf("upstream error: %d (retries exhausted, passthrough rule matched)", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("upstream error: %d (retries exhausted, passthrough rule matched) message=%s", resp.StatusCode, summary)
 	}
 
-	// 返回统一的重试耗尽错误响应
-	c.JSON(http.StatusBadGateway, gin.H{
+	// 上游 429 已耗尽内部重试/切号后仍属于临时上游故障。返回 503，
+	// 让支持 5xx 的客户端继续退避重试，而不是把 429 当成本地限流直接中断。
+	finalStatus := http.StatusBadGateway
+	finalMessage := "Upstream request failed after retries"
+	if resp.StatusCode == http.StatusTooManyRequests {
+		finalStatus = http.StatusServiceUnavailable
+		finalMessage = "Upstream rate limit temporarily unavailable; please retry later."
+	}
+	c.JSON(finalStatus, gin.H{
 		"type": "error",
 		"error": gin.H{
 			"type":    "upstream_error",
-			"message": "Upstream request failed after retries",
+			"message": finalMessage,
 		},
 	})
 
