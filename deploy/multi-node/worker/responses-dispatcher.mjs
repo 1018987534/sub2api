@@ -6,6 +6,7 @@ const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 15;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
 const MAX_INGRESS_ERROR_BODY_BYTES = 8 * 1024;
 const MAX_CLOUDFLARE_520_BODY_BYTES = 32 * 1024;
+const MAX_CLOUDFLARE_502_BODY_BYTES = 32 * 1024;
 const SAFE_EDGE_CONNECTION_FAILURE_STATUSES = new Set([521, 522, 523, 525, 526]);
 const SAFE_CAPACITY_REJECTION_TYPES = new Set([
   "node_capacity",
@@ -380,6 +381,39 @@ async function isStandardCloudflareOrigin520(response) {
   );
 }
 
+async function isStandardCloudflareOrigin502(response) {
+  if (
+    response.status !== 502 ||
+    response.headers.has("x-request-id") ||
+    response.headers.has(EDGE_CAPACITY_NONCE_HEADER)
+  ) {
+    return false;
+  }
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.startsWith("text/html")) {
+    return false;
+  }
+  const contentLength = Number.parseInt(response.headers.get("content-length") ?? "", 10);
+  if (Number.isFinite(contentLength) && contentLength > MAX_CLOUDFLARE_502_BODY_BYTES) {
+    return false;
+  }
+
+  let body;
+  try {
+    body = await response.clone().text();
+  } catch {
+    return false;
+  }
+  if (new TextEncoder().encode(body).byteLength > MAX_CLOUDFLARE_502_BODY_BYTES) {
+    return false;
+  }
+  return (
+    body.includes("Bad gateway") &&
+    body.includes("Error code 502") &&
+    body.includes("cloudflare.com/5xx-error-landing")
+  );
+}
+
 async function safeIngressFailureType(request, response, capacityNonce = "") {
   if (request.method !== "POST") {
     return "";
@@ -401,6 +435,11 @@ async function safeIngressFailureType(request, response, capacityNonce = "") {
   // arbitrary application 520 responses terminal instead of replaying them.
   if (await isStandardCloudflareOrigin520(response)) {
     return "edge_connection_520";
+  }
+  // A standard Cloudflare-generated 502 means the request did not reach the
+  // origin application. Keep application JSON 502 responses terminal.
+  if (await isStandardCloudflareOrigin502(response)) {
+    return "edge_connection_502";
   }
   if (SAFE_EDGE_CONNECTION_FAILURE_STATUSES.has(response.status)) {
     return `edge_connection_${response.status}`;

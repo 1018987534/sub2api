@@ -742,6 +742,57 @@ test("retries a POST after a standard Cloudflare origin 520 page", async () => {
   }
 });
 
+test("retries a POST after a standard Cloudflare origin 502 page", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  const body = '{"model":"gpt-5","input":"hello"}';
+  globalThis.fetch = async (request) => {
+    forwarded.push({ url: request.url, body: await request.text() });
+    if (forwarded.length === 1) {
+      return new Response(
+        [
+          "<!DOCTYPE html>",
+          '<html><head><title>xiaohondou.com | 502: Bad gateway</title></head>',
+          '<body><span>Bad gateway</span>',
+          '<span class="code-label">Error code 502</span>',
+          '<a href="https://www.cloudflare.com/5xx-error-landing?utm_source=errorcode_502">cloudflare.com</a>',
+          "</body></html>",
+        ].join(""),
+        { status: 502, headers: { "Content-Type": "text/html; charset=UTF-8" } },
+      );
+    }
+    return new Response("recovered");
+  };
+
+  try {
+    const response = await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }),
+      {
+        BWG_US_01_ORIGIN: "https://control.example",
+        BWG_US_01_PERCENT: "50",
+        VMISS_US_01_ORIGIN: "https://gateway.example",
+        VMISS_US_01_PERCENT: "50",
+      },
+    );
+
+    assert.equal(await response.text(), "recovered");
+    assert.equal(forwarded.length, 2);
+    assert.notEqual(new URL(forwarded[0].url).origin, new URL(forwarded[1].url).origin);
+    assert.deepEqual(
+      forwarded.map((request) => request.body),
+      [body, body],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
 test("does not retry ordinary application 400 or upstream 5xx responses", async () => {
   resetRoutingConfigCache();
   const originalFetch = globalThis.fetch;
