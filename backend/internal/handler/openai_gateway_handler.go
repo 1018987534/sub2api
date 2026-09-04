@@ -144,8 +144,6 @@ type grokMediaEligibilityProber interface {
 	ProbeMediaEligibility(ctx context.Context, accountID int64) (bool, string, error)
 }
 
-const maxOpenAIFirstOutputTimeoutSwitches = 1
-
 func openAIForwardSucceededForScheduling(result *service.OpenAIForwardResult) bool {
 	return result.SucceededForScheduling()
 }
@@ -628,7 +626,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
-	firstOutputTimeoutSwitchCount := 0
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
@@ -781,6 +778,17 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			trace.MarkRoutingLatency(routingDuration)
 		}
 		forwardStart := time.Now()
+		// Ordinary streaming Responses requests previously stayed completely
+		// silent until the upstream returned response headers. Start a heartbeat
+		// for every account attempt because a pre-output stream failure may stop
+		// the response-layer heartbeat before failover selects the next account.
+		// Heartbeat bytes stay excluded from semantic-output checks, so same-account
+		// retries and account switching remain safe. Legacy compact owns its unary
+		// bridge keepalive above.
+		stopResponsesKeepalive := func() {}
+		if reqStream && !legacyCompact {
+			stopResponsesKeepalive = service.StartOpenAIResponsesSSEKeepalive(c, h.openAICompactKeepaliveInterval())
+		}
 		// 用扣除非语义心跳字节的口径快照：心跳注释不构成语义响应，
 		// 不能因心跳字节变化而放弃 failover 换号（#3887）。
 		writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
@@ -790,6 +798,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		attemptBody := h.deriveOpenAIForwardAttemptBody(reqLog, forwardBody, account, &passthroughFailoverState)
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
+				stopResponsesKeepalive()
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
@@ -891,10 +900,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, forwardModel, requireCompact, nil), false, nil, err)
 					}
 					if !failoverErr.ShouldRetryNextAccount() {
-						h.handleFailoverExhausted(c, failoverErr, streamStarted)
-						return
-					}
-					if openAIFirstOutputFailoverExhausted(failoverErr, &firstOutputTimeoutSwitchCount) {
 						h.handleFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
@@ -3559,17 +3564,6 @@ func openAIRequestAllowsFailoverReplay(c *gin.Context) bool {
 		return false
 	}
 	return !failoverClientGone(c)
-}
-
-func openAIFirstOutputFailoverExhausted(failoverErr *service.UpstreamFailoverError, switchCount *int) bool {
-	if failoverErr == nil || !failoverErr.SafeToFailoverAfterWrite || switchCount == nil {
-		return false
-	}
-	if *switchCount >= maxOpenAIFirstOutputTimeoutSwitches {
-		return true
-	}
-	*switchCount = *switchCount + 1
-	return false
 }
 
 // errorResponse returns OpenAI API format error response

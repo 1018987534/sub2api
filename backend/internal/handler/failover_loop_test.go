@@ -77,6 +77,7 @@ func TestSameAccountRetryAllowedUsesDeadlineInsteadOfPoolCount(t *testing.T) {
 }
 
 func TestSameAccountRetryAllowedRequiresOptInAndDefaultsToCountLimit(t *testing.T) {
+	require.Equal(t, 5, maxSameAccountRetries)
 	err := &service.UpstreamFailoverError{SameAccountRetryDeadline: time.Now().Add(time.Minute)}
 	require.False(t, sameAccountRetryAllowed(err, 0, maxSameAccountRetries))
 

@@ -49,6 +49,15 @@ func StartOpenAICompactSSEKeepalive(c *gin.Context, interval time.Duration) func
 	return startOpenAISSEKeepalive(c, interval)
 }
 
+// StartOpenAIResponsesSSEKeepalive starts downstream SSE keepalives for an
+// already validated streaming Responses request. Unlike the compact-specific
+// entry point, this is intentionally independent of the compact marker so the
+// client connection stays active while the upstream is still waiting to return
+// response headers.
+func StartOpenAIResponsesSSEKeepalive(c *gin.Context, interval time.Duration) func() {
+	return startOpenAISSEKeepalive(c, interval)
+}
+
 // startOpenAISSEKeepalive 是不检查 compact 标记的内部入口，供【已经确定处于
 // SSE 流式上下文】的调用方使用（例如 /v1/responses 透传：进入流式循环时上游
 // 已返回 text/event-stream，SSE 响应头也已设好）。
@@ -60,8 +69,23 @@ func startOpenAISSEKeepalive(c *gin.Context, interval time.Duration) func() {
 		return func() {}
 	}
 	originalWriter := c.Writer
+	carriedBytes := 0
+	if value, ok := c.Get(openAICompactSSEKeepaliveKey); ok {
+		if previous, valid := value.(*openAICompactSSEKeepalive); valid && previous != nil {
+			previous.mu.Lock()
+			previous.markStoppedLocked()
+			carriedBytes = previous.bytes
+			previousWriter := previous.writer
+			previous.mu.Unlock()
+			if current, wrapped := c.Writer.(*openAICompactKeepaliveWriter); wrapped && current.k == previous {
+				originalWriter = previousWriter
+				c.Writer = previousWriter
+			}
+		}
+	}
 	k := &openAICompactSSEKeepalive{
 		writer: originalWriter,
+		bytes:  carriedBytes,
 		stop:   make(chan struct{}),
 	}
 	c.Set(openAICompactSSEKeepaliveKey, k)

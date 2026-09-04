@@ -71,6 +71,26 @@ func TestOpenAICompactSSEKeepalive_StopBeforeFirstBeatKeepsWriterUntouched(t *te
 	require.False(t, StopOpenAICompactSSEKeepaliveCommitted(c))
 }
 
+func TestOpenAIResponsesSSEKeepalive_RestartCarriesEarlierHeartbeatBytes(t *testing.T) {
+	c, rec := newCompactBridgeTestContext(t, false)
+	stopBeforeHeaders := StartOpenAIResponsesSSEKeepalive(c, keepaliveTestInterval)
+	waitForKeepaliveBeats()
+	require.True(t, StopOpenAICompactSSEKeepaliveCommitted(c))
+	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c))
+
+	stopAfterHeaders := StartOpenAIResponsesSSEKeepalive(c, keepaliveTestInterval)
+	waitForKeepaliveBeats()
+	require.Equal(t, -1, OpenAICompactKeepaliveAdjustedWrittenSize(c),
+		"restarting after upstream headers must still exclude all earlier heartbeat bytes")
+
+	stopAfterHeaders()
+	stopBeforeHeaders()
+	_, err := c.Writer.Write([]byte("data: semantic\n\n"))
+	require.NoError(t, err)
+	require.Equal(t, len("data: semantic\n\n"), OpenAICompactKeepaliveAdjustedWrittenSize(c))
+	require.GreaterOrEqual(t, strings.Count(rec.Body.String(), ": keepalive\n\n"), 2)
+}
+
 func TestOpenAIAdjustedWrittenSizeExcludesResponsesStreamKeepalive(t *testing.T) {
 	c, rec := newCompactBridgeTestContext(t, false)
 	n, err := c.Writer.Write([]byte(":\n\n"))

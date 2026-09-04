@@ -22,7 +22,7 @@ func TestGetPoolModeRetryCount(t *testing.T) {
 				Platform:    PlatformOpenAI,
 				Credentials: map[string]any{},
 			},
-			expected: defaultPoolModeRetryCount,
+			expected: 5,
 		},
 		{
 			name: "default_when_missing_retry_count",
@@ -33,7 +33,7 @@ func TestGetPoolModeRetryCount(t *testing.T) {
 					"pool_mode": true,
 				},
 			},
-			expected: defaultPoolModeRetryCount,
+			expected: 5,
 		},
 		{
 			name: "supports_float64_from_json_credentials",
@@ -105,7 +105,7 @@ func TestGetPoolModeRetryCount(t *testing.T) {
 					"pool_mode_retry_count": "oops",
 				},
 			},
-			expected: defaultPoolModeRetryCount,
+			expected: 5,
 		},
 	}
 
