@@ -17,11 +17,10 @@ const totalLatencyProbePrefix = "scheduler:total_duration:probe:"
 const totalLatencyManualProbePrefix = "scheduler:total_duration:manual_probe:"
 
 // Each completed, billable stream updates one timestamped 24-hour window and
-// atomically derives the scheduling score. The score is the median of the
-// latest 50 samples (or every retained sample when fewer than 50 exist).
-// Pool transitions still require the existing minimum sample count and three
-// consecutive qualifying aggregates, so a sparse account cannot enter the
-// fast pool from a single observation.
+// atomically derives the scheduling score. The score is the 10%-90% trimmed
+// mean of the latest six hours, falling back to 24 hours until six hours has
+// enough observations. Pool transitions require three consecutive qualifying
+// aggregate results, so one long but valid generation cannot flip an account.
 var totalLatencyStatsRecordScript = redis.NewScript(`
 	local stats_key = KEYS[1]
 	local samples_key = KEYS[2]
@@ -59,10 +58,13 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 		return values
 	end
 
-	-- ZREVRANGE orders by the timestamp score, so this is the most recent
-	-- bounded sample set regardless of how many requests arrived recently.
-	local samples = decode(redis.call('ZREVRANGE', samples_key, 0, 49))
-	local window_hours = 24
+	local primary = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - primary_window_ms, '+inf'))
+	local samples = primary
+	local window_hours = 6
+	if #samples < minimum_samples then
+		samples = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - fallback_window_ms, '+inf'))
+		window_hours = 24
+	end
 
 	local old_updated = tonumber(redis.call('HGET', stats_key, 'updated_at_ms'))
 	local is_fast = tonumber(redis.call('HGET', stats_key, 'is_fast')) or 0
@@ -74,7 +76,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 		exit_slow_streak = 0
 	end
 
-	if #samples == 0 then
+	if #samples < minimum_samples then
 		redis.call('HDEL', stats_key, 'normal_total_ms', 'p50_ms', 'p90_ms')
 		redis.call('HSET', stats_key,
 			'sample_count', tostring(#samples),
@@ -83,14 +85,13 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'enter_fast_streak', '0',
 			'exit_slow_streak', '0',
 			'updated_at_ms', tostring(now_ms),
-			'score_version', '4')
+			'score_version', '3')
 	else
 		table.sort(samples)
-		local middle = math.floor(#samples / 2)
-		local normal_total = samples[middle + 1]
-		if #samples % 2 == 0 then
-			normal_total = (samples[middle] + samples[middle + 1]) / 2
-		end
+		local trim = math.floor(#samples * 0.10)
+		local sum = 0
+		for index = trim + 1, #samples - trim do sum = sum + samples[index] end
+		local normal_total = sum / (#samples - 2 * trim)
 
 		local function percentile(p)
 			local position = (#samples - 1) * p + 1
@@ -102,11 +103,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 		local p50 = percentile(0.50)
 		local p90 = percentile(0.90)
 
-		if #samples < minimum_samples then
-			is_fast = 0
-			enter_fast_streak = 0
-			exit_slow_streak = 0
-		elseif normal_total <= fast_threshold_ms then
+		if normal_total <= fast_threshold_ms then
 			exit_slow_streak = 0
 			if is_fast == 0 then
 				enter_fast_streak = enter_fast_streak + 1
@@ -138,7 +135,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'enter_fast_streak', tostring(enter_fast_streak),
 			'exit_slow_streak', tostring(exit_slow_streak),
 			'updated_at_ms', tostring(now_ms),
-			'score_version', '4')
+			'score_version', '3')
 	end
 
 	redis.call('EXPIRE', stats_key, stats_ttl_seconds)

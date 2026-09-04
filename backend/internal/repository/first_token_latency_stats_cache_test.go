@@ -42,7 +42,7 @@ func TestTotalLatencyStatsCacheRequiresTwentySamplesAndThreeFastAggregates(t *te
 	stats, err := cache.GetStatsBatch(ctx, []int64{15})
 	require.NoError(t, err)
 	require.Equal(t, int64(19), stats[15].SampleCount)
-	require.Equal(t, 8_000.0, stats[15].PredictedMS)
+	require.Zero(t, stats[15].PredictedMS)
 	require.False(t, stats[15].ReliableFast)
 
 	require.NoError(t, cache.RecordSample(ctx, 15, "fast-20", 8_000))
@@ -60,58 +60,20 @@ func TestTotalLatencyStatsCacheRequiresTwentySamplesAndThreeFastAggregates(t *te
 	require.Zero(t, stats[15].RecoveryFastStreak)
 }
 
-func TestTotalLatencyStatsCacheUsesMedianOfLatestFiftySamples(t *testing.T) {
-	mr, _, cache := newTotalLatencyTestCache(t)
-	ctx := context.Background()
-	for index := 0; index < 60; index++ {
-		// Make the first ten observations old and very slow. They must not be
-		// included once the latest-50 bound is applied.
-		mr.SetTime(time.UnixMilli(int64(index + 1)))
-		durationMS := 1_000_000
-		if index >= 10 {
-			durationMS = (index - 9) * 1_000
-		}
-		require.NoError(t, cache.RecordSample(ctx, 42, fmt.Sprintf("range-%d", index), durationMS))
-	}
-
-	stats, err := cache.GetStatsBatch(ctx, []int64{42})
-	require.NoError(t, err)
-	require.Equal(t, int64(50), stats[42].SampleCount)
-	require.InDelta(t, 25_500, stats[42].PredictedMS, 0.001)
-	require.InDelta(t, 25_500, stats[42].P50MS, 0.001)
-	require.InDelta(t, 45_100, stats[42].P90MS, 0.001)
-	require.Equal(t, 24, stats[42].WindowHours)
-}
-
-func TestTotalLatencyStatsCacheUsesAllSamplesBelowFifty(t *testing.T) {
-	_, _, cache := newTotalLatencyTestCache(t)
-	values := []int{100_000, 2_000, 4_000}
-	recordTotalLatencySamples(t, cache, 43, "short", values)
-
-	stats, err := cache.GetStatsBatch(context.Background(), []int64{43})
-	require.NoError(t, err)
-	require.Equal(t, int64(3), stats[43].SampleCount)
-	require.Equal(t, 4_000.0, stats[43].PredictedMS)
-}
-
-func TestTotalLatencyStatsCacheDoesNotTrimExtremesForMedian(t *testing.T) {
+func TestTotalLatencyStatsCacheUsesTenToNinetyTrimmedMeanAndPercentiles(t *testing.T) {
 	_, _, cache := newTotalLatencyTestCache(t)
 	values := make([]int, 0, 20)
-	values = append(values, 1_000)
-	for index := 2; index <= 17; index++ {
-		values = append(values, index*1_000)
+	for seconds := 1; seconds <= 20; seconds++ {
+		values = append(values, seconds*1_000)
 	}
-	values = append(values, 50_000, 100_000, 1_000_000)
-	recordTotalLatencySamples(t, cache, 44, "extremes", values)
+	recordTotalLatencySamples(t, cache, 42, "range", values)
 
-	stats, err := cache.GetStatsBatch(context.Background(), []int64{44})
+	stats, err := cache.GetStatsBatch(context.Background(), []int64{42})
 	require.NoError(t, err)
-	require.Equal(t, int64(20), stats[44].SampleCount)
-	// A 10%-90% trim would remove the two lowest and two highest samples and
-	// produce a much higher average. The requested rule keeps all samples and
-	// takes the median.
-	require.Equal(t, 10_500.0, stats[44].PredictedMS)
-	require.Equal(t, 10_500.0, stats[44].P50MS)
+	require.InDelta(t, 10_500, stats[42].PredictedMS, 0.001)
+	require.InDelta(t, 10_500, stats[42].P50MS, 0.001)
+	require.InDelta(t, 18_100, stats[42].P90MS, 0.001)
+	require.Equal(t, 6, stats[42].WindowHours)
 }
 
 func TestTotalLatencyStatsCacheDeduplicatesPerAccountRequest(t *testing.T) {
@@ -177,7 +139,7 @@ func TestTotalLatencyStatsCacheFastAccountNeedsThreeSlowAggregatesToExit(t *test
 	require.True(t, mr.Exists(statsKey))
 }
 
-func TestTotalLatencyStatsCacheUsesRetainedSamplesWithinTwentyFourHours(t *testing.T) {
+func TestTotalLatencyStatsCacheFallsBackToTwentyFourHours(t *testing.T) {
 	_, rdb, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 	accountID := int64(19)
