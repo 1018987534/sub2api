@@ -687,45 +687,25 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				zap.Error(openAICompatibleSelectionErrorForLog(err, requestPlatform)),
 				zap.Int("excluded_account_count", len(failedAccountIDs)),
 			)
-			if legacyCompact && errors.Is(err, service.ErrNoAvailableCompactAccounts) {
-				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
-				h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "compact_not_supported", "No available accounts support /responses/compact", streamStarted)
-				return
-			}
-			if lastFailoverErr != nil && lastFailoverErr.Reason == service.OpenAIHTTPContinuationUnsupportedReason {
-				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
-				return
-			}
-			// Once a failover account is the only filtered candidate, preserve its
-			// terminal upstream status (notably 429 after configured pool retries).
-			// This does not apply when the scheduler reports any other filter such
-			// as profit_threshold, so capacity exhaustion cannot inherit a stale 429.
-			if lastFailoverErr != nil && selectionFailureIsOnlyExcluded(err) {
-				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
-				return
-			}
-			// The current selection failure is authoritative. Once failed accounts
-			// have been excluded, reusing lastFailoverErr here can turn a profit-gated
-			// pool exhaustion into the last upstream 429 and make clients retry a
-			// request that Sub2API cannot currently route.
-			fallback := noAccountErrorClassification{
-				Status:  http.StatusServiceUnavailable,
-				ErrType: "api_error",
-				Message: "Service temporarily unavailable",
-			}
-			var cls noAccountErrorClassification
 			if len(failedAccountIDs) == 0 {
-				cls = classifyOpenAISelectionFailureFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform, err)
+				if legacyCompact && errors.Is(err, service.ErrNoAvailableCompactAccounts) {
+					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "compact_not_supported", "No available accounts support /responses/compact", streamStarted)
+					return
+				}
+				cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel, requestPlatform)
+				cls = classifySelectionFailureError(err, cls)
+				if !cls.ModelNotFound {
+					markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+				}
+				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
+				return
+			}
+			if lastFailoverErr != nil {
+				h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 			} else {
-				// A previous attempt already proved that this group can serve the
-				// model. Avoid a second persistent model-availability query after
-				// failover, and classify only the scheduler's current filters.
-				cls = classifySelectionFailureError(err, fallback)
+				h.handleFailoverExhaustedSimple(c, 502, streamStarted)
 			}
-			if !cls.ModelNotFound {
-				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
-			}
-			h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
 			return
 		}
 		if selection == nil || selection.Account == nil {

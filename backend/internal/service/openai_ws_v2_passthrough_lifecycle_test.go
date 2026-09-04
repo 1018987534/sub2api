@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -583,10 +582,6 @@ func TestPassthroughLifecycle_ActiveTurnInactivityUsesReadTimeout(t *testing.T) 
 	delta, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	require.NoError(t, err)
 	require.Equal(t, "response.output_text.delta", gjson.GetBytes(delta, "type").String())
-	failed, err := readPassthroughLifecycleFrame(t, clientConn, 2500*time.Millisecond)
-	require.NoError(t, err)
-	require.Equal(t, "response.failed", gjson.GetBytes(failed, "type").String())
-	require.Equal(t, "stream_read_error", gjson.GetBytes(failed, "response.error.code").String())
 	_, err = readPassthroughLifecycleFrame(t, clientConn, 2500*time.Millisecond)
 	var websocketCloseErr coderws.CloseError
 	require.ErrorAs(t, err, &websocketCloseErr)
@@ -794,11 +789,6 @@ func TestPassthroughLifecycle_ResponseCreatedTimeoutClosesWithoutFailover(t *tes
 	created, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	require.NoError(t, err)
 	require.Equal(t, "response.created", gjson.GetBytes(created, "type").String())
-	failed, err := readPassthroughLifecycleFrame(t, clientConn, 2500*time.Millisecond)
-	require.NoError(t, err)
-	require.Equal(t, "response.failed", gjson.GetBytes(failed, "type").String())
-	require.NotEmpty(t, gjson.GetBytes(failed, "response.id").String())
-	require.Equal(t, "stream_read_error", gjson.GetBytes(failed, "response.error.code").String())
 	_, err = readPassthroughLifecycleFrame(t, clientConn, 2500*time.Millisecond)
 	var websocketCloseErr coderws.CloseError
 	require.ErrorAs(t, err, &websocketCloseErr)
@@ -840,11 +830,6 @@ func TestPassthroughLifecycle_SecondTurnTimeoutIsNotFailoverSafe(t *testing.T) {
 	created, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
 	require.NoError(t, err)
 	require.Equal(t, "response.created", gjson.GetBytes(created, "type").String())
-	failed, err := readPassthroughLifecycleFrame(t, clientConn, 2500*time.Millisecond)
-	require.NoError(t, err)
-	require.Equal(t, "response.failed", gjson.GetBytes(failed, "type").String())
-	require.NotEmpty(t, gjson.GetBytes(failed, "response.id").String())
-	require.Equal(t, "stream_read_error", gjson.GetBytes(failed, "response.error.code").String())
 	_, err = readPassthroughLifecycleFrame(t, clientConn, 2500*time.Millisecond)
 	var websocketCloseErr coderws.CloseError
 	require.ErrorAs(t, err, &websocketCloseErr)
@@ -859,43 +844,5 @@ func TestPassthroughLifecycle_SecondTurnTimeoutIsNotFailoverSafe(t *testing.T) {
 		require.Equal(t, coderws.StatusGoingAway, closeErr.StatusCode())
 	case <-time.After(2500 * time.Millisecond):
 		t.Fatal("second turn first semantic output was left unbounded")
-	}
-}
-
-func TestPassthroughLifecycle_UpstreamCloseAfterOutputSendsFailedBeforeClose(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	controlCtx, cancelControl := context.WithCancelCause(context.Background())
-	defer cancelControl(context.Canceled)
-	cfg := passthroughLifecycleConfig()
-	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
-	upstream := newStagedPassthroughConn()
-	upstream.Send(`{"type":"response.created","response":{"id":"resp_interrupted","model":"gpt-5.1"}}`)
-	upstream.Fail(io.ErrUnexpectedEOF)
-	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, newPassthroughLifecycleService(cfg, upstream), passthroughLifecycleAccount())
-	defer server.Close()
-	clientConn := dialPassthroughLifecycleClient(t, server)
-	defer func() { _ = clientConn.CloseNow() }()
-
-	created, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
-	require.NoError(t, err)
-	require.Equal(t, "response.created", gjson.GetBytes(created, "type").String())
-
-	failed, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
-	require.NoError(t, err)
-	require.Equal(t, "response.failed", gjson.GetBytes(failed, "type").String())
-	require.NotEmpty(t, gjson.GetBytes(failed, "response.id").String())
-	require.Equal(t, "stream_read_error", gjson.GetBytes(failed, "response.error.code").String())
-
-	_, err = readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
-	var websocketCloseErr coderws.CloseError
-	require.ErrorAs(t, err, &websocketCloseErr)
-	require.Equal(t, coderws.StatusInternalError, websocketCloseErr.Code)
-
-	select {
-	case err := <-serverErr:
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "upstream websocket closed before terminal event")
-	case <-time.After(3 * time.Second):
-		t.Fatal("upstream close did not terminate passthrough")
 	}
 }

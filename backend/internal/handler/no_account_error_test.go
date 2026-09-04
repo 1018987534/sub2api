@@ -303,33 +303,3 @@ func TestClassifySelectionFailureError_StillUpgradesNonModelNotFoundFallback(t *
 	require.Equal(t, "rate_limit_error", got.ErrType)
 	require.False(t, got.ModelNotFound)
 }
-
-func TestClassifySelectionFailureError_ProfitGatedExhaustionStaysServiceUnavailable(t *testing.T) {
-	fallback := noAccountErrorClassification{
-		Status:  http.StatusServiceUnavailable,
-		ErrType: "api_error",
-		Message: "Service temporarily unavailable",
-	}
-
-	got := classifySelectionFailureError(
-		fmt.Errorf("no available OpenAI accounts supporting model: gpt-5.6-terra (pool=8, filtered: excluded=4 profit_threshold=4)"),
-		fallback,
-	)
-
-	require.Equal(t, fallback, got)
-}
-
-func TestClassifySelectionFailureError_MixedCooldownAndExcludedStaysServiceUnavailable(t *testing.T) {
-	fallback := noAccountErrorClassification{
-		Status:  http.StatusServiceUnavailable,
-		ErrType: "api_error",
-		Message: "Service temporarily unavailable",
-	}
-
-	got := classifySelectionFailureError(
-		fmt.Errorf("no available OpenAI accounts supporting model: gpt-5.6-terra (pool=5, filtered: excluded=4 model_rate_limited=1)"),
-		fallback,
-	)
-
-	require.Equal(t, fallback, got)
-}

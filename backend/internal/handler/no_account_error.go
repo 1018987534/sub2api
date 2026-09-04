@@ -34,7 +34,7 @@ type noAccountErrorClassification struct {
 	ModelNotFound bool // true when this is a 404 model_not_found classification
 }
 
-var selectionFailureCountPattern = regexp.MustCompile(`([a-z][a-z0-9_]*)=(\d+)`)
+var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)
 
 // classifySelectionFailureError preserves the scheduler's compact reason when
 // every model-capable account is temporarily rate limited.
@@ -59,7 +59,12 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 	if fallback.ModelNotFound {
 		return fallback
 	}
-	if !selectionFailureIsPureModelCooldown(err) {
+	match := selectionModelRateLimitedPattern.FindStringSubmatch(strings.ToLower(err.Error()))
+	if len(match) != 2 {
+		return fallback
+	}
+	count, parseErr := strconv.Atoi(match[1])
+	if parseErr != nil || count <= 0 {
 		return fallback
 	}
 	return noAccountErrorClassification{
@@ -67,81 +72,6 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 		ErrType: "rate_limit_error",
 		Message: "All available accounts are currently rate-limited. Please retry later.",
 	}
-}
-
-// selectionFailureIsPureModelCooldown returns true only when every positive
-// scheduler exclusion that can still serve the requested model is a transient
-// model-level cooldown. Failed-account exclusions, profit vetoes, quota pauses,
-// and other capacity filters must keep the generic 503 classification instead
-// of inheriting a misleading 429 from one cooled-down candidate.
-func selectionFailureIsPureModelCooldown(err error) bool {
-	if err == nil {
-		return false
-	}
-	sawModelRateLimit := false
-	for _, match := range selectionFailureCountPattern.FindAllStringSubmatch(strings.ToLower(err.Error()), -1) {
-		if len(match) != 3 {
-			continue
-		}
-		count, parseErr := strconv.Atoi(match[2])
-		if parseErr != nil || count <= 0 {
-			continue
-		}
-		switch match[1] {
-		case "pool", "total", "eligible":
-			// Summary metadata, not an exclusion reason.
-		case "model_rate_limited", "rate_limited":
-			sawModelRateLimit = true
-		case "model_not_supported", "model_unsupported":
-			// Accounts that cannot serve the model do not change the verdict for
-			// the remaining model-capable accounts.
-		default:
-			return false
-		}
-	}
-	return sawModelRateLimit
-}
-
-// selectionFailureIsOnlyExcluded identifies the terminal selection result
-// after failover has already excluded the account that produced the upstream
-// error. In that narrow case the last failover error is still authoritative;
-// profit gates, quota pauses, and mixed filters must not inherit it.
-func selectionFailureIsOnlyExcluded(err error) bool {
-	if err == nil {
-		return false
-	}
-	sawExcluded := false
-	for _, match := range selectionFailureCountPattern.FindAllStringSubmatch(strings.ToLower(err.Error()), -1) {
-		if len(match) != 3 {
-			continue
-		}
-		count, parseErr := strconv.Atoi(match[2])
-		if parseErr != nil || count <= 0 {
-			continue
-		}
-		switch match[1] {
-		case "pool", "total", "eligible":
-			// Summary metadata, not an exclusion reason.
-		case "excluded":
-			sawExcluded = true
-		default:
-			return false
-		}
-	}
-	return sawExcluded
-}
-
-func classifyOpenAISelectionFailureFromGin(
-	c *gin.Context,
-	diag service.ModelAvailabilityDiagnoser,
-	apiKey *service.APIKey,
-	routingModel string,
-	displayModel string,
-	platform string,
-	err error,
-) noAccountErrorClassification {
-	classification := classifyNoAccountErrorFromGin(c, diag, apiKey, routingModel, displayModel, platform)
-	return classifySelectionFailureError(err, classification)
 }
 
 // classifyNoAccountError decides between 404 model_not_found and 503

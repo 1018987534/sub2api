@@ -973,26 +973,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		for {
 			upstreamMessage, readErr := lease.ReadMessageWithContextTimeout(ctx, s.openAIWSReadTimeout())
 			if readErr != nil {
-				if wroteDownstream && !clientDisconnected && ctx.Err() == nil {
-					failedEvent := buildOpenAIWSSyntheticFailedEvent(
-						responseID,
-						originalModel,
-						"stream_read_error",
-						"Upstream response stream was interrupted",
-					)
-					if writeErr := writeClientMessage(failedEvent); writeErr == nil {
-						markOpenAIWSClientVisibleFailure(c, "response.failed", failedEvent)
-						MarkOpsStreamFailure(c, "upstream_error", "stream_read_error", "Upstream response stream was interrupted", http.StatusBadGateway)
-					} else {
-						logOpenAIWSModeInfo(
-							"ingress_ws_failed_terminal_write_failed account_id=%d turn=%d conn_id=%s cause=%s",
-							account.ID,
-							turn,
-							truncateOpenAIWSLogValue(lease.ConnID(), openAIWSIDValueMaxLen),
-							truncateOpenAIWSLogValue(writeErr.Error(), openAIWSLogValueMaxLen),
-						)
-					}
-				}
 				lease.MarkBroken()
 				return nil, wrapOpenAIWSIngressTurnError(
 					"read_upstream",

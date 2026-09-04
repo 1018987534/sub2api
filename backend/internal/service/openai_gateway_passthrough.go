@@ -2007,32 +2007,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		pendingLines = pendingLines[:0]
 		return true
 	}
-	writeResponseFailedTerminal := func(source []byte, fallbackMessage string) bool {
-		if sawResponseFailed || failureDelivered || clientDisconnected || !writePendingLines() {
-			return false
-		}
-		// If the upstream read failed between the data line and the blank SSE
-		// boundary, close that partial event before appending the terminal event.
-		if flushPending {
-			if _, err := fmt.Fprintln(w); err != nil {
-				clientDisconnected = true
-				return false
-			}
-			flushPending = false
-		}
-		if _, err := fmt.Fprint(w, buildOpenAIResponseFailedSSE(responseID, originalModel, source, fallbackMessage)); err != nil {
-			clientDisconnected = true
-			return false
-		}
-		clientOutputStarted = true
-		failureDelivered = true
-		sawFailedEvent = true
-		sawTerminalEvent = true
-		terminalEventType = "response.failed"
-		flushPending = true
-		flushPendingOutput()
-		return true
-	}
 	ensureResponseFailedTerminal := func() {
 		if !sawBareError || sawResponseFailed || failureDelivered {
 			return
@@ -2041,12 +2015,17 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			s.handleOpenAIStreamTerminalAccountSideEffects(c, account, bareErrorPayload, failedMessage, resp.Header, mappedModel)
 			bareErrorAccountSideEffectsPending = false
 		}
-		writeResponseFailedTerminal(bareErrorPayload, failedMessage)
-	}
-	sendSyntheticResponseFailed := func(code string, message string) {
-		if writeResponseFailedTerminal(buildOpenAISyntheticFailureSource(code, message), message) {
-			MarkOpsStreamFailure(c, "upstream_error", code, message, http.StatusBadGateway)
+		if clientDisconnected || !writePendingLines() {
+			return
 		}
+		if _, err := fmt.Fprint(w, buildOpenAIResponseFailedSSE(responseID, originalModel, bareErrorPayload, failedMessage)); err != nil {
+			clientDisconnected = true
+			return
+		}
+		clientOutputStarted = true
+		failureDelivered = true
+		flushPending = true
+		flushPendingOutput()
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -2332,9 +2311,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 		}
 		if errors.Is(err, bufio.ErrTooLong) {
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] SSE line too long: account=%d max_size=%d error=%v", account.ID, maxLineSize, err)
-			if openAIStreamClientOutputStarted(c, clientOutputStarted) && !clientDisconnected {
-				sendSyntheticResponseFailed("response_too_large", "Upstream response exceeded the streaming limit")
-			}
 			return resultWithUsage(), err
 		}
 		if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
@@ -2355,7 +2331,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			upstreamRequestID,
 			err,
 		)
-		sendSyntheticResponseFailed("stream_read_error", "Upstream response stream was interrupted")
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", err)
 	}
 	if firstOutputDeadlineReached() {
@@ -2378,7 +2353,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, "OpenAI stream ended before a terminal event")
 		}
 		s.recordOpenAIProxyStreamDisconnect(account, errors.New("stream ended before terminal event"), upstreamRequestID)
-		sendSyntheticResponseFailed("stream_interrupted", "Upstream response stream ended before a terminal event")
 		return resultWithUsage(), errors.New("stream usage incomplete: missing terminal event")
 	}
 	if (sawDone || sawTerminalEvent) && !sawFailedEvent {
