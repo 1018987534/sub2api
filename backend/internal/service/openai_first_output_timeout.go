@@ -274,10 +274,16 @@ func (s *OpenAIGatewayService) openAIFirstOutputDeadline(account *Account, reaso
 	return deadline, timeout
 }
 
+// newOpenAIFirstOutputTimeoutError records the timeout as an upstream attempt
+// and returns the failover error. proxyID/proxyName are supplied by the caller
+// because the same deadline is enforced over HTTP and WebSocket transports,
+// whose direct-route semantics differ (see opsUpstreamWSProxyAttribution).
 func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	ctx context.Context,
 	c *gin.Context,
 	account *Account,
+	proxyID *int64,
+	proxyName string,
 	startTime time.Time,
 	originalModel string,
 	reasoningEffort string,
@@ -313,7 +319,9 @@ func (s *OpenAIGatewayService) newOpenAIFirstOutputTimeoutError(
 	)
 	requestID := strings.TrimSpace(responseHeaders.Get("x-request-id"))
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-		Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+		ProxyID:   proxyID,
+		ProxyName: proxyName,
+		Platform:  account.Platform, AccountID: account.ID, AccountName: account.Name,
 		UpstreamStatusCode: http.StatusGatewayTimeout, UpstreamRequestID: requestID,
 		Kind: failureKind, Message: failureMessage,
 		Detail: fmt.Sprintf("phase=%s reason=%s elapsed_ms=%d timeout_ms=%d", phase, failureKind, elapsed.Milliseconds(), timeout.Milliseconds()),
