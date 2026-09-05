@@ -30,7 +30,10 @@ For all commands and payload examples, read [references/admin-cli.md](references
 - For user requests like `站点 logo 换一下`, treat `site_logo` as a production system setting first. Do not start by changing `frontend/public/logo.*`, running local UI tests, or relying on the default fallback asset unless the user explicitly asks to change the default source asset.
 - Update the live setting through the admin settings surface/API when possible. If you must use a database fallback, update only `settings.key='site_logo'`, back up the previous value, then verify `/api/v1/settings/public` and the rendered homepage favicon on `https://xiaohondou.com` and compatibility hosts.
 - A DB-only setting change can leave server-rendered HTML cached with the previous favicon. If public settings show the new value but homepage HTML still injects the old data URL, restart only the control `sub2api` container and re-check readiness plus rendered favicon; do not touch gateway-only nodes.
-- If the requested logo change truly requires code, finish with the production release workflow instead of leaving a local-only code diff.
+- If the requested logo change truly requires code, finish the default
+  topic-branch -> `main` merge and `cdy/main` push delivery lifecycle instead
+  of leaving a local-only code diff. Production release remains a separate
+  user-authorized step governed by `sub2api-vps-release`.
 
 ## Multi-node Responses Routing
 
