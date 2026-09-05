@@ -483,7 +483,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 			derefGroupID(groupID),
 			accountID,
 			responseID,
-			store.BindResponseAccount(ctx, derefGroupID(groupID), responseID, accountID, s.openAIWSResponseStickyTTL()),
+			s.bindOpenAIResponseAccount(ctx, store, derefGroupID(groupID), responseID, accountID, s.openAIWSResponseStickyTTL()),
 		)
 		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account:     account,
