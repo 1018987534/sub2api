@@ -436,8 +436,8 @@ export default {
         accountSchedulingThresholdsDisabledHint: '100 disables platform auto-pause. Values 1–99 pause scheduling once utilization reaches that percent.',
         accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.',
         priorityModeTitle: 'OpenAI Scheduling Priority',
-        firstTokenPriorityTitle: 'First-Token Priority',
-        firstTokenPriorityDescription: 'Prioritize recent first-token predictions. Keep normal session affinity while the bound account\'s stable prediction is at most 15 seconds; above 15 seconds, fall back to weighted affinity and first-token ordering. Adaptive probes back off persistently slow accounts.',
+        firstTokenPriorityTitle: 'Total-Duration Pools',
+        firstTokenPriorityDescription: 'Enter the fast pool after three normal totals at or below 17 seconds and leave after three at or above 21 seconds. Fast accounts prefer lower rates; slow accounts prefer shorter duration. Probes only affect fresh scheduling.',
         lowRateModeDescription: 'Prioritize billing rate and automatically use sticky weighting within the same rate tier.'
       },
       upstreamBillingProbe: {

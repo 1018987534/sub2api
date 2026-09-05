@@ -274,6 +274,7 @@ export interface PublicSettings {
   /** When true, user monitor shows account quota/balance snapshots (default off). */
   channel_monitor_show_quota?: boolean
   available_channels_enabled: boolean
+  lottery_enabled: boolean
   model_plaza_enabled: boolean
   model_plaza_require_auth: boolean
   service_quota_enabled: boolean
@@ -909,11 +910,15 @@ export interface AccountFirstTokenLatencyMetric {
   account_id: number
   account_name: string
   predicted_ms: number
+  normal_total_ms?: number
+  p50_ms?: number
+  p90_ms?: number
   has_prediction: boolean
   is_fast_pool: boolean
   scheduling_rate_multiplier: number | null
   groups: AccountFirstTokenLatencyGroup[]
   sample_count: number
+  window_hours?: number
   updated_at: string
   slow_streak: number
   recovery_fast_streak: number

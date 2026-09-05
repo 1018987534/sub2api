@@ -104,6 +104,11 @@ export const FeatureFlags = {
     mode: 'opt-in',
     label: 'Available Channels',
   }),
+  lottery: defineFlag({
+    key: 'lottery_enabled',
+    mode: 'opt-in',
+    label: 'Lottery',
+  }),
   modelPlaza: defineFlag({
     key: 'model_plaza_enabled',
     mode: 'opt-in',

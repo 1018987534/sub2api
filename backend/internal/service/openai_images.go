@@ -9,6 +9,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -26,6 +29,8 @@ import (
 	"github.com/imroc/req/v3"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	xdraw "golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 )
 
 const (
@@ -39,9 +44,18 @@ const (
 	openAIChatGPTFilesURL          = "https://chatgpt.com/backend-api/files"
 	openAIImageBackendUserAgent    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 	openAIImageMaxDownloadBytes    = 20 << 20 // 20MB per image download
-	openAIImageMaxUploadPartSize   = 20 << 20 // 20MB per multipart upload part
+	openAIImageMaxUploadPartSize   = 10 << 20 // 10MB per multipart upload part
 	openAIImagesResponsesMainModel = "gpt-5.4-mini"
+	openAIImageCompressMaxEdge     = 2048
+	openAIImageCompressJPEGQuality = 82
 )
+
+// OpenAIImagesMaxRequestBodyBytes limits the buffered request before parsing.
+// It leaves room for one source image and one mask plus multipart framing.
+const OpenAIImagesMaxRequestBodyBytes int64 = 24 << 20
+
+// OpenAIImagesMaxUploadPartBytes is the hard limit for each edit image part.
+const OpenAIImagesMaxUploadPartBytes int64 = openAIImageMaxUploadPartSize
 
 type OpenAIImagesCapability string
 
@@ -332,10 +346,13 @@ func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *Ope
 			continue
 		}
 
-		data, err := io.ReadAll(io.LimitReader(part, openAIImageMaxUploadPartSize))
+		data, err := io.ReadAll(io.LimitReader(part, openAIImageMaxUploadPartSize+1))
 		_ = part.Close()
 		if err != nil {
 			return fmt.Errorf("read multipart field %s: %w", name, err)
+		}
+		if part.FileName() != "" && int64(len(data)) > OpenAIImagesMaxUploadPartBytes {
+			return fmt.Errorf("image file %s exceeds %d MB", name, OpenAIImagesMaxUploadPartBytes/(1<<20))
 		}
 
 		fileName := strings.TrimSpace(part.FileName())
@@ -435,6 +452,143 @@ func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *Ope
 		return fmt.Errorf("image file is required")
 	}
 	return nil
+}
+
+// CompressOpenAIImagesMultipartRequest normalizes image-edit uploads before
+// they are forwarded to an upstream model. It bounds the image dimensions and
+// re-encodes opaque images as quality-controlled JPEG; masks and transparent
+// images remain PNG so edit semantics are preserved.
+func CompressOpenAIImagesMultipartRequest(body []byte, contentType string) ([]byte, string, error) {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || !strings.EqualFold(mediaType, "multipart/form-data") {
+		return body, contentType, nil
+	}
+	boundary := strings.TrimSpace(params["boundary"])
+	if boundary == "" {
+		return nil, "", fmt.Errorf("multipart boundary is required")
+	}
+
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	for {
+		part, nextErr := reader.NextPart()
+		if nextErr == io.EOF {
+			break
+		}
+		if nextErr != nil {
+			return nil, "", fmt.Errorf("read multipart body: %w", nextErr)
+		}
+		name := strings.TrimSpace(part.FormName())
+		fileName := strings.TrimSpace(part.FileName())
+		if fileName == "" || (name != "image" && !strings.HasPrefix(name, "image[") && name != "mask") {
+			target, createErr := writer.CreatePart(cloneMultipartHeader(part.Header))
+			if createErr != nil {
+				_ = part.Close()
+				return nil, "", fmt.Errorf("create multipart part %s: %w", name, createErr)
+			}
+			if _, copyErr := io.Copy(target, part); copyErr != nil {
+				_ = part.Close()
+				return nil, "", fmt.Errorf("copy multipart part %s: %w", name, copyErr)
+			}
+			_ = part.Close()
+			continue
+		}
+
+		data, readErr := io.ReadAll(io.LimitReader(part, OpenAIImagesMaxUploadPartBytes+1))
+		_ = part.Close()
+		if readErr != nil {
+			return nil, "", fmt.Errorf("read image file %s: %w", name, readErr)
+		}
+		if int64(len(data)) > OpenAIImagesMaxUploadPartBytes {
+			return nil, "", fmt.Errorf("image file %s exceeds %d MB", name, OpenAIImagesMaxUploadPartBytes/(1<<20))
+		}
+		compressed, outputType, outputName, compressErr := compressOpenAIImagePart(data, fileName, name == "mask")
+		if compressErr != nil {
+			return nil, "", fmt.Errorf("compress image file %s: %w", name, compressErr)
+		}
+		if int64(len(compressed)) > OpenAIImagesMaxUploadPartBytes {
+			return nil, "", fmt.Errorf("compressed image file %s exceeds %d MB", name, OpenAIImagesMaxUploadPartBytes/(1<<20))
+		}
+
+		header := cloneMultipartHeader(part.Header)
+		header.Set("Content-Type", outputType)
+		header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": name, "filename": outputName}))
+		target, createErr := writer.CreatePart(header)
+		if createErr != nil {
+			return nil, "", fmt.Errorf("create compressed image part %s: %w", name, createErr)
+		}
+		if _, writeErr := target.Write(compressed); writeErr != nil {
+			return nil, "", fmt.Errorf("write compressed image part %s: %w", name, writeErr)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", fmt.Errorf("finalize compressed multipart body: %w", err)
+	}
+	return buffer.Bytes(), writer.FormDataContentType(), nil
+}
+
+func compressOpenAIImagePart(data []byte, fileName string, mask bool) ([]byte, string, string, error) {
+	decoded, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, "", "", fmt.Errorf("decode image: %w", err)
+	}
+	bounds := decoded.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+	targetWidth, targetHeight := width, height
+	if maxEdge := imageMaxInt(width, height); maxEdge > openAIImageCompressMaxEdge {
+		scale := float64(openAIImageCompressMaxEdge) / float64(maxEdge)
+		targetWidth = imageMaxInt(1, int(float64(width)*scale))
+		targetHeight = imageMaxInt(1, int(float64(height)*scale))
+	}
+	resized := decoded
+	if targetWidth != width || targetHeight != height {
+		canvas := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeight))
+		xdraw.CatmullRom.Scale(canvas, canvas.Bounds(), decoded, bounds, xdraw.Over, nil)
+		resized = canvas
+	}
+
+	var output bytes.Buffer
+	outputType := "image/jpeg"
+	if mask || imageHasTransparency(resized) {
+		outputType = "image/png"
+		if err := png.Encode(&output, resized); err != nil {
+			return nil, "", "", fmt.Errorf("encode PNG: %w", err)
+		}
+	} else if err := jpeg.Encode(&output, resized, &jpeg.Options{Quality: openAIImageCompressJPEGQuality}); err != nil {
+		return nil, "", "", fmt.Errorf("encode JPEG: %w", err)
+	}
+	base := fileName
+	if dot := strings.LastIndexByte(base, '.'); dot > 0 {
+		base = base[:dot]
+	}
+	ext := ".jpg"
+	if outputType == "image/png" {
+		ext = ".png"
+	}
+	return output.Bytes(), outputType, base + ext, nil
+}
+
+func imageHasTransparency(img image.Image) bool {
+	if img == nil {
+		return false
+	}
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if _, _, _, alpha := img.At(x, y).RGBA(); alpha != 0xffff {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func imageMaxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func parseOpenAIImageDimensions(_ textproto.MIMEHeader) (int, int) {

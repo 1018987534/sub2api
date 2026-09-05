@@ -813,8 +813,8 @@ func (s *GatewayService) selectAccountWithLoadAwarenessSingleGroup(ctx context.C
 		}
 		firstTokenPriority := s.rateLimitService != nil && s.rateLimitService.FirstTokenPriorityEnabled(ctx)
 		if firstTokenPriority && len(available) > 1 {
-			// Build the old layered order first. It remains the tie-breaker when
-			// measured TTFT differs by no more than the noise band.
+			// Build the old layered order first, then make upstream billing rate
+			// the baseline inside the total-duration fast pool.
 			remaining := append([]accountWithLoad(nil), available...)
 			baseline := make([]accountWithLoad, 0, len(available))
 			for len(remaining) > 0 {
@@ -834,13 +834,23 @@ func (s *GatewayService) selectAccountWithLoadAwarenessSingleGroup(ctx context.C
 			for _, candidate := range baseline {
 				accounts = append(accounts, candidate.account)
 			}
+			rateOrder := newOpenAILegacyUpstreamRateOrder(accounts, time.Now(), defaultOpenAIOAuthSchedulingRateMultiplier)
+			if rateOrder.enabled {
+				sort.SliceStable(baseline, func(i, j int) bool {
+					return rateOrder.compare(baseline[i].account, baseline[j].account) < 0
+				})
+				accounts = accounts[:0]
+				for _, candidate := range baseline {
+					accounts = append(accounts, candidate.account)
+				}
+			}
 			allowProbe := firstTokenProbeAllowedForNewScheduling(firstTokenProbeEligible(ctx), stickyAccountID, 0)
 			ranks := firstTokenPriorityRanksWithProbeOptions(
 				ctx,
 				accounts,
 				s.rateLimitService.firstTokenLatencyStatsCache,
 				allowProbe,
-				firstTokenProbeEligible(ctx),
+				allowProbe,
 			)
 			sort.SliceStable(baseline, func(i, j int) bool {
 				return ranks[baseline[i].account.ID] < ranks[baseline[j].account.ID]

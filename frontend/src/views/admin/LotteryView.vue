@@ -1,0 +1,89 @@
+<template>
+  <AppLayout>
+    <div class="mx-auto max-w-7xl space-y-6">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div><h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.title') }}</h1><p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.lottery.description') }}</p></div>
+        <div class="flex flex-wrap gap-2"><button class="btn btn-secondary" :disabled="loading" :title="t('common.refresh')" @click="load"><Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" /><span>{{ t('common.refresh') }}</span></button><button class="btn btn-primary" :disabled="saving || !form.enabled || !!currentOpenRound" @click="startRound"><Icon name="plus" size="sm" /><span>{{ t('admin.lottery.startRound') }}</span></button></div>
+      </div>
+
+      <div v-if="loading" class="card flex justify-center py-16"><div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div></div>
+      <template v-else>
+        <form class="space-y-6" @submit.prevent="save">
+          <section class="card p-5 sm:p-6">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.enabled') }}</h2><p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.lottery.enabledHint') }}</p></div><label class="inline-flex cursor-pointer items-center gap-3"><input v-model="form.enabled" type="checkbox" class="h-5 w-5 rounded border-gray-300 text-primary-600 focus:ring-primary-500" /><span class="text-sm font-medium text-gray-700 dark:text-gray-200">{{ form.enabled ? t('common.enabled') : t('common.disabled') }}</span></label></div>
+          </section>
+
+          <section class="card p-5 sm:p-6"><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.rules') }}</h2><div class="mt-5 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
+            <label class="space-y-1.5"><span class="label">{{ t('admin.lottery.participantThreshold') }}</span><input v-model.number="form.participant_threshold" type="number" min="2" max="100000" class="input" /></label>
+            <label class="space-y-1.5"><span class="label">{{ t('admin.lottery.prizeCount') }}</span><input v-model.number="form.prize_count" type="number" min="1" max="10000" class="input" /></label>
+            <label class="space-y-1.5"><span class="label">{{ t('admin.lottery.prizeAmount') }}</span><div class="relative"><input v-model.number="form.prize_amount" type="number" min="0.01" step="0.01" class="input pr-16" /><span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-400">coins</span></div></label>
+            <label class="space-y-1.5"><span class="label">{{ t('admin.lottery.drawMode') }}</span><select v-model="form.draw_mode" class="input"><option value="auto">{{ t('admin.lottery.automatic') }}</option><option value="manual">{{ t('admin.lottery.manual') }}</option></select></label>
+            <label class="space-y-1.5 md:col-span-2"><span class="label">{{ t('admin.lottery.nextRoundMode') }}</span><select v-model="form.next_round_mode" class="input"><option value="manual">{{ t('admin.lottery.manualNext') }}</option><option value="auto">{{ t('admin.lottery.autoNext') }}</option></select></label>
+          </div></section>
+
+          <section class="card p-5 sm:p-6"><div class="flex items-start justify-between gap-3"><div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.actors') }}</h2><p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('admin.lottery.actorHint') }}</p></div><Icon name="users" size="lg" class="text-primary-500" /></div><div class="mt-5 grid gap-5 md:grid-cols-3"><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.actorPercentage') }}</span><div class="relative"><input v-model.number="form.actor_percentage" type="number" min="0" max="95" step="0.1" class="input pr-8" /><span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-gray-400">%</span></div></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.actorInterval') }}</span><div class="flex items-center gap-2"><input v-model.number="form.actor_join_min_seconds" type="number" min="5" max="86400" class="input" /><span class="text-gray-400">-</span><input v-model.number="form.actor_join_max_seconds" type="number" min="5" max="86400" class="input" /></div></label><div class="rounded-xl bg-gray-50 p-4 text-sm text-gray-600 dark:bg-dark-900 dark:text-dark-300"><span class="font-medium text-gray-900 dark:text-white">{{ actorPreview }}</span><p class="mt-1 text-xs">{{ t('admin.lottery.actorHint') }}</p></div></div></section>
+
+          <section class="card p-5 sm:p-6"><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.eligibility') }}</h2><div class="mt-5 grid gap-5 md:grid-cols-3"><label class="flex items-start gap-3 rounded-xl border border-gray-200 p-4 dark:border-dark-700"><input v-model="form.require_recharge" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" /><span><span class="block text-sm font-medium text-gray-800 dark:text-gray-200">{{ t('admin.lottery.requireRecharge') }}</span><span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.rechargeRequired') }}</span></span></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.minRecharge') }}</span><input v-model.number="form.min_recharge_amount" type="number" min="0" step="0.01" class="input" /><span class="hint">{{ t('admin.lottery.minRechargeHint') }}</span></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.minAccountAge') }}</span><input v-model.number="form.min_account_age_days" type="number" min="0" max="36500" class="input" /><span class="hint">{{ t('admin.lottery.minRechargeHint') }}</span></label><label class="space-y-1.5 md:col-span-2"><span class="label">{{ t('admin.lottery.recentRecharge') }}</span><input v-model.number="form.recent_recharge_days" type="number" min="0" max="36500" class="input" /><span class="hint">{{ t('admin.lottery.recentRechargeHint') }}</span></label></div></section>
+          <div class="flex justify-end"><button class="btn btn-primary w-full sm:w-auto" type="submit" :disabled="saving"><Icon v-if="saving" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="checkCircle" size="sm" /><span>{{ saving ? t('common.saving') : t('admin.lottery.save') }}</span></button></div>
+        </form>
+
+        <section class="card overflow-hidden"><div class="flex flex-col gap-3 border-b border-gray-100 px-5 py-4 dark:border-dark-800 sm:flex-row sm:items-center sm:justify-between sm:px-6"><div><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.rounds') }}</h2><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ currentOpenRound ? `#${currentOpenRound.round_no}` : t('admin.lottery.noOpenRound') }}</p></div></div><div class="overflow-x-auto"><table class="w-full min-w-[760px] text-left text-sm"><thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-900 dark:text-dark-400"><tr><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.round') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.progress') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.real') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.actors') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.status') }}</th><th class="px-5 py-3 font-medium">{{ t('admin.lottery.columns.actions') }}</th></tr></thead><tbody class="divide-y divide-gray-100 dark:divide-dark-800"><tr v-for="round in rounds" :key="round.id"><td class="px-5 py-3 font-medium text-gray-900 dark:text-white">#{{ round.round_no }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.participant_count }} / {{ round.participant_threshold }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.real_participant_count ?? (round.participant_count - (round.actor_count || 0)) }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.actor_count || 0 }} / {{ round.actor_target_count || 0 }}</td><td class="px-5 py-3"><span class="badge" :class="round.status === 'open' ? 'badge-warning' : round.status === 'drawn' ? 'badge-success' : 'badge-gray'">{{ statusLabel(round.status) }}</span></td><td class="px-5 py-3"><button v-if="round.status === 'open'" class="btn btn-secondary btn-sm" :disabled="drawingId === round.id" @click="draw(round)"><Icon v-if="drawingId === round.id" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="trophy" size="sm" /><span>{{ t('admin.lottery.draw') }}</span></button><span v-else class="text-xs text-gray-400">{{ round.drawn_at ? date(round.drawn_at) : '-' }}</span></td></tr><tr v-if="rounds.length === 0"><td colspan="6" class="px-5 py-10 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('common.noData') }}</td></tr></tbody></table></div></section>
+      </template>
+    </div>
+  </AppLayout>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import AppLayout from '@/components/layout/AppLayout.vue'
+import Icon from '@/components/icons/Icon.vue'
+import lotteryAPI, { type LotteryConfig, type LotteryRound } from '@/api/lottery'
+import { useAppStore } from '@/stores/app'
+import { extractApiErrorMessage } from '@/utils/apiError'
+
+const { t } = useI18n()
+const appStore = useAppStore()
+const loading = ref(true)
+const saving = ref(false)
+const drawingId = ref<number | null>(null)
+const rounds = ref<LotteryRound[]>([])
+const form = reactive<LotteryConfig>({ enabled: false, participant_threshold: 50, prize_count: 1, prize_amount: 5, draw_mode: 'auto', next_round_mode: 'manual', actor_percentage: 0, actor_join_min_seconds: 60, actor_join_max_seconds: 600, require_recharge: true, min_recharge_amount: 0, min_account_age_days: 0, recent_recharge_days: 0 })
+const currentOpenRound = computed(() => rounds.value.find((round) => round.status === 'open'))
+const actorPreview = computed(() => `${Math.max(0, Math.floor(form.participant_threshold * form.actor_percentage / 100))} / ${form.participant_threshold} ${t('admin.lottery.actors')}`)
+
+function date(value: string): string { return new Date(value).toLocaleString() }
+function statusLabel(status: string): string { return t(`lottery.statuses.${status}`, status) }
+
+async function load(): Promise<void> {
+  loading.value = true
+  try {
+    const [config, page] = await Promise.all([lotteryAPI.getAdminConfig(), lotteryAPI.getAdminRounds(1, 50)])
+    Object.assign(form, config)
+    rounds.value = page.items
+  } catch (error) { appStore.showError(extractApiErrorMessage(error, t('admin.lottery.loadFailed'))) }
+  finally { loading.value = false }
+}
+async function save(): Promise<void> {
+  saving.value = true
+  try { const updated = await lotteryAPI.updateAdminConfig({ ...form }); Object.assign(form, updated); appStore.showSuccess(t('admin.lottery.saved')) }
+  catch (error) { appStore.showError(extractApiErrorMessage(error, t('admin.lottery.saveFailed'))) }
+  finally { saving.value = false }
+}
+async function startRound(): Promise<void> {
+  try { const round = await lotteryAPI.startRound(); rounds.value = [round, ...rounds.value.filter((item) => item.id !== round.id)]; appStore.showSuccess(t('admin.lottery.roundStarted')) }
+  catch (error) { appStore.showError(extractApiErrorMessage(error, t('admin.lottery.loadFailed'))) }
+}
+async function draw(round: LotteryRound): Promise<void> {
+  drawingId.value = round.id
+  try { const result = await lotteryAPI.drawRound(round.id); const index = rounds.value.findIndex((item) => item.id === round.id); if (index >= 0) rounds.value[index] = result.round; if (result.next_round) rounds.value.unshift(result.next_round); appStore.showSuccess(t('admin.lottery.drawn')) }
+  catch (error) { appStore.showError(extractApiErrorMessage(error, t('admin.lottery.loadFailed'))) }
+  finally { drawingId.value = null }
+}
+onMounted(load)
+</script>
+
+<style scoped>
+.label { @apply block text-sm font-medium text-gray-700 dark:text-gray-200; }
+.hint { @apply block text-xs text-gray-500 dark:text-dark-400; }
+</style>

@@ -254,109 +254,45 @@ describe('ImageStudioView', () => {
     wrapper.unmount()
   })
 
-  it('loads completed tasks from the selected key history', async () => {
-    mocks.listTasks.mockResolvedValue([{
-      id: 'imgtask_history',
-      task_id: 'imgtask_history',
-      status: 'completed',
-      mode: 'generate',
-      prompt: 'A saved lighthouse',
-      size: '1536x1024',
-      quality: 'high',
-      output_format: 'png',
-      created_at: 1_721_430_000,
-      result: { data: [{ url: 'https://cdn.example.com/history.png' }] },
-    }])
-
+  it('does not load server history and advertises one-time browser storage', async () => {
     const wrapper = mount(ImageStudioView, { global: globalOptions })
     await flushPromises()
 
-    expect(mocks.listTasks).toHaveBeenCalledWith('sk-key-1', 50, expect.any(AbortSignal))
-    expect(wrapper.text()).toContain('A saved lighthouse')
-    expect(wrapper.text()).toContain('1536x1024')
-    expect(wrapper.findAll('img').map((image) => image.attributes('src'))).toContain('https://cdn.example.com/history.png')
+    expect(mocks.listTasks).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="privacy-notice"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="session-results-panel"]').text()).toContain('imageStudio.sessionCount:0:0')
 
     wrapper.unmount()
   })
 
-  it('renders every output as a separate compact history card', async () => {
-    mocks.listTasks.mockResolvedValue([{
-      id: 'imgtask_multi',
-      task_id: 'imgtask_multi',
+  it('renders generated outputs only in the current session', async () => {
+    mocks.submitTask.mockResolvedValue({
+      id: 'imgtask_session',
+      task_id: 'imgtask_session',
       status: 'completed',
-      mode: 'generate',
-      prompt: 'Three product concepts',
-      size: '1024x1024',
-      quality: 'high',
-      output_format: 'png',
-      n: 3,
-      created_at: 1_721_430_000,
       result: {
         data: [
-          { url: 'https://cdn.example.com/concept-1.png' },
-          { url: 'https://cdn.example.com/concept-2.png' },
-          { url: 'https://cdn.example.com/concept-3.png' },
+          { b64_json: 'one', output_format: 'png' },
+          { b64_json: 'two', output_format: 'png' },
         ],
       },
-    }])
-
+    })
     const wrapper = mount(ImageStudioView, { global: globalOptions })
     await flushPromises()
 
-    expect(wrapper.findAll('[data-test="history-panel"]')).toHaveLength(1)
-    expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(3)
-    expect(wrapper.get('[data-test="history-summary"]').text()).toBe('imageStudio.historyCount:1:3')
-    expect(wrapper.findAll('[data-test="output-position"]').map((badge) => badge.text())).toEqual(['1/3', '2/3', '3/3'])
+    await wrapper.find('[data-test="prompt-input"]').setValue('Two concepts')
+    await wrapper.find('[data-test="generate-button"]').trigger('click')
+    await flushPromises()
 
-    const panel = wrapper.get('[data-test="history-panel"]')
-    expect(panel.classes()).toEqual(expect.arrayContaining(['h-full', 'min-h-[680px]']))
-    expect(panel.find('[data-test="history-pagination"]').exists()).toBe(true)
-    const grid = panel.get('[data-test="history-grid"]')
-    expect(grid.classes()).toContain('grid-cols-[repeat(auto-fill,minmax(min(150px,100%),1fr))]')
-    expect(grid.findAll('img').map((image) => image.attributes('src'))).toEqual([
-      'https://cdn.example.com/concept-1.png',
-      'https://cdn.example.com/concept-2.png',
-      'https://cdn.example.com/concept-3.png',
-    ])
+    expect(wrapper.findAll('[data-test="session-card"]')).toHaveLength(2)
+    expect(wrapper.get('[data-test="session-summary"]').text()).toBe('imageStudio.sessionCount:1:2')
+    expect(wrapper.find('[data-test="session-results-panel"]').text()).not.toContain('24')
+    expect(mocks.listTasks).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })
 
-  it('paginates flattened image cards ten at a time', async () => {
-    mocks.listTasks.mockResolvedValue([{
-      id: 'imgtask_paginated',
-      task_id: 'imgtask_paginated',
-      status: 'completed',
-      mode: 'generate',
-      prompt: 'A paginated concept set',
-      size: '1024x1024',
-      quality: 'auto',
-      output_format: 'png',
-      created_at: 1_721_430_000,
-      result: {
-        data: Array.from({ length: 11 }, (_, index) => ({ url: `https://cdn.example.com/page-${index + 1}.png` })),
-      },
-    }])
-
-    const wrapper = mount(ImageStudioView, { global: globalOptions })
-    await flushPromises()
-
-    expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(10)
-    expect(wrapper.find('[data-test="history-pagination"]').exists()).toBe(true)
-    expect(wrapper.findAll('[data-test="history-grid"] img').map((image) => image.attributes('src'))).not.toContain('https://cdn.example.com/page-11.png')
-
-    const nextButton = wrapper.find('[data-test="history-next-page"]')
-    expect(nextButton.exists()).toBe(true)
-    await nextButton.trigger('click')
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(1)
-    expect(wrapper.findAll('[data-test="history-grid"] img').map((image) => image.attributes('src'))).toEqual(['https://cdn.example.com/page-11.png'])
-
-    wrapper.unmount()
-  })
-
-  it('clears cached keys and history before loading a different user session', async () => {
+  it('clears current-session images before loading a different user session', async () => {
     const authStore = useAuthStore()
     const oldKey = makeKey(1, makeGroup(), 1)
     const newKey = makeKey(8, makeGroup({ id: 18, name: 'New Image Group' }), 8)
@@ -368,30 +304,26 @@ describe('ImageStudioView', () => {
       if (authStore.user?.id === 8) return newKeys
       return Promise.resolve({ items: [oldKey], total: 1, page: 1, page_size: 100, pages: 1 })
     })
-    mocks.listTasks.mockImplementation((apiKey: string) => Promise.resolve(apiKey === oldKey.key ? [{
-      id: 'imgtask_old_owner',
-      task_id: 'imgtask_old_owner',
-      status: 'completed',
-      prompt: 'Old owner private image',
-      result: { data: [{ url: 'https://cdn.example.com/old-owner.png' }] },
-    }] : []))
-
     const wrapper = mount(ImageStudioView, { global: globalOptions })
     await flushPromises()
-    expect(wrapper.text()).toContain('Old owner private image')
     expect(wrapper.find('[data-test="api-key-select"]').text()).toContain('key-1')
+
+    await wrapper.find('[data-test="prompt-input"]').setValue('Old owner private image')
+    await wrapper.find('[data-test="generate-button"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Old owner private image')
 
     authStore.user = { id: 8 } as User
     await wrapper.vm.$nextTick()
 
     expect(wrapper.text()).not.toContain('Old owner private image')
     expect(wrapper.find('[data-test="api-key-select"]').text()).not.toContain('key-1')
-    expect(wrapper.findAll('[data-test="history-card"]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-test="session-card"]')).toHaveLength(0)
 
     resolveNewKeys({ items: [newKey], total: 1, page: 1, page_size: 100, pages: 1 })
     await flushPromises()
     expect(wrapper.find('[data-test="api-key-select"]').text()).toContain('key-8 · New Image Group')
-    expect(mocks.listTasks).toHaveBeenCalledWith(newKey.key, 50, expect.any(AbortSignal))
+    expect(mocks.listTasks).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })

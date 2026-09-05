@@ -278,6 +278,30 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/lottery',
+    name: 'Lottery',
+    component: () => import('@/views/user/LotteryView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Lottery',
+      titleKey: 'lottery.title',
+      descriptionKey: 'lottery.description'
+    }
+  },
+  {
+    path: '/lottery/snapshot',
+    name: 'LotterySnapshot',
+    component: () => import('@/views/user/LotteryView.vue'),
+    props: { snapshot: true },
+    meta: {
+      requiresAuth: false,
+      title: 'Lottery snapshot',
+      titleKey: 'lottery.title',
+      descriptionKey: 'lottery.description'
+    }
+  },
+  {
     path: '/available-channels',
     name: 'UserAvailableChannels',
     component: () => import('@/views/user/AvailableChannelsView.vue'),
@@ -568,6 +592,18 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresAdmin: true, title: 'Support Inbox', titleKey: 'supportChat.inbox' }
   },
   {
+    path: '/admin/lottery',
+    name: 'AdminLottery',
+    component: () => import('@/views/admin/LotteryView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Lottery Management',
+      titleKey: 'admin.lottery.title',
+      descriptionKey: 'admin.lottery.description'
+    }
+  },
+  {
     path: '/admin/proxies',
     name: 'AdminProxies',
     component: () => import('@/views/admin/ProxiesView.vue'),
@@ -769,7 +805,7 @@ let authInitialized = false
 const navigationLoading = useNavigationLoadingState()
 // 延迟初始化预加载，传入 router 实例
 let routePrefetch: ReturnType<typeof useRoutePrefetch> | null = null
-const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result', '/payment/airwallex', '/legal']
+const BACKEND_MODE_ALLOWED_PATHS = ['/login', '/key-usage', '/setup', '/payment/result', '/payment/airwallex', '/legal', '/lottery/snapshot']
 const BACKEND_MODE_CALLBACK_PATHS = [
   '/auth/callback',
   '/auth/linuxdo/callback',

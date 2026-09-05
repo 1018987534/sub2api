@@ -893,7 +893,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		)
 	}
 	if s.rateLimitService != nil {
-		s.rateLimitService.ObserveFirstTokenLatency(ctx, account, usageLog.RequestID, usageLog.FirstTokenMs)
+		s.rateLimitService.ObserveTotalDurationLatency(ctx, account, usageLog)
 	}
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {

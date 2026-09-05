@@ -770,6 +770,7 @@ const flagChannelMonitor = makeSidebarFlag(FeatureFlags.channelMonitor)
 const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
+const flagLottery = makeSidebarFlag(FeatureFlags.lottery)
 const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
 const flagUserSubscriptionsMenu = () => appStore.cachedPublicSettings?.hide_user_subscriptions_menu !== true
 const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
@@ -797,6 +798,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
+    { path: '/lottery', label: t('nav.lottery'), icon: GiftIcon, hideInSimpleMode: true, featureFlag: flagLottery },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     { path: '/support', label: t('nav.support'), icon: CustomerSupportIcon },
     { path: '/image-studio', label: t('nav.imageStudio'), icon: AIImageIcon },
@@ -860,6 +862,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/support', label: t('nav.supportInbox'), icon: CustomerSupportIcon },
+    { path: '/admin/lottery', label: t('nav.lotteryManagement'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     {
       path: '/admin/security-audit',

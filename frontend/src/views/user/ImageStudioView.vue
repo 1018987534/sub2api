@@ -15,6 +15,14 @@
         </button>
       </div>
 
+      <div class="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100" data-test="privacy-notice">
+        <Icon name="lock" size="md" class="mt-0.5 flex-shrink-0 text-emerald-600 dark:text-emerald-300" />
+        <div>
+          <p class="font-semibold">{{ t('imageStudio.privacyTitle') }}</p>
+          <p class="mt-1 leading-5 text-emerald-800/80 dark:text-emerald-100/80">{{ t('imageStudio.privacyDescription') }}</p>
+        </div>
+      </div>
+
       <div class="grid min-h-[680px] gap-5 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[380px_minmax(0,1fr)]">
         <section class="h-fit rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-dark-700 dark:bg-dark-800 sm:p-5" data-test="studio-controls">
           <div class="grid grid-cols-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-900" role="tablist" :aria-label="t('imageStudio.mode')">
@@ -75,7 +83,7 @@
                   <Icon v-else name="upload" size="lg" class="text-gray-400" />
                   <span class="min-w-0 text-sm text-gray-600 dark:text-gray-300">
                     <span class="block truncate font-medium text-gray-800 dark:text-gray-100">{{ sourceImage?.name || t('imageStudio.chooseImage') }}</span>
-                    <span class="mt-1 block text-xs text-gray-500">PNG / JPEG / WebP · 20 MB</span>
+                    <span class="mt-1 block text-xs text-gray-500">PNG / JPEG / WebP · 10 MB</span>
                   </span>
                   <input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" data-test="source-image-input" @change="selectSourceImage" />
                 </label>
@@ -90,7 +98,7 @@
                 </div>
                 <label class="flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 hover:border-emerald-400 dark:border-dark-600 dark:text-gray-300 dark:hover:border-emerald-600">
                   <Icon name="upload" size="sm" />
-                  <span class="min-w-0 flex-1 truncate">{{ maskImage?.name || t('imageStudio.optionalMask') }}</span>
+                  <span class="min-w-0 flex-1 truncate">{{ maskImage?.name || t('imageStudio.optionalMask') }} · 10 MB</span>
                   <input type="file" accept="image/png,image/jpeg,image/webp" class="hidden" @change="selectMaskImage" />
                 </label>
               </div>
@@ -181,22 +189,18 @@
         <section class="min-w-0" aria-live="polite">
           <div
             class="flex h-full min-h-[680px] w-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800"
-            data-test="history-panel"
+            data-test="session-results-panel"
           >
             <div class="flex min-h-16 items-center justify-between gap-3 border-b border-gray-200 px-4 py-3 dark:border-dark-700 sm:px-5">
               <div>
                 <h3 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('imageStudio.results') }}</h3>
-                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400" data-test="history-summary">
-                  {{ t('imageStudio.historyCount', { tasks: historyTaskCount, images: historyImageCount }) }}
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400" data-test="session-summary">
+                  {{ t('imageStudio.sessionCount', { tasks: sessionTaskCount, images: sessionImageCount }) }}
                 </p>
               </div>
-              <button v-if="hasFinishedJobs" type="button" class="btn btn-secondary btn-sm" :disabled="clearingHistory" @click="clearCompletedJobs">
-                <Icon :name="clearingHistory ? 'refresh' : 'trash'" size="sm" :class="clearingHistory ? 'animate-spin' : ''" />
-                <span class="ml-1.5">{{ t('imageStudio.clearCompleted') }}</span>
-              </button>
             </div>
 
-            <div v-if="loadingKeys || loadingHistory" class="flex min-h-[614px] flex-1 items-center justify-center">
+            <div v-if="loadingKeys" class="flex min-h-[614px] flex-1 items-center justify-center">
               <Icon name="refresh" size="lg" class="animate-spin text-emerald-600" />
             </div>
 
@@ -214,13 +218,13 @@
             <div v-else class="flex flex-1 flex-col" data-test="job-list">
               <div
                 class="grid flex-1 content-start grid-cols-[repeat(auto-fill,minmax(min(150px,100%),1fr))] gap-3 bg-gray-50 p-3 dark:bg-dark-900/50 sm:p-4"
-                data-test="history-grid"
+                data-test="session-grid"
               >
                 <article
-                  v-for="item in paginatedHistoryItems"
+                  v-for="item in sessionItems"
                   :key="item.id"
                   class="group min-w-0 overflow-hidden rounded-md border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800"
-                  data-test="history-card"
+                  data-test="session-card"
                 >
                   <div class="relative aspect-square overflow-hidden bg-gray-100 dark:bg-dark-900">
                     <button v-if="item.output" type="button" class="block h-full w-full" @click="openPreview(item.output, item.job, item.outputIndex)">
@@ -274,54 +278,12 @@
                         <button v-if="item.job.canReuse" type="button" class="btn-ghost btn-icon h-7 w-7" :title="t('imageStudio.reuse')" @click="reuseJob(item.job)">
                           <Icon name="edit" size="xs" />
                         </button>
-                        <button v-if="item.job.status !== 'processing'" type="button" class="btn-ghost btn-icon h-7 w-7 text-red-600 dark:text-red-400" :title="t('imageStudio.deleteTask')" @click="removeJob(item.job)">
-                          <Icon name="trash" size="xs" />
-                        </button>
                       </div>
                     </div>
                   </div>
                 </article>
               </div>
 
-              <div
-                class="flex flex-col gap-3 border-t border-gray-200 bg-white px-4 py-3 dark:border-dark-700 dark:bg-dark-800 sm:flex-row sm:items-center sm:justify-between"
-                data-test="history-pagination"
-              >
-                <p class="text-sm text-gray-600 dark:text-gray-300">
-                  {{ t('pagination.showing') }}
-                  <span class="font-medium text-gray-900 dark:text-white">{{ historyFromItem }}</span>
-                  {{ t('pagination.to') }}
-                  <span class="font-medium text-gray-900 dark:text-white">{{ historyToItem }}</span>
-                  {{ t('pagination.of') }}
-                  <span class="font-medium text-gray-900 dark:text-white">{{ historyItems.length }}</span>
-                  {{ t('pagination.results') }}
-                </p>
-                <div class="flex items-center justify-between gap-3 sm:justify-end">
-                  <button
-                    type="button"
-                    class="btn btn-secondary btn-sm"
-                    :disabled="historyPage <= 1"
-                    data-test="history-previous-page"
-                    @click="setHistoryPage(historyPage - 1)"
-                  >
-                    <Icon name="chevronLeft" size="sm" class="mr-1" />
-                    {{ t('pagination.previous') }}
-                  </button>
-                  <span class="min-w-20 text-center text-sm font-medium text-gray-700 dark:text-gray-200">
-                    {{ t('pagination.pageOf', { page: historyPage, total: historyTotalPages }) }}
-                  </span>
-                  <button
-                    type="button"
-                    class="btn btn-secondary btn-sm"
-                    :disabled="historyPage >= historyTotalPages"
-                    data-test="history-next-page"
-                    @click="setHistoryPage(historyPage + 1)"
-                  >
-                    {{ t('pagination.next') }}
-                    <Icon name="chevronRight" size="sm" class="ml-1" />
-                  </button>
-                </div>
-              </div>
             </div>
           </div>
         </section>
@@ -399,7 +361,7 @@ interface PreviewState {
   prompt: string
 }
 
-interface StudioHistoryItem {
+interface SessionImageItem {
   id: string
   job: StudioJob
   output?: ImageStudioOutput
@@ -414,9 +376,8 @@ interface ImageStudioPreset {
   resolution: ImageStudioResolution
 }
 
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const POLL_INTERVAL_MS = 3000
-const HISTORY_PAGE_SIZE = 10
 const DEFAULT_IMAGE_STUDIO_PRESET: ImageStudioPreset = { orientation: 'square', resolution: '2K' }
 const IMAGE_STUDIO_SIZE_PRESETS: Record<ImageStudioResolution, Record<ImageStudioOrientation, string>> = {
   '1K': { square: '1024x1024', landscape: '1024x688', portrait: '688x1024' },
@@ -447,8 +408,6 @@ const form = reactive(createDefaultForm())
 
 const imageKeys = ref<ApiKey[]>([])
 const loadingKeys = ref(false)
-const loadingHistory = ref(false)
-const clearingHistory = ref(false)
 const submitting = ref(false)
 const modelLoading = ref(false)
 const modelSupported = ref<boolean | null>(null)
@@ -457,11 +416,9 @@ const sourceImage = ref<File | null>(null)
 const maskImage = ref<File | null>(null)
 const sourcePreviewURL = ref('')
 const jobs = ref<StudioJob[]>([])
-const historyPage = ref(1)
 const preview = ref<PreviewState | null>(null)
 
 let modelRequestController: AbortController | null = null
-let historyRequestController: AbortController | null = null
 const jobControllers = new Map<string, AbortController>()
 let sessionRevision = 0
 let loadingOwnerUserID = 0
@@ -475,8 +432,7 @@ const canSubmit = computed(() => Boolean(
   form.prompt.trim() &&
   (form.mode === 'generate' || sourceImage.value),
 ))
-const hasFinishedJobs = computed(() => jobs.value.some((job) => job.status !== 'processing'))
-const historyItems = computed<StudioHistoryItem[]>(() => jobs.value.flatMap((job) => {
+const sessionItems = computed<SessionImageItem[]>(() => jobs.value.flatMap((job) => {
   if (job.status === 'completed' && job.outputs.length > 0) {
     return job.outputs.map((output, outputIndex) => ({
       id: `${job.localID}_${outputIndex}`,
@@ -487,15 +443,8 @@ const historyItems = computed<StudioHistoryItem[]>(() => jobs.value.flatMap((job
   }
   return [{ id: job.localID, job, outputIndex: 0 }]
 }))
-const historyTaskCount = computed(() => jobs.value.length)
-const historyImageCount = computed(() => jobs.value.reduce((count, job) => count + job.outputs.length, 0))
-const historyTotalPages = computed(() => Math.max(1, Math.ceil(historyItems.value.length / HISTORY_PAGE_SIZE)))
-const historyFromItem = computed(() => historyItems.value.length === 0 ? 0 : (historyPage.value - 1) * HISTORY_PAGE_SIZE + 1)
-const historyToItem = computed(() => Math.min(historyPage.value * HISTORY_PAGE_SIZE, historyItems.value.length))
-const paginatedHistoryItems = computed(() => {
-  const start = (historyPage.value - 1) * HISTORY_PAGE_SIZE
-  return historyItems.value.slice(start, start + HISTORY_PAGE_SIZE)
-})
+const sessionTaskCount = computed(() => jobs.value.length)
+const sessionImageCount = computed(() => jobs.value.reduce((count, job) => count + job.outputs.length, 0))
 
 const modeOptions = computed(() => [
   { value: 'generate' as const, label: t('imageStudio.generateMode') },
@@ -573,8 +522,6 @@ function isCurrentSession(userID: number, revision: number): boolean {
 function abortImageStudioRequests() {
   modelRequestController?.abort()
   modelRequestController = null
-  historyRequestController?.abort()
-  historyRequestController = null
   for (const controller of jobControllers.values()) controller.abort()
   jobControllers.clear()
 }
@@ -590,12 +537,9 @@ function resetImageStudioSession() {
   preview.value = null
   imageKeys.value = []
   jobs.value = []
-  historyPage.value = 1
   Object.assign(form, createDefaultForm())
 
   loadingKeys.value = false
-  loadingHistory.value = false
-  clearingHistory.value = false
   submitting.value = false
   modelLoading.value = false
   modelSupported.value = null
@@ -646,7 +590,7 @@ async function loadKeysForUser(userID: number, revision: number) {
     if (!imageKeys.value.some((key) => key.id === form.apiKeyId)) {
       form.apiKeyId = imageKeys.value[0]?.id || 0
     } else {
-      await Promise.all([validateSelectedKey(), loadHistory()])
+      await validateSelectedKey()
     }
   } catch (error) {
     if (isCurrentSession(userID, revision)) {
@@ -660,72 +604,11 @@ async function loadKeysForUser(userID: number, revision: number) {
   }
 }
 
-async function loadHistory() {
-  historyRequestController?.abort()
+function clearSessionOutputs() {
   for (const controller of jobControllers.values()) controller.abort()
   jobControllers.clear()
-
-  const key = selectedKey.value
-  historyPage.value = 1
-  if (!key) {
-    jobs.value = []
-    loadingHistory.value = false
-    return
-  }
-
-  const controller = new AbortController()
-  historyRequestController = controller
-  loadingHistory.value = true
-  try {
-    const tasks = await imageStudioAPI.listTasks(key.key, 50, controller.signal)
-    if (controller.signal.aborted) return
-    jobs.value = tasks.map((task) => historyTaskToJob(task, key.id))
-    for (const job of jobs.value) {
-      if (job.status !== 'processing' || !job.taskID) continue
-      const jobController = new AbortController()
-      jobControllers.set(job.localID, jobController)
-      void monitorTask(job, key, jobController)
-    }
-  } catch (error) {
-    if (!controller.signal.aborted) {
-      jobs.value = []
-      appStore.showError(errorMessage(error, t('imageStudio.loadHistoryFailed')))
-    }
-  } finally {
-    if (historyRequestController === controller) {
-      loadingHistory.value = false
-      historyRequestController = null
-    }
-  }
-}
-
-function historyTaskToJob(task: ImageStudioTask, keyID: number): StudioJob {
-  const outputFormat = task.output_format || inferTaskOutputFormat(task) || 'png'
-  const status: StudioJobStatus = task.status === 'completed' || task.status === 'failed' ? task.status : 'processing'
-  const outputs = status === 'completed' ? extractImageStudioOutputs(task.result, outputFormat) : []
-  return {
-    localID: `history_${task.task_id || task.id}`,
-    taskID: task.task_id || task.id,
-    keyID,
-    mode: task.mode === 'edit' ? 'edit' : 'generate',
-    prompt: task.prompt?.trim() || t('imageStudio.apiTask'),
-    size: task.size || resolveImageStudioSize(DEFAULT_IMAGE_STUDIO_PRESET),
-    quality: task.quality || 'auto',
-    outputFormat,
-    requestedCount: Math.max(1, task.n || outputs.length || 1),
-    status,
-    outputs,
-    error: task.error?.message || '',
-    createdAt: task.created_at ? task.created_at * 1000 : Date.now(),
-    canReuse: Boolean(task.prompt?.trim()),
-  }
-}
-
-function inferTaskOutputFormat(task: ImageStudioTask): string {
-  const url = task.image_url || task.result?.data?.find((item) => item.url)?.url || ''
-  const match = url.match(/\.([a-z0-9]+)(?:\?|$)/i)
-  const format = match?.[1]?.toLowerCase()
-  return format === 'jpg' ? 'jpeg' : format || ''
+  jobs.value = []
+  closePreview()
 }
 
 async function validateSelectedKey() {
@@ -847,7 +730,6 @@ async function submitGeneration() {
     canReuse: true,
   })
   jobs.value.unshift(job)
-  historyPage.value = 1
   submitting.value = true
 
   const controller = new AbortController()
@@ -952,10 +834,6 @@ function openPreview(output: ImageStudioOutput, job: StudioJob, index = job.outp
   preview.value = { output, job, index: Math.max(0, index), prompt: output.revisedPrompt || job.prompt }
 }
 
-function setHistoryPage(page: number) {
-  historyPage.value = Math.min(Math.max(1, page), historyTotalPages.value)
-}
-
 function closePreview() {
   preview.value = null
 }
@@ -985,31 +863,6 @@ function reuseJob(job: StudioJob) {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-async function removeJob(job: StudioJob) {
-  if (job.status === 'processing') return
-  if (job.taskID) {
-    const key = imageKeys.value.find((item) => item.id === job.keyID)
-    if (!key) return
-    try {
-      await imageStudioAPI.deleteTask(key.key, job.taskID)
-    } catch (error) {
-      appStore.showError(errorMessage(error, t('imageStudio.deleteHistoryFailed')))
-      return
-    }
-  }
-  jobs.value = jobs.value.filter((item) => item.localID !== job.localID)
-  if (preview.value?.job.localID === job.localID) closePreview()
-}
-
-async function clearCompletedJobs() {
-  clearingHistory.value = true
-  try {
-    await Promise.all(jobs.value.filter((job) => job.status !== 'processing').map((job) => removeJob(job)))
-  } finally {
-    clearingHistory.value = false
-  }
-}
-
 function jobStatusLabel(status: StudioJobStatus): string {
   return t(`imageStudio.status.${status}`)
 }
@@ -1036,7 +889,7 @@ watch(
 
 watch(() => form.apiKeyId, () => {
   void validateSelectedKey()
-  void loadHistory()
+  clearSessionOutputs()
 })
 
 watch(() => form.outputFormat, (format) => {
@@ -1045,10 +898,6 @@ watch(() => form.outputFormat, (format) => {
 
 watch(() => form.background, (background) => {
   if (background === 'transparent' && form.outputFormat === 'jpeg') form.outputFormat = 'png'
-})
-
-watch(() => historyItems.value.length, () => {
-  if (historyPage.value > historyTotalPages.value) historyPage.value = historyTotalPages.value
 })
 
 onMounted(() => {
