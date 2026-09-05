@@ -1951,6 +1951,7 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 		}
 	case 429:
 		statusCode = http.StatusServiceUnavailable
+		c.Header("Retry-After", "5")
 		if errType == "" {
 			errType = "api_error"
 		}
@@ -2416,6 +2417,9 @@ func generateAnthropicMsgID() string {
 
 func (s *GeminiMessagesCompatService) writeClaudeError(c *gin.Context, status int, errType, message string) error {
 	MarkResponseCommitted(c)
+	if status == http.StatusServiceUnavailable && strings.Contains(strings.ToLower(message), "rate limit") {
+		c.Header("Retry-After", "5")
+	}
 	c.JSON(status, gin.H{
 		"type":  "error",
 		"error": gin.H{"type": errType, "message": message},
@@ -2425,6 +2429,9 @@ func (s *GeminiMessagesCompatService) writeClaudeError(c *gin.Context, status in
 
 func (s *GeminiMessagesCompatService) writeGoogleError(c *gin.Context, status int, message string) error {
 	MarkResponseCommitted(c)
+	if status == http.StatusServiceUnavailable && strings.Contains(strings.ToLower(message), "rate limit") {
+		c.Header("Retry-After", "5")
+	}
 	c.JSON(status, gin.H{
 		"error": gin.H{
 			"code":    status,

@@ -705,6 +705,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		statusCode = http.StatusServiceUnavailable
 		errType = "upstream_error"
 		errMsg = "Upstream rate limit temporarily unavailable; please retry later."
+		c.Header("Retry-After", "5")
 	default:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
@@ -883,6 +884,9 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	status := resp.StatusCode
 	if status == http.StatusTooManyRequests {
 		status = http.StatusServiceUnavailable
+		if c != nil && strings.TrimSpace(c.Writer.Header().Get("Retry-After")) == "" {
+			c.Header("Retry-After", "5")
+		}
 		if upstreamMsg == "" {
 			upstreamMsg = "Upstream rate limit temporarily unavailable; please retry later."
 		}

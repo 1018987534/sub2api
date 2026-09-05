@@ -1,0 +1,32 @@
+Changed branch/field: transient account/user/image/live/WebSocket capacity rejections now use HTTP 503 with server_error (WebSocket ingress also keeps Retry-After: 5); upstream account-pool 429s remain internally retried/failed over and are exposed as retryable 503 after exhaustion; billing/quota 429s remain unchanged.
+
+Artifacts:
+- MODIFIED_FILE: release-evidence/no-client-429-20260905/MODIFIED_FILE
+- DIFF_FILE: release-evidence/no-client-429-20260905/DIFF_FILE
+- VERIFICATION.txt: release-evidence/no-client-429-20260905/VERIFICATION.txt
+- ROLLBACK.sh: release-evidence/no-client-429-20260905/ROLLBACK.sh
+
+BASELINE
+Command: go test ./internal/handler -run 'Test(ConcurrencyErrorResponse|OpenAIResponsesWebSocket_IngressCapacityRejected|OpenAIGatewayHandlerAcquireImageGenerationSlot_Returns429WhenFull|OpenAIGatewayHandlerResponses_ImageIntentRejectedByImageConcurrency)$' -count=1
+Input: detached worktree at 68d5073fa (pre-change)
+Literal output: ok   github.com/Wei-Shaw/sub2api/internal/handler 1.179s
+Exit status: 0
+
+MODIFIED
+Command: go test ./internal/handler -count=1; go test ./internal/service -count=1; go test ./... -count=1
+Input: cdy/no-client-429-20260905 modified worktree
+Literal output: ok github.com/Wei-Shaw/sub2api/internal/handler 59.407s; ok github.com/Wei-Shaw/sub2api/internal/service 130.941s; all packages passed
+Exit status: 0
+
+RACE
+Command: go test -race ./internal/handler -run 'Test(ConcurrencyErrorResponse|OpenAIResponsesWebSocket_IngressCapacityRejected)$' -count=1
+Input: cdy/no-client-429-20260905 modified worktree
+Literal output: ok github.com/Wei-Shaw/sub2api/internal/handler 2.359s
+Exit status: 0
+
+ROLLBACK
+Command: ./release-evidence/no-client-429-20260905/ROLLBACK.sh /private/tmp/sub2api-no-client-429-rollback-test-20260905/MODIFIED_FILE
+Input: rollback test copy with MODIFIED_FILE.orig from 68d5073fa
+Literal output: restored behavior: /private/tmp/sub2api-no-client-429-rollback-test-20260905/MODIFIED_FILE matches /private/tmp/sub2api-no-client-429-rollback-test-20260905/MODIFIED_FILE.orig
+Exit status: 0
+Restored behavior/status: rollback test copy exactly matches the pre-change source; release-evidence/no-client-429-20260905/MODIFIED_FILE remains changed.

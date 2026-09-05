@@ -1596,6 +1596,9 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
 func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
 	if failoverErr != nil {
 		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+		if failoverErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(failoverErr.ResponseHeaders.Get("Retry-After")) == "" {
+			markTransientRetryableResponse(c)
+		}
 	}
 	if failoverErr != nil && failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
@@ -2155,7 +2158,8 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
 			zap.Int64("account_id", account.ID),
 			zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 		)
-		writeError(http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later")
+		markTransientRetryableResponse(c)
+		writeError(http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later")
 		return nil, openAISlotAcquireFailed
 	}
 
@@ -2252,7 +2256,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	if !ingressLeaseAcquired {
 		reqLog.Info("openai.websocket_ingress_capacity_rejected", zap.Int("max_ingress_connections_per_api_key", maxIngressConnections))
 		c.Header("Retry-After", "5")
-		h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Too many open WebSocket connections, please retry later")
+		h.errorResponse(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later")
 		return
 	}
 	if ingressLease != nil {
@@ -3229,13 +3233,17 @@ func (h *OpenAIGatewayHandler) acquireImageGenerationSlot(c *gin.Context, stream
 	if acquired {
 		return release, true
 	}
-	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Image generation concurrency limit exceeded, please retry later", streamStarted)
+	markTransientRetryableResponse(c)
+	h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later", streamStarted)
 	return nil, false
 }
 
 // handleConcurrencyError handles concurrency-related acquire errors.
 func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotType string, streamStarted bool) {
 	status, errType, message := concurrencyErrorResponse(err, slotType)
+	if status == http.StatusServiceUnavailable {
+		markTransientRetryableResponse(c)
+	}
 	h.handleStreamingAwareError(c, status, errType, message, streamStarted)
 }
 
@@ -3264,6 +3272,9 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 		return
 	}
 	copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
+	if failoverErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(failoverErr.ResponseHeaders.Get("Retry-After")) == "" {
+		markTransientRetryableResponse(c)
+	}
 	if failoverErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(failoverErr)
 		h.handleStreamingAwareError(c, status, "upstream_error", message, streamStarted)

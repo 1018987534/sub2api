@@ -383,6 +383,9 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
 	}
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+		if lastErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(lastErr.ResponseHeaders.Get("Retry-After")) == "" {
+			markTransientRetryableResponse(c)
+		}
 	}
 	if lastErr != nil && lastErr.IsCredentialFailure() {
 		status, message := credentialFailoverClientResponse(lastErr)

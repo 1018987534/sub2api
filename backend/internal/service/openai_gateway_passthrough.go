@@ -885,6 +885,14 @@ func writeSanitizedOpenAIPassthroughError(c *gin.Context, upstreamStatus int, up
 	case http.StatusTooManyRequests:
 		downstreamStatus = http.StatusServiceUnavailable
 		message = "Upstream rate limit temporarily unavailable; please retry later."
+		if upstreamHeaders == nil {
+			upstreamHeaders = make(http.Header)
+		} else {
+			upstreamHeaders = upstreamHeaders.Clone()
+		}
+		if strings.TrimSpace(upstreamHeaders.Get("Retry-After")) == "" {
+			upstreamHeaders.Set("Retry-After", "5")
+		}
 	default:
 		if upstreamStatus >= http.StatusInternalServerError {
 			message = "Upstream service temporarily unavailable"

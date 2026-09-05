@@ -107,7 +107,7 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
 		return
 	}
 	if !acquired {
-		h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Live concurrency limit reached")
+		h.errorResponse(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later")
 		return
 	}
 	defer userRelease()
@@ -180,7 +180,7 @@ func liveCallIdentity(
 func (h *OpenAIGatewayHandler) writeLiveCreateError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrLiveConcurrencyFull):
-		h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Live concurrency limit reached")
+		h.errorResponse(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later")
 	case errors.Is(err, service.ErrLiveUnavailable):
 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Live is unavailable")
 	default:

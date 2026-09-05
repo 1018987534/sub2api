@@ -368,6 +368,9 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
+		if lastErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(lastErr.ResponseHeaders.Get("Retry-After")) == "" {
+			markTransientRetryableResponse(c)
+		}
 	}
 	statusCode := http.StatusBadGateway
 	if lastErr != nil && lastErr.StatusCode > 0 {

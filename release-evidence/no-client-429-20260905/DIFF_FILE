@@ -1,0 +1,441 @@
+diff --git a/backend/internal/handler/concurrency_error_response.go b/backend/internal/handler/concurrency_error_response.go
+index 911f5a54d..16c399a52 100644
+--- a/backend/internal/handler/concurrency_error_response.go
++++ b/backend/internal/handler/concurrency_error_response.go
+@@ -5,15 +5,28 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"net/http"
++
++	"github.com/gin-gonic/gin"
+ )
+ 
+ const statusClientClosedRequest = 499
+ 
++const transientRetryAfterSeconds = "5"
++
++func markTransientRetryableResponse(c *gin.Context) {
++	if c != nil {
++		c.Header("Retry-After", transientRetryAfterSeconds)
++	}
++}
++
+ func concurrencyErrorResponse(err error, slotType string) (int, string, string) {
+ 	var waitQueueFullErr *WaitQueueFullError
+ 	if errors.As(err, &waitQueueFullErr) {
+-		return http.StatusTooManyRequests, "rate_limit_error",
+-			"Too many pending requests, please retry later"
++		// Account/user capacity is a transient service condition, not a client
++		// quota violation. Returning 429 makes clients such as Codex stop the
++		// current task instead of applying their transient-service retry policy.
++		return http.StatusServiceUnavailable, "server_error",
++			"Service temporarily unavailable, please retry later"
+ 	}
+ 
+ 	var concurrencyErr *ConcurrencyError
+@@ -21,8 +34,8 @@ func concurrencyErrorResponse(err error, slotType string) (int, string, string)
+ 		if concurrencyErr.SlotType != "" {
+ 			slotType = concurrencyErr.SlotType
+ 		}
+-		return http.StatusTooManyRequests, "rate_limit_error",
+-			fmt.Sprintf("Concurrency limit exceeded for %s, please retry later", slotType)
++		return http.StatusServiceUnavailable, "server_error",
++			fmt.Sprintf("Service temporarily unavailable: %s concurrency is busy, please retry later", slotType)
+ 	}
+ 
+ 	if errors.Is(err, context.Canceled) {
+diff --git a/backend/internal/handler/concurrency_error_response_test.go b/backend/internal/handler/concurrency_error_response_test.go
+index a2e6b9ab9..4d2c3f220 100644
+--- a/backend/internal/handler/concurrency_error_response_test.go
++++ b/backend/internal/handler/concurrency_error_response_test.go
+@@ -19,12 +19,12 @@ func TestConcurrencyErrorResponse(t *testing.T) {
+ 		wantMessage string
+ 	}{
+ 		{
+-			name:        "true concurrency timeout remains rate limit",
++			name:        "true concurrency timeout is retryable service error",
+ 			err:         &ConcurrencyError{SlotType: "account", IsTimeout: true},
+ 			slotType:    "user",
+-			wantStatus:  http.StatusTooManyRequests,
+-			wantType:    "rate_limit_error",
+-			wantMessage: "Concurrency limit exceeded for account, please retry later",
++			wantStatus:  http.StatusServiceUnavailable,
++			wantType:    "server_error",
++			wantMessage: "Service temporarily unavailable: account concurrency is busy, please retry later",
+ 		},
+ 		{
+ 			name:        "client cancellation is not classified as concurrency limit",
+@@ -61,3 +61,10 @@ func TestConcurrencyErrorResponse(t *testing.T) {
+ 		})
+ 	}
+ }
++
++func TestConcurrencyErrorResponse_WaitQueueFullIsRetryableServiceError(t *testing.T) {
++	status, errType, message := concurrencyErrorResponse(&WaitQueueFullError{}, "account")
++	require.Equal(t, http.StatusServiceUnavailable, status)
++	require.Equal(t, "server_error", errType)
++	require.Equal(t, "Service temporarily unavailable, please retry later", message)
++}
+diff --git a/backend/internal/handler/gateway_handler.go b/backend/internal/handler/gateway_handler.go
+index 9a1497388..39a8c6872 100644
+--- a/backend/internal/handler/gateway_handler.go
++++ b/backend/internal/handler/gateway_handler.go
+@@ -396,7 +396,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
+ 						zap.Int64("account_id", account.ID),
+ 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
+ 					)
+-					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
++					markTransientRetryableResponse(c)
++					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later", streamStarted)
+ 					return
+ 				}
+ 				if err == nil && canWait {
+@@ -720,7 +721,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
+ 						zap.Int64("account_id", account.ID),
+ 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
+ 					)
+-					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
++					markTransientRetryableResponse(c)
++					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later", streamStarted)
+ 					return
+ 				}
+ 				if err == nil && canWait {
+@@ -1855,10 +1857,16 @@ func (h *GatewayHandler) calculateSubscriptionRemaining(group *service.Group, su
+ // handleConcurrencyError handles concurrency-related acquire errors.
+ func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotType string, streamStarted bool) {
+ 	status, errType, message := concurrencyErrorResponse(err, slotType)
++	if status == http.StatusServiceUnavailable {
++		markTransientRetryableResponse(c)
++	}
+ 	h.handleStreamingAwareError(c, status, errType, message, streamStarted)
+ }
+ 
+ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, platform string, streamStarted bool) {
++	if failoverErr != nil && failoverErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(failoverErr.ResponseHeaders.Get("Retry-After")) == "" {
++		markTransientRetryableResponse(c)
++	}
+ 	statusCode := failoverErr.StatusCode
+ 	responseBody := failoverErr.ResponseBody
+ 	if service.IsOpenAISilentRefusalErrorBody(responseBody) {
+@@ -1902,6 +1910,9 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
+ 
+ // handleFailoverExhaustedSimple 简化版本，用于没有响应体的情况
+ func (h *GatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCode int, streamStarted bool) {
++	if statusCode == http.StatusTooManyRequests {
++		markTransientRetryableResponse(c)
++	}
+ 	status, errType, errMsg := h.mapUpstreamError(statusCode)
+ 	service.SetOpsUpstreamError(c, statusCode, errMsg, "")
+ 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)
+diff --git a/backend/internal/handler/gateway_handler_chat_completions.go b/backend/internal/handler/gateway_handler_chat_completions.go
+index 7a90f00c8..267246296 100644
+--- a/backend/internal/handler/gateway_handler_chat_completions.go
++++ b/backend/internal/handler/gateway_handler_chat_completions.go
+@@ -383,6 +383,9 @@ func (h *GatewayHandler) handleCCFailoverExhausted(c *gin.Context, lastErr *serv
+ 	}
+ 	if lastErr != nil {
+ 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
++		if lastErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(lastErr.ResponseHeaders.Get("Retry-After")) == "" {
++			markTransientRetryableResponse(c)
++		}
+ 	}
+ 	if lastErr != nil && lastErr.IsCredentialFailure() {
+ 		status, message := credentialFailoverClientResponse(lastErr)
+diff --git a/backend/internal/handler/gateway_handler_responses.go b/backend/internal/handler/gateway_handler_responses.go
+index 53ef8e1b4..ef7ba8203 100644
+--- a/backend/internal/handler/gateway_handler_responses.go
++++ b/backend/internal/handler/gateway_handler_responses.go
+@@ -368,6 +368,9 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
+ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
+ 	if lastErr != nil {
+ 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
++		if lastErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(lastErr.ResponseHeaders.Get("Retry-After")) == "" {
++			markTransientRetryableResponse(c)
++		}
+ 	}
+ 	statusCode := http.StatusBadGateway
+ 	if lastErr != nil && lastErr.StatusCode > 0 {
+diff --git a/backend/internal/handler/gemini_v1beta_handler.go b/backend/internal/handler/gemini_v1beta_handler.go
+index 1604a4c39..8911a8d8e 100644
+--- a/backend/internal/handler/gemini_v1beta_handler.go
++++ b/backend/internal/handler/gemini_v1beta_handler.go
+@@ -233,7 +233,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
+ 	userReleaseFunc, err := geminiConcurrency.AcquireUserSlotWithWait(c, authSubject.UserID, authSubject.Concurrency, stream, &streamStarted)
+ 	if err != nil {
+ 		reqLog.Warn("gemini.user_slot_acquire_failed", zap.Error(err))
+-		googleError(c, http.StatusTooManyRequests, err.Error())
++		status, _, message := concurrencyErrorResponse(err, "user")
++		if status == http.StatusServiceUnavailable {
++			markTransientRetryableResponse(c)
++		}
++		googleError(c, status, message)
+ 		return
+ 	}
+ 	// 确保请求取消时也会释放槽位，避免长连接被动中断造成泄漏
+@@ -439,7 +443,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
+ 					zap.Int64("account_id", account.ID),
+ 					zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
+ 				)
+-				googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later")
++				markTransientRetryableResponse(c)
++				googleError(c, http.StatusServiceUnavailable, "Service temporarily unavailable, please retry later")
+ 				return
+ 			}
+ 			if err == nil && canWait {
+@@ -461,7 +466,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
+ 			)
+ 			if err != nil {
+ 				reqLog.Warn("gemini.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+-				googleError(c, http.StatusTooManyRequests, err.Error())
++				markTransientRetryableResponse(c)
++				googleError(c, http.StatusServiceUnavailable, "Service temporarily unavailable, please retry later")
+ 				return
+ 			}
+ 			if accountWaitCounted {
+@@ -631,6 +637,11 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
+ 		googleError(c, http.StatusBadGateway, "Upstream request failed")
+ 		return
+ 	}
++	if failoverErr.StatusCode == http.StatusTooManyRequests {
++		if strings.TrimSpace(failoverErr.ResponseHeaders.Get("Retry-After")) == "" {
++			markTransientRetryableResponse(c)
++		}
++	}
+ 
+ 	statusCode := failoverErr.StatusCode
+ 	responseBody := failoverErr.ResponseBody
+diff --git a/backend/internal/handler/image_concurrency_limiter_test.go b/backend/internal/handler/image_concurrency_limiter_test.go
+index 723c26d09..12b7bcb87 100644
+--- a/backend/internal/handler/image_concurrency_limiter_test.go
++++ b/backend/internal/handler/image_concurrency_limiter_test.go
+@@ -136,9 +136,9 @@ func TestOpenAIGatewayHandlerAcquireImageGenerationSlot_Returns429WhenFull(t *te
+ 
+ 	require.False(t, blocked)
+ 	require.Nil(t, blockedRelease)
+-	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+-	require.Equal(t, "rate_limit_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+-	require.Contains(t, rec.Body.String(), "Image generation concurrency limit exceeded")
++	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
++	require.Equal(t, "server_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
++	require.Contains(t, rec.Body.String(), "Service temporarily unavailable")
+ }
+ 
+ func TestOpenAIGatewayHandlerResponses_ImageIntentRejectedByImageConcurrency(t *testing.T) {
+@@ -181,9 +181,9 @@ func TestOpenAIGatewayHandlerResponses_ImageIntentRejectedByImageConcurrency(t *
+ 
+ 	h.Responses(c)
+ 
+-	require.Equal(t, http.StatusTooManyRequests, rec.Code)
+-	require.Equal(t, "rate_limit_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
+-	require.Contains(t, rec.Body.String(), "Image generation concurrency limit exceeded")
++	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
++	require.Equal(t, "server_error", gjson.GetBytes(rec.Body.Bytes(), "error.type").String())
++	require.Contains(t, rec.Body.String(), "Service temporarily unavailable")
+ }
+ 
+ func TestOpenAIGatewayHandlerResponses_TextOnlyNotRejectedByImageConcurrency(t *testing.T) {
+diff --git a/backend/internal/handler/openai_gateway_handler.go b/backend/internal/handler/openai_gateway_handler.go
+index 1b3ae9942..d1d9927ea 100644
+--- a/backend/internal/handler/openai_gateway_handler.go
++++ b/backend/internal/handler/openai_gateway_handler.go
+@@ -1596,6 +1596,9 @@ func (h *OpenAIGatewayHandler) anthropicStreamingAwareError(c *gin.Context, stat
+ func (h *OpenAIGatewayHandler) handleAnthropicFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, streamStarted bool) {
+ 	if failoverErr != nil {
+ 		copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
++		if failoverErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(failoverErr.ResponseHeaders.Get("Retry-After")) == "" {
++			markTransientRetryableResponse(c)
++		}
+ 	}
+ 	if failoverErr != nil && failoverErr.IsCredentialFailure() {
+ 		status, message := credentialFailoverClientResponse(failoverErr)
+@@ -2155,7 +2158,8 @@ func (h *OpenAIGatewayHandler) acquireOpenAIAccountSlot(
+ 			zap.Int64("account_id", account.ID),
+ 			zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
+ 		)
+-		writeError(http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later")
++		markTransientRetryableResponse(c)
++		writeError(http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later")
+ 		return nil, openAISlotAcquireFailed
+ 	}
+ 
+@@ -2252,7 +2256,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
+ 	if !ingressLeaseAcquired {
+ 		reqLog.Info("openai.websocket_ingress_capacity_rejected", zap.Int("max_ingress_connections_per_api_key", maxIngressConnections))
+ 		c.Header("Retry-After", "5")
+-		h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Too many open WebSocket connections, please retry later")
++		h.errorResponse(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later")
+ 		return
+ 	}
+ 	if ingressLease != nil {
+@@ -3229,13 +3233,17 @@ func (h *OpenAIGatewayHandler) acquireImageGenerationSlot(c *gin.Context, stream
+ 	if acquired {
+ 		return release, true
+ 	}
+-	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Image generation concurrency limit exceeded, please retry later", streamStarted)
++	markTransientRetryableResponse(c)
++	h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later", streamStarted)
+ 	return nil, false
+ }
+ 
+ // handleConcurrencyError handles concurrency-related acquire errors.
+ func (h *OpenAIGatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotType string, streamStarted bool) {
+ 	status, errType, message := concurrencyErrorResponse(err, slotType)
++	if status == http.StatusServiceUnavailable {
++		markTransientRetryableResponse(c)
++	}
+ 	h.handleStreamingAwareError(c, status, errType, message, streamStarted)
+ }
+ 
+@@ -3264,6 +3272,9 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
+ 		return
+ 	}
+ 	copyFailoverRetryAfter(c, failoverErr.ResponseHeaders)
++	if failoverErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(failoverErr.ResponseHeaders.Get("Retry-After")) == "" {
++		markTransientRetryableResponse(c)
++	}
+ 	if failoverErr.IsCredentialFailure() {
+ 		status, message := credentialFailoverClientResponse(failoverErr)
+ 		h.handleStreamingAwareError(c, status, "upstream_error", message, streamStarted)
+diff --git a/backend/internal/handler/openai_gateway_handler_test.go b/backend/internal/handler/openai_gateway_handler_test.go
+index a62661958..0e612ed49 100644
+--- a/backend/internal/handler/openai_gateway_handler_test.go
++++ b/backend/internal/handler/openai_gateway_handler_test.go
+@@ -1056,7 +1056,8 @@ func TestOpenAIResponsesWebSocket_IngressCapacityRejected(t *testing.T) {
+ 	require.Error(t, err)
+ 	require.Nil(t, clientConn)
+ 	require.NotNil(t, response)
+-	require.Equal(t, http.StatusTooManyRequests, response.StatusCode)
++	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
++	require.Equal(t, "5", response.Header.Get("Retry-After"))
+ 	_ = response.Body.Close()
+ }
+ 
+diff --git a/backend/internal/handler/openai_live.go b/backend/internal/handler/openai_live.go
+index 1f6b6c49a..45e48def5 100644
+--- a/backend/internal/handler/openai_live.go
++++ b/backend/internal/handler/openai_live.go
+@@ -107,7 +107,7 @@ func (h *OpenAIGatewayHandler) Live(c *gin.Context) {
+ 		return
+ 	}
+ 	if !acquired {
+-		h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Live concurrency limit reached")
++		h.errorResponse(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later")
+ 		return
+ 	}
+ 	defer userRelease()
+@@ -180,7 +180,7 @@ func liveCallIdentity(
+ func (h *OpenAIGatewayHandler) writeLiveCreateError(c *gin.Context, err error) {
+ 	switch {
+ 	case errors.Is(err, service.ErrLiveConcurrencyFull):
+-		h.errorResponse(c, http.StatusTooManyRequests, "rate_limit_error", "Live concurrency limit reached")
++		h.errorResponse(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later")
+ 	case errors.Is(err, service.ErrLiveUnavailable):
+ 		h.errorResponse(c, http.StatusServiceUnavailable, "api_error", "Live is unavailable")
+ 	default:
+diff --git a/backend/internal/service/gateway_upstream_response.go b/backend/internal/service/gateway_upstream_response.go
+index e7fc78c37..c26085aef 100644
+--- a/backend/internal/service/gateway_upstream_response.go
++++ b/backend/internal/service/gateway_upstream_response.go
+@@ -494,6 +494,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
+ 		statusCode = http.StatusServiceUnavailable
+ 		errType = "upstream_error"
+ 		errMsg = "Upstream rate limit temporarily unavailable; please retry later."
++		c.Header("Retry-After", "5")
+ 	case 529:
+ 		statusCode = http.StatusServiceUnavailable
+ 		errType = "overloaded_error"
+@@ -641,6 +642,7 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
+ 	if resp.StatusCode == http.StatusTooManyRequests {
+ 		finalStatus = http.StatusServiceUnavailable
+ 		finalMessage = "Upstream rate limit temporarily unavailable; please retry later."
++		c.Header("Retry-After", "5")
+ 	}
+ 	c.JSON(finalStatus, gin.H{
+ 		"type": "error",
+diff --git a/backend/internal/service/gemini_chat_completions_compat_service.go b/backend/internal/service/gemini_chat_completions_compat_service.go
+index 887328cb2..fd5eb5974 100644
+--- a/backend/internal/service/gemini_chat_completions_compat_service.go
++++ b/backend/internal/service/gemini_chat_completions_compat_service.go
+@@ -912,6 +912,9 @@ func (s *GeminiMessagesCompatService) writeGeminiChatCompletionsMappedError(
+ }
+ 
+ func (s *GeminiMessagesCompatService) writeChatCompletionsError(c *gin.Context, status int, errType, message string) error {
++	if status == http.StatusServiceUnavailable && strings.Contains(strings.ToLower(message), "rate limit") {
++		c.Header("Retry-After", "5")
++	}
+ 	c.JSON(status, gin.H{
+ 		"error": gin.H{
+ 			"type":    errType,
+diff --git a/backend/internal/service/gemini_messages_compat_service.go b/backend/internal/service/gemini_messages_compat_service.go
+index d25b3ff89..bdb2d893d 100644
+--- a/backend/internal/service/gemini_messages_compat_service.go
++++ b/backend/internal/service/gemini_messages_compat_service.go
+@@ -1951,6 +1951,7 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
+ 		}
+ 	case 429:
+ 		statusCode = http.StatusServiceUnavailable
++		c.Header("Retry-After", "5")
+ 		if errType == "" {
+ 			errType = "api_error"
+ 		}
+@@ -2416,6 +2417,9 @@ func generateAnthropicMsgID() string {
+ 
+ func (s *GeminiMessagesCompatService) writeClaudeError(c *gin.Context, status int, errType, message string) error {
+ 	MarkResponseCommitted(c)
++	if status == http.StatusServiceUnavailable && strings.Contains(strings.ToLower(message), "rate limit") {
++		c.Header("Retry-After", "5")
++	}
+ 	c.JSON(status, gin.H{
+ 		"type":  "error",
+ 		"error": gin.H{"type": errType, "message": message},
+@@ -2425,6 +2429,9 @@ func (s *GeminiMessagesCompatService) writeClaudeError(c *gin.Context, status in
+ 
+ func (s *GeminiMessagesCompatService) writeGoogleError(c *gin.Context, status int, message string) error {
+ 	MarkResponseCommitted(c)
++	if status == http.StatusServiceUnavailable && strings.Contains(strings.ToLower(message), "rate limit") {
++		c.Header("Retry-After", "5")
++	}
+ 	c.JSON(status, gin.H{
+ 		"error": gin.H{
+ 			"code":    status,
+diff --git a/backend/internal/service/openai_gateway_passthrough.go b/backend/internal/service/openai_gateway_passthrough.go
+index 8e9785c7c..65da46d5c 100644
+--- a/backend/internal/service/openai_gateway_passthrough.go
++++ b/backend/internal/service/openai_gateway_passthrough.go
+@@ -885,6 +885,14 @@ func writeSanitizedOpenAIPassthroughError(c *gin.Context, upstreamStatus int, up
+ 	case http.StatusTooManyRequests:
+ 		downstreamStatus = http.StatusServiceUnavailable
+ 		message = "Upstream rate limit temporarily unavailable; please retry later."
++		if upstreamHeaders == nil {
++			upstreamHeaders = make(http.Header)
++		} else {
++			upstreamHeaders = upstreamHeaders.Clone()
++		}
++		if strings.TrimSpace(upstreamHeaders.Get("Retry-After")) == "" {
++			upstreamHeaders.Set("Retry-After", "5")
++		}
+ 	default:
+ 		if upstreamStatus >= http.StatusInternalServerError {
+ 			message = "Upstream service temporarily unavailable"
+diff --git a/backend/internal/service/openai_gateway_upstream_errors.go b/backend/internal/service/openai_gateway_upstream_errors.go
+index 4973a55a9..f50a8be13 100644
+--- a/backend/internal/service/openai_gateway_upstream_errors.go
++++ b/backend/internal/service/openai_gateway_upstream_errors.go
+@@ -705,6 +705,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
+ 		statusCode = http.StatusServiceUnavailable
+ 		errType = "upstream_error"
+ 		errMsg = "Upstream rate limit temporarily unavailable; please retry later."
++		c.Header("Retry-After", "5")
+ 	default:
+ 		statusCode = http.StatusBadGateway
+ 		errType = "upstream_error"
+@@ -883,6 +884,9 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
+ 	status := resp.StatusCode
+ 	if status == http.StatusTooManyRequests {
+ 		status = http.StatusServiceUnavailable
++		if c != nil && strings.TrimSpace(c.Writer.Header().Get("Retry-After")) == "" {
++			c.Header("Retry-After", "5")
++		}
+ 		if upstreamMsg == "" {
+ 			upstreamMsg = "Upstream rate limit temporarily unavailable; please retry later."
+ 		}

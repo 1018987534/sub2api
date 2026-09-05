@@ -396,7 +396,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
-					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
+					markTransientRetryableResponse(c)
+					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later", streamStarted)
 					return
 				}
 				if err == nil && canWait {
@@ -720,7 +721,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
-					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
+					markTransientRetryableResponse(c)
+					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "server_error", "Service temporarily unavailable, please retry later", streamStarted)
 					return
 				}
 				if err == nil && canWait {
@@ -1855,10 +1857,16 @@ func (h *GatewayHandler) calculateSubscriptionRemaining(group *service.Group, su
 // handleConcurrencyError handles concurrency-related acquire errors.
 func (h *GatewayHandler) handleConcurrencyError(c *gin.Context, err error, slotType string, streamStarted bool) {
 	status, errType, message := concurrencyErrorResponse(err, slotType)
+	if status == http.StatusServiceUnavailable {
+		markTransientRetryableResponse(c)
+	}
 	h.handleStreamingAwareError(c, status, errType, message, streamStarted)
 }
 
 func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *service.UpstreamFailoverError, platform string, streamStarted bool) {
+	if failoverErr != nil && failoverErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(failoverErr.ResponseHeaders.Get("Retry-After")) == "" {
+		markTransientRetryableResponse(c)
+	}
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
 	if service.IsOpenAISilentRefusalErrorBody(responseBody) {
@@ -1902,6 +1910,9 @@ func (h *GatewayHandler) handleFailoverExhausted(c *gin.Context, failoverErr *se
 
 // handleFailoverExhaustedSimple 简化版本，用于没有响应体的情况
 func (h *GatewayHandler) handleFailoverExhaustedSimple(c *gin.Context, statusCode int, streamStarted bool) {
+	if statusCode == http.StatusTooManyRequests {
+		markTransientRetryableResponse(c)
+	}
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	service.SetOpsUpstreamError(c, statusCode, errMsg, "")
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)

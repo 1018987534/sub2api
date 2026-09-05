@@ -233,7 +233,11 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	userReleaseFunc, err := geminiConcurrency.AcquireUserSlotWithWait(c, authSubject.UserID, authSubject.Concurrency, stream, &streamStarted)
 	if err != nil {
 		reqLog.Warn("gemini.user_slot_acquire_failed", zap.Error(err))
-		googleError(c, http.StatusTooManyRequests, err.Error())
+		status, _, message := concurrencyErrorResponse(err, "user")
+		if status == http.StatusServiceUnavailable {
+			markTransientRetryableResponse(c)
+		}
+		googleError(c, status, message)
 		return
 	}
 	// 确保请求取消时也会释放槽位，避免长连接被动中断造成泄漏
@@ -439,7 +443,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					zap.Int64("account_id", account.ID),
 					zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 				)
-				googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later")
+				markTransientRetryableResponse(c)
+				googleError(c, http.StatusServiceUnavailable, "Service temporarily unavailable, please retry later")
 				return
 			}
 			if err == nil && canWait {
@@ -461,7 +466,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			)
 			if err != nil {
 				reqLog.Warn("gemini.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-				googleError(c, http.StatusTooManyRequests, err.Error())
+				markTransientRetryableResponse(c)
+				googleError(c, http.StatusServiceUnavailable, "Service temporarily unavailable, please retry later")
 				return
 			}
 			if accountWaitCounted {
@@ -630,6 +636,11 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 	if failoverErr == nil {
 		googleError(c, http.StatusBadGateway, "Upstream request failed")
 		return
+	}
+	if failoverErr.StatusCode == http.StatusTooManyRequests {
+		if strings.TrimSpace(failoverErr.ResponseHeaders.Get("Retry-After")) == "" {
+			markTransientRetryableResponse(c)
+		}
 	}
 
 	statusCode := failoverErr.StatusCode

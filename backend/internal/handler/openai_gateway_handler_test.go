@@ -1056,7 +1056,8 @@ func TestOpenAIResponsesWebSocket_IngressCapacityRejected(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, clientConn)
 	require.NotNil(t, response)
-	require.Equal(t, http.StatusTooManyRequests, response.StatusCode)
+	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
+	require.Equal(t, "5", response.Header.Get("Retry-After"))
 	_ = response.Body.Close()
 }
 

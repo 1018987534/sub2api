@@ -494,6 +494,7 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		statusCode = http.StatusServiceUnavailable
 		errType = "upstream_error"
 		errMsg = "Upstream rate limit temporarily unavailable; please retry later."
+		c.Header("Retry-After", "5")
 	case 529:
 		statusCode = http.StatusServiceUnavailable
 		errType = "overloaded_error"
@@ -641,6 +642,7 @@ func (s *GatewayService) handleRetryExhaustedError(ctx context.Context, resp *ht
 	if resp.StatusCode == http.StatusTooManyRequests {
 		finalStatus = http.StatusServiceUnavailable
 		finalMessage = "Upstream rate limit temporarily unavailable; please retry later."
+		c.Header("Retry-After", "5")
 	}
 	c.JSON(finalStatus, gin.H{
 		"type": "error",
