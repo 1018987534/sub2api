@@ -1168,7 +1168,21 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, true) {
 			continue
 		}
-		if index < len(routing.routes)-1 && !s.apiKeyRouteFastPoolAvailable(ctx, group) {
+		candidateID := route.GroupID
+		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
+		attemptCtx = s.withOpenAIQuotaAutoPauseContext(attemptCtx)
+		attemptCtx = s.withOpenAIGroupPrivacyRequirement(attemptCtx, &candidateID)
+		attemptCtx = s.withOpenAIProfitControlGate(attemptCtx, &candidateID)
+		if index < len(routing.routes)-1 && !s.apiKeyRouteFastPoolAvailable(
+			attemptCtx,
+			group,
+			requestedModel,
+			excludedIDs,
+			OpenAIUpstreamTransportAny,
+			"",
+			"",
+			false,
+		) {
 			continue
 		}
 		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
@@ -1179,11 +1193,6 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 			continue
 		}
 
-		candidateID := route.GroupID
-		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
-		attemptCtx = s.withOpenAIQuotaAutoPauseContext(attemptCtx)
-		attemptCtx = s.withOpenAIGroupPrivacyRequirement(attemptCtx, &candidateID)
-		attemptCtx = s.withOpenAIProfitControlGate(attemptCtx, &candidateID)
 		selection, err := s.selectAccountWithLoadAwareness(attemptCtx, &candidateID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
 		if err != nil {
 			if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts) {

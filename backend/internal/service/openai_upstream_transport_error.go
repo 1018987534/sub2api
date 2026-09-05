@@ -150,7 +150,9 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	if !transportClass.Persistent && account != nil {
 		failoverErr.RetryableOnSameAccount = true
 		if !account.IsPoolMode() {
-			failoverErr.SameAccountRetryMax = defaultPoolModeRetryCount
+			// Generic transport failures get one replay before switching
+			// credentials; the five-attempt budget is specific to API-key 429s.
+			failoverErr.SameAccountRetryMax = 1
 		}
 	}
 	return failoverErr
