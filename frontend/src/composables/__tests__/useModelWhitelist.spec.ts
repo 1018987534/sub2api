@@ -4,7 +4,7 @@ vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
 }))
 
-import { buildModelMappingObject, getModelsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
+import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
 
 describe('useModelWhitelist', () => {
   it('openai 模型列表包含 GPT-5.4 官方快照', () => {
@@ -15,6 +15,18 @@ describe('useModelWhitelist', () => {
     expect(models).toContain('gpt-5.4-2026-03-05')
     expect(models).toContain('codex-auto-review')
     expect(models).toContain('gpt-5.6')
+  })
+
+  it('openai 模型列表和预设映射包含 GPT-6 Astra', () => {
+    expect(getModelsByPlatform('openai')).toContain('gpt-6-astra')
+
+    expect(getPresetMappingsByPlatform('openai')).toContainEqual(
+      expect.objectContaining({
+        label: 'GPT-6 Astra',
+        from: 'gpt-6-astra',
+        to: 'gpt-6-astra'
+      })
+    )
   })
 
   it('openai 模型列表不再暴露已下线的 ChatGPT 登录 Codex 模型', () => {
