@@ -13,7 +13,7 @@ import (
 func TestChannelMonitorRepositoryUpdateSortOrdersUsesOneBatch(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	repo := &channelMonitorRepository{db: db}
 
 	mock.ExpectBegin()
@@ -33,7 +33,7 @@ func TestChannelMonitorRepositoryUpdateSortOrdersUsesOneBatch(t *testing.T) {
 func TestChannelMonitorRepositoryUpdateSortOrdersRejectsMissingIDBeforeUpdate(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	repo := &channelMonitorRepository{db: db}
 
 	mock.ExpectBegin()

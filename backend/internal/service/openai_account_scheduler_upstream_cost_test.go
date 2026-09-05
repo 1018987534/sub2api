@@ -414,8 +414,10 @@ func TestOpenAIFreshUpstreamBillingRateRecomputesPeakAtSelectionTime(t *testing.
 func TestOpenAIFreshUpstreamBillingRateUsesConvertedSnapshotRate(t *testing.T) {
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	account := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 2, now.Add(-time.Minute), 30*time.Minute)
-	snapshot := account.Extra[UpstreamBillingProbeExtraKey].(map[string]any)
-	data := snapshot["data"].(map[string]any)
+	snapshot, ok := account.Extra[UpstreamBillingProbeExtraKey].(map[string]any)
+	require.True(t, ok)
+	data, ok := snapshot["data"].(map[string]any)
+	require.True(t, ok)
 	data["group_rate_multiplier"] = 2.0
 	normalized, synchronizedRate, ok := NormalizeUpstreamBillingProbeData(data, 0.05)
 	require.True(t, ok)

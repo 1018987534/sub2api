@@ -44,7 +44,7 @@ func TestBuildUpstreamRequestOpenAIPassthroughKeepsLargeBodyUncompressed(t *test
 
 func readOpenAIUpstreamRequestBody(t *testing.T, body io.ReadCloser) []byte {
 	t.Helper()
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	data, err := io.ReadAll(body)
 	require.NoError(t, err)
 	return data

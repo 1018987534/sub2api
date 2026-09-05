@@ -91,12 +91,6 @@ func classifyUpstreamTransportError(err error) upstreamTransportErrorClass {
 	return upstreamTransportErrorClass{}
 }
 
-// classifyOpenAITransportError preserves the local classifier name used by
-// existing tests and scheduling policy while sharing the upstream logic.
-func classifyOpenAITransportError(err error) upstreamTransportErrorClass {
-	return classifyUpstreamTransportError(err)
-}
-
 // handleOpenAIUpstreamTransportError handles a transport-level upstream failure
 // (Do/DoWithTLS returned a non-HTTP error: proxy/DNS/TCP/TLS). It:
 //  1. records the failure in Ops error logs (status 0, kind=request_error);

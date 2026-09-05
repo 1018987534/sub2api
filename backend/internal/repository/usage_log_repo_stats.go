@@ -52,7 +52,7 @@ func (r *usageLogRepository) GetAccountCacheStatsBatch(ctx context.Context, acco
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var accountID int64
 		var stats service.AccountCacheStats

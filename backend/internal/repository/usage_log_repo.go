@@ -199,6 +199,7 @@ func NewUsageLogRepository(client *dbent.Client, sqlDB *sql.DB, cfg *config.Conf
 	return newUsageLogRepositoryWithSQLAndInstanceID(client, sqlDB, instanceID)
 }
 
+//nolint:unused // used by integration-tagged repository tests.
 func newUsageLogRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *usageLogRepository {
 	return newUsageLogRepositoryWithSQLAndInstanceID(client, sqlq, "")
 }

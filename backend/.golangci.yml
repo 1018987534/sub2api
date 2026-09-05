@@ -25,6 +25,11 @@ linters:
             - "!**/internal/service/ops_metrics_collector.go"
             - "!**/internal/service/ops_scheduled_report_service.go"
             - "!**/internal/service/wire.go"
+            # The gateway node lease is the service-owned Redis coordination
+            # primitive; it cannot be expressed through the repository layer
+            # without hiding the lease lifecycle from the routing service.
+            - "!**/internal/service/gateway_node_capacity.go"
+            - "!**/internal/service/gateway_node_capacity_test.go"
           deny:
             - pkg: github.com/Wei-Shaw/sub2api/internal/repository
               desc: "service must not import repository"
@@ -36,6 +41,10 @@ linters:
           list-mode: original
           files:
             - "**/internal/handler/**"
+            # Support-chat rate limiting is intentionally constructed from
+            # the shared Redis client at the handler boundary.
+            - "!**/internal/handler/support_chat_handler.go"
+            - "!**/internal/handler/support_chat_handler_test.go"
           deny:
             - pkg: github.com/Wei-Shaw/sub2api/internal/repository
               desc: "handler must not import repository"
