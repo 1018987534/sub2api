@@ -103,6 +103,23 @@ var (
 		Mode:                                "chat",
 		SupportsPromptCaching:               true,
 	}
+	openAIGPT6AstraFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:                   10e-6,
+		InputCostPerTokenPriority:           20e-6,
+		OutputCostPerToken:                  50e-6,
+		OutputCostPerTokenPriority:          100e-6,
+		CacheCreationInputTokenCost:         12.5e-6,
+		CacheCreationInputTokenCostPriority: 25e-6,
+		CacheReadInputTokenCost:             1e-6,
+		CacheReadInputTokenCostPriority:     2e-6,
+		LongContextInputTokenThreshold:      272000,
+		LongContextInputCostMultiplier:      2.0,
+		LongContextOutputCostMultiplier:     1.5,
+		SupportsServiceTier:                 true,
+		LiteLLMProvider:                     "openai",
+		Mode:                                "chat",
+		SupportsPromptCaching:               true,
+	}
 	openAIGPT54MiniFallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:       7.5e-07,
 		OutputCostPerToken:      4.5e-06,

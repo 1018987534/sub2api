@@ -27,6 +27,8 @@ export default {
     submit: '提交',
     back: '返回',
     next: '下一步',
+    previousPage: '上一页',
+    nextPage: '下一页',
     yes: '是',
     no: '否',
     all: '全部',

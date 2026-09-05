@@ -27,6 +27,8 @@ export default {
     submit: 'Submit',
     back: 'Back',
     next: 'Next',
+    previousPage: 'Previous page',
+    nextPage: 'Next page',
     yes: 'Yes',
     no: 'No',
     all: 'All',

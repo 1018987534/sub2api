@@ -276,6 +276,23 @@ func TestFirstTokenPriorityStatsFastRequiresTrackedConfirmation(t *testing.T) {
 	require.False(t, firstTokenPriorityStatsFast(recovering, now))
 }
 
+func TestFirstTokenPriorityStatsFastRejectsSixteenSecondAccount(t *testing.T) {
+	now := time.Now()
+	stat := FirstTokenLatencyStats{
+		PredictedMS:             13_000,
+		SampleCount:             20,
+		UpdatedAt:               now,
+		ReliableFast:            true,
+		FastConfirmationTracked: true,
+	}
+	require.True(t, firstTokenPriorityStatsFast(stat, now))
+
+	stat.PredictedMS = 13_001
+	require.False(t, firstTokenPriorityStatsFast(stat, now))
+	stat.PredictedMS = 16_000
+	require.False(t, firstTokenPriorityStatsFast(stat, now), "a 16-second account must remain in the slow pool")
+}
+
 func TestFirstTokenPriorityCircuitBrokenAccountEntersSlowPool(t *testing.T) {
 	now := time.Now()
 	stats := map[int64]FirstTokenLatencyStats{
