@@ -19,13 +19,15 @@ func markTransientRetryableResponse(c *gin.Context) {
 	}
 }
 
-func concurrencyErrorResponse(err error, slotType string) (int, string, string) {
+const (
+	gatewayQueueFullCode        = "gateway_queue_full"
+	gatewayConcurrencyLimitCode = "gateway_concurrency_limit"
+)
+
+func concurrencyErrorResponse(err error, slotType string) (int, string, string, string) {
 	var waitQueueFullErr *WaitQueueFullError
 	if errors.As(err, &waitQueueFullErr) {
-		// Account/user capacity is a transient service condition, not a client
-		// quota violation. Returning 429 makes clients such as Codex stop the
-		// current task instead of applying their transient-service retry policy.
-		return http.StatusServiceUnavailable, "server_error",
+		return http.StatusServiceUnavailable, "server_error", "",
 			"Service temporarily unavailable, please retry later"
 	}
 
@@ -34,13 +36,13 @@ func concurrencyErrorResponse(err error, slotType string) (int, string, string) 
 		if concurrencyErr.SlotType != "" {
 			slotType = concurrencyErr.SlotType
 		}
-		return http.StatusServiceUnavailable, "server_error",
+		return http.StatusServiceUnavailable, "server_error", "",
 			fmt.Sprintf("Service temporarily unavailable: %s concurrency is busy, please retry later", slotType)
 	}
 
 	if errors.Is(err, context.Canceled) {
-		return statusClientClosedRequest, "api_error", "context canceled"
+		return statusClientClosedRequest, "api_error", "", "context canceled"
 	}
 
-	return http.StatusServiceUnavailable, "api_error", "Service temporarily unavailable, please retry later"
+	return http.StatusServiceUnavailable, "api_error", "", "Service temporarily unavailable, please retry later"
 }

@@ -16,6 +16,7 @@ func TestConcurrencyErrorResponse(t *testing.T) {
 		slotType    string
 		wantStatus  int
 		wantType    string
+		wantCode    string
 		wantMessage string
 	}{
 		{
@@ -25,6 +26,14 @@ func TestConcurrencyErrorResponse(t *testing.T) {
 			wantStatus:  http.StatusServiceUnavailable,
 			wantType:    "server_error",
 			wantMessage: "Service temporarily unavailable: account concurrency is busy, please retry later",
+		},
+		{
+			name:        "full local wait queue is retryable service error",
+			err:         &WaitQueueFullError{SlotType: "account"},
+			slotType:    "account",
+			wantStatus:  http.StatusServiceUnavailable,
+			wantType:    "server_error",
+			wantMessage: "Service temporarily unavailable, please retry later",
 		},
 		{
 			name:        "client cancellation is not classified as concurrency limit",
@@ -54,17 +63,19 @@ func TestConcurrencyErrorResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, errType, message := concurrencyErrorResponse(tt.err, tt.slotType)
+			status, errType, code, message := concurrencyErrorResponse(tt.err, tt.slotType)
 			require.Equal(t, tt.wantStatus, status)
 			require.Equal(t, tt.wantType, errType)
+			require.Equal(t, tt.wantCode, code)
 			require.Equal(t, tt.wantMessage, message)
 		})
 	}
 }
 
 func TestConcurrencyErrorResponse_WaitQueueFullIsRetryableServiceError(t *testing.T) {
-	status, errType, message := concurrencyErrorResponse(&WaitQueueFullError{}, "account")
+	status, errType, code, message := concurrencyErrorResponse(&WaitQueueFullError{}, "account")
 	require.Equal(t, http.StatusServiceUnavailable, status)
 	require.Equal(t, "server_error", errType)
+	require.Empty(t, code)
 	require.Equal(t, "Service temporarily unavailable, please retry later", message)
 }
