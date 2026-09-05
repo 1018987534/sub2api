@@ -133,7 +133,7 @@ gateway VPS <-> WireGuard <-> 新 VPS PostgreSQL/Redis
 | 其他路径 | 不经过 Worker，固定由新主 control 处理 |
 | WireGuard | 新主 `10.20.0.1`，`vmiss-us-01=10.20.0.2/32`，`yt-us-01=10.20.1.2/32`，`vmiss-us-02=10.20.2.2/32`，`dmit-us-01=10.20.3.2/32` |
 | 共享数据 relay | 新主 `10.20.0.1:5432`、`10.20.0.1:6379`，仅绑定 `wg0` 地址 |
-| 最终数据库备份 | 新主 `/tmp/sub2api-final.dump`，约 162 MB |
+| 最终数据库备份 | 迁移时位于新主 `/tmp/sub2api-final.dump`，约 162 MB；该历史临时文件已清理，后续备份必须写入普通磁盘目录 |
 | 备份 SHA256 | `cd94a22d13573774db9810050a5f0ca284167ff7f1dc15194659e64d0706852f` |
 
 迁移点新旧数据库核对结果：
@@ -767,18 +767,30 @@ dump SHA256：cd94a22d13573774db9810050a5f0ca284167ff7f1dc15194659e64d0706852f
 5. 让 Redis 生成 RDB 快照并复制出来；Redis是缓存/共享运行态，RDB只作为备份，不盲目恢复过期 leader lock。
 6. 复制 `/www/sub2api/data/` 和当前必要配置，密钥文件权限保持 `600`。
 
+不要把主机 `/tmp` 当作数据库备份目录。执行前先用 `findmnt -no FSTYPE /tmp`
+确认文件系统类型；`tmpfs` 会直接占用 RAM 并推动其他进程换入 swap。数据库 dump
+必须落到普通磁盘上的专用备份目录，复制后校验 SHA256 和 `pg_restore -l`，再删除
+容器内临时文件。
+
 ### 9.3 传输和恢复
 
 示例路径（执行时替换占位符，不在命令中打印密码）：
 
 ```bash
 # 旧 VPS：导出 PostgreSQL
+BACKUP_DIR="/www/sub2api/backups/final-migration-$(date +%Y%m%dT%H%M%S)"
+install -d -m 700 "$BACKUP_DIR"
 docker exec sub2api-postgres pg_dump -U sub2api -d sub2api -Fc -f /tmp/sub2api-final.dump
-docker cp sub2api-postgres:/tmp/sub2api-final.dump /tmp/sub2api-final.dump
-sha256sum /tmp/sub2api-final.dump
+docker cp sub2api-postgres:/tmp/sub2api-final.dump "$BACKUP_DIR/sub2api-final.dump"
+docker exec sub2api-postgres rm -f /tmp/sub2api-final.dump
+pg_restore -l "$BACKUP_DIR/sub2api-final.dump" >/dev/null
+sha256sum "$BACKUP_DIR/sub2api-final.dump"
 
 # 旧 VPS -> 新 VPS：走 SSH 传输
-scp /tmp/sub2api-final.dump root@95.169.18.157:/tmp/
+DEST_DIR="/opt/sub2api-control/backups/final-migration-$(date +%Y%m%dT%H%M%S)"
+ssh root@95.169.18.157 "install -d -m 700 '$DEST_DIR'"
+scp "$BACKUP_DIR/sub2api-final.dump" root@95.169.18.157:"$DEST_DIR/"
+ssh root@95.169.18.157 "pg_restore -l '$DEST_DIR/sub2api-final.dump' >/dev/null && sha256sum '$DEST_DIR/sub2api-final.dump'"
 ```
 
 新主恢复顺序：
