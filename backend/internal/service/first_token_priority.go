@@ -209,8 +209,8 @@ func firstTokenLatencyMetricGroups(account *Account, now time.Time) ([]AccountFi
 	includeGroup := func(group *Group) bool {
 		if group == nil ||
 			strings.EqualFold(strings.TrimSpace(group.Name), firstTokenLatencyHiddenGroup) ||
-			!((group.Status == "" || group.Status == StatusActive) &&
-				(group.Platform == "" || group.Platform == PlatformOpenAI)) {
+			(group.Status != "" && group.Status != StatusActive) ||
+			(group.Platform != "" && group.Platform != PlatformOpenAI) {
 			return false
 		}
 		reports := PreviewProfitAdmission([]ProfitPreviewGroupInput{{
@@ -715,10 +715,6 @@ func firstTokenPriorityProbeInterval(stats FirstTokenLatencyStats, fastestMS flo
 		return firstTokenPriorityProbeMax
 	}
 	return interval
-}
-
-func firstTokenPriorityRanks(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache, allowProbe bool) map[int64]int {
-	return firstTokenPriorityRanksWithProbeOptions(ctx, candidates, cache, allowProbe, allowProbe)
 }
 
 func firstTokenPriorityRanksWithProbeOptions(

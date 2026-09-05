@@ -149,7 +149,7 @@ func (h *SupportChatHandler) listMessages(c *gin.Context, id int64) {
 		response.Error(c, 500, err.Error())
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]supportMessage, 0, limit)
 	for rows.Next() {
 		var m supportMessage
@@ -220,7 +220,7 @@ func (h *SupportChatHandler) insertMessageWithAttachment(c *gin.Context, convers
 	if err != nil {
 		return supportMessage{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if in.IdempotencyKey == "" {
 		in.IdempotencyKey = fmt.Sprintf("%s-%d-%d", senderType, senderID, time.Now().UnixNano())
 	}
@@ -300,7 +300,7 @@ func parseSupportMessageRequest(c *gin.Context) (supportMessageInput, *supportAt
 		if err != nil {
 			return supportMessageInput{}, nil, fmt.Errorf("file is required")
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		if header.Size > supportChatMaxAttachment {
 			return supportMessageInput{}, nil, fmt.Errorf("file must be 4 MiB or smaller")
 		}
@@ -479,7 +479,7 @@ func (h *SupportChatHandler) AdminConversations(c *gin.Context) {
 		response.Error(c, 500, err.Error())
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]supportConversation, 0, 100)
 	for rows.Next() {
 		var v supportConversation

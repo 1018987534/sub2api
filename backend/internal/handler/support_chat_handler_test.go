@@ -34,7 +34,7 @@ func supportMessageRows(id, conversationID, senderID int64, senderType, content 
 func TestSupportChatInsertMessageRejectsBlankContent(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	h := NewSupportChatHandler(db, nil)
 	_, err = h.insertMessage(supportChatTestContext(), 41, 7, "user", supportMessageInput{Content: " \n\t"})
@@ -45,7 +45,7 @@ func TestSupportChatInsertMessageRejectsBlankContent(t *testing.T) {
 func TestSupportChatInsertMessageUpdatesUnreadForEachSender(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	h := NewSupportChatHandler(db, nil)
 	now := time.Date(2026, 8, 23, 16, 0, 0, 0, time.UTC)
 	insertPattern := `INSERT INTO support_messages .*ON CONFLICT \(idempotency_key\) DO NOTHING RETURNING`
@@ -69,7 +69,7 @@ func TestSupportChatInsertMessageUpdatesUnreadForEachSender(t *testing.T) {
 func TestSupportChatInsertMessageIdempotentRetryDoesNotIncrementUnread(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	h := NewSupportChatHandler(db, nil)
 	now := time.Date(2026, 8, 23, 16, 0, 0, 0, time.UTC)
 	insertPattern := `INSERT INTO support_messages .*ON CONFLICT \(idempotency_key\) DO NOTHING RETURNING`
@@ -85,7 +85,7 @@ func TestSupportChatInsertMessageIdempotentRetryDoesNotIncrementUnread(t *testin
 func TestSupportChatReadClearsUserUnread(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	h := NewSupportChatHandler(db, nil)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE support_conversations SET unread_by_user=0,updated_at=NOW() WHERE user_id=$1")).
 		WithArgs(int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -98,7 +98,7 @@ func TestSupportChatReadClearsUserUnread(t *testing.T) {
 func TestSupportChatAdminReadClearsAdminUnread(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	h := NewSupportChatHandler(db, nil)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE support_conversations SET unread_by_admin=0,manually_unread_by_admin=false,updated_at=NOW() WHERE id=$1")).
 		WithArgs(int64(41)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -112,7 +112,7 @@ func TestSupportChatAdminReadClearsAdminUnread(t *testing.T) {
 func TestSupportChatAdminConversationsHidesEmptyConversations(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	h := NewSupportChatHandler(db, nil)
 	rows := sqlmock.NewRows([]string{"id", "user_id", "email", "username", "unread_by_user", "unread_by_admin", "manually_unread_by_admin", "last_message_at", "updated_at"})
 	mock.ExpectQuery(`FROM support_conversations c JOIN users u ON u.id=c.user_id WHERE EXISTS \(SELECT 1 FROM support_messages m WHERE m.conversation_id=c.id\)`).
@@ -248,7 +248,7 @@ func TestSupportChatMessageRateLimitIsTenPerMinute(t *testing.T) {
 func TestSupportChatAttachmentMessagePersistsAtomically(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	h := NewSupportChatHandler(db, nil)
 	now := time.Date(2026, 8, 23, 17, 0, 0, 0, time.UTC)
 	mock.ExpectBegin()

@@ -591,7 +591,7 @@ func (s *LotteryService) ListRounds(ctx context.Context, page, pageSize int) (Lo
 	if err != nil {
 		return LotteryRoundPage{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]LotteryRound, 0, pageSize)
 	for rows.Next() {
 		round, scanErr := scanLotteryRound(rows)
@@ -646,7 +646,7 @@ func (s *LotteryService) ListParticipants(ctx context.Context, roundID int64, pa
 	if err != nil {
 		return LotteryParticipantPage{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := make([]LotteryParticipant, 0, pageSize)
 	for rows.Next() {
@@ -752,7 +752,7 @@ func (s *LotteryService) listWinners(ctx context.Context, userID int64, limit in
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]LotteryWinner, 0, limit)
 	for rows.Next() {
 		var winner LotteryWinner
@@ -779,7 +779,7 @@ func (s *LotteryService) listWinnersForRound(ctx context.Context, roundID int64,
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]LotteryWinner, 0, limit)
 	for rows.Next() {
 		var winner LotteryWinner

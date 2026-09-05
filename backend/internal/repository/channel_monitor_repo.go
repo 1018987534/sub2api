@@ -214,7 +214,7 @@ func (r *channelMonitorRepository) UpdateSortOrders(ctx context.Context, updates
 	if err != nil {
 		return fmt.Errorf("begin channel monitor reorder: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	ids := make([]int64, 0, len(updates))
 	args := make([]any, 0, len(updates)*2+1)
 	caseClauses := make([]string, 0, len(updates))
