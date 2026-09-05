@@ -2347,7 +2347,23 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, true) {
 			continue
 		}
-		if index < len(routing.routes)-1 && !s.apiKeyRouteFastPoolAvailable(ctx, group) {
+		candidateID := route.GroupID
+		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
+		attemptCtx = s.withOpenAIQuotaAutoPauseContext(attemptCtx)
+		attemptCtx = s.withOpenAIGroupPrivacyRequirement(attemptCtx, &candidateID)
+		if requiredImageCapability == "" {
+			attemptCtx = s.withOpenAIProfitControlGate(attemptCtx, &candidateID)
+		}
+		if index < len(routing.routes)-1 && !s.apiKeyRouteFastPoolAvailable(
+			attemptCtx,
+			group,
+			requestedModel,
+			excludedIDs,
+			requiredTransport,
+			requiredCapability,
+			requiredImageCapability,
+			requireCompact,
+		) {
 			continue
 		}
 		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
@@ -2358,8 +2374,6 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			continue
 		}
 
-		candidateID := route.GroupID
-		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
 		selection, decision, err := s.selectAccountWithSchedulerSingleGroup(attemptCtx, &candidateID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform, previousResponseCanMove, useUpstreamTokenCost)
 		lastDecision = decision
 		if err != nil {
@@ -2392,10 +2406,22 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 }
 
 // apiKeyRouteFastPoolAvailable keeps ordered API-key routes on groups that
-// currently have at least one confirmed fast-pool OpenAI API-key account.
+// currently have at least one confirmed fast-pool OpenAI API-key account for
+// this request. Request-specific exclusions and all ordinary admission gates
+// must be applied here, otherwise a failed fast account can keep a non-final
+// route alive and make it retry slow accounts instead of moving to the backup.
 // When total-duration scheduling is disabled or its shared stats cache is not
 // available, the legacy route behavior remains unchanged.
-func (s *OpenAIGatewayService) apiKeyRouteFastPoolAvailable(ctx context.Context, group *Group) bool {
+func (s *OpenAIGatewayService) apiKeyRouteFastPoolAvailable(
+	ctx context.Context,
+	group *Group,
+	requestedModel string,
+	excludedIDs map[int64]struct{},
+	requiredTransport OpenAIUpstreamTransport,
+	requiredCapability OpenAIEndpointCapability,
+	requiredImageCapability OpenAIImagesCapability,
+	requireCompact bool,
+) bool {
 	if s == nil || group == nil || NormalizeOpenAICompatiblePlatform(group.Platform) != PlatformOpenAI ||
 		!s.isFirstTokenPriorityEnabled(ctx) || s.rateLimitService == nil || s.rateLimitService.firstTokenLatencyStatsCache == nil {
 		return true
@@ -2411,8 +2437,34 @@ func (s *OpenAIGatewayService) apiKeyRouteFastPoolAvailable(ctx context.Context,
 	}
 	accountIDs := make([]int64, 0, len(accounts))
 	for i := range accounts {
-		if isFirstTokenPriorityAccount(&accounts[i]) {
-			accountIDs = append(accountIDs, accounts[i].ID)
+		account := &accounts[i]
+		if _, excluded := excludedIDs[account.ID]; excluded {
+			continue
+		}
+		fresh := s.resolveFreshSchedulableOpenAIAccount(
+			ctx,
+			account,
+			PlatformOpenAI,
+			requestedModel,
+			false,
+			requiredCapability,
+		)
+		if fresh == nil || !accountSupportsOpenAICapabilities(fresh, requiredCapability, requiredImageCapability) ||
+			!s.isOpenAIAccountTransportCompatible(fresh, requiredTransport) {
+			continue
+		}
+		if requireCompact && openAICompactSupportTier(fresh) == 0 {
+			continue
+		}
+		if group.RequirePrivacySet && !fresh.IsPrivacySet() {
+			continue
+		}
+		if s.needsUpstreamChannelRestrictionCheck(ctx, &groupID) &&
+			s.isUpstreamModelRestrictedByChannel(ctx, groupID, fresh, requestedModel, requireCompact) {
+			continue
+		}
+		if isFirstTokenPriorityAccount(fresh) {
+			accountIDs = append(accountIDs, fresh.ID)
 		}
 	}
 	if len(accountIDs) == 0 {

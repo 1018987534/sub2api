@@ -1768,8 +1768,8 @@ func deferOpenAIAPIKey429AccountSideEffects(c *gin.Context, account *Account, st
 }
 
 // applyOpenAIResponsesSameAccountRetryPolicy limits transient non-pool
-// Responses failures to five local replays before switching credentials. Pool
-// accounts retain their configured retry count/status policy; OAuth 429 and
+// Responses failures to one local replay before switching credentials. Pool
+// accounts retain their configured retry count/status policy; API-key 429 and
 // request-scoped capacity shedding retain their existing specialized windows.
 func applyOpenAIResponsesSameAccountRetryPolicy(c *gin.Context, account *Account, statusCode int, shouldDisable bool, failoverErr *UpstreamFailoverError) {
 	if account == nil || failoverErr == nil || shouldDisable || account.Platform != PlatformOpenAI || account.IsPoolMode() ||
@@ -1794,7 +1794,15 @@ func applyOpenAIResponsesSameAccountRetryPolicy(c *gin.Context, account *Account
 	}
 
 	failoverErr.RetryableOnSameAccount = true
-	failoverErr.SameAccountRetryMax = defaultPoolModeRetryCount
+	// The five-attempt budget is reserved for the explicit API-key 429 policy
+	// above. Generic 5xx responses, including provider overload 502/503s, must
+	// switch accounts after one replay instead of repeatedly hitting the same
+	// unhealthy relay.
+	if statusCode == http.StatusTooManyRequests && account.Type == AccountTypeAPIKey {
+		failoverErr.SameAccountRetryMax = defaultPoolModeRetryCount
+	} else {
+		failoverErr.SameAccountRetryMax = 1
+	}
 }
 
 func openAIStreamFailedEventRetryableOnSameAccount(account *Account, payload []byte, message string) bool {
