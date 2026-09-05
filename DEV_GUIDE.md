@@ -56,6 +56,22 @@ npm install -g pnpm
 - Go 版本必须是 **1.27.0**：三个 workflow 都用 `go-version-file: backend/go.mod` 取版本，随后硬断言 `go version | grep -q 'go1.27.0'`。升级 Go 时要同时改 `backend/go.mod`、`backend-ci.yml`（两处）、`release.yml`、`security-scan.yml` 里的这句断言，**以及三个 Dockerfile 里的 Go 构建镜像**（`Dockerfile` / `deploy/Dockerfile` 的 `ARG GOLANG_IMAGE`、`backend/Dockerfile` 的 `FROM golang:`）。前者漏了 CI 会在版本校验步骤直接失败；**后者漏了 CI 不会报，而是等到有人用这些 Dockerfile 构建时才失败**（`go.mod requires go >= X (running Y; GOTOOLCHAIN=local)`）。
 - 前端使用 `pnpm install --frozen-lockfile`，必须提交 `pnpm-lock.yaml`
 
+### 推送后的绿灯门禁
+
+代码必须按 `topic -> main -> cdy/main` 流程交付。`git push` 成功或远端 SHA
+一致，只能证明代码已上传，不能证明交付成功。每次推送后必须以当前完整
+`main` SHA 查询 GitHub Actions，并等待以下两个 workflow 都完成且为
+`success`：
+
+- `CI`（单元测试、集成测试、前端、lint、部署脚本检查）
+- `Security Scan`（后端安全、前端依赖安全扫描）
+
+任一 workflow 为 `failure`、`cancelled`、`timed_out` 或该 SHA 没有对应运行，
+都不得报告“全绿”、不得发布。邮件是历史运行的通知：邮件里显示的旧 SHA
+失败不会被后续绿色运行改写，判断当前状态时必须使用当前 SHA 的 Actions
+结果（例如 `gh run list/view` 或 commit check-runs），并在交付记录中写明
+当前 SHA 和两个 run ID。
+
 ### 本地测试命令
 
 ```bash
