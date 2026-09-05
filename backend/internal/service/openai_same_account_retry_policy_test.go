@@ -26,11 +26,11 @@ func TestOpenAIResponsesSameAccountRetryPolicy(t *testing.T) {
 			retryMax:  5,
 		},
 		{
-			name:      "non-pool OAuth generic 502 retries five times",
+			name:      "non-pool OAuth generic 502 retries once",
 			account:   &Account{ID: 2, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
 			status:    http.StatusBadGateway,
 			retryable: true,
-			retryMax:  5,
+			retryMax:  1,
 		},
 		{
 			name: "pool account keeps configured retry budget",
@@ -74,7 +74,7 @@ func TestDeferOpenAIAPIKey429AccountSideEffectsAfterFiveRetries(t *testing.T) {
 	require.False(t, deferOpenAIAPIKey429AccountSideEffects(c, &Account{ID: 13, Platform: PlatformOpenAI, Type: AccountTypeOAuth}, http.StatusTooManyRequests))
 }
 
-func TestOpenAIStreamGenericFailureRetriesFiveBeforeAccountSwitch(t *testing.T) {
+func TestOpenAIStreamGenericFailureRetriesOnceBeforeAccountSwitch(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -85,7 +85,20 @@ func TestOpenAIStreamGenericFailureRetriesFiveBeforeAccountSwitch(t *testing.T) 
 
 	require.Equal(t, http.StatusBadGateway, err.StatusCode)
 	require.True(t, err.RetryableOnSameAccount)
-	require.Equal(t, 5, err.SameAccountRetryMax)
+	require.Equal(t, 1, err.SameAccountRetryMax)
+}
+
+func TestOpenAIResponsesOverloadFiveXXRetriesOnceBeforeAccountSwitch(t *testing.T) {
+	account := &Account{ID: 22, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	err := &UpstreamFailoverError{
+		StatusCode:   http.StatusServiceUnavailable,
+		ResponseBody: []byte(`{"error":{"message":"Our servers are currently overloaded. Please try again later."}}`),
+	}
+
+	applyOpenAIResponsesSameAccountRetryPolicy(nil, account, err.StatusCode, false, err)
+
+	require.True(t, err.RetryableOnSameAccount)
+	require.Equal(t, 1, err.SameAccountRetryMax)
 }
 
 func TestOpenAIResponsesSameAccountRetryPolicySkipsWrappedModelNotFound(t *testing.T) {
