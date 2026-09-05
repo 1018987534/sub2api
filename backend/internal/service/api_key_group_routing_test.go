@@ -227,3 +227,133 @@ func TestOpenAIGatewayOrderedRoutesFallBackToNextGroup(t *testing.T) {
 	require.Equal(t, 1, selection.GroupRouteIndex)
 	require.Equal(t, int64(2), selection.Account.SelectedAPIKeyGroup.ID)
 }
+
+func TestOpenAIGatewayOrderedRoutesSkipSlowSpecialPriceGroup(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	now := time.Now()
+	groups := &apiKeyGroupRouteGroupRepoStub{groups: map[int64]*Group{
+		1: {ID: 1, Name: "special-price", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1},
+		2: {ID: 2, Name: "plus", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1},
+	}}
+	accounts := &apiKeyGroupRouteAccountRepoStub{accounts: []Account{
+		{ID: 201, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{1}},
+		{ID: 202, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{2}},
+	}}
+	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		201: {PredictedMS: 16_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+		202: {PredictedMS: 12_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+	}}
+	settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+		SettingKeyFirstTokenPriorityEnabled: "true",
+	}}
+	svc := &OpenAIGatewayService{
+		accountRepo:       accounts,
+		schedulerSnapshot: NewSchedulerSnapshotService(nil, nil, accounts, groups, nil),
+		cfg:               &config.Config{},
+		rateLimitService: &RateLimitService{
+			settingService:              NewSettingService(settings, &config.Config{}),
+			firstTokenLatencyStatsCache: stats,
+		},
+	}
+	primaryID := int64(1)
+	ctx := ContextWithAPIKeyGroupRoutes(context.Background(), &APIKey{
+		GroupID:     &primaryID,
+		GroupRoutes: []APIKeyGroupRoute{{GroupID: 1}, {GroupID: 2}},
+		User:        &User{ID: 42, Status: StatusActive, Balance: 10},
+	})
+
+	selection, err := svc.SelectAccountWithLoadAwareness(ctx, &primaryID, "", "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, int64(2), selection.Group.ID)
+	require.Equal(t, int64(202), selection.Account.ID)
+	require.Equal(t, 1, selection.GroupRouteIndex)
+	require.Equal(t, []int64{1, 2}, accounts.groupCalls)
+}
+
+func TestOpenAIGatewaySchedulerRoutesSkipSlowSpecialPriceGroup(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	now := time.Now()
+	groups := &apiKeyGroupRouteGroupRepoStub{groups: map[int64]*Group{
+		1: {ID: 1, Name: "special-price", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1},
+		2: {ID: 2, Name: "plus", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1},
+	}}
+	accounts := &apiKeyGroupRouteAccountRepoStub{accounts: []Account{
+		{ID: 211, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{1}},
+		{ID: 212, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{2}},
+	}}
+	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		211: {PredictedMS: 16_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+		212: {PredictedMS: 12_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+	}}
+	settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+		SettingKeyFirstTokenPriorityEnabled: "true",
+	}}
+	svc := &OpenAIGatewayService{
+		accountRepo:       accounts,
+		schedulerSnapshot: NewSchedulerSnapshotService(nil, nil, accounts, groups, nil),
+		cfg:               &config.Config{},
+		rateLimitService: &RateLimitService{
+			settingService:              NewSettingService(settings, &config.Config{}),
+			firstTokenLatencyStatsCache: stats,
+		},
+	}
+	primaryID := int64(1)
+	ctx := ContextWithAPIKeyGroupRoutes(context.Background(), &APIKey{
+		GroupID:     &primaryID,
+		GroupRoutes: []APIKeyGroupRoute{{GroupID: 1}, {GroupID: 2}},
+		User:        &User{ID: 42, Status: StatusActive, Balance: 10},
+	})
+
+	selection, _, err := svc.SelectAccountWithScheduler(ctx, &primaryID, "", "", "gpt-5.1", nil, OpenAIUpstreamTransportAny, false)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, int64(2), selection.Group.ID)
+	require.Equal(t, int64(212), selection.Account.ID)
+	require.Equal(t, 1, selection.GroupRouteIndex)
+}
+
+func TestOpenAIGatewayOrderedRoutesKeepSlowFinalGroupAsFallback(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+
+	now := time.Now()
+	groups := &apiKeyGroupRouteGroupRepoStub{groups: map[int64]*Group{
+		1: {ID: 1, Name: "special-price", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, SubscriptionType: SubscriptionTypeStandard, RateMultiplier: 1},
+	}}
+	accounts := &apiKeyGroupRouteAccountRepoStub{accounts: []Account{{
+		ID: 203, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, GroupIDs: []int64{1},
+	}}}
+	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		203: {PredictedMS: 16_000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true},
+	}}
+	settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
+		SettingKeyFirstTokenPriorityEnabled: "true",
+	}}
+	svc := &OpenAIGatewayService{
+		accountRepo:       accounts,
+		schedulerSnapshot: NewSchedulerSnapshotService(nil, nil, accounts, groups, nil),
+		cfg:               &config.Config{},
+		rateLimitService: &RateLimitService{
+			settingService:              NewSettingService(settings, &config.Config{}),
+			firstTokenLatencyStatsCache: stats,
+		},
+	}
+	primaryID := int64(1)
+	ctx := ContextWithAPIKeyGroupRoutes(context.Background(), &APIKey{
+		GroupID:     &primaryID,
+		GroupRoutes: []APIKeyGroupRoute{{GroupID: 1}},
+		User:        &User{ID: 42, Status: StatusActive, Balance: 10},
+	})
+
+	selection, err := svc.SelectAccountWithLoadAwareness(ctx, &primaryID, "", "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.Equal(t, int64(1), selection.Group.ID)
+	require.Equal(t, int64(203), selection.Account.ID)
+	require.Equal(t, 0, selection.GroupRouteIndex)
+}

@@ -2246,7 +2246,7 @@ func TestOpenAIGatewayService_FirstTokenPriorityKeepsEqualRateFastSessionSticky(
 	}
 }
 
-func TestOpenAIGatewayService_FirstTokenPriorityUsesDefaultStickyAtOrBelowFifteenSeconds(t *testing.T) {
+func TestOpenAIGatewayService_TotalDurationPriorityUsesDefaultStickyInsideFastPool(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	ctx := context.Background()
@@ -2263,7 +2263,7 @@ func TestOpenAIGatewayService_FirstTokenPriorityUsesDefaultStickyAtOrBelowFiftee
 	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_healthy_sticky": sticky.ID}}
 	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
 		preferred.ID: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
-		sticky.ID:    {PredictedMS: 15_000, SampleCount: 5, UpdatedAt: now},
+		sticky.ID:    {PredictedMS: 12_000, SampleCount: 5, UpdatedAt: now},
 	}}
 	repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyFirstTokenPriorityEnabled: "true"}}
 	svc := &OpenAIGatewayService{
@@ -2285,7 +2285,7 @@ func TestOpenAIGatewayService_FirstTokenPriorityUsesDefaultStickyAtOrBelowFiftee
 	}
 }
 
-func TestOpenAIGatewayService_FirstTokenPriorityFallsBackToWeightedStickyAboveFifteenSeconds(t *testing.T) {
+func TestOpenAIGatewayService_TotalDurationPriorityDoesNotLetSlowStickyCrossFastPool(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	ctx := context.Background()
@@ -2302,7 +2302,7 @@ func TestOpenAIGatewayService_FirstTokenPriorityFallsBackToWeightedStickyAboveFi
 	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_slow_sticky": slowSticky.ID}}
 	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
 		fast.ID:       {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
-		slowSticky.ID: {PredictedMS: 15_001, SampleCount: 5, UpdatedAt: now},
+		slowSticky.ID: {PredictedMS: 17_001, SampleCount: 5, UpdatedAt: now},
 	}}
 	repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyFirstTokenPriorityEnabled: "true"}}
 	svc := &OpenAIGatewayService{

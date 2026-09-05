@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -12,23 +11,34 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const firstTokenLatencyStatsPrefix = "scheduler:first_token:account:"
-const firstTokenLatencyProbePrefix = "scheduler:first_token:probe:"
-const firstTokenLatencyManualProbePrefix = "scheduler:first_token:manual_probe:"
-const firstTokenLatencyCircuitBreakThresholdMS = 120_000
+const totalLatencyStatsPrefix = "scheduler:total_duration:account:"
+const totalLatencySamplesPrefix = "scheduler:total_duration:samples:"
+const totalLatencyProbePrefix = "scheduler:total_duration:probe:"
+const totalLatencyManualProbePrefix = "scheduler:total_duration:manual_probe:"
+const totalLatencyFastThresholdMS = 13_000
+const totalLatencySlowThresholdMS = 17_000
 
-// Scheduling uses a time-smoothed robust score. The recent median absorbs
-// isolated samples, while explicit confirmation lets recovered accounts return
-// to the fast pool without inheriting stale slow history.
-var firstTokenLatencyStatsRecordScript = redis.NewScript(`
+// Each completed, billable stream updates one timestamped 24-hour window and
+// atomically derives the scheduling score. The score is the 10%-90% trimmed
+// mean of the latest six hours, falling back to 24 hours until six hours has
+// enough observations. Pool transitions require three consecutive qualifying
+// aggregate results, so one long but valid generation cannot flip an account.
+var totalLatencyStatsRecordScript = redis.NewScript(`
 	local stats_key = KEYS[1]
-	local dedupe_key = KEYS[2]
-	local probe_key = KEYS[3]
-	local manual_probe_key = KEYS[4]
-	local latency_ms = tonumber(ARGV[1])
+	local samples_key = KEYS[2]
+	local dedupe_key = KEYS[3]
+	local probe_key = KEYS[4]
+	local manual_probe_key = KEYS[5]
+	local duration_ms = tonumber(ARGV[1])
 	local stats_ttl_seconds = tonumber(ARGV[2])
 	local dedupe_ttl_seconds = tonumber(ARGV[3])
-	local circuit_break_threshold_ms = tonumber(ARGV[4])
+	local minimum_samples = tonumber(ARGV[4])
+	local primary_window_ms = tonumber(ARGV[5])
+	local fallback_window_ms = tonumber(ARGV[6])
+	local fast_threshold_ms = tonumber(ARGV[7])
+	local slow_threshold_ms = tonumber(ARGV[8])
+	local confirmations = tonumber(ARGV[9])
+	local request_id = ARGV[10]
 	local now = redis.call('TIME')
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 
@@ -36,160 +46,107 @@ var firstTokenLatencyStatsRecordScript = redis.NewScript(`
 		return 0
 	end
 
-	local old_ewma = tonumber(redis.call('HGET', stats_key, 'ewma_ms'))
-	local old_median = tonumber(redis.call('HGET', stats_key, 'median_ms'))
-	local old_reliable_fast = tonumber(redis.call('HGET', stats_key, 'reliable_fast')) or 0
-	local score_version = tonumber(redis.call('HGET', stats_key, 'score_version')) or 0
-	local old_confirmation_tracked = tonumber(redis.call('HGET', stats_key, 'fast_confirmation_tracked')) or 0
-	local recovery_fast_streak = tonumber(redis.call('HGET', stats_key, 'recovery_fast_streak')) or 0
-	local recovery_fast_samples = redis.call('HGET', stats_key, 'recovery_fast_samples')
-	local circuit_broken = tonumber(redis.call('HGET', stats_key, 'circuit_broken')) or 0
+	redis.call('ZREMRANGEBYSCORE', samples_key, '-inf', now_ms - fallback_window_ms)
+	local member = tostring(now_ms) .. ':' .. request_id .. ':' .. tostring(duration_ms)
+	redis.call('ZADD', samples_key, now_ms, member)
+	redis.call('EXPIRE', samples_key, stats_ttl_seconds)
+
+	local function decode(raw_members)
+		local values = {}
+		for _, raw in ipairs(raw_members) do
+			local value = tonumber(string.match(raw, ':(%d+)$'))
+			if value then table.insert(values, value) end
+		end
+		return values
+	end
+
+	local primary = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - primary_window_ms, '+inf'))
+	local samples = primary
+	local window_hours = 6
+	if #samples < minimum_samples then
+		samples = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - fallback_window_ms, '+inf'))
+		window_hours = 24
+	end
+
 	local old_updated = tonumber(redis.call('HGET', stats_key, 'updated_at_ms'))
-	local encoded = redis.call('HGET', stats_key, 'recent_samples')
-	local sample_count = tonumber(redis.call('HGET', stats_key, 'sample_count')) or 0
-	local retained_sample_count = 0
-	local elapsed_seconds = 0
-	if old_updated and now_ms > old_updated then
-		elapsed_seconds = (now_ms - old_updated) / 1000
+	local is_fast = tonumber(redis.call('HGET', stats_key, 'is_fast')) or 0
+	local enter_fast_streak = tonumber(redis.call('HGET', stats_key, 'enter_fast_streak')) or 0
+	local exit_slow_streak = tonumber(redis.call('HGET', stats_key, 'exit_slow_streak')) or 0
+	if not old_updated or now_ms - old_updated > primary_window_ms then
+		is_fast = 0
+		enter_fast_streak = 0
+		exit_slow_streak = 0
 	end
 
-	-- Average-based versions may leave a stale median_ms behind. Rebuild it from
-	-- the retained sample window whenever the window exists.
-	if encoded then
-		local previous = {}
-		for value in string.gmatch(encoded, '[^,]+') do
-			local parsed = tonumber(value)
-			if parsed then table.insert(previous, parsed) end
+	if #samples < minimum_samples then
+		redis.call('HDEL', stats_key, 'normal_total_ms', 'p50_ms', 'p90_ms')
+		redis.call('HSET', stats_key,
+			'sample_count', tostring(#samples),
+			'window_hours', tostring(window_hours),
+			'is_fast', '0',
+			'enter_fast_streak', '0',
+			'exit_slow_streak', '0',
+			'updated_at_ms', tostring(now_ms),
+			'score_version', '3')
+	else
+		table.sort(samples)
+		local trim = math.floor(#samples * 0.10)
+		local sum = 0
+		for index = trim + 1, #samples - trim do sum = sum + samples[index] end
+		local normal_total = sum / (#samples - 2 * trim)
+
+		local function percentile(p)
+			local position = (#samples - 1) * p + 1
+			local lower = math.floor(position)
+			local upper = math.ceil(position)
+			if lower == upper then return samples[lower] end
+			return samples[lower] + (position - lower) * (samples[upper] - samples[lower])
 		end
-		table.sort(previous)
-		retained_sample_count = #previous
-		if #previous > 0 then
-			if #previous % 2 == 0 then
-				old_median = (previous[#previous / 2] + previous[#previous / 2 + 1]) / 2
+		local p50 = percentile(0.50)
+		local p90 = percentile(0.90)
+
+		if normal_total <= fast_threshold_ms then
+			exit_slow_streak = 0
+			if is_fast == 0 then
+				enter_fast_streak = enter_fast_streak + 1
+				if enter_fast_streak >= confirmations then
+					is_fast = 1
+					enter_fast_streak = 0
+				end
 			else
-				old_median = previous[math.floor((#previous + 1) / 2)]
+				enter_fast_streak = 0
 			end
-		end
-	end
-	if score_version < 2 and old_median then
-		-- Migrate the old per-sample EWMA without inheriting its volatile score.
-		old_ewma = old_median
-	end
-	local was_confirmed_fast = old_confirmation_tracked == 1 and old_reliable_fast == 1
-	-- Existing production hashes predate confirmation tracking. Preserve fast
-	-- state only when at least three retained observations support the median.
-	if old_confirmation_tracked == 0 and old_reliable_fast == 1 and old_median and old_median <= 10000 and retained_sample_count >= 3 then
-		was_confirmed_fast = true
-	end
-	if circuit_broken == 1 then
-		was_confirmed_fast = false
-	end
-	-- A single TTFT over two minutes is a circuit breaker. Do not let the
-	-- robust median/EWMA hide it; recovery still requires three fast samples.
-	if latency_ms > circuit_break_threshold_ms then
-		circuit_broken = 1
-		was_confirmed_fast = false
-		recovery_fast_streak = 0
-		recovery_fast_samples = nil
-	end
-	if elapsed_seconds > 1200 then
-		was_confirmed_fast = false
-		recovery_fast_streak = 0
-		recovery_fast_samples = nil
-		sample_count = 0
-		old_ewma = nil
-	end
-	local samples = {}
-	if encoded and elapsed_seconds <= 1200 then
-		for value in string.gmatch(encoded, '[^,]+') do
-			table.insert(samples, tonumber(value))
-		end
-	end
-	table.insert(samples, latency_ms)
-	while #samples > 9 do
-		table.remove(samples, 1)
-	end
-
-	sample_count = sample_count + 1
-
-	local recovery_samples = {}
-	if recovery_fast_samples then
-		for value in string.gmatch(recovery_fast_samples, '[^,]+') do
-			table.insert(recovery_samples, tonumber(value))
-		end
-	end
-	if not was_confirmed_fast and latency_ms <= 10000 then
-		recovery_fast_streak = recovery_fast_streak + 1
-		table.insert(recovery_samples, latency_ms)
-		while #recovery_samples > 3 do table.remove(recovery_samples, 1) end
-	else
-		recovery_fast_streak = 0
-		recovery_samples = {}
-	end
-	local recovery_confirmed = not was_confirmed_fast and recovery_fast_streak >= 3
-	if recovery_confirmed then
-		samples = {}
-		for _, value in ipairs(recovery_samples) do table.insert(samples, value) end
-	end
-
-	local sorted = {}
-	for i, value in ipairs(samples) do sorted[i] = value end
-	table.sort(sorted)
-	local median = 0
-	if #sorted > 0 then
-		if #sorted % 2 == 0 then
-			median = (sorted[#sorted / 2] + sorted[#sorted / 2 + 1]) / 2
+		elseif normal_total >= slow_threshold_ms then
+			enter_fast_streak = 0
+			exit_slow_streak = exit_slow_streak + 1
+			if is_fast == 1 and exit_slow_streak >= confirmations then
+				is_fast = 0
+			end
 		else
-			median = sorted[math.floor((#sorted + 1) / 2)]
+			enter_fast_streak = 0
+			exit_slow_streak = 0
 		end
+
+		redis.call('HSET', stats_key,
+			'normal_total_ms', tostring(normal_total),
+			'p50_ms', tostring(p50),
+			'p90_ms', tostring(p90),
+			'sample_count', tostring(#samples),
+			'window_hours', tostring(window_hours),
+			'is_fast', tostring(is_fast),
+			'enter_fast_streak', tostring(enter_fast_streak),
+			'exit_slow_streak', tostring(exit_slow_streak),
+			'updated_at_ms', tostring(now_ms),
+			'score_version', '3')
 	end
-	local ewma = median
-	if old_ewma and not recovery_confirmed then
-		-- Time-based EWMA avoids traffic volume changing the smoothing strength.
-		-- Busy and idle accounts converge on the same wall-clock horizon.
-		local alpha = 1 - math.exp(-elapsed_seconds / 900)
-		if alpha < 0 then alpha = 0 end
-		ewma = alpha * median + (1 - alpha) * old_ewma
-	end
-	local reliable_fast = 0
-	if (was_confirmed_fast or recovery_confirmed) and ewma > 0 and ewma <= 10000 then reliable_fast = 1 end
-	if recovery_confirmed then
-		circuit_broken = 0
-		recovery_fast_streak = 0
-		recovery_samples = {}
-	end
-	local slow_streak = tonumber(redis.call('HGET', stats_key, 'slow_streak')) or 0
-	if elapsed_seconds > 1200 then
-		slow_streak = 0
-	elseif old_ewma and latency_ms >= old_ewma * 0.8 then
-		slow_streak = slow_streak + 1
-	else
-		slow_streak = 0
-	end
-	local parts = {}
-	for i, value in ipairs(samples) do parts[i] = tostring(value) end
-	local recovery_parts = {}
-	for i, value in ipairs(recovery_samples) do recovery_parts[i] = tostring(value) end
-	redis.call('HSET', stats_key,
-		'ewma_ms', tostring(ewma),
-		'median_ms', tostring(median),
-		'sample_count', tostring(sample_count),
-		'reliable_fast', tostring(reliable_fast),
-		'fast_confirmation_tracked', '1',
-		'recovery_fast_streak', tostring(recovery_fast_streak),
-		'recovery_fast_samples', table.concat(recovery_parts, ','),
-		'circuit_broken', tostring(circuit_broken),
-		'score_version', '2',
-		'slow_streak', tostring(slow_streak),
-		'updated_at_ms', tostring(now_ms),
-		'recent_samples', table.concat(parts, ','))
+
 	redis.call('EXPIRE', stats_key, stats_ttl_seconds)
 	redis.call('DEL', probe_key)
 	redis.call('DEL', manual_probe_key)
 	return 1
 `)
 
-var firstTokenManualProbeClaimScript = redis.NewScript(`
+var totalLatencyManualProbeClaimScript = redis.NewScript(`
 	local candidate_count = tonumber(ARGV[1])
 	local lease_seconds = tonumber(ARGV[2])
 	for index = 1, candidate_count do
@@ -206,23 +163,40 @@ type firstTokenLatencyStatsCache struct {
 	rdb *redis.Client
 }
 
+// NewFirstTokenLatencyStatsCache retains the existing provider name for wire
+// compatibility. Its data and behavior are total-duration based.
 func NewFirstTokenLatencyStatsCache(rdb *redis.Client) service.FirstTokenLatencyStatsCache {
 	return &firstTokenLatencyStatsCache{rdb: rdb}
 }
 
-func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountID int64, requestID string, firstTokenMs int) error {
+func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountID int64, requestID string, durationMs int) error {
 	requestID = strings.TrimSpace(requestID)
-	if accountID <= 0 || requestID == "" || firstTokenMs <= 0 {
+	if accountID <= 0 || requestID == "" || durationMs <= 0 {
 		return nil
 	}
-	const statsTTL = 24 * time.Hour
-	const dedupeTTL = 2 * time.Hour
-	statsKey := fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID)
-	dedupeKey := fmt.Sprintf("scheduler:first_token:event:%d:%s", accountID, requestID)
-	probeKey := fmt.Sprintf("%s%d", firstTokenLatencyProbePrefix, accountID)
-	manualProbeKey := fmt.Sprintf("%s%d", firstTokenLatencyManualProbePrefix, accountID)
-	if _, err := firstTokenLatencyStatsRecordScript.Run(ctx, c.rdb, []string{statsKey, dedupeKey, probeKey, manualProbeKey}, firstTokenMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds()), firstTokenLatencyCircuitBreakThresholdMS).Result(); err != nil {
-		return fmt.Errorf("record first-token latency stats: %w", err)
+	const statsTTL = 26 * time.Hour
+	const dedupeTTL = 26 * time.Hour
+	statsKey := fmt.Sprintf("%s%d", totalLatencyStatsPrefix, accountID)
+	samplesKey := fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)
+	dedupeKey := fmt.Sprintf("scheduler:total_duration:event:%d:%s", accountID, requestID)
+	probeKey := fmt.Sprintf("%s%d", totalLatencyProbePrefix, accountID)
+	manualProbeKey := fmt.Sprintf("%s%d", totalLatencyManualProbePrefix, accountID)
+	if _, err := totalLatencyStatsRecordScript.Run(
+		ctx,
+		c.rdb,
+		[]string{statsKey, samplesKey, dedupeKey, probeKey, manualProbeKey},
+		durationMs,
+		int(statsTTL.Seconds()),
+		int(dedupeTTL.Seconds()),
+		20,
+		int64((6*time.Hour)/time.Millisecond),
+		int64((24*time.Hour)/time.Millisecond),
+		totalLatencyFastThresholdMS,
+		totalLatencySlowThresholdMS,
+		3,
+		requestID,
+	).Result(); err != nil {
+		return fmt.Errorf("record total-duration stats: %w", err)
 	}
 	return nil
 }
@@ -231,8 +205,8 @@ func (c *firstTokenLatencyStatsCache) RequestManualProbe(ctx context.Context, ac
 	if accountID <= 0 || ttl <= 0 {
 		return nil
 	}
-	if err := c.rdb.Set(ctx, fmt.Sprintf("%s%d", firstTokenLatencyManualProbePrefix, accountID), "1", ttl).Err(); err != nil {
-		return fmt.Errorf("queue first-token manual probe: %w", err)
+	if err := c.rdb.Set(ctx, fmt.Sprintf("%s%d", totalLatencyManualProbePrefix, accountID), "1", ttl).Err(); err != nil {
+		return fmt.Errorf("queue total-duration manual probe: %w", err)
 	}
 	return nil
 }
@@ -248,17 +222,17 @@ func (c *firstTokenLatencyStatsCache) TryClaimManualProbe(ctx context.Context, a
 			continue
 		}
 		validAccountIDs = append(validAccountIDs, accountID)
-		keys = append(keys, fmt.Sprintf("%s%d", firstTokenLatencyManualProbePrefix, accountID))
+		keys = append(keys, fmt.Sprintf("%s%d", totalLatencyManualProbePrefix, accountID))
 	}
 	if len(validAccountIDs) == 0 {
 		return 0, false, nil
 	}
 	for _, accountID := range validAccountIDs {
-		keys = append(keys, fmt.Sprintf("%s%d", firstTokenLatencyProbePrefix, accountID))
+		keys = append(keys, fmt.Sprintf("%s%d", totalLatencyProbePrefix, accountID))
 	}
-	claimedIndex, err := firstTokenManualProbeClaimScript.Run(ctx, c.rdb, keys, len(validAccountIDs), int(lease.Seconds())).Int()
+	claimedIndex, err := totalLatencyManualProbeClaimScript.Run(ctx, c.rdb, keys, len(validAccountIDs), int(lease.Seconds())).Int()
 	if err != nil {
-		return 0, false, fmt.Errorf("claim first-token manual probe: %w", err)
+		return 0, false, fmt.Errorf("claim total-duration manual probe: %w", err)
 	}
 	if claimedIndex <= 0 || claimedIndex > len(validAccountIDs) {
 		return 0, false, nil
@@ -270,9 +244,9 @@ func (c *firstTokenLatencyStatsCache) TryClaimProbe(ctx context.Context, account
 	if accountID <= 0 || lease <= 0 {
 		return false, nil
 	}
-	claimed, err := c.rdb.SetNX(ctx, fmt.Sprintf("%s%d", firstTokenLatencyProbePrefix, accountID), "1", lease).Result()
+	claimed, err := c.rdb.SetNX(ctx, fmt.Sprintf("%s%d", totalLatencyProbePrefix, accountID), "1", lease).Result()
 	if err != nil {
-		return false, fmt.Errorf("claim first-token probe: %w", err)
+		return false, fmt.Errorf("claim total-duration probe: %w", err)
 	}
 	return claimed, nil
 }
@@ -288,83 +262,48 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		if accountID <= 0 {
 			continue
 		}
-		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", firstTokenLatencyStatsPrefix, accountID), "ewma_ms", "median_ms", "sample_count", "updated_at_ms", "slow_streak", "reliable_fast", "recent_samples", "fast_confirmation_tracked", "recovery_fast_streak", "score_version", "circuit_broken")
+		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", totalLatencyStatsPrefix, accountID),
+			"normal_total_ms", "p50_ms", "p90_ms", "sample_count", "window_hours",
+			"updated_at_ms", "exit_slow_streak", "is_fast", "enter_fast_streak", "score_version")
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
-		return nil, fmt.Errorf("get first-token latency stats: %w", err)
+		return nil, fmt.Errorf("get total-duration stats: %w", err)
 	}
 	for accountID, cmd := range commands {
 		values, err := cmd.Result()
-		if err != nil || len(values) != 11 || values[0] == nil {
+		if err != nil || len(values) != 10 || values[3] == nil || values[5] == nil {
 			continue
 		}
-		stablePrediction, ewmaErr := strconv.ParseFloat(fmt.Sprint(values[0]), 64)
-		var median float64
-		var medianErr error
-		recentSampleCount := 0
-		if values[6] != nil && strings.TrimSpace(fmt.Sprint(values[6])) != "" {
-			samples := make([]float64, 0, 9)
-			for _, raw := range strings.Split(fmt.Sprint(values[6]), ",") {
-				value, parseErr := strconv.ParseFloat(strings.TrimSpace(raw), 64)
-				if parseErr == nil {
-					samples = append(samples, value)
-				}
-			}
-			if len(samples) > 0 {
-				recentSampleCount = len(samples)
-				sort.Float64s(samples)
-				middle := len(samples) / 2
-				if len(samples)%2 == 0 {
-					median = (samples[middle-1] + samples[middle]) / 2
-				} else {
-					median = samples[middle]
-				}
-			} else {
-				medianErr = fmt.Errorf("recent samples are empty")
-			}
-		} else if values[1] != nil {
-			median, medianErr = strconv.ParseFloat(fmt.Sprint(values[1]), 64)
-		} else {
-			medianErr = fmt.Errorf("median samples are missing")
-		}
-		count, countErr := strconv.ParseInt(fmt.Sprint(values[2]), 10, 64)
-		updatedAtMS, updatedErr := strconv.ParseInt(fmt.Sprint(values[3]), 10, 64)
-		slowStreak, streakErr := strconv.Atoi(fmt.Sprint(values[4]))
-		reliableFast := values[5] != nil && fmt.Sprint(values[5]) == "1"
-		confirmationTracked := values[7] != nil && fmt.Sprint(values[7]) == "1"
-		if !confirmationTracked {
-			// Older average-based versions could reset recent_samples to one good
-			// probe while retaining a large cumulative sample_count. Treat that
-			// hash as migrated in memory, but do not inherit fast status unless the
-			// retained window itself contains enough supporting observations.
-			confirmationTracked = true
-			reliableFast = reliableFast && recentSampleCount >= 3 && median <= 10_000
-		}
-		recoveryFastStreak := 0
-		if values[8] != nil {
-			recoveryFastStreak, _ = strconv.Atoi(fmt.Sprint(values[8]))
-		}
-		scoreVersion := 0
-		if values[9] != nil {
-			scoreVersion, _ = strconv.Atoi(fmt.Sprint(values[9]))
-		}
-		circuitBroken := values[10] != nil && fmt.Sprint(values[10]) == "1"
-		if scoreVersion < 2 {
-			stablePrediction = median
-		}
-		if ewmaErr != nil || medianErr != nil || countErr != nil || updatedErr != nil || streakErr != nil || count <= 0 || updatedAtMS <= 0 {
+		count, countErr := strconv.ParseInt(fmt.Sprint(values[3]), 10, 64)
+		updatedAtMS, updatedErr := strconv.ParseInt(fmt.Sprint(values[5]), 10, 64)
+		if countErr != nil || updatedErr != nil || updatedAtMS <= 0 {
 			continue
 		}
-		result[accountID] = service.FirstTokenLatencyStats{
-			PredictedMS:             stablePrediction,
+		stat := service.FirstTokenLatencyStats{
 			SampleCount:             count,
 			UpdatedAt:               time.UnixMilli(updatedAtMS),
-			SlowStreak:              slowStreak,
-			ReliableFast:            reliableFast,
-			FastConfirmationTracked: confirmationTracked,
-			RecoveryFastStreak:      recoveryFastStreak,
-			CircuitBroken:           circuitBroken,
+			ReliableFast:            values[7] != nil && fmt.Sprint(values[7]) == "1",
+			FastConfirmationTracked: true,
 		}
+		if values[0] != nil && strings.TrimSpace(fmt.Sprint(values[0])) != "" {
+			stat.PredictedMS, _ = strconv.ParseFloat(fmt.Sprint(values[0]), 64)
+		}
+		if values[1] != nil {
+			stat.P50MS, _ = strconv.ParseFloat(fmt.Sprint(values[1]), 64)
+		}
+		if values[2] != nil {
+			stat.P90MS, _ = strconv.ParseFloat(fmt.Sprint(values[2]), 64)
+		}
+		if values[4] != nil {
+			stat.WindowHours, _ = strconv.Atoi(fmt.Sprint(values[4]))
+		}
+		if values[6] != nil {
+			stat.SlowStreak, _ = strconv.Atoi(fmt.Sprint(values[6]))
+		}
+		if values[8] != nil {
+			stat.RecoveryFastStreak, _ = strconv.Atoi(fmt.Sprint(values[8]))
+		}
+		result[accountID] = stat
 	}
 	return result, nil
 }

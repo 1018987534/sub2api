@@ -1105,7 +1105,7 @@ func applyOpenAIFirstTokenPriorityOrder(
 			accounts,
 			cache,
 			allowProbe,
-			req.FirstTokenProbeEligible,
+			allowProbe,
 		)
 		sort.SliceStable(selectionOrder[start:end], func(i, j int) bool {
 			return ranks[selectionOrder[start+i].account.ID] < ranks[selectionOrder[start+j].account.ID]
@@ -1342,7 +1342,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 		if accountID <= 0 {
 			continue
 		}
-		// The first-token primary pass already checked the session account against
+		// The total-duration primary pass already checked the session account against
 		// the fast, minimum-rate pool. Do not reintroduce a slow or expensive
 		// session account through the generic weighted fallback.
 		if req.FirstTokenPriority && accountID == req.StickyAccountID {
@@ -2309,6 +2309,9 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, true) {
 			continue
 		}
+		if index < len(routing.routes)-1 && !s.apiKeyRouteFastPoolAvailable(ctx, group) {
+			continue
+		}
 		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
 		if err != nil {
 			return nil, lastDecision, err
@@ -2348,6 +2351,46 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		return nil, lastDecision, lastNoAccount
 	}
 	return nil, lastDecision, ErrNoAvailableAccounts
+}
+
+// apiKeyRouteFastPoolAvailable keeps ordered API-key routes on groups that
+// currently have at least one confirmed fast-pool OpenAI API-key account.
+// The final configured route remains an unconditional fallback. A temporary
+// snapshot or Redis read failure fails open so a cache incident cannot turn a
+// configured backup route into an outage.
+func (s *OpenAIGatewayService) apiKeyRouteFastPoolAvailable(ctx context.Context, group *Group) bool {
+	if s == nil || group == nil || NormalizeOpenAICompatiblePlatform(group.Platform) != PlatformOpenAI ||
+		!s.isFirstTokenPriorityEnabled(ctx) || s.rateLimitService == nil || s.rateLimitService.firstTokenLatencyStatsCache == nil {
+		return true
+	}
+
+	groupID := group.ID
+	accounts, err := s.listSchedulableAccounts(ctx, &groupID, PlatformOpenAI)
+	if err != nil {
+		slog.Warn("api_key_route_fast_pool_check_failed", "group_id", group.ID, "error", err)
+		return true
+	}
+	accountIDs := make([]int64, 0, len(accounts))
+	for i := range accounts {
+		if isFirstTokenPriorityAccount(&accounts[i]) {
+			accountIDs = append(accountIDs, accounts[i].ID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return false
+	}
+	stats, err := s.rateLimitService.firstTokenLatencyStatsCache.GetStatsBatch(ctx, accountIDs)
+	if err != nil {
+		slog.Warn("api_key_route_fast_pool_stats_failed", "group_id", group.ID, "error", err)
+		return true
+	}
+	now := time.Now()
+	for _, accountID := range accountIDs {
+		if stat, ok := stats[accountID]; ok && firstTokenPriorityStatsFast(stat, now) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *OpenAIGatewayService) selectAccountWithSchedulerSingleGroup(
@@ -2483,7 +2526,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	firstTokenPriority := s.isFirstTokenPriorityEnabled(ctx)
 	if firstTokenPriority {
 		// Session affinity is applied only after capability, fast-pool and rate
-		// ordering. It therefore cannot hold back a recovered sub-10-second or
+		// ordering. It therefore cannot hold back a recovered fast-pool or
 		// lower-rate account, while equal-rate fast accounts keep cache locality.
 		stickyWeighted = true
 	}
