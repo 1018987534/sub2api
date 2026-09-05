@@ -103,23 +103,6 @@ var (
 		Mode:                                "chat",
 		SupportsPromptCaching:               true,
 	}
-	openAIGPT6AstraFallbackPricing = &LiteLLMModelPricing{
-		InputCostPerToken:                   10e-6,
-		InputCostPerTokenPriority:           20e-6,
-		OutputCostPerToken:                  50e-6,
-		OutputCostPerTokenPriority:          100e-6,
-		CacheCreationInputTokenCost:         12.5e-6,
-		CacheCreationInputTokenCostPriority: 25e-6,
-		CacheReadInputTokenCost:             1e-6,
-		CacheReadInputTokenCostPriority:     2e-6,
-		LongContextInputTokenThreshold:      272000,
-		LongContextInputCostMultiplier:      2.0,
-		LongContextOutputCostMultiplier:     1.5,
-		SupportsServiceTier:                 true,
-		LiteLLMProvider:                     "openai",
-		Mode:                                "chat",
-		SupportsPromptCaching:               true,
-	}
 	openAIGPT54MiniFallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:       7.5e-07,
 		OutputCostPerToken:      4.5e-06,
@@ -495,23 +478,18 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			SupportsServiceTier:   entry.SupportsServiceTier,
 			TokenPricingAbsent:    entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
 		}
+		hasExplicitLongContext := entry.LongContextInputTokenThreshold != nil ||
+			entry.LongContextInputCostMultiplier != nil ||
+			entry.LongContextOutputCostMultiplier != nil
 
 		if entry.InputCostPerToken != nil {
 			pricing.InputCostPerToken = *entry.InputCostPerToken
-		}
-		if entry.InputCostPerTokenAbove272K != nil && pricing.InputCostPerToken > 0 {
-			pricing.LongContextInputTokenThreshold = 272000
-			pricing.LongContextInputCostMultiplier = *entry.InputCostPerTokenAbove272K / pricing.InputCostPerToken
 		}
 		if entry.InputCostPerTokenPriority != nil {
 			pricing.InputCostPerTokenPriority = *entry.InputCostPerTokenPriority
 		}
 		if entry.OutputCostPerToken != nil {
 			pricing.OutputCostPerToken = *entry.OutputCostPerToken
-		}
-		if entry.OutputCostPerTokenAbove272K != nil && pricing.OutputCostPerToken > 0 {
-			pricing.LongContextInputTokenThreshold = 272000
-			pricing.LongContextOutputCostMultiplier = *entry.OutputCostPerTokenAbove272K / pricing.OutputCostPerToken
 		}
 		if entry.OutputCostPerTokenPriority != nil {
 			pricing.OutputCostPerTokenPriority = *entry.OutputCostPerTokenPriority
@@ -550,9 +528,6 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			pricing.InputCostPerImageToken = *entry.InputCostPerImageToken
 		}
 
-		hasExplicitLongContext := entry.LongContextInputTokenThreshold != nil ||
-			entry.LongContextInputCostMultiplier != nil ||
-			entry.LongContextOutputCostMultiplier != nil
 		if !hasExplicitLongContext {
 			deriveLongContextFromAboveTierFields(rawEntry, pricing)
 			if isLopsidedLongContextLadder(pricing) {

@@ -15,8 +15,8 @@ const totalLatencyStatsPrefix = "scheduler:total_duration:account:"
 const totalLatencySamplesPrefix = "scheduler:total_duration:samples:"
 const totalLatencyProbePrefix = "scheduler:total_duration:probe:"
 const totalLatencyManualProbePrefix = "scheduler:total_duration:manual_probe:"
-const totalLatencyFastThresholdMS = 13_000
-const totalLatencySlowThresholdMS = 17_000
+const totalLatencyFastThresholdMS = 17_000
+const totalLatencySlowThresholdMS = 21_000
 
 // Each completed, billable stream updates one timestamped 24-hour window and
 // atomically derives the scheduling score. The score is the 10%-90% trimmed

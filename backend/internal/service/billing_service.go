@@ -483,21 +483,6 @@ func (s *BillingService) initFallbackPricing() {
 		LongContextInputMultiplier:         2.0,
 		LongContextOutputMultiplier:        1.5,
 	}
-	// OpenAI GPT-6 Astra 官方价格（USD/token）。标准 $10/$50，Priority $20/$100，
-	// Flex 为标准价的一半；缓存写入为输入价的 1.25 倍，272K 以上沿官方阶梯计费。
-	s.fallbackPrices["gpt-6-astra"] = &ModelPricing{
-		InputPricePerToken:                 10e-6,
-		InputPricePerTokenPriority:         20e-6,
-		OutputPricePerToken:                50e-6,
-		OutputPricePerTokenPriority:        100e-6,
-		CacheCreationPricePerToken:         12.5e-6,
-		CacheCreationPricePerTokenPriority: 25e-6,
-		CacheReadPricePerToken:             1e-6,
-		CacheReadPricePerTokenPriority:     2e-6,
-		LongContextInputThreshold:          272000,
-		LongContextInputMultiplier:         2.0,
-		LongContextOutputMultiplier:        1.5,
-	}
 
 	s.fallbackPrices["gpt-5.4-mini"] = &ModelPricing{
 		InputPricePerToken:     7.5e-7,
