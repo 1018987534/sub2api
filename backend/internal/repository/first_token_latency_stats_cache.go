@@ -116,7 +116,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			else
 				enter_fast_streak = 0
 			end
-		elseif normal_total >= slow_threshold_ms then
+		elseif normal_total > slow_threshold_ms then
 			enter_fast_streak = 0
 			exit_slow_streak = exit_slow_streak + 1
 			if is_fast == 1 and exit_slow_streak >= confirmations then
