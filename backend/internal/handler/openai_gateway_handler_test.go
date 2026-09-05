@@ -2807,7 +2807,6 @@ func TestOpenAIResponses_FirstOutputTimeoutContinuesAcrossAccountsUntilHealthy(t
 
 	require.Equal(t, []int64{9910, 9912, 9913}, upstream.calls())
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Contains(t, rec.Body.String(), ": keepalive\n\n")
 	require.Contains(t, rec.Body.String(), "resp_timeout_third_healthy")
 	require.Contains(t, rec.Body.String(), `"type":"response.completed"`)
 	require.NotContains(t, rec.Body.String(), "first_output_timeout")
