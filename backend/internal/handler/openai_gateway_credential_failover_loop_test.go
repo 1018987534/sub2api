@@ -550,7 +550,7 @@ func TestResponsesCredentialFailoverLoop(t *testing.T) {
 
 		router.ServeHTTP(recorder, req)
 
-		require.Equal(t, http.StatusTooManyRequests, recorder.Code, recorder.Body.String())
+		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
 		require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
 		require.Equal(t, 1, repo.selectorCalls())
 		require.Empty(t, upstream.accountHits())
@@ -689,7 +689,7 @@ func TestGrokMedia429FailoverIsBounded(t *testing.T) {
 
 		router.ServeHTTP(recorder, req)
 
-		require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+		require.Equal(t, http.StatusTooManyRequests, recorder.Code, recorder.Body.String())
 		require.Equal(t, []int64{801, 802}, upstream.accountHits())
 		require.NotContains(t, recorder.Body.String(), "rate limited")
 	})

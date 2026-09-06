@@ -201,7 +201,7 @@ func TestCredentialFailoverExhaustionReturnsFixedSafe503(t *testing.T) {
 		ClientMessage:     "invalid_grant refresh_token=must-not-leak",
 	}, false)
 
-	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 	require.Contains(t, recorder.Body.String(), service.GrokCredentialUnavailableClientMessage)
 	require.NotContains(t, strings.ToLower(recorder.Body.String()), "invalid_grant")
 	require.NotContains(t, strings.ToLower(recorder.Body.String()), "refresh_token")
@@ -268,7 +268,7 @@ func TestFailoverExhaustionAllowsBoundedRetryAfterDate(t *testing.T) {
 		ResponseHeaders: http.Header{"Retry-After": []string{retryAfter}},
 	}, false)
 
-	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
 	require.Equal(t, retryAfter, recorder.Header().Get("Retry-After"))
 }
 
