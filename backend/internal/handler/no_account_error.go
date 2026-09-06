@@ -37,10 +37,7 @@ type noAccountErrorClassification struct {
 var selectionModelRateLimitedPattern = regexp.MustCompile(`(?:model_rate_limited|rate_limited)=(\d+)`)
 
 // classifySelectionFailureError preserves the scheduler's compact reason when
-// every model-capable account is temporarily rate limited. This is an upstream
-// account-pool exhaustion, not a client quota violation: expose 503 so SDKs
-// can apply their normal transient-service retry policy instead of aborting on
-// 429.
+// every model-capable account is temporarily rate limited.
 func classifySelectionFailureError(err error, fallback noAccountErrorClassification) noAccountErrorClassification {
 	if err == nil {
 		return fallback
@@ -71,9 +68,9 @@ func classifySelectionFailureError(err error, fallback noAccountErrorClassificat
 		return fallback
 	}
 	return noAccountErrorClassification{
-		Status:  http.StatusServiceUnavailable,
-		ErrType: "api_error",
-		Message: "Service temporarily unavailable; all available accounts are currently rate-limited. Please retry later.",
+		Status:  http.StatusTooManyRequests,
+		ErrType: "rate_limit_error",
+		Message: "All available accounts are currently rate-limited. Please retry later.",
 	}
 }
 

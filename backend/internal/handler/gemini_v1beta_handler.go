@@ -249,11 +249,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 	userReleaseFunc, err := geminiConcurrency.AcquireUserSlotWithWait(c, authSubject.UserID, authSubject.Concurrency, stream, &streamStarted)
 	if err != nil {
 		reqLog.Warn("gemini.user_slot_acquire_failed", zap.Error(err))
-		status, _, _, message := concurrencyErrorResponse(err, "user")
-		if status == http.StatusServiceUnavailable {
-			markTransientRetryableResponse(c)
-		}
-		googleError(c, status, message)
+		googleError(c, http.StatusTooManyRequests, err.Error())
 		return
 	}
 	// 确保请求取消时也会释放槽位，避免长连接被动中断造成泄漏
@@ -459,8 +455,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 					zap.Int64("account_id", account.ID),
 					zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 				)
-				markTransientRetryableResponse(c)
-				googleError(c, http.StatusServiceUnavailable, "Service temporarily unavailable, please retry later")
+				googleError(c, http.StatusTooManyRequests, "Too many pending requests, please retry later")
 				return
 			}
 			if err == nil && canWait {
@@ -482,8 +477,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			)
 			if err != nil {
 				reqLog.Warn("gemini.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
-				markTransientRetryableResponse(c)
-				googleError(c, http.StatusServiceUnavailable, "Service temporarily unavailable, please retry later")
+				googleError(c, http.StatusTooManyRequests, err.Error())
 				return
 			}
 			if accountWaitCounted {
@@ -653,17 +647,11 @@ func (h *GatewayHandler) handleGeminiFailoverExhausted(c *gin.Context, failoverE
 		googleError(c, http.StatusBadGateway, "Upstream request failed")
 		return
 	}
-	if failoverErr.StatusCode == http.StatusTooManyRequests {
-		if strings.TrimSpace(failoverErr.ResponseHeaders.Get("Retry-After")) == "" {
-			markTransientRetryableResponse(c)
-		}
-	}
-
 	statusCode := failoverErr.StatusCode
 	responseBody := failoverErr.ResponseBody
 
 	// 先检查透传规则
-	if statusCode != http.StatusTooManyRequests && h.errorPassthroughService != nil && len(responseBody) > 0 {
+	if h.errorPassthroughService != nil && len(responseBody) > 0 {
 		if rule := h.errorPassthroughService.MatchRule(service.PlatformGemini, statusCode, responseBody); rule != nil {
 			// 确定响应状态码
 			respCode := statusCode
@@ -702,7 +690,7 @@ func mapGeminiUpstreamError(statusCode int) (int, string) {
 	case 403:
 		return http.StatusBadGateway, "Upstream access forbidden, please contact administrator"
 	case 429:
-		return http.StatusServiceUnavailable, "Upstream rate limit temporarily unavailable; please retry later."
+		return http.StatusTooManyRequests, "Upstream rate limit exceeded, please retry later"
 	case 529:
 		return http.StatusServiceUnavailable, "Upstream service overloaded, please retry later"
 	case 500, 502, 503, 504:

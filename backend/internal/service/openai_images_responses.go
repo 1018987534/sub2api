@@ -71,9 +71,6 @@ func (e *OpenAIImagesUpstreamError) clientStatusCode() int {
 	if e == nil {
 		return http.StatusBadGateway
 	}
-	if e.StatusCode == http.StatusTooManyRequests {
-		return http.StatusServiceUnavailable
-	}
 	if e.StatusCode > 0 {
 		return e.StatusCode
 	}
@@ -82,9 +79,6 @@ func (e *OpenAIImagesUpstreamError) clientStatusCode() int {
 
 func (e *OpenAIImagesUpstreamError) clientErrorType() string {
 	if e == nil {
-		return "upstream_error"
-	}
-	if e.StatusCode == http.StatusTooManyRequests {
 		return "upstream_error"
 	}
 	if trimmed := strings.TrimSpace(e.ErrorType); trimmed != "" {
@@ -97,9 +91,6 @@ func (e *OpenAIImagesUpstreamError) clientMessage() string {
 	if e == nil {
 		return "Upstream request failed"
 	}
-	if e.StatusCode == http.StatusTooManyRequests {
-		return "Upstream rate limit temporarily unavailable; please retry later."
-	}
 	if trimmed := strings.TrimSpace(e.Message); trimmed != "" {
 		return trimmed
 	}
@@ -107,16 +98,6 @@ func (e *OpenAIImagesUpstreamError) clientMessage() string {
 		return trimmed
 	}
 	return "Upstream request failed"
-}
-
-func (e *OpenAIImagesUpstreamError) clientCode() string {
-	if e == nil {
-		return ""
-	}
-	if e.StatusCode == http.StatusTooManyRequests {
-		return openAICapacityShedRetryableClientCode
-	}
-	return strings.TrimSpace(e.Code)
 }
 
 // IsOpenAIImagesRetryableUpstreamError reports whether an Images error is an
@@ -157,7 +138,7 @@ func openAIImagesUpstreamErrorResponseBody(err *OpenAIImagesUpstreamError) []byt
 	body := []byte(`{"error":{"type":"","message":""}}`)
 	body, _ = sjson.SetBytes(body, "error.type", err.clientErrorType())
 	body, _ = sjson.SetBytes(body, "error.message", err.clientMessage())
-	if code := err.clientCode(); code != "" {
+	if code := strings.TrimSpace(err.Code); code != "" {
 		body, _ = sjson.SetBytes(body, "error.code", code)
 	}
 	if param := strings.TrimSpace(err.Param); param != "" {
@@ -1111,7 +1092,7 @@ func buildOpenAIImagesStreamErrorBodyFromUpstream(err *OpenAIImagesUpstreamError
 	}
 	body := buildOpenAIImagesStreamErrorBody(err.clientMessage())
 	body, _ = sjson.SetBytes(body, "error.type", err.clientErrorType())
-	if code := err.clientCode(); code != "" {
+	if code := strings.TrimSpace(err.Code); code != "" {
 		body, _ = sjson.SetBytes(body, "error.code", code)
 	}
 	if param := strings.TrimSpace(err.Param); param != "" {
@@ -1132,7 +1113,7 @@ func writeOpenAIImagesUpstreamErrorResponse(c *gin.Context, err *OpenAIImagesUps
 		"type":    err.clientErrorType(),
 		"message": err.clientMessage(),
 	}
-	if code := err.clientCode(); code != "" {
+	if code := strings.TrimSpace(err.Code); code != "" {
 		errorObj["code"] = code
 	}
 	if param := strings.TrimSpace(err.Param); param != "" {

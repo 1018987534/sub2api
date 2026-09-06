@@ -169,10 +169,10 @@ func TestHandleErrorResponse_NonDeterministicStatusesKeepGeneric502(t *testing.T
 			http.StatusBadGateway, "upstream_error", "Upstream authentication failed, please contact administrator"},
 		{"forbidden", http.StatusForbidden, `{"error":{"message":"Your account is deactivated"}}`,
 			http.StatusBadGateway, "upstream_error", "Upstream access forbidden, please contact administrator"},
-		// 上游 429 已经过账号内重试和账号切换；耗尽后按临时上游故障返回 503，
-		// 让支持 5xx 的客户端自动重试，而不是把它当作客户端限流错误中断。
+		// 上游 429 经过账号内重试和账号切换后，仍按原始限流语义返回 429，
+		// 让客户端按照 Retry-After/限流策略退避。
 		{"rate_limited", http.StatusTooManyRequests, `{"error":{"message":"Rate limit reached"}}`,
-			http.StatusServiceUnavailable, "upstream_error", "Upstream rate limit temporarily unavailable; please retry later."},
+			http.StatusTooManyRequests, "rate_limit_error", "Upstream rate limit exceeded, please retry later"},
 	}
 
 	for _, tc := range cases {

@@ -368,9 +368,6 @@ func (h *GatewayHandler) responsesErrorResponse(c *gin.Context, status int, code
 func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastErr *service.UpstreamFailoverError, streamStarted bool) {
 	if lastErr != nil {
 		copyFailoverRetryAfter(c, lastErr.ResponseHeaders)
-		if lastErr.StatusCode == http.StatusTooManyRequests && strings.TrimSpace(lastErr.ResponseHeaders.Get("Retry-After")) == "" {
-			markTransientRetryableResponse(c)
-		}
 	}
 	statusCode := http.StatusBadGateway
 	if lastErr != nil && lastErr.StatusCode > 0 {
@@ -389,11 +386,7 @@ func (h *GatewayHandler) handleResponsesFailoverExhausted(c *gin.Context, lastEr
 		service.SetOpsUpstreamError(c, statusCode, service.OpenAISilentRefusalClientMessage(), "")
 		status, code, message = http.StatusBadGateway, "upstream_error", service.OpenAISilentRefusalClientMessage()
 	} else if lastErr != nil && statusCode == http.StatusTooManyRequests {
-		// This is an upstream account-pool exhaustion after internal retries.
-		// Do not expose it as a client quota failure: SDKs commonly stop the
-		// current task on 429. Keep the original status in ops fields and expose
-		// a retryable 503 instead.
-		status, code, message = http.StatusServiceUnavailable, "upstream_error", "Upstream rate limit temporarily unavailable; please retry later."
+		status, code, message = http.StatusTooManyRequests, "rate_limit_error", "All available accounts are currently rate-limited. Please retry later."
 	}
 	if streamStarted {
 		// A slot-wait heartbeat commits HTTP 200 before any upstream response.

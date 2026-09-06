@@ -260,9 +260,6 @@ func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(statusCode i
 	if isOpenAIContextWindowError(upstreamMsg, upstreamBody) {
 		return false
 	}
-	if isUpstreamModelNotFoundError(statusCode, upstreamBody) {
-		return true
-	}
 	if isOpenAIHTTPUpstreamAccessStateError(statusCode, upstreamMsg, upstreamBody) {
 		return true
 	}
@@ -573,34 +570,29 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		)
 	}
 
-	// An upstream 429 has already entered the account failover path. Never let
-	// an error-passthrough rule re-expose it as a client quota error if a custom
-	// rule happens to match the provider body.
-	if resp.StatusCode != http.StatusTooManyRequests {
-		if status, errType, errMsg, matched := applyErrorPassthroughRule(
-			c,
-			PlatformOpenAI,
-			resp.StatusCode,
-			body,
-			http.StatusBadGateway,
-			"upstream_error",
-			"Upstream request failed",
-		); matched {
-			MarkResponseCommitted(c)
-			c.JSON(status, gin.H{
-				"error": gin.H{
-					"type":    errType,
-					"message": errMsg,
-				},
-			})
-			if upstreamMsg == "" {
-				upstreamMsg = errMsg
-			}
-			if upstreamMsg == "" {
-				return nil, fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
-			}
-			return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, upstreamMsg)
+	if status, errType, errMsg, matched := applyErrorPassthroughRule(
+		c,
+		PlatformOpenAI,
+		resp.StatusCode,
+		body,
+		http.StatusBadGateway,
+		"upstream_error",
+		"Upstream request failed",
+	); matched {
+		MarkResponseCommitted(c)
+		c.JSON(status, gin.H{
+			"error": gin.H{
+				"type":    errType,
+				"message": errMsg,
+			},
+		})
+		if upstreamMsg == "" {
+			upstreamMsg = errMsg
 		}
+		if upstreamMsg == "" {
+			return nil, fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, upstreamMsg)
 	}
 
 	// Check custom error codes
@@ -702,10 +694,9 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		errType = "upstream_error"
 		errMsg = "Upstream access forbidden, please contact administrator"
 	case 429:
-		statusCode = http.StatusServiceUnavailable
-		errType = "upstream_error"
-		errMsg = "Upstream rate limit temporarily unavailable; please retry later."
-		c.Header("Retry-After", "5")
+		statusCode = http.StatusTooManyRequests
+		errType = "rate_limit_error"
+		errMsg = "Upstream rate limit exceeded, please retry later"
 	default:
 		statusCode = http.StatusBadGateway
 		errType = "upstream_error"
@@ -794,21 +785,19 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 
 	// Apply error passthrough rules
-	if resp.StatusCode != http.StatusTooManyRequests {
-		if status, errType, errMsg, matched := applyErrorPassthroughRule(
-			c, account.Platform, resp.StatusCode, body,
-			http.StatusBadGateway, "api_error", "Upstream request failed",
-		); matched {
-			MarkResponseCommitted(c)
-			writeError(c, status, errType, errMsg)
-			if upstreamMsg == "" {
-				upstreamMsg = errMsg
-			}
-			if upstreamMsg == "" {
-				return nil, fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
-			}
-			return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, upstreamMsg)
+	if status, errType, errMsg, matched := applyErrorPassthroughRule(
+		c, account.Platform, resp.StatusCode, body,
+		http.StatusBadGateway, "api_error", "Upstream request failed",
+	); matched {
+		MarkResponseCommitted(c)
+		writeError(c, status, errType, errMsg)
+		if upstreamMsg == "" {
+			upstreamMsg = errMsg
 		}
+		if upstreamMsg == "" {
+			return nil, fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
+		}
+		return nil, fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", resp.StatusCode, upstreamMsg)
 	}
 
 	// Check custom error codes — if the account does not handle this status,
@@ -876,21 +865,11 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	case resp.StatusCode == 404:
 		errType = "not_found_error"
 	case resp.StatusCode == 429:
-		errType = "api_error"
+		errType = "rate_limit_error"
 	case resp.StatusCode >= 500:
 		errType = "api_error"
 	}
 
-	status := resp.StatusCode
-	if status == http.StatusTooManyRequests {
-		status = http.StatusServiceUnavailable
-		if c != nil && strings.TrimSpace(c.Writer.Header().Get("Retry-After")) == "" {
-			c.Header("Retry-After", "5")
-		}
-		if upstreamMsg == "" {
-			upstreamMsg = "Upstream rate limit temporarily unavailable; please retry later."
-		}
-	}
-	writeError(c, status, errType, upstreamMsg)
+	writeError(c, resp.StatusCode, errType, upstreamMsg)
 	return nil, fmt.Errorf("upstream error: %d %s", resp.StatusCode, upstreamMsg)
 }

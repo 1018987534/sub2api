@@ -20,20 +20,22 @@ func TestConcurrencyErrorResponse(t *testing.T) {
 		wantMessage string
 	}{
 		{
-			name:        "true concurrency timeout is retryable service error",
+			name:        "true concurrency timeout remains rate limit",
 			err:         &ConcurrencyError{SlotType: "account", IsTimeout: true},
 			slotType:    "user",
-			wantStatus:  http.StatusServiceUnavailable,
-			wantType:    "server_error",
-			wantMessage: "Service temporarily unavailable: account concurrency is busy, please retry later",
+			wantStatus:  http.StatusTooManyRequests,
+			wantType:    "rate_limit_error",
+			wantCode:    gatewayConcurrencyLimitCode,
+			wantMessage: "Concurrency limit exceeded for account, please retry later",
 		},
 		{
-			name:        "full local wait queue is retryable service error",
+			name:        "full local wait queue has gateway code",
 			err:         &WaitQueueFullError{SlotType: "account"},
 			slotType:    "account",
-			wantStatus:  http.StatusServiceUnavailable,
-			wantType:    "server_error",
-			wantMessage: "Service temporarily unavailable, please retry later",
+			wantStatus:  http.StatusTooManyRequests,
+			wantType:    "rate_limit_error",
+			wantCode:    gatewayQueueFullCode,
+			wantMessage: "Too many pending requests, please retry later",
 		},
 		{
 			name:        "client cancellation is not classified as concurrency limit",
@@ -70,12 +72,4 @@ func TestConcurrencyErrorResponse(t *testing.T) {
 			require.Equal(t, tt.wantMessage, message)
 		})
 	}
-}
-
-func TestConcurrencyErrorResponse_WaitQueueFullIsRetryableServiceError(t *testing.T) {
-	status, errType, code, message := concurrencyErrorResponse(&WaitQueueFullError{}, "account")
-	require.Equal(t, http.StatusServiceUnavailable, status)
-	require.Equal(t, "server_error", errType)
-	require.Empty(t, code)
-	require.Equal(t, "Service temporarily unavailable, please retry later", message)
 }

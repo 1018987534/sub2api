@@ -1870,28 +1870,26 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 		logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini] upstream error %d: %s", upstreamStatus, truncateForLog(body, s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes))
 	}
 
-	if upstreamStatus != http.StatusTooManyRequests {
-		if status, errType, errMsg, matched := applyErrorPassthroughRule(
-			c,
-			PlatformGemini,
-			upstreamStatus,
-			body,
-			http.StatusBadGateway,
-			"upstream_error",
-			"Upstream request failed",
-		); matched {
-			c.JSON(status, gin.H{
-				"type":  "error",
-				"error": gin.H{"type": errType, "message": errMsg},
-			})
-			if upstreamMsg == "" {
-				upstreamMsg = errMsg
-			}
-			if upstreamMsg == "" {
-				return fmt.Errorf("upstream error: %d (passthrough rule matched)", upstreamStatus)
-			}
-			return fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", upstreamStatus, upstreamMsg)
+	if status, errType, errMsg, matched := applyErrorPassthroughRule(
+		c,
+		PlatformGemini,
+		upstreamStatus,
+		body,
+		http.StatusBadGateway,
+		"upstream_error",
+		"Upstream request failed",
+	); matched {
+		c.JSON(status, gin.H{
+			"type":  "error",
+			"error": gin.H{"type": errType, "message": errMsg},
+		})
+		if upstreamMsg == "" {
+			upstreamMsg = errMsg
 		}
+		if upstreamMsg == "" {
+			return fmt.Errorf("upstream error: %d (passthrough rule matched)", upstreamStatus)
+		}
+		return fmt.Errorf("upstream error: %d (passthrough rule matched) message=%s", upstreamStatus, upstreamMsg)
 	}
 
 	var statusCode int
@@ -1953,13 +1951,14 @@ func (s *GeminiMessagesCompatService) writeGeminiMappedError(c *gin.Context, acc
 			errMsg = "Resource not found"
 		}
 	case 429:
-		statusCode = http.StatusServiceUnavailable
-		c.Header("Retry-After", "5")
+		if statusCode == 0 {
+			statusCode = http.StatusTooManyRequests
+		}
 		if errType == "" {
-			errType = "api_error"
+			errType = "rate_limit_error"
 		}
 		if errMsg == "" {
-			errMsg = "Upstream rate limit temporarily unavailable; please retry later."
+			errMsg = "Upstream rate limit exceeded, please retry later"
 		}
 	case 529:
 		if statusCode == 0 {
@@ -2420,9 +2419,6 @@ func generateAnthropicMsgID() string {
 
 func (s *GeminiMessagesCompatService) writeClaudeError(c *gin.Context, status int, errType, message string) error {
 	MarkResponseCommitted(c)
-	if status == http.StatusServiceUnavailable && strings.Contains(strings.ToLower(message), "rate limit") {
-		c.Header("Retry-After", "5")
-	}
 	c.JSON(status, gin.H{
 		"type":  "error",
 		"error": gin.H{"type": errType, "message": message},
@@ -2432,9 +2428,6 @@ func (s *GeminiMessagesCompatService) writeClaudeError(c *gin.Context, status in
 
 func (s *GeminiMessagesCompatService) writeGoogleError(c *gin.Context, status int, message string) error {
 	MarkResponseCommitted(c)
-	if status == http.StatusServiceUnavailable && strings.Contains(strings.ToLower(message), "rate limit") {
-		c.Header("Retry-After", "5")
-	}
 	c.JSON(status, gin.H{
 		"error": gin.H{
 			"code":    status,

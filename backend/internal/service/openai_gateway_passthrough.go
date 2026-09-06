@@ -485,7 +485,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 
 		if reqStream {
-			result, handleErr := s.handleStreamingResponsePassthroughWithReasoning(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel, reasoningEffortValue)
+			result, handleErr := s.handleStreamingResponsePassthrough(ctx, resp, c, account, startTime, reqModel, upstreamPassthroughModel)
 			if handleErr != nil {
 				if retryBody, fallbackModel, retry := s.applyOpenAIPassthroughCompactFallbackFromSignal(
 					c, account, requestedModel, body, handleErr, compactModelFallbackRetried, resp,
@@ -498,9 +498,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				if signal, ok := asOpenAICompactFallbackSignal(handleErr); ok {
 					_ = resp.Body.Close()
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
-					// The explicit compact fallback is a bounded same-account retry.
-					// Once exhausted, return its normalized 400 instead of allowing the
-					// generic model-not-found policy to rotate through more accounts.
+					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
+						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
+					}
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 				}
 				_ = resp.Body.Close()
@@ -525,8 +525,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				if signal, ok := asOpenAICompactFallbackSignal(handleErr); ok {
 					_ = resp.Body.Close()
 					compactResp, compactBody := openAICompactFallbackErrorResponse(resp, signal)
-					// Keep compact fallback bounded even when ordinary model-not-found
-					// responses are eligible for account failover.
+					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
+						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
+					}
 					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 				}
 				_ = resp.Body.Close()
@@ -807,9 +808,6 @@ func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, r
 	if isOpenAIContextWindowError("", responseBody) {
 		return false
 	}
-	if isUpstreamModelNotFoundError(statusCode, responseBody) {
-		return true
-	}
 	if isOpenAIHTTPUpstreamAccessStateError(statusCode, "", responseBody) {
 		return true
 	}
@@ -884,17 +882,6 @@ func writeSanitizedOpenAIPassthroughError(c *gin.Context, upstreamStatus int, up
 	case http.StatusForbidden:
 		downstreamStatus = http.StatusBadGateway
 		message = "Upstream access denied"
-	case http.StatusTooManyRequests:
-		downstreamStatus = http.StatusServiceUnavailable
-		message = "Upstream rate limit temporarily unavailable; please retry later."
-		if upstreamHeaders == nil {
-			upstreamHeaders = make(http.Header)
-		} else {
-			upstreamHeaders = upstreamHeaders.Clone()
-		}
-		if strings.TrimSpace(upstreamHeaders.Get("Retry-After")) == "" {
-			upstreamHeaders.Set("Retry-After", "5")
-		}
 	default:
 		if upstreamStatus >= http.StatusInternalServerError {
 			message = "Upstream service temporarily unavailable"
@@ -946,10 +933,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
 	reqModel, _, _ := extractOpenAIRequestMetaFromBody(requestBody)
 	canonicalModel := canonicalOpenAIAccountSchedulingModel(account, reqModel)
-	shouldDisable := false
-	if !deferOpenAIAPIKey429AccountSideEffects(c, account, resp.StatusCode) {
-		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
-	}
+	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 		ProxyID:              opsUpstreamProxyID(account),
 		ProxyName:            opsUpstreamProxyName(account),
@@ -964,7 +948,7 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
-	failoverErr := s.newOpenAIAccountFailoverError(
+	return s.newOpenAIAccountFailoverError(
 		account,
 		resp.StatusCode,
 		resp.Header,
@@ -973,8 +957,6 @@ func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 		shouldDisable,
 		!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode),
 	)
-	applyOpenAIResponsesSameAccountRetryPolicy(c, account, resp.StatusCode, shouldDisable, failoverErr)
-	return failoverErr
 }
 
 func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
@@ -1037,7 +1019,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	// context-window 超限是确定性请求失败（shouldFailoverOpenAIPassthroughResponse
 	// 已保证不切号），其文案对客户端可操作（如触发自动压缩）；在净化信封内保留
 	// 脱敏后的上游消息，而不是抹成通用文案。
-	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" && resp.StatusCode != http.StatusTooManyRequests {
+	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" {
 		writeOpenAIPassthroughErrorEnvelope(c, resp.StatusCode, resp.Header, upstreamMsg)
 	} else {
 		writeSanitizedOpenAIPassthroughError(c, resp.StatusCode, resp.Header)
@@ -1396,8 +1378,8 @@ const openAICapacityShedRetryableClientCode = "server_error"
 // error / response.failed 事件中的容量降载错误码改写为客户端可重试的错误码。
 // 走到转发这一步说明网关侧 failover 已不可用（流中途）或已用尽；保留原始降载码
 // 只会让客户端就地终止会话。错误消息原样保留；监控与账号状态判定都基于改写前
-// 的原始 payload，不受影响。上游 rate_limit 也在客户端副本中归一成
-// server_error，避免 Codex 把它当成本地配额耗尽而中断当前任务。
+// 的原始 payload，不受影响。rate_limit 等其他错误码一律不动（客户端依赖
+// rate_limit_exceeded 原码解析重试延时）。
 func sanitizeOpenAICapacityShedErrorCodeForClient(payload []byte) ([]byte, bool) {
 	if len(payload) == 0 || !gjson.ValidBytes(payload) || !isOpenAIUpstreamCapacityShedEvent(payload) {
 		return payload, false
@@ -1421,49 +1403,6 @@ func sanitizeOpenAICapacityShedErrorCodeForClient(payload []byte) ([]byte, bool)
 		changed = true
 	}
 	return updated, changed
-}
-
-// sanitizeOpenAIRetryableErrorForClient rewrites transient upstream failures
-// only in the copy delivered to the client. Account state, failover decisions,
-// and ops attribution continue to use the original payload.
-func sanitizeOpenAIRetryableErrorForClient(payload []byte) ([]byte, bool) {
-	updated, changed := sanitizeOpenAICapacityShedErrorCodeForClient(payload)
-	if len(payload) == 0 || !gjson.ValidBytes(payload) ||
-		openAIStreamFailedEventSemanticStatus(payload, extractOpenAISSEErrorMessage(payload)) != http.StatusTooManyRequests {
-		return updated, changed
-	}
-
-	errorPath := ""
-	switch {
-	case gjson.GetBytes(updated, "response.error").Exists():
-		errorPath = "response.error"
-	case gjson.GetBytes(updated, "error").Exists():
-		errorPath = "error"
-	}
-	if errorPath != "" {
-		for path, value := range map[string]any{
-			errorPath + ".type":    "upstream_error",
-			errorPath + ".code":    openAICapacityShedRetryableClientCode,
-			errorPath + ".message": "Upstream rate limit temporarily unavailable; please retry later.",
-		} {
-			next, err := sjson.SetBytes(updated, path, value)
-			if err != nil {
-				return payload, false
-			}
-			updated = next
-		}
-	}
-	for _, path := range []string{"response.error.status_code", "error.status_code", "status_code", "status"} {
-		if !gjson.GetBytes(updated, path).Exists() {
-			continue
-		}
-		next, err := sjson.SetBytes(updated, path, http.StatusServiceUnavailable)
-		if err != nil {
-			return payload, false
-		}
-		updated = next
-	}
-	return updated, !bytes.Equal(updated, payload) || changed
 }
 
 func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
@@ -1711,9 +1650,6 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 	canonicalModel ...string,
 ) (int, bool) {
 	statusCode := openAIStreamFailureStatus(payload, message)
-	if deferOpenAIAPIKey429AccountSideEffects(c, account, statusCode) {
-		return statusCode, false
-	}
 	switch statusCode {
 	case http.StatusForbidden:
 		if !openAIStream403AccountFailure(payload, message) {
@@ -1738,70 +1674,6 @@ func (s *OpenAIGatewayService) handleOpenAIStreamTerminalAccountSideEffects(
 		return statusCode, s.handleOpenAIAccountUpstreamError(ctx, account, statusCode, accountHeaders, payload, model)
 	default:
 		return statusCode, false
-	}
-}
-
-const openAIAPIKey429RetryStateContextKey = "openai_api_key_429_retry_state"
-
-// deferOpenAIAPIKey429AccountSideEffects keeps the first five 429 responses
-// retryable on the selected non-pool API-key account. The sixth response is
-// processed normally, which parks the exhausted account before the handler
-// switches to another credential.
-func deferOpenAIAPIKey429AccountSideEffects(c *gin.Context, account *Account, statusCode int) bool {
-	if c == nil || account == nil || account.Platform != PlatformOpenAI || account.Type != AccountTypeAPIKey ||
-		account.IsPoolMode() || statusCode != http.StatusTooManyRequests {
-		return false
-	}
-
-	state := map[int64]int{}
-	if current, ok := c.Get(openAIAPIKey429RetryStateContextKey); ok {
-		if typed, typedOK := current.(map[int64]int); typedOK {
-			state = typed
-		}
-	}
-	if state[account.ID] >= defaultPoolModeRetryCount {
-		return false
-	}
-	state[account.ID]++
-	c.Set(openAIAPIKey429RetryStateContextKey, state)
-	return true
-}
-
-// applyOpenAIResponsesSameAccountRetryPolicy limits transient non-pool
-// Responses failures to one local replay before switching credentials. Pool
-// accounts retain their configured retry count/status policy; API-key 429 and
-// request-scoped capacity shedding retain their existing specialized windows.
-func applyOpenAIResponsesSameAccountRetryPolicy(c *gin.Context, account *Account, statusCode int, shouldDisable bool, failoverErr *UpstreamFailoverError) {
-	if account == nil || failoverErr == nil || shouldDisable || account.Platform != PlatformOpenAI || account.IsPoolMode() ||
-		failoverErr.RequestScopedTransient || !failoverErr.SameAccountRetryDeadline.IsZero() {
-		return
-	}
-	if c != nil && c.Request != nil && OpenAIImagesEndpointFromContext(c.Request.Context()) {
-		return
-	}
-	// A provider can wrap a deterministic model-routing rejection in a 5xx.
-	// Replaying the same account cannot change its model capability.
-	if isOpenAIExplicitModelNotFoundBody(failoverErr.ResponseBody) {
-		return
-	}
-
-	shouldRetry := statusCode >= http.StatusInternalServerError
-	if statusCode == http.StatusTooManyRequests {
-		shouldRetry = account.Type == AccountTypeAPIKey
-	}
-	if !shouldRetry {
-		return
-	}
-
-	failoverErr.RetryableOnSameAccount = true
-	// The five-attempt budget is reserved for the explicit API-key 429 policy
-	// above. Generic 5xx responses, including provider overload 502/503s, must
-	// switch accounts after one replay instead of repeatedly hitting the same
-	// unhealthy relay.
-	if statusCode == http.StatusTooManyRequests && account.Type == AccountTypeAPIKey {
-		failoverErr.SameAccountRetryMax = defaultPoolModeRetryCount
-	} else {
-		failoverErr.SameAccountRetryMax = 1
 	}
 }
 
@@ -1922,7 +1794,6 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 		classificationHeaders = nil
 	}
 	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, headers, classificationHeaders, payload, message, shouldDisable, retryableOnSameAccount)
-	applyOpenAIResponsesSameAccountRetryPolicy(c, account, statusCode, shouldDisable, failoverErr)
 	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient {
 		return failoverErr
 	}

@@ -225,16 +225,14 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		}
 
 		// 返回简化的错误响应
-		statusCode := resp.StatusCode
 		errMsg := "Upstream request failed"
 		switch resp.StatusCode {
 		case 429:
-			statusCode = http.StatusServiceUnavailable
-			errMsg = "Upstream rate limit temporarily unavailable; please retry later."
+			errMsg = "Rate limit exceeded"
 		case 529:
 			errMsg = "Service overloaded"
 		}
-		s.countTokensError(c, statusCode, "upstream_error", errMsg)
+		s.countTokensError(c, resp.StatusCode, "upstream_error", errMsg)
 		if upstreamMsg == "" {
 			return fmt.Errorf("upstream error: %d", resp.StatusCode)
 		}
@@ -342,16 +340,14 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 			Detail:             upstreamDetail,
 		})
 
-		statusCode := resp.StatusCode
 		errMsg := "Upstream request failed"
 		switch resp.StatusCode {
 		case 429:
-			statusCode = http.StatusServiceUnavailable
-			errMsg = "Upstream rate limit temporarily unavailable; please retry later."
+			errMsg = "Rate limit exceeded"
 		case 529:
 			errMsg = "Service overloaded"
 		}
-		s.countTokensError(c, statusCode, "upstream_error", errMsg)
+		s.countTokensError(c, resp.StatusCode, "upstream_error", errMsg)
 		if upstreamMsg == "" {
 			return fmt.Errorf("upstream error: %d", resp.StatusCode)
 		}

@@ -69,8 +69,8 @@ func TestClassifySelectionFailureError_RateLimitedPool(t *testing.T) {
 		fallback,
 	)
 
-	require.Equal(t, http.StatusServiceUnavailable, got.Status)
-	require.Equal(t, "api_error", got.ErrType)
+	require.Equal(t, http.StatusTooManyRequests, got.Status)
+	require.Equal(t, "rate_limit_error", got.ErrType)
 	require.Contains(t, got.Message, "rate-limited")
 	require.Equal(t, fallback, classifySelectionFailureError(fmt.Errorf("model_rate_limited=0"), fallback))
 	require.Equal(t, fallback, classifySelectionFailureError(fmt.Errorf("no available accounts"), fallback))
@@ -285,12 +285,12 @@ func TestClassifySelectionFailureError_CallSiteChainKeepsModelNotFoundAttributio
 	require.Equal(t, service.OpsClientBusinessLimitedReasonLocalModelConfiguration, service.OpsClientBusinessLimitedReason(c))
 }
 
-// 池子里确实存在能服务该模型、只是全部在冷却的账号时，也必须保持
-// 客户端可重试的 503，而不是暴露上游 429。
+// 池子里确实存在能服务该模型、只是全部在冷却的账号时，保留 429
+// 让客户端按限流语义退避。
 func TestClassifySelectionFailureError_StillUpgradesNonModelNotFoundFallback(t *testing.T) {
 	fallback := noAccountErrorClassification{
-		Status:  http.StatusServiceUnavailable,
-		ErrType: "api_error",
+		Status:  http.StatusTooManyRequests,
+		ErrType: "rate_limit_error",
 		Message: "Service temporarily unavailable",
 	}
 
@@ -299,7 +299,7 @@ func TestClassifySelectionFailureError_StillUpgradesNonModelNotFoundFallback(t *
 		fallback,
 	)
 
-	require.Equal(t, http.StatusServiceUnavailable, got.Status)
-	require.Equal(t, "api_error", got.ErrType)
+	require.Equal(t, http.StatusTooManyRequests, got.Status)
+	require.Equal(t, "rate_limit_error", got.ErrType)
 	require.False(t, got.ModelNotFound)
 }
