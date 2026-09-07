@@ -117,15 +117,6 @@ func isFirstTokenPriorityAccount(account *Account) bool {
 	return account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey && account.IsActive() && account.Schedulable
 }
 
-func totalDurationDimensionForRequest(accountID int64, req *OpenAIAccountScheduleRequest) TotalDurationLatencyDimension {
-	dimension := TotalDurationLatencyDimension{AccountID: accountID}
-	if req != nil {
-		dimension.RequestedModel = req.RequestedModel
-		dimension.ReasoningEffort = req.ReasoningEffort
-	}
-	return NormalizeTotalDurationLatencyDimension(dimension)
-}
-
 func requestedReasoningEffortForScheduling(ctx context.Context) string {
 	if effort := RequestedReasoningEffortFromContext(ctx); effort != nil {
 		return *effort
@@ -134,53 +125,25 @@ func requestedReasoningEffortForScheduling(ctx context.Context) string {
 }
 
 func firstTokenStatsForRequest(ctx context.Context, cache FirstTokenLatencyStatsCache, accountIDs []int64, req *OpenAIAccountScheduleRequest) (map[int64]FirstTokenLatencyStats, error) {
+	// Total-duration pool state is deliberately account-scoped. The request
+	// model and reasoning effort remain useful for usage/audit records, but must
+	// not fragment the scheduler's rolling sample set.
+	_ = req
 	if cache == nil {
 		return map[int64]FirstTokenLatencyStats{}, nil
-	}
-	if req == nil {
-		return cache.GetStatsBatch(ctx, accountIDs)
-	}
-	if dimensional, ok := cache.(DimensionAwareFirstTokenLatencyStatsCache); ok {
-		dimensions := make([]TotalDurationLatencyDimension, 0, len(accountIDs))
-		for _, accountID := range accountIDs {
-			dimensions = append(dimensions, totalDurationDimensionForRequest(accountID, req))
-		}
-		byDimension, err := dimensional.GetStatsBatchForDimensions(ctx, dimensions)
-		if err != nil {
-			return nil, err
-		}
-		result := make(map[int64]FirstTokenLatencyStats, len(byDimension))
-		for dimension, stat := range byDimension {
-			result[dimension.AccountID] = stat
-		}
-		return result, nil
 	}
 	return cache.GetStatsBatch(ctx, accountIDs)
 }
 
 func claimFirstTokenProbeForRequest(ctx context.Context, cache FirstTokenLatencyStatsCache, accountID int64, req *OpenAIAccountScheduleRequest, lease time.Duration) (bool, error) {
-	if dimensional, ok := cache.(DimensionAwareFirstTokenLatencyStatsCache); ok && req != nil {
-		return dimensional.TryClaimProbeForDimension(ctx, totalDurationDimensionForRequest(accountID, req), lease)
-	}
+	_ = req
 	return cache.TryClaimProbe(ctx, accountID, lease)
 }
 
 func tryClaimManualProbeForRequest(ctx context.Context, cache FirstTokenLatencyStatsCache, legacy FirstTokenManualProbeCache, accountIDs []int64, req *OpenAIAccountScheduleRequest) (int64, bool, error) {
-	if dimensional, ok := cache.(DimensionAwareFirstTokenLatencyStatsCache); ok && req != nil {
-		dimensions := make([]TotalDurationLatencyDimension, 0, len(accountIDs))
-		for _, accountID := range accountIDs {
-			dimensions = append(dimensions, totalDurationDimensionForRequest(accountID, req))
-		}
-		dimension, claimed, err := dimensional.TryClaimManualProbeForDimensions(ctx, dimensions, firstTokenPriorityProbeLease)
-		if err != nil || claimed {
-			return dimension.AccountID, claimed, err
-		}
-		// The admin dashboard intentionally queues a probe at account scope. If
-		// no exact model/effort queue exists, let the next eligible dimension
-		// consume that account-level request instead of silently dropping it.
-		if legacy != nil {
-			return legacy.TryClaimManualProbe(ctx, accountIDs, firstTokenPriorityProbeLease)
-		}
+	_ = cache
+	_ = req
+	if legacy == nil {
 		return 0, false, nil
 	}
 	return legacy.TryClaimManualProbe(ctx, accountIDs, firstTokenPriorityProbeLease)
@@ -204,13 +167,6 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	dimensionMetrics := []TotalDurationLatencyMetric{}
-	if dimensional, ok := s.firstTokenLatencyStatsCache.(DimensionAwareFirstTokenLatencyStatsCache); ok {
-		dimensionMetrics, err = dimensional.ListStatsByAccountIDs(ctx, accountIDs)
-		if err != nil {
-			return nil, err
-		}
-	}
 	cacheStats := make(map[int64]AccountCacheStats)
 	if provider, ok := s.usageRepo.(AccountCacheStatsProvider); ok {
 		cacheStats, err = provider.GetAccountCacheStatsBatch(ctx, accountIDs, now.Add(-24*time.Hour), now)
@@ -228,44 +184,15 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 	for index := range eligible {
 		accountByID[eligible[index].ID] = &eligible[index]
 	}
-	type metricInput struct {
+	inputs := make([]struct {
 		account *Account
 		stat    FirstTokenLatencyStats
-		model   string
-		effort  string
-	}
-	inputs := make([]metricInput, 0, len(eligible))
-	if len(dimensionMetrics) > 0 {
-		dimensionAccounts := make(map[int64]struct{}, len(dimensionMetrics))
-		for _, dimensionMetric := range dimensionMetrics {
-			account := accountByID[dimensionMetric.Dimension.AccountID]
-			if account == nil {
-				continue
-			}
-			dimensionAccounts[dimensionMetric.Dimension.AccountID] = struct{}{}
-			inputs = append(inputs, metricInput{
-				account: account,
-				stat:    dimensionMetric.Stats,
-				model:   dimensionMetric.Dimension.RequestedModel,
-				effort:  dimensionMetric.Dimension.ReasoningEffort,
-			})
-		}
-		// During migration, some accounts can still have only the legacy
-		// account-level samples. Keep those visible until a dimension sample is
-		// collected, while avoiding a duplicate legacy row for accounts that
-		// already have model/effort metrics.
-		for _, account := range eligible {
-			if _, found := dimensionAccounts[account.ID]; found {
-				continue
-			}
-			if stat, found := stats[account.ID]; found {
-				inputs = append(inputs, metricInput{account: accountByID[account.ID], stat: stat})
-			}
-		}
-	} else {
-		for _, account := range eligible {
-			inputs = append(inputs, metricInput{account: accountByID[account.ID], stat: stats[account.ID]})
-		}
+	}, 0, len(eligible))
+	for _, account := range eligible {
+		inputs = append(inputs, struct {
+			account *Account
+			stat    FirstTokenLatencyStats
+		}{account: accountByID[account.ID], stat: stats[account.ID]})
 	}
 	metrics := make([]AccountFirstTokenLatencyMetric, 0, len(inputs))
 	for _, input := range inputs {
@@ -292,8 +219,6 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 		metrics = append(metrics, AccountFirstTokenLatencyMetric{
 			AccountID:                account.ID,
 			AccountName:              account.Name,
-			RequestedModel:           input.model,
-			ReasoningEffort:          input.effort,
 			PredictedMS:              stat.PredictedMS,
 			NormalTotalMS:            stat.PredictedMS,
 			P50MS:                    stat.P50MS,
@@ -387,17 +312,9 @@ func (s *RateLimitService) ObserveTotalDurationLatency(ctx context.Context, acco
 		usageLog.DurationMs == nil || *usageLog.DurationMs <= 0 {
 		return
 	}
-	effort := ""
-	if usageLog.RequestedReasoningEffort != nil {
-		effort = *usageLog.RequestedReasoningEffort
-	}
-	dimension := TotalDurationLatencyDimension{AccountID: account.ID, RequestedModel: usageLog.RequestedModel, ReasoningEffort: effort}
-	var err error
-	if dimensional, ok := s.firstTokenLatencyStatsCache.(DimensionAwareFirstTokenLatencyStatsCache); ok {
-		err = dimensional.RecordSampleForDimension(ctx, NormalizeTotalDurationLatencyDimension(dimension), usageLog.RequestID, *usageLog.DurationMs)
-	} else {
-		err = s.firstTokenLatencyStatsCache.RecordSample(ctx, account.ID, usageLog.RequestID, *usageLog.DurationMs)
-	}
+	// Keep requested model/reasoning effort on the usage record, but aggregate
+	// scheduler samples at account scope so one account has one pool state.
+	err := s.firstTokenLatencyStatsCache.RecordSample(ctx, account.ID, usageLog.RequestID, *usageLog.DurationMs)
 	if err != nil {
 		slog.Warn("total_duration_latency_stats_record_failed", "account_id", account.ID, "error", err)
 	}

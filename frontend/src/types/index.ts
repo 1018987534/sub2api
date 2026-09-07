@@ -936,8 +936,6 @@ export interface AccountFirstTokenLatencyGroup {
 export interface AccountFirstTokenLatencyMetric {
   account_id: number
   account_name: string
-  requested_model?: string
-  reasoning_effort?: string
   predicted_ms: number
   normal_total_ms?: number
   p50_ms?: number

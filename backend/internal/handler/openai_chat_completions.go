@@ -292,6 +292,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
+		if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
+			trace.BeginAttempt(account.ID, len(forwardBody), forwardStart)
+		}
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {

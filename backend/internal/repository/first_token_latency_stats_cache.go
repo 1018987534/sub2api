@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
@@ -273,9 +272,7 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 
 func totalDurationDimensionKey(prefix string, dimension service.TotalDurationLatencyDimension) string {
 	dimension = service.NormalizeTotalDurationLatencyDimension(dimension)
-	model := base64.RawURLEncoding.EncodeToString([]byte(dimension.RequestedModel))
-	effort := base64.RawURLEncoding.EncodeToString([]byte(dimension.ReasoningEffort))
-	return fmt.Sprintf("%s%d:m:%s:e:%s", prefix, dimension.AccountID, model, effort)
+	return fmt.Sprintf("%s%d", prefix, dimension.AccountID)
 }
 
 func (c *firstTokenLatencyStatsCache) RecordSampleForDimension(ctx context.Context, dimension service.TotalDurationLatencyDimension, requestID string, durationMs int) error {
@@ -288,9 +285,7 @@ func (c *firstTokenLatencyStatsCache) RecordSampleForDimension(ctx context.Conte
 	const dedupeTTL = 26 * time.Hour
 	statsKey := totalDurationDimensionKey(totalLatencyDimensionStatsPrefix, dimension)
 	samplesKey := totalDurationDimensionKey(totalLatencyDimensionSamplesPrefix, dimension)
-	dedupeKey := fmt.Sprintf("scheduler:total_duration:dimension:event:%d:%s:%s:%s", dimension.AccountID,
-		base64.RawURLEncoding.EncodeToString([]byte(dimension.RequestedModel)),
-		base64.RawURLEncoding.EncodeToString([]byte(dimension.ReasoningEffort)), requestID)
+	dedupeKey := fmt.Sprintf("scheduler:total_duration:dimension:event:%d:%s", dimension.AccountID, requestID)
 	probeKey := totalDurationDimensionKey(totalLatencyDimensionProbePrefix, dimension)
 	manualProbeKey := totalDurationDimensionKey(totalLatencyDimensionManualProbePrefix, dimension)
 	policy := c.totalDurationLatencyPolicy()
@@ -303,11 +298,7 @@ func (c *firstTokenLatencyStatsCache) RecordSampleForDimension(ctx context.Conte
 		policy.RecentSlowRatio, int64(policy.CircuitBreakThreshold/time.Millisecond), requestID).Result(); err != nil {
 		return fmt.Errorf("record dimension total-duration stats: %w", err)
 	}
-	return c.rdb.HSet(ctx, statsKey,
-		"account_id", dimension.AccountID,
-		"requested_model", dimension.RequestedModel,
-		"reasoning_effort", dimension.ReasoningEffort,
-	).Err()
+	return c.rdb.HSet(ctx, statsKey, "account_id", dimension.AccountID).Err()
 }
 
 func (c *firstTokenLatencyStatsCache) TryClaimProbeForDimension(ctx context.Context, dimension service.TotalDurationLatencyDimension, lease time.Duration) (bool, error) {
@@ -513,29 +504,11 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatchForDimensions(ctx context.Con
 
 func parseTotalDurationDimensionKey(key string) (service.TotalDurationLatencyDimension, bool) {
 	value := strings.TrimPrefix(key, totalLatencyDimensionStatsPrefix)
-	parts := strings.Split(value, ":m:")
-	if len(parts) != 2 {
-		return service.TotalDurationLatencyDimension{}, false
-	}
-	accountID, err := strconv.ParseInt(parts[0], 10, 64)
+	accountID, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || accountID <= 0 {
 		return service.TotalDurationLatencyDimension{}, false
 	}
-	effortParts := strings.Split(parts[1], ":e:")
-	if len(effortParts) != 2 {
-		return service.TotalDurationLatencyDimension{}, false
-	}
-	model, err := base64.RawURLEncoding.DecodeString(effortParts[0])
-	if err != nil {
-		return service.TotalDurationLatencyDimension{}, false
-	}
-	effort, err := base64.RawURLEncoding.DecodeString(effortParts[1])
-	if err != nil {
-		return service.TotalDurationLatencyDimension{}, false
-	}
-	return service.NormalizeTotalDurationLatencyDimension(service.TotalDurationLatencyDimension{
-		AccountID: accountID, RequestedModel: string(model), ReasoningEffort: string(effort),
-	}), true
+	return service.NormalizeTotalDurationLatencyDimension(service.TotalDurationLatencyDimension{AccountID: accountID}), true
 }
 
 func (c *firstTokenLatencyStatsCache) ListStatsByAccountIDs(ctx context.Context, accountIDs []int64) ([]service.TotalDurationLatencyMetric, error) {
@@ -548,7 +521,7 @@ func (c *firstTokenLatencyStatsCache) ListStatsByAccountIDs(ctx context.Context,
 	if len(allowed) == 0 {
 		return []service.TotalDurationLatencyMetric{}, nil
 	}
-	// Dimension cardinality grows with account/model/reasoning combinations.
+	// Dimension keys are retained for compatibility, but are now account-scoped.
 	// Never use KEYS here because this endpoint is called from the admin
 	// dashboard and must not block Redis while scanning a production database.
 	var keys []string
