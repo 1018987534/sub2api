@@ -446,6 +446,7 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 	edgeRoutingWaitMs := t.edgeRoutingWaitMs
 	edgeRoutingSource := t.edgeRoutingSource
 	attemptCount := t.attemptCount
+	hasCurrentAttempt := t.attempt != nil
 	var attempt openAILatencyAttempt
 	attempts := make([]openAILatencyAttempt, 0, len(t.completedAttempts)+1)
 	attempts = append(attempts, t.completedAttempts...)
@@ -455,10 +456,16 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 	}
 	t.mu.Unlock()
 
-	if accountID == 0 {
+	if !hasCurrentAttempt {
+		// A handler can exceed the trace threshold before account selection
+		// succeeds. Do not attribute its local request ID or timing to an
+		// upstream attempt that never started.
+		accountID = 0
+		upstreamRequestID = ""
+	} else if accountID == 0 {
 		accountID = attempt.accountID
 	}
-	if strings.TrimSpace(upstreamRequestID) == "" {
+	if hasCurrentAttempt && strings.TrimSpace(upstreamRequestID) == "" {
 		upstreamRequestID = attempt.upstreamRequestID
 	}
 	firstFlush := attempt.firstDownstreamFlush
@@ -507,6 +514,10 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 			}
 		}
 	}
+	forwardToFlushMs := int64(0)
+	if hasCurrentAttempt {
+		forwardToFlushMs = nonNegativeMillis(firstFlush.Sub(attempt.forwardStart))
+	}
 	largestPhase, largestPhaseMs := openAILatencyLargestPhase([]openAILatencyPhase{
 		{name: "inbound_request_body_read", ms: requestBodyReadLatencyMs},
 		{name: "ingress_auth_middleware", ms: ingressToHandlerLatencyMs},
@@ -553,7 +564,7 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		zap.Int64("routing_other_ms", routingOtherMs),
 		zap.Int64("failed_attempt_elapsed_ms", failedAttemptElapsedMs),
 		zap.Int64("failover_wait_ms", failoverWaitMs),
-		zap.Int64("forward_to_flush_ms", nonNegativeMillis(firstFlush.Sub(attempt.forwardStart))),
+		zap.Int64("forward_to_flush_ms", forwardToFlushMs),
 		zap.Int64("upstream_request_prepare_ms", requestPrepareMs),
 		zap.Int64("client_acquire_ms", clientAcquireMs),
 		zap.Int64("transport_dispatch_ms", transportDispatchMs),

@@ -74,6 +74,26 @@ func TestOpenAILatencyTraceLogsSlowFirstFlushOnce(t *testing.T) {
 	logSink.mu.Unlock()
 }
 
+func TestOpenAILatencyTraceDoesNotInventUpstreamAttemptBeforeSelection(t *testing.T) {
+	logSink, restore := captureStructuredLog(t)
+	defer restore()
+
+	requestStart := time.Now().Add(-4 * time.Second)
+	trace := NewOpenAILatencyTrace(requestStart, 1024, "gpt-test", true)
+	trace.MarkRequestBodyReadLatency(3200 * time.Millisecond)
+	ctx := context.WithValue(context.Background(), ctxkey.RequestID, "rid-local")
+
+	trace.LogIfSlow(ctx, 3*time.Second, "handler_end", 0, "rid-local")
+
+	logSink.mu.Lock()
+	require.Len(t, logSink.events, 1)
+	fields := logSink.events[0].Fields
+	require.Equal(t, int64(0), fields["account_id"])
+	require.Equal(t, int64(0), fields["forward_to_flush_ms"])
+	require.Empty(t, fields["upstream_request_id"])
+	logSink.mu.Unlock()
+}
+
 func TestOpenAILatencyTraceDoesNotLogLongCompletionWhenFirstFlushWasFast(t *testing.T) {
 	logSink, restore := captureStructuredLog(t)
 	defer restore()
