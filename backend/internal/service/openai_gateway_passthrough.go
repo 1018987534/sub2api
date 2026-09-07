@@ -1829,8 +1829,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	account *Account,
 	startTime time.Time,
 	originalModel string,
-		mappedModel string,
-	) (*openaiStreamingResultPassthrough, error) {
+	mappedModel string,
+) (*openaiStreamingResultPassthrough, error) {
 	latencyTrace := OpenAILatencyTraceFromContext(ctx)
 	if latencyTrace != nil {
 		defer latencyTrace.LogIfSlow(ctx, OpenAISlowTraceThreshold(s.cfg), "stream_end", account.ID, resp.Header.Get("x-request-id"))
@@ -2229,10 +2229,10 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			failureDelivered = true
 		}
 	}
-		ensureResponseFailedTerminal()
-		if err := documentScanner.Err(); err != nil {
-			if (sawDone || sawTerminalEvent) && !sawFailedEvent {
-				s.clearOpenAIProxyStreamDisconnect(account)
+	ensureResponseFailedTerminal()
+	if err := documentScanner.Err(); err != nil {
+		if (sawDone || sawTerminalEvent) && !sawFailedEvent {
+			s.clearOpenAIProxyStreamDisconnect(account)
 			return resultWithUsage(), nil
 		}
 		if sawFailedEvent {
