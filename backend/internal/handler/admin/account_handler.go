@@ -147,8 +147,6 @@ type UpdateAccountRequest struct {
 	GroupIDs                     *[]int64       `json:"group_ids"`
 	ExpiresAt                    *int64         `json:"expires_at"`
 	AutoPauseOnExpired           *bool          `json:"auto_pause_on_expired"`
-	PeriodicScheduleRunMinutes   *int           `json:"periodic_schedule_run_minutes"`
-	PeriodicSchedulePauseMinutes *int           `json:"periodic_schedule_pause_minutes"`
 	ProbeEnabled                 *bool          `json:"upstream_billing_probe_enabled"`
 	RateSyncEnabled              *bool          `json:"upstream_billing_rate_sync_enabled"`
 	RateConversionRatio          *float64       `json:"upstream_billing_rate_conversion_ratio"`
@@ -1160,8 +1158,6 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		GroupIDs:                     req.GroupIDs,
 		ExpiresAt:                    req.ExpiresAt,
 		AutoPauseOnExpired:           req.AutoPauseOnExpired,
-		PeriodicScheduleRunMinutes:   req.PeriodicScheduleRunMinutes,
-		PeriodicSchedulePauseMinutes: req.PeriodicSchedulePauseMinutes,
 		ProbeEnabled:                 req.ProbeEnabled,
 		RateSyncEnabled:              req.RateSyncEnabled,
 		RateConversionRatio:          req.RateConversionRatio,

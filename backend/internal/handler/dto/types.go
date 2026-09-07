@@ -54,22 +54,21 @@ type AdminUser struct {
 }
 
 type APIKey struct {
-	ID          int64                      `json:"id"`
-	UserID      int64                      `json:"user_id"`
-	Key         string                     `json:"key"`
-	Name        string                     `json:"name"`
-	GroupID     *int64                     `json:"group_id"`
-	GroupRoutes []service.APIKeyGroupRoute `json:"group_routes"`
-	Status      string                     `json:"status"`
-	IPWhitelist []string                   `json:"ip_whitelist"`
-	IPBlacklist []string                   `json:"ip_blacklist"`
-	LastUsedAt  *time.Time                 `json:"last_used_at"`
-	LastUsedIP  *string                    `json:"last_used_ip"`
-	Quota       float64                    `json:"quota"`      // Quota limit in USD (0 = unlimited)
-	QuotaUsed   float64                    `json:"quota_used"` // Used quota amount in USD
-	ExpiresAt   *time.Time                 `json:"expires_at"` // Expiration time (nil = never expires)
-	CreatedAt   time.Time                  `json:"created_at"`
-	UpdatedAt   time.Time                  `json:"updated_at"`
+	ID          int64      `json:"id"`
+	UserID      int64      `json:"user_id"`
+	Key         string     `json:"key"`
+	Name        string     `json:"name"`
+	GroupID     *int64     `json:"group_id"`
+	Status      string     `json:"status"`
+	IPWhitelist []string   `json:"ip_whitelist"`
+	IPBlacklist []string   `json:"ip_blacklist"`
+	LastUsedAt  *time.Time `json:"last_used_at"`
+	LastUsedIP  *string    `json:"last_used_ip"`
+	Quota       float64    `json:"quota"`      // Quota limit in USD (0 = unlimited)
+	QuotaUsed   float64    `json:"quota_used"` // Used quota amount in USD
+	ExpiresAt   *time.Time `json:"expires_at"` // Expiration time (nil = never expires)
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 	// CurrentConcurrency is the real-time active request count for this API key.
 	CurrentConcurrency int `json:"current_concurrency"`
 
@@ -238,9 +237,8 @@ type Account struct {
 	RateLimitResetAt *time.Time `json:"rate_limit_reset_at"`
 	OverloadUntil    *time.Time `json:"overload_until"`
 
-	TempUnschedulableUntil  *time.Time                  `json:"temp_unschedulable_until"`
-	TempUnschedulableReason string                      `json:"temp_unschedulable_reason"`
-	PeriodicSchedulePause   PeriodicSchedulePauseStatus `json:"periodic_schedule_pause"`
+	TempUnschedulableUntil  *time.Time `json:"temp_unschedulable_until"`
+	TempUnschedulableReason string     `json:"temp_unschedulable_reason"`
 
 	SessionWindowStart  *time.Time `json:"session_window_start"`
 	SessionWindowEnd    *time.Time `json:"session_window_end"`
@@ -324,16 +322,6 @@ type Account struct {
 
 	GroupIDs []int64  `json:"group_ids,omitempty"`
 	Groups   []*Group `json:"groups,omitempty"`
-}
-
-type PeriodicSchedulePauseStatus struct {
-	Enabled      bool       `json:"enabled"`
-	RunMinutes   int        `json:"run_minutes"`
-	PauseMinutes int        `json:"pause_minutes"`
-	AnchorAt     *time.Time `json:"anchor_at"`
-	Paused       bool       `json:"paused"`
-	NextPauseAt  *time.Time `json:"next_pause_at"`
-	ResumeAt     *time.Time `json:"resume_at"`
 }
 
 // AccountListItem is the compact representation returned by the admin account

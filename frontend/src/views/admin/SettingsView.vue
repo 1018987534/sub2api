@@ -5265,41 +5265,42 @@
 
               <div
                 v-if="!form.openai_advanced_scheduler_enabled"
-                class="border-t border-gray-100 pt-5 dark:border-dark-700"
+                class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700"
               >
-                <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {{ t("admin.settings.scheduling.priorityModeTitle") }}
-                </label>
-                <div class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" :aria-label="t('admin.settings.scheduling.priorityModeTitle')">
-                  <button
-                    type="button"
-                    role="radio"
-                    :aria-checked="schedulerPriorityMode === 'first_token'"
-                    :class="schedulerPriorityMode === 'first_token' ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300' : 'border-gray-200 text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:text-gray-300'"
-                    class="min-h-24 border p-3 text-left transition-colors"
-                    data-testid="scheduler-priority-first-token"
-                    @click="schedulerPriorityMode = 'first_token'"
-                  >
-                    <span class="block text-sm font-semibold">{{ t("admin.settings.scheduling.firstTokenPriorityTitle") }}</span>
-                    <span class="mt-1 block text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t("admin.settings.scheduling.firstTokenPriorityDescription") }}</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="radio"
-                    :aria-checked="schedulerPriorityMode === 'low_rate'"
-                    :class="schedulerPriorityMode === 'low_rate' ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/20 dark:text-primary-300' : 'border-gray-200 text-gray-700 hover:border-gray-300 dark:border-dark-600 dark:text-gray-300'"
-                    class="min-h-24 border p-3 text-left transition-colors"
-                    data-testid="scheduler-priority-low-rate"
-                    @click="schedulerPriorityMode = 'low_rate'"
-                  >
-                    <span class="block text-sm font-semibold">{{ t("admin.settings.openaiExperimentalScheduler.lowRatePriorityTitle") }}</span>
-                    <span class="mt-1 block text-xs leading-5 text-gray-500 dark:text-gray-400">{{ t("admin.settings.scheduling.lowRateModeDescription") }}</span>
-                  </button>
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.scheduling.firstTokenPriorityTitle") }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.scheduling.firstTokenPriorityDescription") }}
+                  </p>
                 </div>
+                <Toggle
+                  v-model="form.total_duration_priority_enabled"
+                  data-testid="scheduler-priority-first-token"
+                />
               </div>
 
               <div
-                v-if="!form.openai_advanced_scheduler_enabled && schedulerPriorityMode === 'low_rate'"
+                v-if="!form.openai_advanced_scheduler_enabled"
+                class="flex items-center justify-between border-t border-gray-100 pt-5 dark:border-dark-700"
+              >
+                <div>
+                  <label class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    {{ t("admin.settings.openaiExperimentalScheduler.lowRatePriorityTitle") }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.openaiExperimentalScheduler.lowRatePriorityDescription") }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="form.openai_low_upstream_rate_priority_enabled"
+                  data-testid="openai-low-rate-priority-toggle"
+                />
+              </div>
+
+              <div
+                v-if="!form.openai_advanced_scheduler_enabled && form.openai_low_upstream_rate_priority_enabled"
                 class="flex flex-col items-stretch gap-3 border-t border-gray-100 pt-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6 dark:border-dark-700"
               >
                 <div class="min-w-0">
@@ -9841,7 +9842,6 @@ type SettingsForm = Omit<
   google_oauth_client_secret: string;
   force_email_on_third_party_signup: boolean;
   openai_low_upstream_rate_priority_enabled: boolean;
-  openai_low_upstream_rate_sticky_weighted_enabled: boolean;
   openai_oauth_scheduling_rate_multiplier: number;
   openai_advanced_scheduler_enabled: boolean;
   openai_advanced_scheduler_sticky_weighted_enabled: boolean;
@@ -10089,7 +10089,6 @@ const form = reactive<SettingsForm>({
   // 分组隔离
   allow_ungrouped_key_scheduling: false,
   openai_low_upstream_rate_priority_enabled: false,
-  openai_low_upstream_rate_sticky_weighted_enabled: false,
   openai_oauth_scheduling_rate_multiplier: 1,
   openai_advanced_scheduler_enabled: false,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
@@ -10154,19 +10153,6 @@ const form = reactive<SettingsForm>({
   affiliate_enabled: false,
   // Allow user view error requests
   allow_user_view_error_requests: false,
-});
-
-type SchedulerPriorityMode = "first_token" | "low_rate";
-
-const schedulerPriorityMode = computed<SchedulerPriorityMode>({
-  get: () => (form.total_duration_priority_enabled ?? form.first_token_priority_enabled) ? "first_token" : "low_rate",
-  set: (mode) => {
-    const firstToken = mode === "first_token";
-    form.total_duration_priority_enabled = firstToken;
-    form.first_token_priority_enabled = firstToken;
-    form.openai_low_upstream_rate_priority_enabled = !firstToken;
-    form.openai_low_upstream_rate_sticky_weighted_enabled = !firstToken;
-  },
 });
 
 // 人机验证 UI 状态：单卡片「总开关 + 服务商单选」，落库仍是三个独立
@@ -11788,9 +11774,7 @@ async function saveSettings() {
       payment_alipay_mobile_precreate_deep_link:
         form.payment_alipay_mobile_precreate_deep_link,
       openai_low_upstream_rate_priority_enabled:
-        schedulerPriorityMode.value === "low_rate",
-      openai_low_upstream_rate_sticky_weighted_enabled:
-        schedulerPriorityMode.value === "low_rate",
+        form.openai_low_upstream_rate_priority_enabled,
       openai_oauth_scheduling_rate_multiplier:
         form.openai_oauth_scheduling_rate_multiplier,
       openai_advanced_scheduler_enabled: form.openai_advanced_scheduler_enabled,
@@ -11887,7 +11871,7 @@ async function saveSettings() {
     payload.account_scheduling_thresholds = sanitizeAccountSchedulingThresholdsMap(
       form.account_scheduling_thresholds,
     );
-    payload.total_duration_priority_enabled = schedulerPriorityMode.value === "first_token";
+    payload.total_duration_priority_enabled = form.total_duration_priority_enabled;
     payload.first_token_priority_enabled = payload.total_duration_priority_enabled;
     appendAuthSourceDefaultsToUpdateRequest(payload, authSourceDefaults);
 

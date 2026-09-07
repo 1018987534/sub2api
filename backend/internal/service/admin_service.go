@@ -419,8 +419,6 @@ type UpdateAccountInput struct {
 	GroupIDs                     *[]int64
 	ExpiresAt                    *int64
 	AutoPauseOnExpired           *bool
-	PeriodicScheduleRunMinutes   *int
-	PeriodicSchedulePauseMinutes *int
 	ProbeEnabled                 *bool
 	RateSyncEnabled              *bool
 	RateConversionRatio          *float64

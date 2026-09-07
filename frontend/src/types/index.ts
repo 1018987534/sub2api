@@ -729,7 +729,6 @@ export interface ApiKey {
   key: string
   name: string
   group_id: number | null
-  group_routes?: ApiKeyGroupRoute[]
   status: 'active' | 'inactive' | 'quota_exhausted' | 'expired'
   ip_whitelist: string[]
   ip_blacklist: string[]
@@ -756,15 +755,9 @@ export interface ApiKey {
   reset_7d_at: string | null
 }
 
-export interface ApiKeyGroupRoute {
-  group_id: number
-  max_rate_multiplier?: number | null
-}
-
 export interface CreateApiKeyRequest {
   name: string
   group_id?: number | null
-  group_routes?: ApiKeyGroupRoute[]
   custom_key?: string // Optional custom API Key
   ip_whitelist?: string[]
   ip_blacklist?: string[]
@@ -778,7 +771,6 @@ export interface CreateApiKeyRequest {
 export interface UpdateApiKeyRequest {
   name?: string
   group_id?: number | null
-  group_routes?: ApiKeyGroupRoute[]
   status?: 'active' | 'inactive'
   ip_whitelist?: string[]
   ip_blacklist?: string[]
@@ -1074,13 +1066,6 @@ export interface TempUnschedulableRule {
   description: string
 }
 
-export interface TempUnschedulableFailureRule {
-  window_seconds: number
-  failure_threshold: number
-  duration_minutes: number
-  description: string
-}
-
 export interface TempUnschedulableState {
   until_unix: number
   triggered_at_unix: number
@@ -1088,10 +1073,6 @@ export interface TempUnschedulableState {
   matched_keyword: string
   rule_index: number
   error_message: string
-  trigger_mode?: 'rules' | 'consecutive_failures'
-  failure_count?: number
-  failure_threshold?: number
-  window_seconds?: number
   trigger_count?: number
   trigger_threshold?: number
   trigger_window_minutes?: number
@@ -1100,16 +1081,6 @@ export interface TempUnschedulableState {
 export interface TempUnschedulableStatus {
   active: boolean
   state?: TempUnschedulableState
-}
-
-export interface PeriodicSchedulePauseStatus {
-  enabled: boolean
-  run_minutes: number
-  pause_minutes: number
-  anchor_at: string | null
-  paused: boolean
-  next_pause_at: string | null
-  resume_at: string | null
 }
 
 export interface UpstreamBillingData {
@@ -1295,7 +1266,6 @@ export interface Account {
   overload_until: string | null
   temp_unschedulable_until: string | null
   temp_unschedulable_reason: string | null
-  periodic_schedule_pause?: PeriodicSchedulePauseStatus
 
   // Session window fields (5-hour window)
   session_window_start: string | null
@@ -1577,8 +1547,6 @@ export interface UpdateAccountRequest {
   group_ids?: number[]
   expires_at?: number | null
   auto_pause_on_expired?: boolean
-  periodic_schedule_run_minutes?: number
-  periodic_schedule_pause_minutes?: number
   upstream_billing_probe_enabled?: boolean
   upstream_billing_rate_sync_enabled?: boolean
   upstream_billing_rate_conversion_ratio?: number

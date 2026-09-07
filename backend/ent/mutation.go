@@ -116,8 +116,6 @@ type APIKeyMutation struct {
 	deleted_at         *time.Time
 	key                *string
 	name               *string
-	group_routes       *[]domain.APIKeyGroupRoute
-	appendgroup_routes []domain.APIKeyGroupRoute
 	status             *string
 	last_used_at       *time.Time
 	ip_whitelist       *[]string
@@ -531,57 +529,6 @@ func (m *APIKeyMutation) GroupIDCleared() bool {
 func (m *APIKeyMutation) ResetGroupID() {
 	m.group = nil
 	delete(m.clearedFields, apikey.FieldGroupID)
-}
-
-// SetGroupRoutes sets the "group_routes" field.
-func (m *APIKeyMutation) SetGroupRoutes(dkgr []domain.APIKeyGroupRoute) {
-	m.group_routes = &dkgr
-	m.appendgroup_routes = nil
-}
-
-// GroupRoutes returns the value of the "group_routes" field in the mutation.
-func (m *APIKeyMutation) GroupRoutes() (r []domain.APIKeyGroupRoute, exists bool) {
-	v := m.group_routes
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldGroupRoutes returns the old "group_routes" field's value of the APIKey entity.
-// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *APIKeyMutation) OldGroupRoutes(ctx context.Context) (v []domain.APIKeyGroupRoute, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldGroupRoutes is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldGroupRoutes requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldGroupRoutes: %w", err)
-	}
-	return oldValue.GroupRoutes, nil
-}
-
-// AppendGroupRoutes adds dkgr to the "group_routes" field.
-func (m *APIKeyMutation) AppendGroupRoutes(dkgr []domain.APIKeyGroupRoute) {
-	m.appendgroup_routes = append(m.appendgroup_routes, dkgr...)
-}
-
-// AppendedGroupRoutes returns the list of values that were appended to the "group_routes" field in this mutation.
-func (m *APIKeyMutation) AppendedGroupRoutes() ([]domain.APIKeyGroupRoute, bool) {
-	if len(m.appendgroup_routes) == 0 {
-		return nil, false
-	}
-	return m.appendgroup_routes, true
-}
-
-// ResetGroupRoutes resets all changes to the "group_routes" field.
-func (m *APIKeyMutation) ResetGroupRoutes() {
-	m.group_routes = nil
-	m.appendgroup_routes = nil
 }
 
 // SetStatus sets the "status" field.
@@ -1585,7 +1532,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 24)
+	fields := make([]string, 0, 23)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1606,9 +1553,6 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.group != nil {
 		fields = append(fields, apikey.FieldGroupID)
-	}
-	if m.group_routes != nil {
-		fields = append(fields, apikey.FieldGroupRoutes)
 	}
 	if m.status != nil {
 		fields = append(fields, apikey.FieldStatus)
@@ -1680,8 +1624,6 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.Name()
 	case apikey.FieldGroupID:
 		return m.GroupID()
-	case apikey.FieldGroupRoutes:
-		return m.GroupRoutes()
 	case apikey.FieldStatus:
 		return m.Status()
 	case apikey.FieldLastUsedAt:
@@ -1737,8 +1679,6 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldName(ctx)
 	case apikey.FieldGroupID:
 		return m.OldGroupID(ctx)
-	case apikey.FieldGroupRoutes:
-		return m.OldGroupRoutes(ctx)
 	case apikey.FieldStatus:
 		return m.OldStatus(ctx)
 	case apikey.FieldLastUsedAt:
@@ -1828,13 +1768,6 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetGroupID(v)
-		return nil
-	case apikey.FieldGroupRoutes:
-		v, ok := value.([]domain.APIKeyGroupRoute)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetGroupRoutes(v)
 		return nil
 	case apikey.FieldStatus:
 		v, ok := value.(string)
@@ -2173,9 +2106,6 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldGroupID:
 		m.ResetGroupID()
-		return nil
-	case apikey.FieldGroupRoutes:
-		m.ResetGroupRoutes()
 		return nil
 	case apikey.FieldStatus:
 		m.ResetStatus()

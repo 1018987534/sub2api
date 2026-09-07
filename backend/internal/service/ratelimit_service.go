@@ -3,9 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -16,9 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
-	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
@@ -29,7 +25,6 @@ type RateLimitService struct {
 	cfg                            *config.Config
 	geminiQuotaService             *GeminiQuotaService
 	tempUnschedCache               TempUnschedCache
-	tempUnschedFailureCounterCache TempUnschedFailureCounterCache
 	firstTokenLatencyStatsCache    FirstTokenLatencyStatsCache
 	openAIAPIKeyHealth             OpenAIAPIKeyHealthCache
 	timeoutCounterCache            TimeoutCounterCache
@@ -114,10 +109,6 @@ func (s *RateLimitService) SetTimeoutCounterCache(cache TimeoutCounterCache) {
 	s.timeoutCounterCache = cache
 }
 
-func (s *RateLimitService) SetTempUnschedFailureCounterCache(cache TempUnschedFailureCounterCache) {
-	s.tempUnschedFailureCounterCache = cache
-}
-
 func (s *RateLimitService) SetFirstTokenLatencyStatsCache(cache FirstTokenLatencyStatsCache) {
 	s.firstTokenLatencyStatsCache = cache
 }
@@ -125,7 +116,6 @@ func (s *RateLimitService) SetFirstTokenLatencyStatsCache(cache FirstTokenLatenc
 func (s *RateLimitService) SetOpenAIAPIKeyHealthCache(cache OpenAIAPIKeyHealthCache) {
 	s.openAIAPIKeyHealth = cache
 }
-
 // SetOpenAI403CounterCache 设置 OpenAI 403 连续失败计数器（可选依赖）
 func (s *RateLimitService) SetOpenAI403CounterCache(cache OpenAI403CounterCache) {
 	s.openAI403CounterCache = cache
@@ -307,17 +297,11 @@ const (
 )
 
 // CheckErrorPolicy checks custom error-code handling and temp-unsched rules.
-// Consecutive-failure mode counts every failed call before the status filter;
-// legacy error rules keep their original custom-code precedence.
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) ErrorPolicyResult {
 	if account == nil {
 		return ErrorPolicyNone
 	}
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
-	if !account.IsPoolMode() && account.GetTempUnschedulableMode() == TempUnschedulableModeConsecutiveFailures &&
-		s.tryConsecutiveFailureTempUnschedulable(ctx, account, statusCode, responseBody) {
-		return ErrorPolicyTempUnscheduled
-	}
 	if account.IsCustomErrorCodesEnabled() {
 		if account.ShouldHandleErrorCode(statusCode) {
 			return ErrorPolicyMatched
@@ -362,10 +346,6 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		slog.Info("pool_mode_error_skipped", "account_id", account.ID, "status_code", statusCode)
 		return false
 	}
-	if account.GetTempUnschedulableMode() == TempUnschedulableModeConsecutiveFailures &&
-		s.tryConsecutiveFailureTempUnschedulable(ctx, account, statusCode, responseBody) {
-		return true
-	}
 
 	// apikey 类型账号：检查自定义错误码配置
 	// 如果启用且错误码不在列表中，则不处理（不停止调度、不标记限流/过载）
@@ -404,7 +384,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 
 	// 先尝试临时不可调度规则（401除外）
 	// 如果匹配成功，直接返回，不执行后续禁用逻辑
-	if statusCode != 401 && account.GetTempUnschedulableMode() == TempUnschedulableModeRules {
+	if statusCode != 401 {
 		if s.tryTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
 			return true
 		}
@@ -2067,7 +2047,6 @@ func (s *RateLimitService) ClearRateLimit(ctx context.Context, accountID int64) 
 		}
 	}
 	s.ResetOpenAI403Counter(ctx, accountID)
-	s.ResetTempUnschedulableFailureCounters(ctx, accountID)
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
 }
@@ -2087,7 +2066,6 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 	if err != nil {
 		return nil, err
 	}
-	s.ResetTempUnschedulableFailureCounters(ctx, accountID)
 
 	result := &SuccessfulTestRecoveryResult{}
 	if account.Status == StatusError {
@@ -2137,7 +2115,6 @@ func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID
 	if err := s.accountRepo.ClearModelRateLimits(ctx, accountID); err != nil {
 		slog.Warn("clear_model_rate_limits_on_temp_unsched_reset_failed", "account_id", accountID, "error", err)
 	}
-	s.ResetTempUnschedulableFailureCounters(ctx, accountID)
 	s.notifyAccountSchedulingBlockCleared(accountID)
 	return nil
 }
@@ -2572,9 +2549,6 @@ func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Ac
 	if !account.IsTempUnschedulableEnabled() {
 		return false
 	}
-	if account.GetTempUnschedulableMode() == TempUnschedulableModeConsecutiveFailures {
-		return s.tryConsecutiveFailureTempUnschedulable(ctx, account, statusCode, responseBody)
-	}
 	// 401 首次命中可临时不可调度（给 token 刷新窗口）；
 	// 若历史上已因 401 进入过临时不可调度，则本次应升级为 error（返回 false 交由默认错误逻辑处理）。
 	// Antigravity 跳过：其 401 由 applyErrorPolicy 的 temp_unschedulable_rules 自行控制，无需升级逻辑。
@@ -2599,157 +2573,6 @@ func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Ac
 	}
 
 	return false
-}
-
-func (s *RateLimitService) HandleTempUnschedulableTransportFailure(ctx context.Context, account *Account, transportErr error) bool {
-	if transportErr == nil || errors.Is(transportErr, context.Canceled) || account == nil || account.IsPoolMode() {
-		return false
-	}
-	if account.GetTempUnschedulableMode() != TempUnschedulableModeConsecutiveFailures {
-		return false
-	}
-	return s.tryConsecutiveFailureTempUnschedulable(ctx, account, 0, []byte(transportErr.Error()))
-}
-
-func (s *RateLimitService) ResetTempUnschedulableFailureCounters(ctx context.Context, accountID int64) {
-	if s == nil || s.tempUnschedFailureCounterCache == nil || accountID <= 0 {
-		return
-	}
-	resetCtx, cancel := tempUnschedStateContext(ctx)
-	defer cancel()
-	if err := s.tempUnschedFailureCounterCache.ResetFailures(resetCtx, accountID); err != nil {
-		slog.Warn("temp_unsched_failure_counters_reset_failed", "account_id", accountID, "error", err)
-	}
-}
-
-func (s *RateLimitService) tryConsecutiveFailureTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte) bool {
-	if s == nil || account == nil || !account.IsTempUnschedulableEnabled() ||
-		account.IsPoolMode() ||
-		account.GetTempUnschedulableMode() != TempUnschedulableModeConsecutiveFailures ||
-		s.tempUnschedFailureCounterCache == nil || s.accountRepo == nil {
-		return false
-	}
-	eventID := tempUnschedFailureEventID(ctx)
-	stateCtx, cancel := tempUnschedStateContext(ctx)
-	defer cancel()
-	if account.TempUnschedulableUntil != nil && account.TempUnschedulableUntil.After(time.Now()) {
-		return true
-	}
-	if s.tempUnschedCache != nil {
-		state, err := s.tempUnschedCache.GetTempUnsched(stateCtx, account.ID)
-		if err != nil {
-			slog.Warn("temp_unsched_cache_get_failed", "account_id", account.ID, "error", err)
-		} else if state != nil && state.UntilUnix > time.Now().Unix() {
-			return true
-		}
-	}
-
-	rules := account.GetTempUnschedulableFailureRules()
-	if len(rules) == 0 {
-		return false
-	}
-	bestRuleIndex := -1
-	bestCount := int64(0)
-	bestRule := TempUnschedulableFailureRule{}
-	for idx, rule := range rules {
-		count, err := s.tempUnschedFailureCounterCache.RecordFailure(
-			stateCtx,
-			account.ID,
-			tempUnschedFailureRuleKey(idx, rule),
-			rule.WindowSeconds,
-			eventID,
-		)
-		if err != nil {
-			slog.Warn("temp_unsched_failure_record_failed", "account_id", account.ID, "rule_index", idx, "error", err)
-			continue
-		}
-		if count < int64(rule.FailureThreshold) {
-			continue
-		}
-		if bestRuleIndex == -1 || rule.DurationMinutes > bestRule.DurationMinutes {
-			bestRuleIndex = idx
-			bestRule = rule
-			bestCount = count
-		}
-	}
-	if bestRuleIndex < 0 {
-		return false
-	}
-	return s.triggerConsecutiveFailureTempUnschedulable(stateCtx, account, bestRule, bestRuleIndex, bestCount, statusCode, responseBody)
-}
-
-func tempUnschedFailureEventID(ctx context.Context) string {
-	if ctx != nil {
-		if value, _ := ctx.Value(ctxkey.RequestID).(string); strings.TrimSpace(value) != "" {
-			return "request:" + strings.TrimSpace(value)
-		}
-		if value, _ := ctx.Value(ctxkey.ClientRequestID).(string); strings.TrimSpace(value) != "" {
-			return "client:" + strings.TrimSpace(value)
-		}
-	}
-	return "generated:" + uuid.NewString()
-}
-
-func tempUnschedStateContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-}
-
-func tempUnschedFailureRuleKey(index int, rule TempUnschedulableFailureRule) string {
-	raw := fmt.Sprintf("%d:%d:%d:%d", index, rule.WindowSeconds, rule.FailureThreshold, rule.DurationMinutes)
-	sum := sha256.Sum256([]byte(raw))
-	return fmt.Sprintf("%x", sum[:8])
-}
-
-func (s *RateLimitService) triggerConsecutiveFailureTempUnschedulable(
-	ctx context.Context,
-	account *Account,
-	rule TempUnschedulableFailureRule,
-	ruleIndex int,
-	failureCount int64,
-	statusCode int,
-	responseBody []byte,
-) bool {
-	now := time.Now()
-	until := now.Add(time.Duration(rule.DurationMinutes) * time.Minute)
-	state := &TempUnschedState{
-		UntilUnix:        until.Unix(),
-		TriggeredAtUnix:  now.Unix(),
-		StatusCode:       statusCode,
-		RuleIndex:        ruleIndex,
-		ErrorMessage:     truncateTempUnschedMessage(responseBody, tempUnschedMessageMaxBytes),
-		TriggerMode:      TempUnschedulableModeConsecutiveFailures,
-		FailureCount:     failureCount,
-		FailureThreshold: rule.FailureThreshold,
-		WindowSeconds:    rule.WindowSeconds,
-	}
-	reason := strings.TrimSpace(state.ErrorMessage)
-	if raw, err := json.Marshal(state); err == nil {
-		reason = string(raw)
-	}
-
-	s.notifyAccountSchedulingBlocked(account, until, "temp_unschedulable_consecutive_failures")
-	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
-		slog.Warn("temp_unsched_set_failed", "account_id", account.ID, "error", err)
-		return false
-	}
-	if s.tempUnschedCache != nil {
-		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
-			slog.Warn("temp_unsched_cache_set_failed", "account_id", account.ID, "error", err)
-		}
-	}
-	s.ResetTempUnschedulableFailureCounters(ctx, account.ID)
-	slog.Info("account_temp_unschedulable_consecutive_failures",
-		"account_id", account.ID,
-		"until", until,
-		"rule_index", ruleIndex,
-		"failure_count", failureCount,
-		"failure_threshold", rule.FailureThreshold,
-		"window_seconds", rule.WindowSeconds,
-	)
-	return true
 }
 
 func wasTempUnschedByStatusCode(reason string, statusCode int) bool {

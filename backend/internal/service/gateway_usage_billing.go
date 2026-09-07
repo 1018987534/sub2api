@@ -718,10 +718,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	apiKey := input.APIKey
 	user := input.User
 	account := input.Account
-	if s.rateLimitService != nil && account != nil {
-		s.rateLimitService.ResetTempUnschedulableFailureCounters(ctx, account.ID)
-	}
-	apiKey, subscription := apiKeyAndSubscriptionForSelectedAccount(apiKey, input.Subscription, account)
+	subscription := input.Subscription
 	ApplyForwardImageBillingResolution(result)
 	logServiceTierBillingDowngrade("service.gateway", account, result.RequestID, ApplyForwardServiceTierBillingResolution(result))
 

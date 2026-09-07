@@ -2381,46 +2381,13 @@
         </div>
 
         <div v-if="tempUnschedEnabled" class="space-y-3">
-          <div
-            role="tablist"
-            class="inline-flex rounded-lg border border-gray-200 bg-gray-100 p-0.5 text-xs dark:border-dark-600 dark:bg-dark-700"
-          >
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="tempUnschedMode === 'rules'"
-              class="rounded-md px-3 py-1.5 transition-colors"
-              :class="tempUnschedMode === 'rules'
-                ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-dark-600 dark:text-white'
-                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
-              @click="setTempUnschedMode('rules')"
-            >
-              {{ t('admin.accounts.tempUnschedulable.modeRules') }}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="tempUnschedMode === 'consecutive_failures'"
-              class="rounded-md px-3 py-1.5 transition-colors"
-              :class="tempUnschedMode === 'consecutive_failures'
-                ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-dark-600 dark:text-white'
-                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
-              @click="setTempUnschedMode('consecutive_failures')"
-            >
-              {{ t('admin.accounts.tempUnschedulable.modeConsecutiveFailures') }}
-            </button>
-          </div>
-
           <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
               <p class="text-xs text-blue-700 dark:text-blue-400">
                 <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
-                {{ t(tempUnschedMode === 'rules'
-                  ? 'admin.accounts.tempUnschedulable.notice'
-                  : 'admin.accounts.tempUnschedulable.failureNotice') }}
+                {{ t('admin.accounts.tempUnschedulable.notice') }}
               </p>
             </div>
 
-          <template v-if="tempUnschedMode === 'rules'">
           <div class="flex flex-wrap gap-2">
             <button
               v-for="preset in tempUnschedPresets"
@@ -2532,64 +2499,6 @@
             </svg>
             {{ t('admin.accounts.tempUnschedulable.addRule') }}
           </button>
-          </template>
-
-          <template v-else>
-            <div v-if="tempUnschedFailureRules.length > 0" class="space-y-3">
-              <div
-                v-for="(rule, index) in tempUnschedFailureRules"
-                :key="getTempUnschedFailureRuleKey(rule)"
-                class="rounded-lg border border-gray-200 p-3 dark:border-dark-600"
-              >
-                <div class="mb-2 flex items-center justify-between">
-                  <span class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                    {{ t('admin.accounts.tempUnschedulable.ruleIndex', { index: index + 1 }) }}
-                  </span>
-                  <button
-                    type="button"
-                    class="rounded p-1 text-red-500 transition-colors hover:text-red-600"
-                    :title="t('common.delete')"
-                    @click="removeTempUnschedFailureRule(index)"
-                  >
-                    <Icon name="x" size="sm" :stroke-width="2" />
-                  </button>
-                </div>
-
-                <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div>
-                    <label class="input-label">{{ t('admin.accounts.tempUnschedulable.windowSeconds') }}</label>
-                    <input v-model.number="rule.window_seconds" type="number" min="1" max="86400" required class="input" />
-                  </div>
-                  <div>
-                    <label class="input-label">{{ t('admin.accounts.tempUnschedulable.failureThreshold') }}</label>
-                    <input v-model.number="rule.failure_threshold" type="number" min="1" max="1000" required class="input" />
-                  </div>
-                  <div>
-                    <label class="input-label">{{ t('admin.accounts.tempUnschedulable.pauseMinutes') }}</label>
-                    <input v-model.number="rule.duration_minutes" type="number" min="1" max="10080" required class="input" />
-                  </div>
-                  <div class="sm:col-span-3">
-                    <label class="input-label">{{ t('admin.accounts.tempUnschedulable.description') }}</label>
-                    <input
-                      v-model="rule.description"
-                      type="text"
-                      class="input"
-                      :placeholder="t('admin.accounts.tempUnschedulable.descriptionPlaceholder')"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-              @click="addTempUnschedFailureRule()"
-            >
-              <Icon name="plus" size="sm" class="mr-1 inline" :stroke-width="2" />
-              {{ t('admin.accounts.tempUnschedulable.addFailureRule') }}
-            </button>
-          </template>
         </div>
       </div>
 
@@ -4132,15 +4041,6 @@ interface TempUnschedRuleForm {
   description: string
 }
 
-type TempUnschedMode = 'rules' | 'consecutive_failures'
-
-interface TempUnschedFailureRuleForm {
-  window_seconds: number | null
-  failure_threshold: number | null
-  duration_minutes: number | null
-  description: string
-}
-
 // State
 const step = ref(1)
 const submitting = ref(false)
@@ -4442,14 +4342,11 @@ const vertexClientEmail = ref('')
 const vertexLocation = ref('global')
 const vertexServiceAccountDragActive = ref(false)
 const tempUnschedEnabled = ref(false)
-const tempUnschedMode = ref<TempUnschedMode>('rules')
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
-const tempUnschedFailureRules = ref<TempUnschedFailureRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('create-model-mapping')
 const getOpenAICompactModelMappingKey = createStableObjectKeyResolver<ModelMapping>('create-openai-compact-model-mapping')
 const getAntigravityModelMappingKey = createStableObjectKeyResolver<ModelMapping>('create-antigravity-model-mapping')
 const getTempUnschedRuleKey = createStableObjectKeyResolver<TempUnschedRuleForm>('create-temp-unsched-rule')
-const getTempUnschedFailureRuleKey = createStableObjectKeyResolver<TempUnschedFailureRuleForm>('create-temp-unsched-failure-rule')
 const geminiOAuthType = ref<'code_assist' | 'google_one' | 'ai_studio'>('google_one')
 const geminiAIStudioOAuthEnabled = ref(false)
 const openAICompactModeOptions = computed(() => [
@@ -4721,6 +4618,325 @@ const canExchangeCode = computed(() => {
   }
   return authCode.trim() && oauth.sessionId.value && !oauth.loading.value
 })
+
+const appendCopySuffix = (name: string) => {
+  const suffix = t('admin.accounts.copyAccountNameSuffix')
+  return name.trim() ? `${name.trim()} ${suffix}` : suffix
+}
+
+const loadModelRestrictionFromMapping = (rawMapping?: Record<string, unknown>) => {
+  const parsed = splitModelMappingObject(rawMapping)
+  allowedModels.value = parsed.allowedModels
+  modelMappings.value = parsed.modelMappings
+  modelRestrictionMode.value =
+    parsed.modelMappings.length > 0 && parsed.allowedModels.length === 0
+      ? 'mapping'
+      : 'whitelist'
+}
+
+function formatTempUnschedKeywords(value: unknown) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .join(', ')
+  }
+  if (typeof value === 'string') {
+    return value
+  }
+  return ''
+}
+
+function toPositiveNumber(value: unknown) {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) {
+    return null
+  }
+  return Math.trunc(num)
+}
+
+function loadTempUnschedRules(credentials?: Record<string, unknown>) {
+  tempUnschedEnabled.value = credentials?.temp_unschedulable_enabled === true
+  const rawRules = credentials?.temp_unschedulable_rules
+  if (!Array.isArray(rawRules)) {
+    tempUnschedRules.value = []
+    return
+  }
+
+  tempUnschedRules.value = rawRules.map((rule) => {
+    const entry = rule as Record<string, unknown>
+    return {
+      error_code: toPositiveNumber(entry.error_code),
+      keywords: formatTempUnschedKeywords(entry.keywords),
+      duration_minutes: toPositiveNumber(entry.duration_minutes),
+      description: typeof entry.description === 'string' ? entry.description : ''
+    }
+  })
+}
+
+function resetQuotaControlState() {
+  windowCostEnabled.value = false
+  windowCostLimit.value = null
+  windowCostStickyReserve.value = null
+  sessionLimitEnabled.value = false
+  maxSessions.value = null
+  sessionIdleTimeout.value = null
+  rpmLimitEnabled.value = false
+  baseRpm.value = null
+  rpmStrategy.value = 'tiered'
+  rpmStickyBuffer.value = null
+  userMsgQueueMode.value = ''
+  tlsFingerprintEnabled.value = false
+  tlsFingerprintProfileId.value = null
+  sessionIdMaskingEnabled.value = false
+  cacheTTLOverrideEnabled.value = false
+  cacheTTLOverrideTarget.value = '5m'
+  customBaseUrlEnabled.value = false
+  customBaseUrl.value = ''
+}
+
+function loadQuotaControlSettings(account: Account) {
+  resetQuotaControlState()
+  if (account.platform !== 'anthropic') {
+    return
+  }
+  if (account.type !== 'oauth' && account.type !== 'setup-token') {
+    return
+  }
+  if (account.window_cost_limit != null && account.window_cost_limit > 0) {
+    windowCostEnabled.value = true
+    windowCostLimit.value = account.window_cost_limit
+    windowCostStickyReserve.value = account.window_cost_sticky_reserve ?? 10
+  }
+  if (account.max_sessions != null && account.max_sessions > 0) {
+    sessionLimitEnabled.value = true
+    maxSessions.value = account.max_sessions
+    sessionIdleTimeout.value = account.session_idle_timeout_minutes ?? 5
+  }
+  if (account.base_rpm != null && account.base_rpm > 0) {
+    rpmLimitEnabled.value = true
+    baseRpm.value = account.base_rpm
+    rpmStrategy.value = (account.rpm_strategy as 'tiered' | 'sticky_exempt') || 'tiered'
+    rpmStickyBuffer.value = account.rpm_sticky_buffer ?? null
+  }
+  userMsgQueueMode.value = account.user_msg_queue_mode ?? ''
+  if (account.enable_tls_fingerprint === true) {
+    tlsFingerprintEnabled.value = true
+  }
+  tlsFingerprintProfileId.value = account.tls_fingerprint_profile_id ?? null
+  if (account.session_id_masking_enabled === true) {
+    sessionIdMaskingEnabled.value = true
+  }
+  if (account.cache_ttl_override_enabled === true) {
+    cacheTTLOverrideEnabled.value = true
+    cacheTTLOverrideTarget.value = account.cache_ttl_override_target || '5m'
+  }
+  if (account.custom_base_url_enabled === true) {
+    customBaseUrlEnabled.value = true
+    customBaseUrl.value = account.custom_base_url || ''
+  }
+}
+
+function applyInitialAccount(account: Account) {
+  applyingInitialAccount.value = true
+  try {
+    resetForm()
+    const credentials = account.credentials as Record<string, unknown> | undefined
+    const extra = account.extra as Record<string, unknown> | undefined
+
+    form.name = appendCopySuffix(account.name)
+    form.notes = account.notes || ''
+    form.platform = account.platform
+    form.proxy_id = account.proxy_id
+    form.concurrency = account.concurrency || 10
+    form.load_factor = account.load_factor ?? null
+    form.priority = account.priority || 1
+    form.rate_multiplier = account.rate_multiplier ?? 1
+    form.group_ids = [...(account.group_ids || [])]
+    form.expires_at = account.expires_at ?? null
+    form.credentials = {}
+
+    if (account.type === 'apikey') {
+      accountCategory.value = 'apikey'
+      apiKeyBaseUrl.value = String(credentials?.base_url || (
+        account.platform === 'openai'
+          ? 'https://api.openai.com'
+          : account.platform === 'gemini'
+            ? 'https://generativelanguage.googleapis.com'
+            : 'https://api.anthropic.com'
+      ))
+      apiKeyValue.value = typeof credentials?.api_key === 'string' ? credentials.api_key : ''
+      if (account.platform === 'gemini') {
+        const tier = credentials?.tier_id
+        if (tier === 'aistudio_paid' || tier === 'aistudio_free') {
+          geminiTierAIStudio.value = tier
+        }
+      }
+      loadModelRestrictionFromMapping(credentials?.model_mapping as Record<string, unknown> | undefined)
+    } else if (account.type === 'bedrock' && account.platform === 'anthropic') {
+      accountCategory.value = 'bedrock'
+      bedrockAuthMode.value = credentials?.auth_mode === 'apikey' ? 'apikey' : 'sigv4'
+      bedrockAccessKeyId.value = typeof credentials?.aws_access_key_id === 'string' ? credentials.aws_access_key_id : ''
+      bedrockSecretAccessKey.value = typeof credentials?.aws_secret_access_key === 'string' ? credentials.aws_secret_access_key : ''
+      bedrockSessionToken.value = typeof credentials?.aws_session_token === 'string' ? credentials.aws_session_token : ''
+      bedrockRegion.value = typeof credentials?.aws_region === 'string' ? credentials.aws_region : 'us-east-1'
+      bedrockForceGlobal.value = credentials?.aws_force_global === 'true'
+      bedrockApiKeyValue.value = typeof credentials?.api_key === 'string' ? credentials.api_key : ''
+      loadModelRestrictionFromMapping(credentials?.model_mapping as Record<string, unknown> | undefined)
+    } else if ((account.platform === 'gemini' || account.platform === 'anthropic') && account.type === 'service_account') {
+      accountCategory.value = 'service_account'
+      vertexProjectId.value = typeof credentials?.project_id === 'string' ? credentials.project_id : ''
+      vertexClientEmail.value = typeof credentials?.client_email === 'string' ? credentials.client_email : ''
+      vertexLocation.value =
+        typeof credentials?.location === 'string'
+          ? credentials.location
+          : typeof credentials?.vertex_location === 'string'
+            ? credentials.vertex_location
+            : 'global'
+      vertexServiceAccountJson.value =
+        typeof credentials?.service_account_json === 'string'
+          ? credentials.service_account_json
+          : typeof credentials?.service_account === 'string'
+            ? credentials.service_account
+            : ''
+      loadModelRestrictionFromMapping(credentials?.model_mapping as Record<string, unknown> | undefined)
+    } else {
+      accountCategory.value = 'oauth-based'
+      addMethod.value = account.type === 'setup-token' ? 'setup-token' : 'oauth'
+      if (account.platform === 'gemini') {
+        const tier = credentials?.tier_id
+        if (tier === 'google_ai_pro' || tier === 'google_ai_ultra' || tier === 'google_one_free') {
+          geminiOAuthType.value = 'google_one'
+          geminiTierGoogleOne.value = tier
+        } else if (tier === 'gcp_enterprise' || tier === 'gcp_standard') {
+          geminiOAuthType.value = 'code_assist'
+          geminiTierGcp.value = tier
+        } else if (tier === 'aistudio_paid' || tier === 'aistudio_free') {
+          geminiOAuthType.value = 'ai_studio'
+          geminiTierAIStudio.value = tier
+        }
+      }
+      if (account.platform === 'openai') {
+        loadModelRestrictionFromMapping(credentials?.model_mapping as Record<string, unknown> | undefined)
+      }
+    }
+
+    if (account.platform === 'antigravity') {
+      antigravityAccountType.value = account.type === 'apikey' || account.type === 'upstream' ? 'upstream' : 'oauth'
+      upstreamBaseUrl.value = typeof credentials?.base_url === 'string' ? credentials.base_url : ''
+      upstreamApiKey.value = typeof credentials?.api_key === 'string' ? credentials.api_key : ''
+      antigravityModelRestrictionMode.value = 'mapping'
+      antigravityWhitelistModels.value = []
+      const rawAgMapping = credentials?.model_mapping as Record<string, string> | undefined
+      if (rawAgMapping && typeof rawAgMapping === 'object') {
+        antigravityModelMappings.value = Object.entries(rawAgMapping).map(([from, to]) => ({ from, to }))
+      } else {
+        const rawWhitelist = credentials?.model_whitelist
+        antigravityModelMappings.value = Array.isArray(rawWhitelist)
+          ? rawWhitelist
+              .map((v) => String(v).trim())
+              .filter((v) => v.length > 0)
+              .map((model) => ({ from: model, to: model }))
+          : []
+      }
+    }
+
+    interceptWarmupRequests.value = credentials?.intercept_warmup_requests === true
+    autoPauseOnExpired.value = account.auto_pause_on_expired === true
+    loadTempUnschedRules(credentials)
+    loadQuotaControlSettings(account)
+
+    mixedScheduling.value = extra?.mixed_scheduling === true
+    allowOverages.value = extra?.allow_overages === true
+    openaiPassthroughEnabled.value = false
+    openAICompactMode.value = 'auto'
+    openAIResponsesMode.value = 'auto'
+    openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
+    openAICompactModelMappings.value = []
+    openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+    openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
+    codexCLIOnlyEnabled.value = false
+    codexCLIOnlyAppServerEnabled.value = false
+    anthropicPassthroughEnabled.value = false
+    webSearchEmulationMode.value = 'default'
+
+    if (account.platform === 'openai' && (account.type === 'oauth' || account.type === 'apikey')) {
+      openaiPassthroughEnabled.value = extra?.openai_passthrough === true || extra?.openai_oauth_passthrough === true
+      openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
+      if (account.type === 'apikey') {
+        openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
+        openAIEndpointCapabilities.value = readOpenAIEndpointCapabilities(credentials)
+        if (!openAITextGenerationCapabilityEnabled.value) {
+          openAIResponsesMode.value = 'auto'
+        }
+      }
+      openaiOAuthResponsesWebSocketV2Mode.value =
+        typeof extra?.openai_oauth_responses_websockets_v2_mode === 'string'
+          ? extra.openai_oauth_responses_websockets_v2_mode as OpenAIWSMode
+          : extra?.openai_oauth_responses_websockets_v2_enabled === true || extra?.responses_websockets_v2_enabled === true || extra?.openai_ws_enabled === true
+            ? OPENAI_WS_MODE_CTX_POOL
+            : OPENAI_WS_MODE_OFF
+      openaiAPIKeyResponsesWebSocketV2Mode.value =
+        typeof extra?.openai_apikey_responses_websockets_v2_mode === 'string'
+          ? extra.openai_apikey_responses_websockets_v2_mode as OpenAIWSMode
+          : extra?.openai_apikey_responses_websockets_v2_enabled === true || extra?.responses_websockets_v2_enabled === true || extra?.openai_ws_enabled === true
+            ? OPENAI_WS_MODE_CTX_POOL
+            : OPENAI_WS_MODE_OFF
+      codexCLIOnlyEnabled.value = account.type === 'oauth' && extra?.codex_cli_only === true
+      codexCLIOnlyAppServerEnabled.value =
+        extra?.codex_cli_only_allow_app_server === true ||
+        (
+          Array.isArray(extra?.codex_cli_only_allowed_clients) &&
+          (extra.codex_cli_only_allowed_clients as unknown[]).includes('claude_code')
+        )
+      const compactMappings = credentials?.compact_model_mapping as Record<string, string> | undefined
+      if (compactMappings && typeof compactMappings === 'object') {
+        openAICompactModelMappings.value = Object.entries(compactMappings).map(([from, to]) => ({ from, to }))
+      }
+    }
+
+    if (account.platform === 'anthropic' && account.type === 'apikey') {
+      anthropicPassthroughEnabled.value = extra?.anthropic_passthrough === true
+      const wsVal = extra?.web_search_emulation
+      webSearchEmulationMode.value =
+        wsVal === 'enabled' || wsVal === 'disabled'
+          ? wsVal
+          : wsVal === true
+            ? 'enabled'
+            : 'default'
+    }
+
+    if (account.type === 'apikey' || account.type === 'bedrock') {
+      editQuotaLimit.value = typeof extra?.quota_limit === 'number' && extra.quota_limit > 0 ? extra.quota_limit : null
+      editQuotaDailyLimit.value = typeof extra?.quota_daily_limit === 'number' && extra.quota_daily_limit > 0 ? extra.quota_daily_limit : null
+      editQuotaWeeklyLimit.value = typeof extra?.quota_weekly_limit === 'number' && extra.quota_weekly_limit > 0 ? extra.quota_weekly_limit : null
+      editDailyResetMode.value = (extra?.quota_daily_reset_mode as 'rolling' | 'fixed') || null
+      editDailyResetHour.value = (extra?.quota_daily_reset_hour as number) ?? null
+      editWeeklyResetMode.value = (extra?.quota_weekly_reset_mode as 'rolling' | 'fixed') || null
+      editWeeklyResetDay.value = (extra?.quota_weekly_reset_day as number) ?? null
+      editWeeklyResetHour.value = (extra?.quota_weekly_reset_hour as number) ?? null
+      editResetTimezone.value = (extra?.quota_reset_timezone as string) || null
+      loadQuotaNotifyFromExtra(extra)
+    }
+
+    if (account.type === 'apikey' || account.type === 'bedrock') {
+      poolModeEnabled.value = credentials?.pool_mode === true
+      poolModeRetryCount.value = normalizePoolModeRetryCount(
+        Number(credentials?.pool_mode_retry_count ?? DEFAULT_POOL_MODE_RETRY_COUNT)
+      )
+      poolModeRetryStatusCodesInput.value = formatPoolModeRetryStatusCodes(credentials?.pool_mode_retry_status_codes)
+      customErrorCodesEnabled.value = credentials?.custom_error_codes_enabled === true
+      selectedErrorCodes.value = Array.isArray(credentials?.custom_error_codes)
+        ? [...credentials.custom_error_codes].map((v) => Number(v)).filter((v) => Number.isInteger(v))
+        : []
+    }
+  } finally {
+    queueMicrotask(() => {
+      applyingInitialAccount.value = false
+    })
+  }
+}
 
 // Watchers
 watch(
@@ -5043,26 +5259,6 @@ const removeTempUnschedRule = (index: number) => {
   tempUnschedRules.value.splice(index, 1)
 }
 
-const addTempUnschedFailureRule = () => {
-  tempUnschedFailureRules.value.push({
-    window_seconds: 60,
-    failure_threshold: 3,
-    duration_minutes: 10,
-    description: ''
-  })
-}
-
-const removeTempUnschedFailureRule = (index: number) => {
-  tempUnschedFailureRules.value.splice(index, 1)
-}
-
-const setTempUnschedMode = (mode: TempUnschedMode) => {
-  tempUnschedMode.value = mode
-  if (mode === 'consecutive_failures' && tempUnschedFailureRules.value.length === 0) {
-    addTempUnschedFailureRule()
-  }
-}
-
 const moveTempUnschedRule = (index: number, direction: number) => {
   const target = index + direction
   if (target < 0 || target >= tempUnschedRules.value.length) return
@@ -5104,49 +5300,9 @@ const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
   return out
 }
 
-const buildTempUnschedFailureRules = (rules: TempUnschedFailureRuleForm[]) => {
-  const out: Array<{
-    window_seconds: number
-    failure_threshold: number
-    duration_minutes: number
-    description: string
-  }> = []
-
-  for (const rule of rules) {
-    const windowSeconds = Number(rule.window_seconds)
-    const failureThreshold = Number(rule.failure_threshold)
-    const durationMinutes = Number(rule.duration_minutes)
-    if (!Number.isFinite(windowSeconds) || windowSeconds < 1 || windowSeconds > 86400) continue
-    if (!Number.isFinite(failureThreshold) || failureThreshold < 1 || failureThreshold > 1000) continue
-    if (!Number.isFinite(durationMinutes) || durationMinutes < 1 || durationMinutes > 10080) continue
-    out.push({
-      window_seconds: Math.trunc(windowSeconds),
-      failure_threshold: Math.trunc(failureThreshold),
-      duration_minutes: Math.trunc(durationMinutes),
-      description: rule.description.trim()
-    })
-  }
-  return out
-}
-
 const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {
   if (!tempUnschedEnabled.value) {
     delete credentials.temp_unschedulable_enabled
-    delete credentials.temp_unschedulable_mode
-    delete credentials.temp_unschedulable_rules
-    delete credentials.temp_unschedulable_failure_rules
-    return true
-  }
-
-  credentials.temp_unschedulable_enabled = true
-  credentials.temp_unschedulable_mode = tempUnschedMode.value
-  if (tempUnschedMode.value === 'consecutive_failures') {
-    const rules = buildTempUnschedFailureRules(tempUnschedFailureRules.value)
-    if (rules.length === 0 || rules.length !== tempUnschedFailureRules.value.length) {
-      appStore.showError(t('admin.accounts.tempUnschedulable.failureRulesInvalid'))
-      return false
-    }
-    credentials.temp_unschedulable_failure_rules = rules
     delete credentials.temp_unschedulable_rules
     return true
   }
@@ -5156,8 +5312,9 @@ const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {
     appStore.showError(t('admin.accounts.tempUnschedulable.rulesInvalid'))
     return false
   }
+
+  credentials.temp_unschedulable_enabled = true
   credentials.temp_unschedulable_rules = rules
-  delete credentials.temp_unschedulable_failure_rules
   return true
 }
 
@@ -5397,9 +5554,7 @@ const resetForm = () => {
   vertexClientEmail.value = ''
   vertexLocation.value = 'global'
   tempUnschedEnabled.value = false
-  tempUnschedMode.value = 'rules'
   tempUnschedRules.value = []
-  tempUnschedFailureRules.value = []
   geminiOAuthType.value = 'code_assist'
   geminiTierGoogleOne.value = 'google_one_free'
   geminiTierGcp.value = 'gcp_standard'
@@ -6999,8 +7154,11 @@ const handleCookieAuth = async (sessionKey: string) => {
       return
     }
 
-    const tempUnschedCredentials: Record<string, unknown> = {}
-    if (!applyTempUnschedConfig(tempUnschedCredentials)) {
+    const tempUnschedPayload = tempUnschedEnabled.value
+      ? buildTempUnschedRules(tempUnschedRules.value)
+      : []
+    if (tempUnschedEnabled.value && tempUnschedPayload.length === 0) {
+      appStore.showError(t('admin.accounts.tempUnschedulable.rulesInvalid'))
       return
     }
 
@@ -7083,7 +7241,10 @@ const handleCookieAuth = async (sessionKey: string) => {
 
         const credentials: Record<string, unknown> = { ...tokenInfo }
         applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
-        Object.assign(credentials, tempUnschedCredentials)
+        if (tempUnschedEnabled.value) {
+          credentials.temp_unschedulable_enabled = true
+          credentials.temp_unschedulable_rules = tempUnschedPayload
+        }
 
         await adminAPI.accounts.create({
           name: accountName,

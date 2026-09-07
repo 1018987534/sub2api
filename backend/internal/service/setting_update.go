@@ -99,7 +99,6 @@ func (s *SettingService) refreshCachedSettingsAfterWrite(ctx context.Context, se
 }
 
 func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, settings *SystemSettings) (map[string]string, error) {
-	normalizeOpenAISchedulerPriorityMode(settings)
 	if err := s.validateDefaultSignupAPIKeyGroup(ctx, settings.DefaultSignupAPIKeyGroupID); err != nil {
 		return nil, err
 	}
@@ -508,7 +507,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingPaymentVisibleMethodAlipayEnabled] = strconv.FormatBool(settings.PaymentVisibleMethodAlipayEnabled)
 	updates[SettingPaymentVisibleMethodWxpayEnabled] = strconv.FormatBool(settings.PaymentVisibleMethodWxpayEnabled)
 	updates[SettingKeyOpenAILowUpstreamRatePriorityEnabled] = strconv.FormatBool(settings.OpenAILowUpstreamRatePriorityEnabled)
-	updates[SettingKeyOpenAILowUpstreamRateStickyWeightedEnabled] = strconv.FormatBool(settings.OpenAILowUpstreamRateStickyWeightedEnabled)
 	updates[SettingKeyOpenAIOAuthSchedulingRateMultiplier] = strconv.FormatFloat(settings.OpenAIOAuthSchedulingRateMultiplier, 'f', -1, 64)
 	updates[openAIAdvancedSchedulerSettingKey] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerEnabled)
 	updates[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled] = strconv.FormatBool(settings.OpenAIAdvancedSchedulerStickyWeightedEnabled)
@@ -562,19 +560,6 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyAllowUserViewErrorRequests] = strconv.FormatBool(settings.AllowUserViewErrorRequests)
 
 	return updates, nil
-}
-
-func normalizeOpenAISchedulerPriorityMode(settings *SystemSettings) {
-	if settings == nil {
-		return
-	}
-	if settings.FirstTokenPriorityEnabled {
-		settings.OpenAILowUpstreamRatePriorityEnabled = false
-		settings.OpenAILowUpstreamRateStickyWeightedEnabled = false
-		return
-	}
-	settings.OpenAILowUpstreamRatePriorityEnabled = true
-	settings.OpenAILowUpstreamRateStickyWeightedEnabled = true
 }
 
 func defaultAccountSchedulingThresholds() map[string]int {
@@ -767,14 +752,13 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	s.InvalidateOpenAICodexClientVersionCache()
 	openAIAdvancedSchedulerSettingSF.Forget(openAIAdvancedSchedulerSettingKey)
 	openAIAdvancedSchedulerSettingCache.Store(&cachedOpenAIAdvancedSchedulerSetting{
-		lowUpstreamRatePriorityEnabled:       settings.OpenAILowUpstreamRatePriorityEnabled,
-		lowUpstreamRateStickyWeightedEnabled: settings.OpenAILowUpstreamRateStickyWeightedEnabled,
-		oauthSchedulingRateMultiplier:        settings.OpenAIOAuthSchedulingRateMultiplier,
-		enabled:                              settings.OpenAIAdvancedSchedulerEnabled,
-		stickyWeightedEnabled:                settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
-		subscriptionPriorityEnabled:          settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
-		firstTokenPriorityEnabled:            settings.FirstTokenPriorityEnabled,
-		lbTopKOverride:                       parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),
+		lowUpstreamRatePriorityEnabled: settings.OpenAILowUpstreamRatePriorityEnabled,
+		oauthSchedulingRateMultiplier:  settings.OpenAIOAuthSchedulingRateMultiplier,
+		enabled:                        settings.OpenAIAdvancedSchedulerEnabled,
+		stickyWeightedEnabled:          settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
+		subscriptionPriorityEnabled:    settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
+		firstTokenPriorityEnabled:      settings.FirstTokenPriorityEnabled,
+		lbTopKOverride:                 parsePositiveIntOverride(settings.OpenAIAdvancedSchedulerLBTopK),
 		weightOverrides: parseOpenAIAdvancedSchedulerWeightOverrides(map[string]string{
 			SettingKeyOpenAIAdvancedSchedulerWeightPriority:         settings.OpenAIAdvancedSchedulerWeightPriority,
 			SettingKeyOpenAIAdvancedSchedulerWeightLoad:             settings.OpenAIAdvancedSchedulerWeightLoad,
