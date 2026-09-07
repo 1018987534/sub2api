@@ -1519,24 +1519,24 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 		// 系统全局 platform quota 默认值（整体替换语义）
 		DefaultPlatformQuotas:       req.DefaultPlatformQuotas,
 		AccountSchedulingThresholds: req.AccountSchedulingThresholds,
-			TotalDurationPriorityEnabled: func() bool {
-				if req.TotalDurationPriorityEnabled != nil {
-					return *req.TotalDurationPriorityEnabled
-				}
-				if req.FirstTokenPriorityEnabled != nil {
-					return *req.FirstTokenPriorityEnabled
-				}
-				return previousSettings.TotalDurationPriorityEnabled
-			}(),
-			FirstTokenPriorityEnabled: func() bool {
-				if req.TotalDurationPriorityEnabled != nil {
-					return *req.TotalDurationPriorityEnabled
-				}
-				if req.FirstTokenPriorityEnabled != nil {
-					return *req.FirstTokenPriorityEnabled
-				}
-				return previousSettings.FirstTokenPriorityEnabled
-			}(),
+		TotalDurationPriorityEnabled: func() bool {
+			if req.TotalDurationPriorityEnabled != nil {
+				return *req.TotalDurationPriorityEnabled
+			}
+			if req.FirstTokenPriorityEnabled != nil {
+				return *req.FirstTokenPriorityEnabled
+			}
+			return previousSettings.TotalDurationPriorityEnabled
+		}(),
+		FirstTokenPriorityEnabled: func() bool {
+			if req.TotalDurationPriorityEnabled != nil {
+				return *req.TotalDurationPriorityEnabled
+			}
+			if req.FirstTokenPriorityEnabled != nil {
+				return *req.FirstTokenPriorityEnabled
+			}
+			return previousSettings.FirstTokenPriorityEnabled
+		}(),
 
 		RegistrationEnabled:                 req.RegistrationEnabled,
 		EmailVerifyEnabled:                  req.EmailVerifyEnabled,
@@ -2437,13 +2437,13 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 
 		AffiliateEnabled: updatedSettings.AffiliateEnabled,
 
-		RiskControlEnabled:          updatedSettings.RiskControlEnabled,
-		CyberSessionBlockEnabled:    updatedSettings.CyberSessionBlockEnabled,
-		CyberSessionBlockTTLSeconds: updatedSettings.CyberSessionBlockTTLSeconds,
-		AccountSchedulingThresholds: updatedSettings.AccountSchedulingThresholds,
+		RiskControlEnabled:           updatedSettings.RiskControlEnabled,
+		CyberSessionBlockEnabled:     updatedSettings.CyberSessionBlockEnabled,
+		CyberSessionBlockTTLSeconds:  updatedSettings.CyberSessionBlockTTLSeconds,
+		AccountSchedulingThresholds:  updatedSettings.AccountSchedulingThresholds,
 		TotalDurationPriorityEnabled: updatedSettings.TotalDurationPriorityEnabled,
 		FirstTokenPriorityEnabled:    updatedSettings.FirstTokenPriorityEnabled,
-		AllowUserViewErrorRequests:  updatedSettings.AllowUserViewErrorRequests,
+		AllowUserViewErrorRequests:   updatedSettings.AllowUserViewErrorRequests,
 	}
 	if fastPolicy, err := h.settingService.GetOpenAIFastPolicySettings(c.Request.Context()); err != nil {
 		slog.Error("openai_fast_policy_settings_get_failed", "error", err)

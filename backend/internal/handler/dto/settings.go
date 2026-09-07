@@ -266,7 +266,7 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEffectiveWeightUpstreamCost     string  `json:"openai_advanced_scheduler_effective_weight_upstream_cost"`
 	OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse string  `json:"openai_advanced_scheduler_effective_weight_previous_response"`
 	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string  `json:"openai_advanced_scheduler_effective_weight_session_sticky"`
-	TotalDurationPriorityEnabled                          bool    `json:"total_duration_priority_enabled"`
+	TotalDurationPriorityEnabled                           bool    `json:"total_duration_priority_enabled"`
 	FirstTokenPriorityEnabled                              bool    `json:"first_token_priority_enabled"`
 
 	// Payment configuration
