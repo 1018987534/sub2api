@@ -272,11 +272,14 @@
                 </span>
               </div>
               <div class="divide-y divide-gray-100 md:hidden dark:divide-dark-700">
-                <div v-for="metric in group.metrics" :key="`mobile:${group.id}:${metric.account_id}`" class="px-4 py-3" data-testid="first-token-mobile-row">
+                <div v-for="metric in group.metrics" :key="`mobile:${group.id}:${metric.account_id}:${metric.requested_model || ''}:${metric.reasoning_effort || ''}`" class="px-4 py-3" data-testid="first-token-mobile-row">
                   <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
                       <div class="truncate font-medium text-gray-900 dark:text-white" :title="metric.account_name">{{ metric.account_name }}</div>
                       <div class="text-xs text-gray-400">#{{ metric.account_id }}</div>
+                      <div v-if="metric.requested_model" class="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                        {{ metric.requested_model }}<span v-if="metric.reasoning_effort"> · {{ metric.reasoning_effort }}</span>
+                      </div>
                     </div>
                     <div class="flex shrink-0 items-center gap-2">
                       <span class="inline-flex items-center gap-1.5 text-sm font-medium" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
@@ -297,6 +300,12 @@
                     </div>
                   </div>
                   <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div v-if="metric.requested_model">
+                      <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenDimension') }}</dt>
+                      <dd class="mt-0.5 truncate text-gray-700 dark:text-gray-300" :title="`${metric.requested_model} · ${metric.reasoning_effort || 'unspecified'}`">
+                        {{ metric.requested_model }} · {{ metric.reasoning_effort || 'unspecified' }}
+                      </dd>
+                    </div>
                     <div>
                       <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenPrediction') }}</dt>
                       <dd class="mt-0.5 font-mono text-sm font-semibold" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
@@ -337,6 +346,8 @@
                   <thead class="text-xs text-gray-500 dark:text-gray-400">
                     <tr>
                       <th class="w-[17%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
+                      <th class="w-[14%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenModel') }}</th>
+                      <th class="w-[8%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenEffort') }}</th>
                       <th class="w-[11%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
                       <th class="w-[15%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPercentiles') }}</th>
                       <th class="w-[8%] px-4 py-2.5 font-medium">{{ t('admin.dashboard.firstTokenPool') }}</th>
@@ -349,10 +360,16 @@
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
-                    <tr v-for="metric in group.metrics" :key="`${group.id}:${metric.account_id}`" data-testid="first-token-latency-row">
+                    <tr v-for="metric in group.metrics" :key="`${group.id}:${metric.account_id}:${metric.requested_model || ''}:${metric.reasoning_effort || ''}`" data-testid="first-token-latency-row">
                       <td class="px-4 py-3">
                         <div class="truncate font-medium text-gray-900 dark:text-white" :title="metric.account_name">{{ metric.account_name }}</div>
                         <div class="text-xs text-gray-400">#{{ metric.account_id }}</div>
+                      </td>
+                      <td class="truncate px-4 py-3 text-xs text-gray-700 dark:text-gray-300" :title="metric.requested_model || '-'">
+                        {{ metric.requested_model || '-' }}
+                      </td>
+                      <td class="px-4 py-3 text-xs text-gray-700 dark:text-gray-300">
+                        {{ metric.reasoning_effort || '-' }}
                       </td>
                       <td data-testid="first-token-prediction" class="px-4 py-3 font-mono font-semibold" :class="metric.is_fast_pool ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
                         {{ metric.has_prediction ? formatDuration(totalDurationScore(metric)) : t('admin.dashboard.firstTokenPendingSample') }}
@@ -645,6 +662,7 @@ const visibleFirstTokenGroups = computed(() => {
 
 const firstTokenPoolLabel = (metric: AccountFirstTokenLatencyMetric) => {
   if (metric.is_fast_pool) return t('admin.dashboard.firstTokenFastPool')
+  if (metric.circuit_broken) return t('admin.dashboard.firstTokenCircuitBrokenPool')
   if (metric.recovery_fast_streak > 0) {
     return t('admin.dashboard.firstTokenSlowPoolRecovering', {
       current: Math.min(metric.recovery_fast_streak, 2),

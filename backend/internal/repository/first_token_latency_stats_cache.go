@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -15,6 +17,10 @@ const totalLatencyStatsPrefix = "scheduler:total_duration:account:"
 const totalLatencySamplesPrefix = "scheduler:total_duration:samples:"
 const totalLatencyProbePrefix = "scheduler:total_duration:probe:"
 const totalLatencyManualProbePrefix = "scheduler:total_duration:manual_probe:"
+const totalLatencyDimensionStatsPrefix = "scheduler:total_duration:dimension:account:"
+const totalLatencyDimensionSamplesPrefix = "scheduler:total_duration:dimension:samples:"
+const totalLatencyDimensionProbePrefix = "scheduler:total_duration:dimension:probe:"
+const totalLatencyDimensionManualProbePrefix = "scheduler:total_duration:dimension:manual_probe:"
 const totalLatencyFastThresholdMS = 17_000
 const totalLatencySlowThresholdMS = 21_000
 
@@ -38,12 +44,38 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local fast_threshold_ms = tonumber(ARGV[7])
 	local slow_threshold_ms = tonumber(ARGV[8])
 	local confirmations = tonumber(ARGV[9])
-	local request_id = ARGV[10]
+	local recent_window_ms = tonumber(ARGV[10])
+	local recent_slow_threshold_ms = tonumber(ARGV[11])
+	local recent_slow_ratio = tonumber(ARGV[12])
+	local circuit_break_threshold_ms = tonumber(ARGV[13])
+	local request_id = ARGV[14]
 	local now = redis.call('TIME')
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 
 	if redis.call('SET', dedupe_key, '1', 'NX', 'EX', dedupe_ttl_seconds) == false then
 		return 0
+	end
+
+	-- A single very long completed request is an immediate circuit break. Keep
+	-- an explicit pending hash so the scheduler can expose the reset state and
+	-- sticky selection cannot reuse the old fast-pool decision.
+	local function reset_pending(circuit_broken)
+		redis.call('DEL', stats_key, samples_key, probe_key, manual_probe_key)
+		redis.call('HSET', stats_key,
+			'sample_count', '0',
+			'window_hours', '0',
+			'is_fast', '0',
+			'enter_fast_streak', '0',
+			'exit_slow_streak', '0',
+			'circuit_broken', tostring(circuit_broken),
+			'updated_at_ms', tostring(now_ms),
+			'score_version', '4')
+		redis.call('EXPIRE', stats_key, stats_ttl_seconds)
+	end
+
+	if circuit_break_threshold_ms > 0 and duration_ms > circuit_break_threshold_ms then
+		reset_pending(1)
+		return 3
 	end
 
 	redis.call('ZREMRANGEBYSCORE', samples_key, '-inf', now_ms - fallback_window_ms)
@@ -67,11 +99,24 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 		samples = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - fallback_window_ms, '+inf'))
 		window_hours = 24
 	end
-
 	local old_updated = tonumber(redis.call('HGET', stats_key, 'updated_at_ms'))
 	local is_fast = tonumber(redis.call('HGET', stats_key, 'is_fast')) or 0
 	local enter_fast_streak = tonumber(redis.call('HGET', stats_key, 'enter_fast_streak')) or 0
 	local exit_slow_streak = tonumber(redis.call('HGET', stats_key, 'exit_slow_streak')) or 0
+	local recent = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - recent_window_ms, '+inf'))
+	local recent_slow = 0
+	for _, value in ipairs(recent) do
+		if value > recent_slow_threshold_ms then recent_slow = recent_slow + 1 end
+	end
+	local recent_overload = #recent > 0 and (recent_slow / #recent) > recent_slow_ratio
+	if recent_overload and is_fast == 1 then
+		-- A fast pool that suddenly produces too many minute-plus requests is
+		-- considered untrusted. Drop the whole rolling state so it re-enters
+		-- as "pending collection" instead of carrying stale fast samples.
+		reset_pending(0)
+		return 2
+	end
+
 	if not old_updated or now_ms - old_updated > primary_window_ms then
 		is_fast = 0
 		enter_fast_streak = 0
@@ -86,8 +131,9 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'is_fast', '0',
 			'enter_fast_streak', '0',
 			'exit_slow_streak', '0',
+			'circuit_broken', '0',
 			'updated_at_ms', tostring(now_ms),
-			'score_version', '3')
+			'score_version', '4')
 	else
 		table.sort(samples)
 		local trim = math.floor(#samples * 0.10)
@@ -136,8 +182,9 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'is_fast', tostring(is_fast),
 			'enter_fast_streak', tostring(enter_fast_streak),
 			'exit_slow_streak', tostring(exit_slow_streak),
+			'circuit_broken', '0',
 			'updated_at_ms', tostring(now_ms),
-			'score_version', '3')
+			'score_version', '4')
 	end
 
 	redis.call('EXPIRE', stats_key, stats_ttl_seconds)
@@ -160,13 +207,31 @@ var totalLatencyManualProbeClaimScript = redis.NewScript(`
 `)
 
 type firstTokenLatencyStatsCache struct {
-	rdb *redis.Client
+	rdb      *redis.Client
+	policyMu sync.RWMutex
+	policy   service.TotalDurationLatencyPolicy
 }
 
 // NewFirstTokenLatencyStatsCache retains the existing provider name for wire
 // compatibility. Its data and behavior are total-duration based.
 func NewFirstTokenLatencyStatsCache(rdb *redis.Client) service.FirstTokenLatencyStatsCache {
-	return &firstTokenLatencyStatsCache{rdb: rdb}
+	return &firstTokenLatencyStatsCache{rdb: rdb, policy: service.DefaultTotalDurationLatencyPolicy()}
+}
+
+func (c *firstTokenLatencyStatsCache) ConfigureTotalDurationLatencyPolicy(policy service.TotalDurationLatencyPolicy) {
+	if c == nil {
+		return
+	}
+	c.policyMu.Lock()
+	c.policy = service.NormalizeTotalDurationLatencyPolicy(policy)
+	c.policyMu.Unlock()
+}
+
+func (c *firstTokenLatencyStatsCache) totalDurationLatencyPolicy() service.TotalDurationLatencyPolicy {
+	c.policyMu.RLock()
+	policy := c.policy
+	c.policyMu.RUnlock()
+	return service.NormalizeTotalDurationLatencyPolicy(policy)
 }
 
 func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountID int64, requestID string, durationMs int) error {
@@ -181,6 +246,7 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 	dedupeKey := fmt.Sprintf("scheduler:total_duration:event:%d:%s", accountID, requestID)
 	probeKey := fmt.Sprintf("%s%d", totalLatencyProbePrefix, accountID)
 	manualProbeKey := fmt.Sprintf("%s%d", totalLatencyManualProbePrefix, accountID)
+	policy := c.totalDurationLatencyPolicy()
 	if _, err := totalLatencyStatsRecordScript.Run(
 		ctx,
 		c.rdb,
@@ -194,11 +260,105 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 		totalLatencyFastThresholdMS,
 		totalLatencySlowThresholdMS,
 		3,
+		int64(policy.RecentWindow/time.Millisecond),
+		int64(policy.RecentSlowThreshold/time.Millisecond),
+		policy.RecentSlowRatio,
+		int64(policy.CircuitBreakThreshold/time.Millisecond),
 		requestID,
 	).Result(); err != nil {
 		return fmt.Errorf("record total-duration stats: %w", err)
 	}
 	return nil
+}
+
+func totalDurationDimensionKey(prefix string, dimension service.TotalDurationLatencyDimension) string {
+	dimension = service.NormalizeTotalDurationLatencyDimension(dimension)
+	model := base64.RawURLEncoding.EncodeToString([]byte(dimension.RequestedModel))
+	effort := base64.RawURLEncoding.EncodeToString([]byte(dimension.ReasoningEffort))
+	return fmt.Sprintf("%s%d:m:%s:e:%s", prefix, dimension.AccountID, model, effort)
+}
+
+func (c *firstTokenLatencyStatsCache) RecordSampleForDimension(ctx context.Context, dimension service.TotalDurationLatencyDimension, requestID string, durationMs int) error {
+	dimension = service.NormalizeTotalDurationLatencyDimension(dimension)
+	requestID = strings.TrimSpace(requestID)
+	if dimension.AccountID <= 0 || requestID == "" || durationMs <= 0 {
+		return nil
+	}
+	const statsTTL = 26 * time.Hour
+	const dedupeTTL = 26 * time.Hour
+	statsKey := totalDurationDimensionKey(totalLatencyDimensionStatsPrefix, dimension)
+	samplesKey := totalDurationDimensionKey(totalLatencyDimensionSamplesPrefix, dimension)
+	dedupeKey := fmt.Sprintf("scheduler:total_duration:dimension:event:%d:%s:%s:%s", dimension.AccountID,
+		base64.RawURLEncoding.EncodeToString([]byte(dimension.RequestedModel)),
+		base64.RawURLEncoding.EncodeToString([]byte(dimension.ReasoningEffort)), requestID)
+	probeKey := totalDurationDimensionKey(totalLatencyDimensionProbePrefix, dimension)
+	manualProbeKey := totalDurationDimensionKey(totalLatencyDimensionManualProbePrefix, dimension)
+	policy := c.totalDurationLatencyPolicy()
+	if _, err := totalLatencyStatsRecordScript.Run(ctx, c.rdb,
+		[]string{statsKey, samplesKey, dedupeKey, probeKey, manualProbeKey},
+		durationMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds()), 20,
+		int64((6*time.Hour)/time.Millisecond), int64((24*time.Hour)/time.Millisecond),
+		totalLatencyFastThresholdMS, totalLatencySlowThresholdMS, 3,
+		int64(policy.RecentWindow/time.Millisecond), int64(policy.RecentSlowThreshold/time.Millisecond),
+		policy.RecentSlowRatio, int64(policy.CircuitBreakThreshold/time.Millisecond), requestID).Result(); err != nil {
+		return fmt.Errorf("record dimension total-duration stats: %w", err)
+	}
+	return c.rdb.HSet(ctx, statsKey,
+		"account_id", dimension.AccountID,
+		"requested_model", dimension.RequestedModel,
+		"reasoning_effort", dimension.ReasoningEffort,
+	).Err()
+}
+
+func (c *firstTokenLatencyStatsCache) TryClaimProbeForDimension(ctx context.Context, dimension service.TotalDurationLatencyDimension, lease time.Duration) (bool, error) {
+	dimension = service.NormalizeTotalDurationLatencyDimension(dimension)
+	if dimension.AccountID <= 0 || lease <= 0 {
+		return false, nil
+	}
+	claimed, err := c.rdb.SetNX(ctx, totalDurationDimensionKey(totalLatencyDimensionProbePrefix, dimension), "1", lease).Result()
+	if err != nil {
+		return false, fmt.Errorf("claim dimension total-duration probe: %w", err)
+	}
+	return claimed, nil
+}
+
+func (c *firstTokenLatencyStatsCache) RequestManualProbeForDimension(ctx context.Context, dimension service.TotalDurationLatencyDimension, ttl time.Duration) error {
+	dimension = service.NormalizeTotalDurationLatencyDimension(dimension)
+	if dimension.AccountID <= 0 || ttl <= 0 {
+		return nil
+	}
+	return c.rdb.Set(ctx, totalDurationDimensionKey(totalLatencyDimensionManualProbePrefix, dimension), "1", ttl).Err()
+}
+
+func (c *firstTokenLatencyStatsCache) TryClaimManualProbeForDimensions(ctx context.Context, dimensions []service.TotalDurationLatencyDimension, lease time.Duration) (service.TotalDurationLatencyDimension, bool, error) {
+	if len(dimensions) == 0 || lease <= 0 {
+		return service.TotalDurationLatencyDimension{}, false, nil
+	}
+	normalized := make([]service.TotalDurationLatencyDimension, 0, len(dimensions))
+	queuedKeys := make([]string, 0, len(dimensions))
+	for _, dimension := range dimensions {
+		dimension = service.NormalizeTotalDurationLatencyDimension(dimension)
+		if dimension.AccountID <= 0 {
+			continue
+		}
+		normalized = append(normalized, dimension)
+		queuedKeys = append(queuedKeys, totalDurationDimensionKey(totalLatencyDimensionManualProbePrefix, dimension))
+	}
+	if len(normalized) == 0 {
+		return service.TotalDurationLatencyDimension{}, false, nil
+	}
+	keys := append([]string(nil), queuedKeys...)
+	for _, dimension := range normalized {
+		keys = append(keys, totalDurationDimensionKey(totalLatencyDimensionProbePrefix, dimension))
+	}
+	claimedIndex, err := totalLatencyManualProbeClaimScript.Run(ctx, c.rdb, keys, len(normalized), int(lease.Seconds())).Int()
+	if err != nil {
+		return service.TotalDurationLatencyDimension{}, false, fmt.Errorf("claim dimension total-duration manual probe: %w", err)
+	}
+	if claimedIndex <= 0 || claimedIndex > len(normalized) {
+		return service.TotalDurationLatencyDimension{}, false, nil
+	}
+	return normalized[claimedIndex-1], true, nil
 }
 
 func (c *firstTokenLatencyStatsCache) RequestManualProbe(ctx context.Context, accountID int64, ttl time.Duration) error {
@@ -264,46 +424,163 @@ func (c *firstTokenLatencyStatsCache) GetStatsBatch(ctx context.Context, account
 		}
 		commands[accountID] = pipe.HMGet(ctx, fmt.Sprintf("%s%d", totalLatencyStatsPrefix, accountID),
 			"normal_total_ms", "p50_ms", "p90_ms", "sample_count", "window_hours",
-			"updated_at_ms", "exit_slow_streak", "is_fast", "enter_fast_streak", "score_version")
+			"updated_at_ms", "exit_slow_streak", "is_fast", "enter_fast_streak", "score_version", "circuit_broken")
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("get total-duration stats: %w", err)
 	}
 	for accountID, cmd := range commands {
 		values, err := cmd.Result()
-		if err != nil || len(values) != 10 || values[3] == nil || values[5] == nil {
+		if err != nil {
 			continue
 		}
-		count, countErr := strconv.ParseInt(fmt.Sprint(values[3]), 10, 64)
-		updatedAtMS, updatedErr := strconv.ParseInt(fmt.Sprint(values[5]), 10, 64)
-		if countErr != nil || updatedErr != nil || updatedAtMS <= 0 {
-			continue
+		if stat, ok := parseTotalDurationStats(values); ok {
+			result[accountID] = stat
 		}
-		stat := service.FirstTokenLatencyStats{
-			SampleCount:             count,
-			UpdatedAt:               time.UnixMilli(updatedAtMS),
-			ReliableFast:            values[7] != nil && fmt.Sprint(values[7]) == "1",
-			FastConfirmationTracked: true,
-		}
-		if values[0] != nil && strings.TrimSpace(fmt.Sprint(values[0])) != "" {
-			stat.PredictedMS, _ = strconv.ParseFloat(fmt.Sprint(values[0]), 64)
-		}
-		if values[1] != nil {
-			stat.P50MS, _ = strconv.ParseFloat(fmt.Sprint(values[1]), 64)
-		}
-		if values[2] != nil {
-			stat.P90MS, _ = strconv.ParseFloat(fmt.Sprint(values[2]), 64)
-		}
-		if values[4] != nil {
-			stat.WindowHours, _ = strconv.Atoi(fmt.Sprint(values[4]))
-		}
-		if values[6] != nil {
-			stat.SlowStreak, _ = strconv.Atoi(fmt.Sprint(values[6]))
-		}
-		if values[8] != nil {
-			stat.RecoveryFastStreak, _ = strconv.Atoi(fmt.Sprint(values[8]))
-		}
-		result[accountID] = stat
 	}
 	return result, nil
+}
+
+func parseTotalDurationStats(values []interface{}) (service.FirstTokenLatencyStats, bool) {
+	if (len(values) != 10 && len(values) != 11) || values[3] == nil || values[5] == nil {
+		return service.FirstTokenLatencyStats{}, false
+	}
+	count, countErr := strconv.ParseInt(fmt.Sprint(values[3]), 10, 64)
+	updatedAtMS, updatedErr := strconv.ParseInt(fmt.Sprint(values[5]), 10, 64)
+	if countErr != nil || updatedErr != nil || updatedAtMS <= 0 {
+		return service.FirstTokenLatencyStats{}, false
+	}
+	stat := service.FirstTokenLatencyStats{
+		SampleCount:             count,
+		UpdatedAt:               time.UnixMilli(updatedAtMS),
+		ReliableFast:            values[7] != nil && fmt.Sprint(values[7]) == "1",
+		FastConfirmationTracked: true,
+	}
+	if values[0] != nil && strings.TrimSpace(fmt.Sprint(values[0])) != "" {
+		stat.PredictedMS, _ = strconv.ParseFloat(fmt.Sprint(values[0]), 64)
+	}
+	if values[1] != nil {
+		stat.P50MS, _ = strconv.ParseFloat(fmt.Sprint(values[1]), 64)
+	}
+	if values[2] != nil {
+		stat.P90MS, _ = strconv.ParseFloat(fmt.Sprint(values[2]), 64)
+	}
+	if values[4] != nil {
+		stat.WindowHours, _ = strconv.Atoi(fmt.Sprint(values[4]))
+	}
+	if values[6] != nil {
+		stat.SlowStreak, _ = strconv.Atoi(fmt.Sprint(values[6]))
+	}
+	if values[8] != nil {
+		stat.RecoveryFastStreak, _ = strconv.Atoi(fmt.Sprint(values[8]))
+	}
+	if len(values) > 10 && values[10] != nil {
+		stat.CircuitBroken = fmt.Sprint(values[10]) == "1"
+	}
+	return stat, true
+}
+
+func (c *firstTokenLatencyStatsCache) GetStatsBatchForDimensions(ctx context.Context, dimensions []service.TotalDurationLatencyDimension) (map[service.TotalDurationLatencyDimension]service.FirstTokenLatencyStats, error) {
+	result := make(map[service.TotalDurationLatencyDimension]service.FirstTokenLatencyStats, len(dimensions))
+	if len(dimensions) == 0 {
+		return result, nil
+	}
+	pipe := c.rdb.Pipeline()
+	commands := make(map[service.TotalDurationLatencyDimension]*redis.SliceCmd, len(dimensions))
+	for _, dimension := range dimensions {
+		dimension = service.NormalizeTotalDurationLatencyDimension(dimension)
+		if dimension.AccountID <= 0 {
+			continue
+		}
+		commands[dimension] = pipe.HMGet(ctx, totalDurationDimensionKey(totalLatencyDimensionStatsPrefix, dimension),
+			"normal_total_ms", "p50_ms", "p90_ms", "sample_count", "window_hours",
+			"updated_at_ms", "exit_slow_streak", "is_fast", "enter_fast_streak", "score_version", "circuit_broken")
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("get dimension total-duration stats: %w", err)
+	}
+	for dimension, command := range commands {
+		values, err := command.Result()
+		if err != nil {
+			continue
+		}
+		if stat, ok := parseTotalDurationStats(values); ok {
+			result[dimension] = stat
+		}
+	}
+	return result, nil
+}
+
+func parseTotalDurationDimensionKey(key string) (service.TotalDurationLatencyDimension, bool) {
+	value := strings.TrimPrefix(key, totalLatencyDimensionStatsPrefix)
+	parts := strings.Split(value, ":m:")
+	if len(parts) != 2 {
+		return service.TotalDurationLatencyDimension{}, false
+	}
+	accountID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || accountID <= 0 {
+		return service.TotalDurationLatencyDimension{}, false
+	}
+	effortParts := strings.Split(parts[1], ":e:")
+	if len(effortParts) != 2 {
+		return service.TotalDurationLatencyDimension{}, false
+	}
+	model, err := base64.RawURLEncoding.DecodeString(effortParts[0])
+	if err != nil {
+		return service.TotalDurationLatencyDimension{}, false
+	}
+	effort, err := base64.RawURLEncoding.DecodeString(effortParts[1])
+	if err != nil {
+		return service.TotalDurationLatencyDimension{}, false
+	}
+	return service.NormalizeTotalDurationLatencyDimension(service.TotalDurationLatencyDimension{
+		AccountID: accountID, RequestedModel: string(model), ReasoningEffort: string(effort),
+	}), true
+}
+
+func (c *firstTokenLatencyStatsCache) ListStatsByAccountIDs(ctx context.Context, accountIDs []int64) ([]service.TotalDurationLatencyMetric, error) {
+	allowed := make(map[int64]struct{}, len(accountIDs))
+	for _, accountID := range accountIDs {
+		if accountID > 0 {
+			allowed[accountID] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return []service.TotalDurationLatencyMetric{}, nil
+	}
+	// Dimension cardinality grows with account/model/reasoning combinations.
+	// Never use KEYS here because this endpoint is called from the admin
+	// dashboard and must not block Redis while scanning a production database.
+	var keys []string
+	for cursor := uint64(0); ; {
+		batch, nextCursor, err := c.rdb.Scan(ctx, cursor, totalLatencyDimensionStatsPrefix+"*", 200).Result()
+		if err != nil {
+			return nil, fmt.Errorf("scan dimension total-duration stats: %w", err)
+		}
+		keys = append(keys, batch...)
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	metrics := make([]service.TotalDurationLatencyMetric, 0, len(keys))
+	for _, key := range keys {
+		dimension, ok := parseTotalDurationDimensionKey(key)
+		if !ok {
+			continue
+		}
+		if _, ok := allowed[dimension.AccountID]; !ok {
+			continue
+		}
+		values, err := c.rdb.HMGet(ctx, key,
+			"normal_total_ms", "p50_ms", "p90_ms", "sample_count", "window_hours",
+			"updated_at_ms", "exit_slow_streak", "is_fast", "enter_fast_streak", "score_version", "circuit_broken").Result()
+		if err != nil {
+			continue
+		}
+		if stat, ok := parseTotalDurationStats(values); ok {
+			metrics = append(metrics, service.TotalDurationLatencyMetric{Dimension: dimension, Stats: stat})
+		}
+	}
+	return metrics, nil
 }

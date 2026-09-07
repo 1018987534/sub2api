@@ -610,9 +610,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
 
-	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
+	if _, ok := service.OpsLatencyMs(c, service.OpsAuthLatencyMsKey); !ok {
+		service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
+	}
 	if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
-		trace.MarkAuthLatency(time.Since(requestStart))
+		if authMs, ok := service.OpsLatencyMs(c, service.OpsAuthLatencyMsKey); ok {
+			trace.MarkAuthLatency(time.Duration(authMs) * time.Millisecond)
+		} else {
+			trace.MarkAuthLatency(time.Since(requestStart))
+		}
 	}
 	routingStart := time.Now()
 

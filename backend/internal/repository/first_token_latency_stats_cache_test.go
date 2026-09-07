@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -89,6 +90,24 @@ func TestTotalLatencyStatsCacheDeduplicatesPerAccountRequest(t *testing.T) {
 	require.Equal(t, int64(1), stats[43].SampleCount)
 }
 
+func TestTotalLatencyStatsCacheSeparatesRequestedModelAndReasoningEffort(t *testing.T) {
+	_, _, cache := newTotalLatencyTestCache(t)
+	ctx := context.Background()
+	fast := service.TotalDurationLatencyDimension{AccountID: 50, RequestedModel: "gpt-5.5", ReasoningEffort: "high"}
+	slow := service.TotalDurationLatencyDimension{AccountID: 50, RequestedModel: "gpt-5.5", ReasoningEffort: "low"}
+	for index := 0; index < 20; index++ {
+		require.NoError(t, cache.RecordSampleForDimension(ctx, fast, fmt.Sprintf("fast-%d", index), 8_000))
+		require.NoError(t, cache.RecordSampleForDimension(ctx, slow, fmt.Sprintf("slow-%d", index), 75_000))
+	}
+	stats, err := cache.GetStatsBatchForDimensions(ctx, []service.TotalDurationLatencyDimension{fast, slow})
+	require.NoError(t, err)
+	require.Equal(t, 8_000.0, stats[service.NormalizeTotalDurationLatencyDimension(fast)].PredictedMS)
+	require.Equal(t, 75_000.0, stats[service.NormalizeTotalDurationLatencyDimension(slow)].PredictedMS)
+	metrics, err := cache.ListStatsByAccountIDs(ctx, []int64{50})
+	require.NoError(t, err)
+	require.Len(t, metrics, 2)
+}
+
 func TestTotalLatencyStatsCacheSingleLongGenerationDoesNotEvictFastAccount(t *testing.T) {
 	_, _, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
@@ -162,6 +181,53 @@ func TestTotalLatencyStatsCacheTwentyOneSecondBoundaryDoesNotExitFastPool(t *tes
 	require.NoError(t, err)
 	require.True(t, stats[accountID].ReliableFast)
 	require.Zero(t, stats[accountID].SlowStreak)
+}
+
+func TestTotalLatencyStatsCacheRecentMinutePlusRatioImmediatelyExitsFastPool(t *testing.T) {
+	mr, _, cache := newTotalLatencyTestCache(t)
+	ctx := context.Background()
+	accountID := int64(182)
+	recordTotalLatencySamples(t, cache, accountID, "fast", repeatedDurations(22, 8_000))
+	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
+	require.NoError(t, err)
+	require.True(t, stats[accountID].ReliableFast)
+
+	for index := 0; index < 12; index++ {
+		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("recent-slow-%d", index), 61_000+index))
+	}
+	stats, err = cache.GetStatsBatch(ctx, []int64{accountID})
+	require.NoError(t, err)
+	require.False(t, stats[accountID].ReliableFast, "more than 35%% minute-plus requests must immediately leave fast pool")
+	require.Equal(t, int64(0), stats[accountID].SampleCount, "reset dimensions must return to pending collection")
+	require.False(t, mr.Exists(fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)), "reset must drop stale samples")
+}
+
+func TestTotalLatencyStatsCacheSingleFiveMinuteRequestImmediatelyBreaksAffinity(t *testing.T) {
+	mr, rdb, cache := newTotalLatencyTestCache(t)
+	ctx := context.Background()
+	accountID := int64(183)
+	recordTotalLatencySamples(t, cache, accountID, "fast", repeatedDurations(22, 8_000))
+	before, err := cache.GetStatsBatch(ctx, []int64{accountID})
+	require.NoError(t, err)
+	require.True(t, before[accountID].ReliableFast)
+
+	probeKey := fmt.Sprintf("%s%d", totalLatencyProbePrefix, accountID)
+	require.NoError(t, rdb.Set(ctx, probeKey, "1", time.Minute).Err())
+	require.NoError(t, cache.RecordSample(ctx, accountID, "five-minute-request", 300_001))
+
+	after, err := cache.GetStatsBatch(ctx, []int64{accountID})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), after[accountID].SampleCount)
+	require.False(t, after[accountID].ReliableFast)
+	require.True(t, after[accountID].CircuitBroken)
+	require.False(t, mr.Exists(fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)))
+	require.False(t, mr.Exists(probeKey), "circuit break must release probe leases")
+
+	require.NoError(t, cache.RecordSample(ctx, accountID, "recovery-sample", 8_000))
+	recovered, err := cache.GetStatsBatch(ctx, []int64{accountID})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), recovered[accountID].SampleCount)
+	require.False(t, recovered[accountID].CircuitBroken, "a new sample clears the pending circuit marker")
 }
 
 func TestTotalLatencyStatsCacheFallsBackToTwentyFourHours(t *testing.T) {

@@ -395,7 +395,8 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		AffiliateEnabled: settings.AffiliateEnabled,
 
 		AccountSchedulingThresholds: settings.AccountSchedulingThresholds,
-		FirstTokenPriorityEnabled:   settings.FirstTokenPriorityEnabled,
+		TotalDurationPriorityEnabled: settings.TotalDurationPriorityEnabled,
+		FirstTokenPriorityEnabled:    settings.FirstTokenPriorityEnabled,
 		AllowUserViewErrorRequests:  settings.AllowUserViewErrorRequests,
 	}
 

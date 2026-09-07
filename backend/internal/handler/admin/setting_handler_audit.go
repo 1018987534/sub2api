@@ -619,8 +619,8 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if !equalAccountSchedulingThresholds(before.AccountSchedulingThresholds, after.AccountSchedulingThresholds) {
 		changed = append(changed, service.SettingKeyAccountSchedulingThresholds)
 	}
-	if before.FirstTokenPriorityEnabled != after.FirstTokenPriorityEnabled {
-		changed = append(changed, service.SettingKeyFirstTokenPriorityEnabled)
+	if before.TotalDurationPriorityEnabled != after.TotalDurationPriorityEnabled {
+		changed = append(changed, service.SettingKeyTotalDurationPriorityEnabled)
 	}
 	changed = appendAuthSourceDefaultChanges(changed, beforeAuthSourceDefaults, afterAuthSourceDefaults)
 	return changed

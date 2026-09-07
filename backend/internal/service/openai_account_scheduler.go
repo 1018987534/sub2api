@@ -89,6 +89,7 @@ type OpenAIAccountScheduleRequest struct {
 	PreviousResponseCanMove bool
 	UseUpstreamTokenCost    bool
 	RequestedModel          string
+	ReasoningEffort         string
 	RequiredTransport       OpenAIUpstreamTransport
 	RequiredCapability      OpenAIEndpointCapability
 	RequiredImageCapability OpenAIImagesCapability
@@ -467,7 +468,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		if escapedSticky {
 			req.PreserveStickyBinding = true
 		}
-	} else if req.FirstTokenPriority && s.shouldUseFirstTokenDefaultSticky(ctx, req.StickyAccountID) {
+	} else if req.FirstTokenPriority && s.shouldUseFirstTokenDefaultSticky(ctx, req) {
 		selection, escapedSticky, err := s.selectBySessionHash(ctx, req)
 		if err != nil {
 			return nil, decision, err
@@ -507,19 +508,19 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	return selection, decision, nil
 }
 
-func (s *defaultOpenAIAccountScheduler) shouldUseFirstTokenDefaultSticky(ctx context.Context, accountID int64) bool {
-	if accountID <= 0 || s == nil || s.service == nil || s.service.rateLimitService == nil {
+func (s *defaultOpenAIAccountScheduler) shouldUseFirstTokenDefaultSticky(ctx context.Context, req OpenAIAccountScheduleRequest) bool {
+	if req.StickyAccountID <= 0 || s == nil || s.service == nil || s.service.rateLimitService == nil {
 		return false
 	}
 	cache := s.service.rateLimitService.firstTokenLatencyStatsCache
 	if cache == nil {
 		return false
 	}
-	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
+	stats, err := firstTokenStatsForRequest(ctx, cache, []int64{req.StickyAccountID}, &req)
 	if err != nil {
 		return false
 	}
-	stat, ok := stats[accountID]
+	stat, ok := stats[req.StickyAccountID]
 	return ok && firstTokenPriorityDefaultStickyEligible(stat, time.Now())
 }
 
@@ -1137,12 +1138,13 @@ func applyOpenAIFirstTokenPriorityOrder(
 			req.StickyAccountID,
 			req.StickyPreviousAccountID,
 		)
-		ranks := firstTokenPriorityRanksWithProbeOptions(
+		ranks := firstTokenPriorityRanksWithProbeOptionsForRequest(
 			ctx,
 			accounts,
 			cache,
 			allowProbe,
 			allowProbe,
+			&req,
 		)
 		sort.SliceStable(selectionOrder[start:end], func(i, j int) bool {
 			return ranks[selectionOrder[start+i].account.ID] < ranks[selectionOrder[start+j].account.ID]
@@ -2037,7 +2039,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled = strings.EqualFold(strings.TrimSpace(values[openAIAdvancedSchedulerSettingKey]), "true")
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
-				firstTokenPriorityEnabled = strings.EqualFold(strings.TrimSpace(values[SettingKeyFirstTokenPriorityEnabled]), "true")
+				firstTokenPriorityEnabled = totalDurationPrioritySettingEnabled(values)
 				lbTopKOverride = parsePositiveIntOverride(values[SettingKeyOpenAIAdvancedSchedulerLBTopK])
 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(values)
 			} else {
@@ -2054,7 +2056,7 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 				enabled = strings.EqualFold(strings.TrimSpace(fallbackValues[openAIAdvancedSchedulerSettingKey]), "true")
 				stickyWeightedEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled]), "true")
 				subscriptionPriorityEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled]), "true")
-				firstTokenPriorityEnabled = strings.EqualFold(strings.TrimSpace(fallbackValues[SettingKeyFirstTokenPriorityEnabled]), "true")
+				firstTokenPriorityEnabled = totalDurationPrioritySettingEnabled(fallbackValues)
 				lbTopKOverride = parsePositiveIntOverride(fallbackValues[SettingKeyOpenAIAdvancedSchedulerLBTopK])
 				weightOverrides = parseOpenAIAdvancedSchedulerWeightOverrides(fallbackValues)
 			}
@@ -2094,6 +2096,14 @@ func (s *OpenAIGatewayService) openAIAdvancedSchedulerRuntimeSettings(ctx contex
 
 	settings, _ := result.(openAIAdvancedSchedulerRuntimeSettings)
 	return normalizeOpenAISchedulerRuntimeSettings(settings)
+}
+
+func totalDurationPrioritySettingEnabled(values map[string]string) bool {
+	value, ok := values[SettingKeyTotalDurationPriorityEnabled]
+	if !ok || strings.TrimSpace(value) == "" {
+		value = values[SettingKeyFirstTokenPriorityEnabled]
+	}
+	return strings.EqualFold(strings.TrimSpace(value), "true")
 }
 
 func normalizeOpenAISchedulerRuntimeSettings(settings openAIAdvancedSchedulerRuntimeSettings) openAIAdvancedSchedulerRuntimeSettings {
@@ -2156,6 +2166,7 @@ func openAIAdvancedSchedulerRuntimeSettingKeys() []string {
 		openAIAdvancedSchedulerSettingKey,
 		SettingKeyOpenAIAdvancedSchedulerStickyWeightedEnabled,
 		SettingKeyOpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
+		SettingKeyTotalDurationPriorityEnabled,
 		SettingKeyFirstTokenPriorityEnabled,
 		SettingKeyOpenAIAdvancedSchedulerLBTopK,
 	}
@@ -2470,7 +2481,10 @@ func (s *OpenAIGatewayService) apiKeyRouteFastPoolAvailable(
 	if len(accountIDs) == 0 {
 		return false
 	}
-	stats, err := s.rateLimitService.firstTokenLatencyStatsCache.GetStatsBatch(ctx, accountIDs)
+	stats, err := firstTokenStatsForRequest(ctx, s.rateLimitService.firstTokenLatencyStatsCache, accountIDs, &OpenAIAccountScheduleRequest{
+		RequestedModel:  requestedModel,
+		ReasoningEffort: requestedReasoningEffortForScheduling(ctx),
+	})
 	if err != nil {
 		slog.Warn("api_key_route_fast_pool_stats_failed", "group_id", group.ID, "error", err)
 		return true
@@ -2716,6 +2730,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		PreviousResponseCanMove: previousResponseCanMove,
 		UseUpstreamTokenCost:    useUpstreamTokenCost,
 		RequestedModel:          requestedModel,
+		ReasoningEffort:         requestedReasoningEffortForScheduling(ctx),
 		RequiredTransport:       requiredTransport,
 		RequiredCapability:      requiredCapability,
 		RequiredImageCapability: requiredImageCapability,

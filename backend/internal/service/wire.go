@@ -509,6 +509,14 @@ func ProvideRateLimitService(
 	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
 	svc.SetTempUnschedFailureCounterCache(tempUnschedFailureCounterCache)
 	svc.SetFirstTokenLatencyStatsCache(firstTokenLatencyStatsCache)
+	if configurable, ok := firstTokenLatencyStatsCache.(TotalDurationLatencyPolicyConfigurable); ok && cfg != nil {
+		configurable.ConfigureTotalDurationLatencyPolicy(TotalDurationLatencyPolicy{
+			RecentWindow:          time.Duration(cfg.Gateway.TotalDurationRecentWindowSeconds) * time.Second,
+			RecentSlowThreshold:   time.Duration(cfg.Gateway.TotalDurationRecentSlowThresholdSeconds) * time.Second,
+			RecentSlowRatio:       cfg.Gateway.TotalDurationRecentSlowRatio,
+			CircuitBreakThreshold: time.Duration(cfg.Gateway.TotalDurationCircuitBreakThresholdSeconds) * time.Second,
+		})
+	}
 	if healthCache, ok := tempUnschedCache.(OpenAIAPIKeyHealthCache); ok {
 		svc.SetOpenAIAPIKeyHealthCache(healthCache)
 	}

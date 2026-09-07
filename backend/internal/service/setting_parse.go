@@ -265,6 +265,7 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse:      "",
 		SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky:         "",
 		SettingKeyFirstTokenPriorityEnabled:                          "false",
+		SettingKeyTotalDurationPriorityEnabled:                       "false",
 
 		SettingKeyAllowUserViewErrorRequests: "false",
 	}
@@ -939,7 +940,12 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.OpenAIAdvancedSchedulerWeightUpstreamCost = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost])
 	result.OpenAIAdvancedSchedulerWeightPreviousResponse = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse])
 	result.OpenAIAdvancedSchedulerWeightSessionSticky = strings.TrimSpace(settings[SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky])
-	result.FirstTokenPriorityEnabled = settings[SettingKeyFirstTokenPriorityEnabled] == "true"
+	priorityValue, hasTotalDurationPriority := settings[SettingKeyTotalDurationPriorityEnabled]
+	if !hasTotalDurationPriority || strings.TrimSpace(priorityValue) == "" {
+		priorityValue = settings[SettingKeyFirstTokenPriorityEnabled]
+	}
+	result.TotalDurationPriorityEnabled = strings.EqualFold(strings.TrimSpace(priorityValue), "true")
+	result.FirstTokenPriorityEnabled = result.TotalDurationPriorityEnabled
 	normalizeOpenAISchedulerPriorityMode(result)
 	result.OpenAIAdvancedSchedulerEffectiveLBTopK = s.openAIAdvancedSchedulerEffectiveLBTopK()
 	effectiveWeights := s.openAIAdvancedSchedulerEffectiveWeights()

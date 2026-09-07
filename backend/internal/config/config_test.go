@@ -701,7 +701,8 @@ func TestLoadOpenAISlowRequestTraceThreshold(t *testing.T) {
 
 	cfg, err := Load()
 	require.NoError(t, err)
-	require.Zero(t, cfg.Gateway.OpenAISlowRequestTraceThresholdMs)
+	require.True(t, cfg.Gateway.OpenAIRequestTraceEnabled)
+	require.Equal(t, 3000, cfg.Gateway.OpenAISlowRequestTraceThresholdMs)
 
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_SLOW_REQUEST_TRACE_THRESHOLD_MS", "3000")

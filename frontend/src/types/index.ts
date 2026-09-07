@@ -936,12 +936,15 @@ export interface AccountFirstTokenLatencyGroup {
 export interface AccountFirstTokenLatencyMetric {
   account_id: number
   account_name: string
+  requested_model?: string
+  reasoning_effort?: string
   predicted_ms: number
   normal_total_ms?: number
   p50_ms?: number
   p90_ms?: number
   has_prediction: boolean
   is_fast_pool: boolean
+  circuit_broken?: boolean
   scheduling_rate_multiplier: number | null
   groups: AccountFirstTokenLatencyGroup[]
   sample_count: number
