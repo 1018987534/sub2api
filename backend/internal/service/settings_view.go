@@ -292,9 +292,9 @@ type SystemSettings struct {
 	OpenAIAdvancedSchedulerEffectiveWeightUpstreamCost     string
 	OpenAIAdvancedSchedulerEffectiveWeightPreviousResponse string
 	OpenAIAdvancedSchedulerEffectiveWeightSessionSticky    string
-	TotalDurationPriorityEnabled                          bool
+	TotalDurationPriorityEnabled                           bool
 	// FirstTokenPriorityEnabled is the deprecated compatibility alias.
-	FirstTokenPriorityEnabled                              bool
+	FirstTokenPriorityEnabled bool
 
 	// 余额不足提醒
 	BalanceLowNotifyEnabled     bool
