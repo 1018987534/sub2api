@@ -80,6 +80,30 @@ func SetOpsLatencyMs(c *gin.Context, key string, value int64) {
 	c.Set(key, value)
 }
 
+// OpsLatencyMs reads a stage latency written to the Gin context. It is kept in
+// the service package so handlers and middleware use one conversion rule.
+func OpsLatencyMs(c *gin.Context, key string) (int64, bool) {
+	if c == nil || strings.TrimSpace(key) == "" {
+		return 0, false
+	}
+	v, ok := c.Get(key)
+	if !ok {
+		return 0, false
+	}
+	switch value := v.(type) {
+	case int:
+		return int64(value), value >= 0
+	case int32:
+		return int64(value), value >= 0
+	case int64:
+		return value, value >= 0
+	case float64:
+		return int64(value), value >= 0
+	default:
+		return 0, false
+	}
+}
+
 // SetOpsUpstreamModel stores only the effective model slug for final Ops
 // attribution. Call it immediately before an upstream attempt is dispatched.
 func SetOpsUpstreamModel(c *gin.Context, model string) {

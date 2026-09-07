@@ -9889,6 +9889,7 @@ const form = reactive<SettingsForm>({
   default_signup_api_key_group_id: 0,
   default_platform_quotas: normalizePlatformQuotasMap() as DefaultPlatformQuotasMap,
   account_scheduling_thresholds: normalizeAccountSchedulingThresholdsMap(),
+  total_duration_priority_enabled: false,
   first_token_priority_enabled: false,
   affiliate_rebate_rate: 20,
   affiliate_rebate_freeze_hours: 0,
@@ -10158,9 +10159,10 @@ const form = reactive<SettingsForm>({
 type SchedulerPriorityMode = "first_token" | "low_rate";
 
 const schedulerPriorityMode = computed<SchedulerPriorityMode>({
-  get: () => form.first_token_priority_enabled ? "first_token" : "low_rate",
+  get: () => (form.total_duration_priority_enabled ?? form.first_token_priority_enabled) ? "first_token" : "low_rate",
   set: (mode) => {
     const firstToken = mode === "first_token";
+    form.total_duration_priority_enabled = firstToken;
     form.first_token_priority_enabled = firstToken;
     form.openai_low_upstream_rate_priority_enabled = !firstToken;
     form.openai_low_upstream_rate_sticky_weighted_enabled = !firstToken;
@@ -11141,6 +11143,13 @@ async function loadSettings() {
         (form as Record<string, unknown>)[key] = value;
       }
     }
+    // `first_token_priority_enabled` predates the total-duration name. Keep
+    // old deployments readable while making the new field authoritative when
+    // the backend actually returns it.
+    if (settings.total_duration_priority_enabled === null ||
+        settings.total_duration_priority_enabled === undefined) {
+      form.total_duration_priority_enabled = Boolean(settings.first_token_priority_enabled);
+    }
     syncCaptchaProviderSelection();
     if (!form.claude_oauth_system_prompt_blocks?.trim()) {
       form.claude_oauth_system_prompt_blocks =
@@ -11878,7 +11887,8 @@ async function saveSettings() {
     payload.account_scheduling_thresholds = sanitizeAccountSchedulingThresholdsMap(
       form.account_scheduling_thresholds,
     );
-    payload.first_token_priority_enabled = schedulerPriorityMode.value === "first_token";
+    payload.total_duration_priority_enabled = schedulerPriorityMode.value === "first_token";
+    payload.first_token_priority_enabled = payload.total_duration_priority_enabled;
     appendAuthSourceDefaultsToUpdateRequest(payload, authSourceDefaults);
 
     const updated = await settingsStepUp.run(() =>

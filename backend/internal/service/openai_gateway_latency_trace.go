@@ -122,11 +122,11 @@ func OpenAILatencyTraceFromContext(ctx context.Context) *OpenAILatencyTrace {
 }
 
 func OpenAISlowTraceThreshold(cfg *config.Config) time.Duration {
-	if cfg == nil {
+	if cfg == nil || !cfg.Gateway.OpenAIRequestTraceEnabled {
 		return 0
 	}
 	if cfg.Gateway.OpenAISlowRequestTraceThresholdMs <= 0 {
-		return 0
+		return 3 * time.Second
 	}
 	return time.Duration(cfg.Gateway.OpenAISlowRequestTraceThresholdMs) * time.Millisecond
 }
@@ -539,11 +539,15 @@ func (t *OpenAILatencyTrace) LogIfSlow(ctx context.Context, threshold time.Durat
 		zap.Int64("auth_ms", authLatencyMs),
 		zap.Int64("ingress_auth_middleware_ms", ingressToHandlerLatencyMs),
 		zap.Int64("inbound_body_read_ms", requestBodyReadLatencyMs),
+		zap.Int64("body_read_ms", requestBodyReadLatencyMs),
 		zap.Int64("pre_routing_other_ms", preRoutingOtherMs),
 		zap.Int64("routing_ms", routingLatencyMs),
+		zap.Int64("scheduler_ms", routingLatencyMs),
 		zap.Int64("user_slot_ms", userSlotLatencyMs),
+		zap.Int64("user_slot_wait_ms", userSlotLatencyMs),
 		zap.Int64("account_selection_ms", accountSelectionLatencyMs),
 		zap.Int64("account_slot_ms", accountSlotLatencyMs),
+		zap.Int64("account_slot_wait_ms", accountSlotLatencyMs),
 		zap.Int64("edge_routing_wait_ms", edgeRoutingWaitMs),
 		zap.String("edge_routing_source", edgeRoutingSource),
 		zap.Int64("routing_other_ms", routingOtherMs),

@@ -628,8 +628,11 @@ const (
 	SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost          = "openai_advanced_scheduler_weight_upstream_cost"
 	SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse      = "openai_advanced_scheduler_weight_previous_response"
 	SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky         = "openai_advanced_scheduler_weight_session_sticky"
-	// SettingKeyFirstTokenPriorityEnabled makes recent TTFT the primary non-sticky scheduling order.
-	SettingKeyFirstTokenPriorityEnabled = "first_token_priority_enabled"
+	// SettingKeyTotalDurationPriorityEnabled controls total-duration fast/slow
+	// pool scheduling. The old first-token key is retained as a read/write alias
+	// for existing deployments and scripts.
+	SettingKeyTotalDurationPriorityEnabled = "total_duration_priority_enabled"
+	SettingKeyFirstTokenPriorityEnabled     = "first_token_priority_enabled"
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"

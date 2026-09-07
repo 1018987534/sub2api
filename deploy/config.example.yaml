@@ -226,9 +226,22 @@ gateway:
   openai_first_output_timeout_seconds: 0
   # Optional high/xhigh/max override (seconds, 0=use the standard timeout)
   openai_high_effort_first_output_timeout_seconds: 0
-  # Slow OpenAI streaming phase trace threshold (milliseconds, 0=disabled)
-  # 慢 OpenAI 流式请求分段追踪阈值（毫秒，0=禁用）
-  openai_slow_request_trace_threshold_ms: 0
+  # Enable structured phase traces for slow OpenAI streaming requests.
+  # 开启慢 OpenAI 流式请求的精确分段追踪日志。
+  openai_request_trace_enabled: true
+  # Trace threshold in milliseconds (<=0 uses the 3-second default).
+  # 追踪阈值（毫秒；<=0 使用 3 秒默认值）。
+  openai_slow_request_trace_threshold_ms: 3000
+  # Fast-pool circuit breaker: reset a fast dimension to pending collection
+  # when more than this ratio of its recent requests exceed the slow threshold.
+  # 快池保护：近窗口内超过该比例的请求超过慢阈值时，重置为待采集。
+  total_duration_recent_window_seconds: 300
+  total_duration_recent_slow_threshold_seconds: 60
+  total_duration_recent_slow_ratio: 0.35
+  # Any single completed request above this duration immediately breaks
+  # affinity, moves the dimension to the slow pool, and resets it to pending.
+  # 任意单次请求超过该时长立即熔断粘性，进入慢池并重置为待采集。
+  total_duration_circuit_break_threshold_seconds: 300
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456

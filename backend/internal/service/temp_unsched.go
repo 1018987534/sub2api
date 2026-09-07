@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -72,10 +73,82 @@ type FirstTokenLatencyStats struct {
 	CircuitBroken           bool
 }
 
+// TotalDurationLatencyDimension identifies one scheduling workload. The legacy
+// cache API remains account-scoped for compatibility, while production caches
+// may implement the dimension-aware extension below.
+type TotalDurationLatencyDimension struct {
+	AccountID       int64
+	RequestedModel  string
+	ReasoningEffort string
+}
+
+type TotalDurationLatencyMetric struct {
+	Dimension TotalDurationLatencyDimension
+	Stats     FirstTokenLatencyStats
+}
+
+type TotalDurationLatencyPolicy struct {
+	RecentWindow          time.Duration
+	RecentSlowThreshold   time.Duration
+	RecentSlowRatio       float64
+	CircuitBreakThreshold time.Duration
+}
+
+func DefaultTotalDurationLatencyPolicy() TotalDurationLatencyPolicy {
+	return TotalDurationLatencyPolicy{
+		RecentWindow:          5 * time.Minute,
+		RecentSlowThreshold:   time.Minute,
+		RecentSlowRatio:       0.35,
+		CircuitBreakThreshold: 5 * time.Minute,
+	}
+}
+
+func NormalizeTotalDurationLatencyPolicy(policy TotalDurationLatencyPolicy) TotalDurationLatencyPolicy {
+	defaults := DefaultTotalDurationLatencyPolicy()
+	if policy.RecentWindow <= 0 {
+		policy.RecentWindow = defaults.RecentWindow
+	}
+	if policy.RecentSlowThreshold <= 0 {
+		policy.RecentSlowThreshold = defaults.RecentSlowThreshold
+	}
+	if policy.RecentSlowRatio <= 0 || policy.RecentSlowRatio >= 1 {
+		policy.RecentSlowRatio = defaults.RecentSlowRatio
+	}
+	if policy.CircuitBreakThreshold <= 0 {
+		policy.CircuitBreakThreshold = defaults.CircuitBreakThreshold
+	}
+	return policy
+}
+
 // FirstTokenLatencyStatsCache is shared by every gateway so scheduling decisions
 // see one cross-node view of recent account performance.
 type FirstTokenLatencyStatsCache interface {
 	RecordSample(ctx context.Context, accountID int64, requestID string, firstTokenMs int) error
 	GetStatsBatch(ctx context.Context, accountIDs []int64) (map[int64]FirstTokenLatencyStats, error)
 	TryClaimProbe(ctx context.Context, accountID int64, lease time.Duration) (bool, error)
+}
+
+// DimensionAwareFirstTokenLatencyStatsCache isolates total-duration samples by
+// account, requested model and requested reasoning effort. It is optional so
+// older test doubles and external cache implementations keep compiling.
+type DimensionAwareFirstTokenLatencyStatsCache interface {
+	RecordSampleForDimension(ctx context.Context, dimension TotalDurationLatencyDimension, requestID string, durationMs int) error
+	GetStatsBatchForDimensions(ctx context.Context, dimensions []TotalDurationLatencyDimension) (map[TotalDurationLatencyDimension]FirstTokenLatencyStats, error)
+	TryClaimProbeForDimension(ctx context.Context, dimension TotalDurationLatencyDimension, lease time.Duration) (bool, error)
+	RequestManualProbeForDimension(ctx context.Context, dimension TotalDurationLatencyDimension, ttl time.Duration) error
+	TryClaimManualProbeForDimensions(ctx context.Context, dimensions []TotalDurationLatencyDimension, lease time.Duration) (TotalDurationLatencyDimension, bool, error)
+	ListStatsByAccountIDs(ctx context.Context, accountIDs []int64) ([]TotalDurationLatencyMetric, error)
+}
+
+type TotalDurationLatencyPolicyConfigurable interface {
+	ConfigureTotalDurationLatencyPolicy(policy TotalDurationLatencyPolicy)
+}
+
+func NormalizeTotalDurationLatencyDimension(dimension TotalDurationLatencyDimension) TotalDurationLatencyDimension {
+	dimension.RequestedModel = strings.TrimSpace(dimension.RequestedModel)
+	dimension.ReasoningEffort = strings.ToLower(strings.TrimSpace(dimension.ReasoningEffort))
+	if dimension.ReasoningEffort == "" {
+		dimension.ReasoningEffort = "unspecified"
+	}
+	return dimension
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
@@ -24,7 +25,24 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	streamStarted := false
 	defer h.recoverResponsesPanic(c, &streamStarted)
 
-	requestStart := time.Now()
+	handlerStart := time.Now()
+	requestStart := handlerStart
+	if ingressStart, ok := c.Request.Context().Value(ctxkey.RequestStart).(time.Time); ok && !ingressStart.IsZero() {
+		requestStart = ingressStart
+	}
+	slowTraceThreshold := service.OpenAISlowTraceThreshold(h.cfg)
+	defer func() {
+		if c == nil || c.Request == nil {
+			return
+		}
+		if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
+			upstreamRequestID := ""
+			if c.Writer != nil {
+				upstreamRequestID = c.Writer.Header().Get("x-request-id")
+			}
+			trace.LogIfSlow(c.Request.Context(), slowTraceThreshold, "handler_end", 0, upstreamRequestID)
+		}
+	}()
 
 	apiKey, ok := middleware2.GetAPIKeyFromContext(c)
 	if !ok {
@@ -49,7 +67,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 
+	bodyReadStart := time.Now()
 	body, err := readLenientJSONRequestBodyWithPrealloc(c.Request, h.cfg)
+	bodyReadDuration := time.Since(bodyReadStart)
 	if err != nil {
 		if maxErr, ok := extractMaxBytesError(err); ok {
 			h.errorResponse(c, http.StatusRequestEntityTooLarge, "invalid_request_error", buildBodyTooLargeMessage(maxErr.Limit))
@@ -93,6 +113,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 	c.Request = c.Request.WithContext(service.WithFirstTokenProbeEligibility(c.Request.Context(), reqStream))
+	if reqStream && slowTraceThreshold > 0 {
+		trace := service.NewOpenAILatencyTrace(requestStart, len(body), reqModel, reqStream)
+		trace.MarkRequestBodyReadLatency(bodyReadDuration)
+		trace.MarkIngressToHandlerLatency(0)
+		c.Request = c.Request.WithContext(service.WithOpenAILatencyTrace(c.Request.Context(), trace))
+	}
 	if _, err := service.ValidateOpenAIServiceTierField(body); err != nil {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
@@ -126,10 +152,23 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	requestPlatform := openAICompatibleRequestPlatform(c.Request.Context(), apiKey)
 
-	service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
+	if _, ok := service.OpsLatencyMs(c, service.OpsAuthLatencyMsKey); !ok {
+		service.SetOpsLatencyMs(c, service.OpsAuthLatencyMsKey, time.Since(requestStart).Milliseconds())
+	}
+	if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
+		if authMs, ok := service.OpsLatencyMs(c, service.OpsAuthLatencyMsKey); ok {
+			trace.MarkAuthLatency(time.Duration(authMs) * time.Millisecond)
+		} else {
+			trace.MarkAuthLatency(time.Since(requestStart))
+		}
+	}
 	routingStart := time.Now()
 
+	userSlotStart := time.Now()
 	userReleaseFunc, acquired := h.acquireResponsesUserSlot(c, subject.UserID, subject.Concurrency, reqStream, &streamStarted, reqLog)
+	if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
+		trace.AddUserSlotLatency(time.Since(userSlotStart))
+	}
 	if !acquired {
 		return
 	}
@@ -167,6 +206,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 		reqLog.Debug("openai_chat_completions.account_selecting", zap.Int("excluded_account_count", len(failedAccountIDs)))
+		selectionStart := time.Now()
 		selection, scheduleDecision, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
 			c.Request.Context(),
 			apiKey.GroupID,
@@ -181,6 +221,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			true,
 			requestPlatform,
 		)
+		if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
+			trace.AddAccountSelectionLatency(time.Since(selectionStart))
+		}
 		if err != nil {
 			if failoverClientGone(c) {
 				reqLog.Info("openai_chat_completions.account_select_aborted_client_disconnected", zap.Error(err))
@@ -221,7 +264,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
+		slotStart := time.Now()
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
+			trace.AddAccountSlotLatency(time.Since(slotStart))
+		}
 		if slotResult == openAISlotAcquireProfitVetoed {
 			// 利润终检否决：排除该账号重新选号；否决次数达上限则按无可用账号终止。
 			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
@@ -234,7 +281,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 
-		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
+		routingDuration := time.Since(routingStart)
+		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, routingDuration.Milliseconds())
+		if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
+			trace.MarkRoutingLatency(routingDuration)
+		}
 		forwardStart := time.Now()
 
 		forwardBody := body
@@ -250,6 +301,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			}()
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
+		if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
+			trace.EndAttempt(time.Now(), err != nil)
+		}
 		var cyberBlockBodyChat []byte
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyChat = body

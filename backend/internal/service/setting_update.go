@@ -524,7 +524,9 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyOpenAIAdvancedSchedulerWeightUpstreamCost] = settings.OpenAIAdvancedSchedulerWeightUpstreamCost
 	updates[SettingKeyOpenAIAdvancedSchedulerWeightPreviousResponse] = settings.OpenAIAdvancedSchedulerWeightPreviousResponse
 	updates[SettingKeyOpenAIAdvancedSchedulerWeightSessionSticky] = settings.OpenAIAdvancedSchedulerWeightSessionSticky
-	updates[SettingKeyFirstTokenPriorityEnabled] = strconv.FormatBool(settings.FirstTokenPriorityEnabled)
+	priorityEnabled := settings.TotalDurationPriorityEnabled || settings.FirstTokenPriorityEnabled
+	updates[SettingKeyTotalDurationPriorityEnabled] = strconv.FormatBool(priorityEnabled)
+	updates[SettingKeyFirstTokenPriorityEnabled] = strconv.FormatBool(priorityEnabled)
 
 	// 余额、订阅到期与账号限额通知
 	updates[SettingKeyBalanceLowNotifyEnabled] = strconv.FormatBool(settings.BalanceLowNotifyEnabled)
