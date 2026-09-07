@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
 	"time"
 )
 
@@ -73,9 +72,9 @@ type FirstTokenLatencyStats struct {
 	CircuitBroken           bool
 }
 
-// TotalDurationLatencyDimension identifies one scheduling workload. The legacy
-// cache API remains account-scoped for compatibility, while production caches
-// may implement the dimension-aware extension below.
+// TotalDurationLatencyDimension is retained as a wire-compatible adapter for
+// older cache implementations. The active scheduler deliberately ignores the
+// model and reasoning fields and keeps one total-duration pool per account.
 type TotalDurationLatencyDimension struct {
 	AccountID       int64
 	RequestedModel  string
@@ -128,9 +127,9 @@ type FirstTokenLatencyStatsCache interface {
 	TryClaimProbe(ctx context.Context, accountID int64, lease time.Duration) (bool, error)
 }
 
-// DimensionAwareFirstTokenLatencyStatsCache isolates total-duration samples by
-// account, requested model and requested reasoning effort. It is optional so
-// older test doubles and external cache implementations keep compiling.
+// DimensionAwareFirstTokenLatencyStatsCache is a legacy extension retained for
+// older cache implementations. New scheduling paths use the account-scoped
+// FirstTokenLatencyStatsCache methods above.
 type DimensionAwareFirstTokenLatencyStatsCache interface {
 	RecordSampleForDimension(ctx context.Context, dimension TotalDurationLatencyDimension, requestID string, durationMs int) error
 	GetStatsBatchForDimensions(ctx context.Context, dimensions []TotalDurationLatencyDimension) (map[TotalDurationLatencyDimension]FirstTokenLatencyStats, error)
@@ -145,10 +144,7 @@ type TotalDurationLatencyPolicyConfigurable interface {
 }
 
 func NormalizeTotalDurationLatencyDimension(dimension TotalDurationLatencyDimension) TotalDurationLatencyDimension {
-	dimension.RequestedModel = strings.TrimSpace(dimension.RequestedModel)
-	dimension.ReasoningEffort = strings.ToLower(strings.TrimSpace(dimension.ReasoningEffort))
-	if dimension.ReasoningEffort == "" {
-		dimension.ReasoningEffort = "unspecified"
-	}
+	dimension.RequestedModel = ""
+	dimension.ReasoningEffort = ""
 	return dimension
 }

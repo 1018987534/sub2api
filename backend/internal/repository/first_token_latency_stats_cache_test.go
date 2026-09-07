@@ -90,7 +90,7 @@ func TestTotalLatencyStatsCacheDeduplicatesPerAccountRequest(t *testing.T) {
 	require.Equal(t, int64(1), stats[43].SampleCount)
 }
 
-func TestTotalLatencyStatsCacheSeparatesRequestedModelAndReasoningEffort(t *testing.T) {
+func TestTotalLatencyStatsCacheAggregatesDimensionsAtAccountScope(t *testing.T) {
 	_, _, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 	fast := service.TotalDurationLatencyDimension{AccountID: 50, RequestedModel: "gpt-5.5", ReasoningEffort: "high"}
@@ -101,11 +101,16 @@ func TestTotalLatencyStatsCacheSeparatesRequestedModelAndReasoningEffort(t *test
 	}
 	stats, err := cache.GetStatsBatchForDimensions(ctx, []service.TotalDurationLatencyDimension{fast, slow})
 	require.NoError(t, err)
-	require.Equal(t, 8_000.0, stats[service.NormalizeTotalDurationLatencyDimension(fast)].PredictedMS)
-	require.Equal(t, 75_000.0, stats[service.NormalizeTotalDurationLatencyDimension(slow)].PredictedMS)
+	normalized := service.NormalizeTotalDurationLatencyDimension(fast)
+	require.Len(t, stats, 1)
+	require.Equal(t, 41_500.0, stats[normalized].PredictedMS)
+	require.Empty(t, normalized.RequestedModel)
+	require.Empty(t, normalized.ReasoningEffort)
 	metrics, err := cache.ListStatsByAccountIDs(ctx, []int64{50})
 	require.NoError(t, err)
-	require.Len(t, metrics, 2)
+	require.Len(t, metrics, 1)
+	require.Empty(t, metrics[0].Dimension.RequestedModel)
+	require.Empty(t, metrics[0].Dimension.ReasoningEffort)
 }
 
 func TestTotalLatencyStatsCacheSingleLongGenerationDoesNotEvictFastAccount(t *testing.T) {
