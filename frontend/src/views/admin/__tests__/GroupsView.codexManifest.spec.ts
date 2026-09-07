@@ -1,5 +1,6 @@
 import { defineComponent, h, type PropType } from "vue";
 import { flushPromises, mount } from "@vue/test-utils";
+import { createPinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminGroup, CodexModelsManifestConfig } from "@/types";
@@ -7,12 +8,14 @@ import GroupsView from "@/views/admin/GroupsView.vue";
 
 const {
   listGroups,
+  getModelAllowlistCandidates,
   getModelsListCandidates,
   getUsageSummary,
   getCapacitySummary,
   getLiveCapability,
 } = vi.hoisted(() => ({
   listGroups: vi.fn(),
+  getModelAllowlistCandidates: vi.fn(),
   getModelsListCandidates: vi.fn(),
   getUsageSummary: vi.fn(),
   getCapacitySummary: vi.fn(),
@@ -24,6 +27,7 @@ vi.mock("@/api/admin", () => ({
     groups: {
       list: listGroups,
       getAll: vi.fn(),
+      getModelAllowlistCandidates,
       getModelsListCandidates,
       getUsageSummary,
       getCapacitySummary,
@@ -204,6 +208,7 @@ const CodexManifestAccountsFieldStub = defineComponent({
 const mountView = () =>
   mount(GroupsView, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         AppLayout: AppLayoutStub,
         TablePageLayout: TablePageLayoutStub,
@@ -230,6 +235,7 @@ describe("GroupsView Codex manifest binding", () => {
   beforeEach(() => {
     localStorage.clear();
     listGroups.mockReset();
+    getModelAllowlistCandidates.mockReset();
     getModelsListCandidates.mockReset();
     getUsageSummary.mockReset();
     getCapacitySummary.mockReset();
@@ -242,6 +248,7 @@ describe("GroupsView Codex manifest binding", () => {
       page_size: 20,
       pages: 1,
     });
+    getModelAllowlistCandidates.mockResolvedValue([]);
     getModelsListCandidates.mockResolvedValue([]);
     getUsageSummary.mockResolvedValue([]);
     getCapacitySummary.mockResolvedValue([]);
