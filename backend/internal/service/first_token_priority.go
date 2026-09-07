@@ -157,7 +157,7 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 	eligible := make([]Account, 0, len(accounts))
 	accountIDs := make([]int64, 0, len(accounts))
 	for _, account := range accounts {
-		if !isFirstTokenPriorityAccount(&account) || !account.IsSchedulableAt(now) {
+		if !isFirstTokenPriorityAccount(&account) || !account.IsSchedulable() {
 			continue
 		}
 		eligible = append(eligible, account)
@@ -323,7 +323,7 @@ func (s *RateLimitService) ObserveTotalDurationLatency(ctx context.Context, acco
 // RequestFirstTokenManualProbe queues the account for the next eligible real
 // streaming request. It does not synthesize a billable upstream request.
 func (s *RateLimitService) RequestFirstTokenManualProbe(ctx context.Context, account *Account) error {
-	if !isFirstTokenPriorityAccount(account) || !account.IsSchedulableAt(time.Now()) || account.ID <= 0 {
+	if !isFirstTokenPriorityAccount(account) || !account.IsSchedulable() || account.ID <= 0 {
 		return ErrFirstTokenManualProbeIneligible
 	}
 	cache, ok := s.firstTokenLatencyStatsCache.(FirstTokenManualProbeCache)
@@ -652,62 +652,6 @@ func stableFirstTokenRankedOrder(ranked []firstTokenRankedAccount, _ time.Time) 
 	})
 	sort.Slice(unknown, func(i, j int) bool { return unknown[i].id < unknown[j].id })
 	return append(known, unknown...)
-}
-
-// applyOpenAIFirstTokenStickyOrder reuses the legacy low-rate weighted sticky
-// policy inside the current total-duration pool. A reliable slow account may
-// receive weighted affinity inside the slow pool, but it
-// never crosses a rate tier or lets a slow sticky account override the fast pool.
-func applyOpenAIFirstTokenStickyOrder(
-	ctx context.Context,
-	ordered []openAIAccountCandidateScore,
-	req OpenAIAccountScheduleRequest,
-	cache FirstTokenLatencyStatsCache,
-	rateOrder openAILegacyUpstreamRateOrder,
-) {
-	if req.StickyAccountID <= 0 || cache == nil || len(ordered) <= 1 {
-		return
-	}
-	accountIDs := make([]int64, 0, len(ordered))
-	for _, candidate := range ordered {
-		if candidate.account == nil || !isFirstTokenPriorityAccount(candidate.account) {
-			continue
-		}
-		accountIDs = append(accountIDs, candidate.account.ID)
-	}
-	if len(accountIDs) == 0 {
-		return
-	}
-	stats, err := firstTokenStatsForRequest(ctx, cache, accountIDs, &req)
-	if err != nil {
-		return
-	}
-	now := time.Now()
-	stickyStats, stickyFound := stats[req.StickyAccountID]
-	if !stickyFound || !firstTokenPriorityStatsReliable(stickyStats) {
-		return
-	}
-	stickyAge := now.Sub(stickyStats.UpdatedAt)
-	if stickyAge < 0 || stickyAge > firstTokenPriorityFreshFor || firstTokenPriorityStatsFast(stickyStats, now) {
-		return
-	}
-	applyOpenAILegacySoftStickyOrder(
-		ordered,
-		func(candidate openAIAccountCandidateScore) *Account { return candidate.account },
-		rateOrder,
-		openAILegacySoftStickyPolicy{
-			enabled:   true,
-			accountID: req.StickyAccountID,
-			weight:    openAILegacySessionStickyWeight,
-			seed:      deriveOpenAISelectionSeed(req),
-		},
-		func(account *Account) int {
-			if account != nil && firstTokenPriorityStatsFast(stats[account.ID], now) {
-				return 1
-			}
-			return 0
-		},
-	)
 }
 
 func dynamicFirstTokenProbeIndex(ranked []firstTokenRankedAccount, fastestMS float64, now time.Time) int {

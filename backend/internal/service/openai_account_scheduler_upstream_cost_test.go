@@ -518,59 +518,6 @@ func TestOpenAILegacyUpstreamRateOrderPlacesKnownRatesBeforeUnknown(t *testing.T
 	require.Negative(t, distinct.compare(&Account{ID: 2}, &Account{ID: 3}))
 }
 
-func TestOpenAILegacySoftStickyNeverCrossesRateOrCapabilityTier(t *testing.T) {
-	now := time.Now()
-	cheap := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.05, now.Add(-time.Minute), 30*time.Minute)
-	expensiveSticky := upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.10, now.Add(-time.Minute), 30*time.Minute)
-	cheapCompact := upstreamCostTestAccount(3, UpstreamBillingProbeStatusOK, 0.05, now.Add(-time.Minute), 30*time.Minute)
-	cheapCompact.Extra["openai_compact_supported"] = true
-	rateOrder := newOpenAILegacyUpstreamRateOrder(
-		[]*Account{cheapCompact, cheap, expensiveSticky},
-		now,
-		defaultOpenAIOAuthSchedulingRateMultiplier,
-	)
-	ordered := []*Account{cheapCompact, cheap, expensiveSticky}
-
-	applyOpenAILegacySoftStickyOrder(
-		ordered,
-		func(account *Account) *Account { return account },
-		rateOrder,
-		openAILegacySoftStickyPolicy{enabled: true, accountID: expensiveSticky.ID, weight: 100, seed: 1},
-		openAICompactSupportTier,
-	)
-
-	require.Equal(t, []int64{cheapCompact.ID, cheap.ID, expensiveSticky.ID}, []int64{ordered[0].ID, ordered[1].ID, ordered[2].ID})
-}
-
-func TestOpenAILegacySoftStickyAddsWeightWithoutHardHit(t *testing.T) {
-	now := time.Now()
-	first := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.05, now.Add(-time.Minute), 30*time.Minute)
-	sticky := upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.05, now.Add(-time.Minute), 30*time.Minute)
-	rateOrder := newOpenAILegacyUpstreamRateOrder([]*Account{first, sticky}, now, defaultOpenAIOAuthSchedulingRateMultiplier)
-	winsWithDefaultWeight := 0
-	winsWithoutExtraWeight := 0
-	for seed := uint64(1); seed <= 1_000; seed++ {
-		for weight, wins := range map[float64]*int{
-			1:                               &winsWithoutExtraWeight,
-			openAILegacySessionStickyWeight: &winsWithDefaultWeight,
-		} {
-			ordered := []*Account{first, sticky}
-			applyOpenAILegacySoftStickyOrder(
-				ordered,
-				func(account *Account) *Account { return account },
-				rateOrder,
-				openAILegacySoftStickyPolicy{enabled: true, accountID: sticky.ID, weight: weight, seed: seed},
-				func(*Account) int { return 0 },
-			)
-			if ordered[0].ID == sticky.ID {
-				*wins++
-			}
-		}
-	}
-	require.Greater(t, winsWithDefaultWeight, winsWithoutExtraWeight)
-	require.Less(t, winsWithDefaultWeight, 1_000)
-}
-
 // 探测资格已放宽到全部 API-key 平台，但调度侧的信任面没有跟着扩大：
 // 只有 OpenAI 平台账号的上游自报倍率参与 legacy 低倍率优先排序，
 // 否则中转方自报低价即可吸走流量，而实际结算走本地倍率。
@@ -665,142 +612,6 @@ func TestOpenAIGatewayServiceLegacyLowRatePriorityUsesConfiguredOAuthReference(t
 	require.Equal(t, oauth.ID, second.Account.ID)
 }
 
-func TestOpenAIGatewayServiceLegacyLowRateSoftStickyRebindsToCheaperAccount(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
-
-	now := time.Now()
-	cheap := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.05, now.Add(-time.Minute), 30*time.Minute)
-	expensive := upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.10, now.Add(-time.Minute), 30*time.Minute)
-	for _, account := range []*Account{cheap, expensive} {
-		account.Status = StatusActive
-		account.Schedulable = true
-		account.Concurrency = 1
-		account.GroupIDs = []int64{1}
-	}
-	cheap.Priority, expensive.Priority = 10, 0
-	settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-		openAIAdvancedSchedulerSettingKey:                    "false",
-		SettingKeyOpenAILowUpstreamRatePriorityEnabled:       "true",
-		SettingKeyOpenAILowUpstreamRateStickyWeightedEnabled: "true",
-		SettingKeyOpenAIOAuthSchedulingRateMultiplier:        "0.05",
-	}}
-	stickyKey := "openai:session"
-	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{stickyKey: expensive.ID}}
-	cfg := &config.Config{}
-	cfg.Gateway.Scheduling.LoadBatchEnabled = true
-	svc := &OpenAIGatewayService{
-		accountRepo:      schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive}},
-		cache:            cache,
-		cfg:              cfg,
-		rateLimitService: &RateLimitService{settingService: NewSettingService(settings, cfg)},
-		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{loadMap: map[int64]*AccountLoadInfo{
-			cheap.ID:     {AccountID: cheap.ID},
-			expensive.ID: {AccountID: expensive.ID},
-		}}),
-	}
-	groupID := int64(1)
-
-	selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "session", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
-	require.NoError(t, err)
-	require.Equal(t, cheap.ID, selection.Account.ID)
-	require.Equal(t, cheap.ID, cache.sessionBindings[stickyKey])
-	selection.ReleaseFunc()
-}
-
-func TestOpenAIGatewayServiceLegacyLowRateSoftStickyFallsThroughFullRateTier(t *testing.T) {
-	now := time.Now()
-	cheap := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.05, now.Add(-time.Minute), 30*time.Minute)
-	expensive := upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.10, now.Add(-time.Minute), 30*time.Minute)
-	for _, account := range []*Account{cheap, expensive} {
-		account.Status = StatusActive
-		account.Schedulable = true
-		account.Concurrency = 1
-		account.GroupIDs = []int64{1}
-	}
-	accounts := []Account{*cheap, *expensive}
-	groupID := int64(1)
-
-	for _, loadBatch := range []bool{true, false} {
-		t.Run(strconv.FormatBool(loadBatch), func(t *testing.T) {
-			resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
-			settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-				openAIAdvancedSchedulerSettingKey:                    "false",
-				SettingKeyOpenAILowUpstreamRatePriorityEnabled:       "true",
-				SettingKeyOpenAILowUpstreamRateStickyWeightedEnabled: "true",
-			}}
-			cfg := &config.Config{}
-			cfg.Gateway.Scheduling.LoadBatchEnabled = loadBatch
-			stickyKey := "openai:session"
-			cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{stickyKey: expensive.ID}}
-			acquiredIDs := []int64{}
-			concurrencyCache := schedulerTestConcurrencyCache{
-				loadMap: map[int64]*AccountLoadInfo{
-					cheap.ID:     {AccountID: cheap.ID, CurrentConcurrency: 1, LoadRate: 100},
-					expensive.ID: {AccountID: expensive.ID},
-				},
-				acquireResults: map[int64]bool{cheap.ID: false, expensive.ID: true},
-				acquiredIDs:    &acquiredIDs,
-			}
-			svc := &OpenAIGatewayService{
-				accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
-				cache:              cache,
-				cfg:                cfg,
-				rateLimitService:   &RateLimitService{settingService: NewSettingService(settings, cfg)},
-				concurrencyService: NewConcurrencyService(concurrencyCache),
-			}
-
-			selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "session", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
-			require.NoError(t, err)
-			require.Equal(t, expensive.ID, selection.Account.ID)
-			require.Equal(t, expensive.ID, cache.sessionBindings[stickyKey])
-			if !loadBatch {
-				require.Equal(t, []int64{cheap.ID, expensive.ID}, acquiredIDs)
-			}
-			selection.ReleaseFunc()
-		})
-	}
-}
-
-func TestOpenAIGatewayServiceLowRateModeAlwaysUsesSoftSticky(t *testing.T) {
-	resetOpenAIAdvancedSchedulerSettingCacheForTest()
-	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
-
-	now := time.Now()
-	cheap := upstreamCostTestAccount(1, UpstreamBillingProbeStatusOK, 0.05, now.Add(-time.Minute), 30*time.Minute)
-	expensive := upstreamCostTestAccount(2, UpstreamBillingProbeStatusOK, 0.10, now.Add(-time.Minute), 30*time.Minute)
-	for _, account := range []*Account{cheap, expensive} {
-		account.Status = StatusActive
-		account.Schedulable = true
-		account.Concurrency = 1
-		account.GroupIDs = []int64{1}
-	}
-	settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
-		openAIAdvancedSchedulerSettingKey:                    "false",
-		SettingKeyOpenAILowUpstreamRatePriorityEnabled:       "true",
-		SettingKeyOpenAILowUpstreamRateStickyWeightedEnabled: "false",
-	}}
-	stickyKey := "openai:session"
-	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{stickyKey: expensive.ID}}
-	cfg := &config.Config{}
-	cfg.Gateway.Scheduling.LoadBatchEnabled = true
-	svc := &OpenAIGatewayService{
-		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{*cheap, *expensive}},
-		cache:              cache,
-		cfg:                cfg,
-		rateLimitService:   &RateLimitService{settingService: NewSettingService(settings, cfg)},
-		concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
-	}
-	groupID := int64(1)
-
-	selection, _, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "session", "gpt-test", nil, OpenAIUpstreamTransportAny, false)
-	require.NoError(t, err)
-	require.Equal(t, cheap.ID, selection.Account.ID)
-	require.Equal(t, cheap.ID, cache.sessionBindings[stickyKey])
-	selection.ReleaseFunc()
-}
-
 func TestOpenAIModelsSelectionIgnoresTokenCostSignal(t *testing.T) {
 	resetOpenAIAdvancedSchedulerSettingCacheForTest()
 	defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
@@ -846,7 +657,7 @@ func TestOpenAIGatewayServiceLegacyLowRatePriorityIsIndependentFromAdvancedSched
 		loadErr   error
 		wantID    int64
 	}{
-		{name: "legacy false is normalized to low rate", loadBatch: true, wantID: 1},
+		{name: "switch off keeps priority first", loadBatch: true, wantID: 2},
 		{name: "load batch", enabled: true, loadBatch: true, wantID: 1},
 		{name: "load batch disabled", enabled: true, wantID: 1},
 		{name: "load lookup failure", enabled: true, loadBatch: true, loadErr: errors.New("load unavailable"), wantID: 1},

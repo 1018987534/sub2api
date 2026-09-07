@@ -160,24 +160,22 @@ func (s *OpenAIGatewayService) setStickySessionAccountID(ctx context.Context, gr
 		return nil
 	}
 
-	return withOpenAIRequestAffinityWrite(ctx, func() error {
-		trackOpenAIRequestAffinitySessionHash(ctx, sessionHash)
-		if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), primaryKey, accountID, ttl); err != nil {
-			return err
-		}
-		if !s.openAISessionHashDualWriteOldEnabled() {
-			return nil
-		}
-		legacyKey := s.openAILegacySessionCacheKey(ctx, sessionHash)
-		if legacyKey == "" {
-			return nil
-		}
-		if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), legacyKey, accountID, s.openAIStickyLegacyTTL(ttl)); err != nil {
-			return err
-		}
-		openAIStickyLegacyDualWriteTotal.Add(1)
+	if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), primaryKey, accountID, ttl); err != nil {
+		return err
+	}
+
+	if !s.openAISessionHashDualWriteOldEnabled() {
 		return nil
-	})
+	}
+	legacyKey := s.openAILegacySessionCacheKey(ctx, sessionHash)
+	if legacyKey == "" {
+		return nil
+	}
+	if err := s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), legacyKey, accountID, s.openAIStickyLegacyTTL(ttl)); err != nil {
+		return err
+	}
+	openAIStickyLegacyDualWriteTotal.Add(1)
+	return nil
 }
 
 func (s *OpenAIGatewayService) refreshStickySessionTTL(ctx context.Context, groupID *int64, sessionHash string, ttl time.Duration) error {

@@ -455,19 +455,13 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 		queryPlatforms = []string{platform, PlatformAntigravity}
 	}
 
-	var accounts []Account
-	var err error
 	if groupID != nil {
-		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
-	} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
-		accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
-	} else {
-		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
+		return s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
 	}
-	if err != nil {
-		return nil, err
+	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		return s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
 	}
-	return filterPeriodicSchedulePausedAccounts(accounts, time.Now()), nil
+	return s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
 }
 
 func (s *GeminiMessagesCompatService) validateUpstreamBaseURL(raw string) (string, error) {
@@ -804,9 +798,6 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 				logger.LegacyPrintf("service.gemini_messages_compat", "Gemini account %d: upstream request failed, retry %d/%d: %v", account.ID, attempt, geminiMaxRetries, err)
 				sleepGeminiBackoff(attempt)
 				continue
-			}
-			if s.rateLimitService != nil {
-				s.rateLimitService.HandleTempUnschedulableTransportFailure(ctx, account, err)
 			}
 			setOpsUpstreamError(c, 0, safeErr, "")
 			return nil, s.writeClaudeError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed after retries: "+safeErr)
@@ -1372,9 +1363,6 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 					Duration:      time.Since(startTime),
 					FirstTokenMs:  nil,
 				}, nil
-			}
-			if s.rateLimitService != nil {
-				s.rateLimitService.HandleTempUnschedulableTransportFailure(ctx, account, err)
 			}
 			setOpsUpstreamError(c, 0, safeErr, "")
 			return nil, s.writeGoogleError(c, http.StatusBadGateway, "Upstream request failed after retries: "+safeErr)

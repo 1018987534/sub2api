@@ -6,7 +6,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	mathrand "math/rand"
@@ -33,48 +32,6 @@ func (s *GatewayService) SelectAccountForModel(ctx context.Context, groupID *int
 
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
 func (s *GatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
-	routing, ok := apiKeyGroupRoutesFromContext(ctx, groupID)
-	if ok {
-		var lastErr error
-		for _, route := range routing.routes {
-			group, err := s.resolveGroupByID(ctx, route.GroupID)
-			if err != nil {
-				if errors.Is(err, ErrGroupNotFound) {
-					lastErr = err
-					continue
-				}
-				return nil, err
-			}
-			if !apiKeyRouteAllowedForUser(routing.user, group) || !apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, false) {
-				continue
-			}
-			subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
-			if err != nil {
-				return nil, err
-			}
-			if !eligible {
-				continue
-			}
-			candidateID := route.GroupID
-			attemptCtx := withAPIKeyGroupRouteAttempt(contextWithSelectedAPIKeyGroup(ctx, group))
-			account, err := s.selectAccountForModelWithExclusions(attemptCtx, &candidateID, sessionHash, requestedModel, excludedIDs)
-			if err == nil && account != nil {
-				clone := *account
-				clone.SelectedAPIKeyGroup = group
-				clone.SelectedAPIKeySubscription = subscription
-				return &clone, nil
-			}
-			lastErr = err
-		}
-		if lastErr != nil {
-			return nil, lastErr
-		}
-		return nil, ErrNoAvailableAccounts
-	}
-	return s.selectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, excludedIDs)
-}
-
-func (s *GatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
 	// 优先检查 context 中的强制平台（/antigravity 路由）
 	var platform string
 	forcePlatform, hasForcePlatform := ctx.Value(ctxkey.ForcePlatform).(string)
@@ -141,67 +98,6 @@ func (s *GatewayService) selectAccountForModelWithExclusions(ctx context.Context
 // metadataUserID: 用于客户端亲和调度，从中提取客户端 ID
 // sub2apiUserID: 系统用户 ID，用于二维亲和调度
 func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
-	routing, ok := apiKeyGroupRoutesFromContext(ctx, groupID)
-	if !ok {
-		return s.selectAccountWithLoadAwarenessSingleGroup(ctx, groupID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
-	}
-
-	var firstWait *AccountSelectionResult
-	var lastNoAccount error
-	for index, route := range routing.routes {
-		group, err := s.resolveGroupByID(ctx, route.GroupID)
-		if err != nil {
-			if errors.Is(err, ErrGroupNotFound) {
-				continue
-			}
-			return nil, err
-		}
-		if !apiKeyRouteAllowedForUser(routing.user, group) ||
-			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, false) {
-			continue
-		}
-		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
-		if err != nil {
-			return nil, err
-		}
-		if !eligible {
-			continue
-		}
-
-		candidateID := route.GroupID
-		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
-		attemptCtx = withGatewayTokenRequestBillingGroup(attemptCtx, group)
-		attemptCtx = withAPIKeyGroupRouteAttempt(attemptCtx)
-		selection, err := s.selectAccountWithLoadAwarenessSingleGroup(attemptCtx, &candidateID, sessionHash, requestedModel, excludedIDs, metadataUserID, sub2apiUserID)
-		if err != nil {
-			if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrClaudeCodeOnly) || errors.Is(err, ErrGroupNotFound) {
-				lastNoAccount = err
-				continue
-			}
-			return nil, err
-		}
-		if selection == nil || selection.Account == nil {
-			lastNoAccount = ErrNoAvailableAccounts
-			continue
-		}
-		selection.attachAPIKeyRoute(group, subscription, index)
-		if selection.Acquired || selection.WaitPlan == nil {
-			return selection, nil
-		}
-		if firstWait == nil {
-			firstWait = selection
-		}
-	}
-	if firstWait != nil {
-		return firstWait, nil
-	}
-	if lastNoAccount != nil {
-		return nil, lastNoAccount
-	}
-	return nil, ErrNoAvailableAccounts
-}
-
-func (s *GatewayService) selectAccountWithLoadAwarenessSingleGroup(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, metadataUserID string, sub2apiUserID int64) (*AccountSelectionResult, error) {
 	// 调试日志：记录调度入口参数
 	excludedIDsList := make([]int64, 0, len(excludedIDs))
 	for id := range excludedIDs {
@@ -320,7 +216,7 @@ func (s *GatewayService) selectAccountWithLoadAwarenessSingleGroup(ctx context.C
 		return nil, err
 	}
 	preferOAuth := platform == PlatformGemini
-	if s.debugModelRoutingEnabled() && platform == PlatformAnthropic && requestedModel != "" {
+	if s.debugModelRoutingEnabled() && requestedModel != "" && modelRoutingAppliesToTargetPlatform(platform) {
 		logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] load-aware enabled: group_id=%v model=%s session=%s platform=%s", derefGroupID(groupID), requestedModel, shortSessionHash(sessionHash), platform)
 	}
 
@@ -354,10 +250,10 @@ func (s *GatewayService) selectAccountWithLoadAwarenessSingleGroup(ctx context.C
 		return needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel)
 	}
 
-	// 获取模型路由配置（anthropic 目标平台；composite 分组按目标平台判断）
+	// 获取模型路由配置（anthropic / openai 目标平台；composite 分组按目标平台判断）
 	var routingAccountIDs []int64
-	if group != nil && requestedModel != "" && platform == PlatformAnthropic &&
-		(group.Platform == PlatformAnthropic || group.Platform == PlatformComposite) {
+	if group != nil && requestedModel != "" &&
+		modelRoutingAppliesToPlatform(platform, group.Platform) {
 		routingAccountIDs = group.GetRoutingAccountIDs(requestedModel)
 		if s.debugModelRoutingEnabled() {
 			logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] context group routing: group_id=%d model=%s enabled=%v rules=%d matched_ids=%v session=%s sticky_account=%d",
@@ -1024,8 +920,35 @@ func (s *GatewayService) ResolveGroupByID(ctx context.Context, groupID int64) (*
 	return s.resolveGroupByID(ctx, groupID)
 }
 
+// modelRoutingAppliesToPlatform 判定模型路由规则是否适用于本次请求。
+//
+// 路由规则的存储与查表（Group.ModelRouting / GetRoutingAccountIDs）本身与平台无关，
+// 早期只有 Anthropic 目标平台会读取它。OpenAI 分组同样存在“同一个公开别名由不同账号
+// 映射到不同上游模型”的故障转移写法，需要显式路由来指定谁是主、谁是备，因此这里把
+// Anthropic 与 OpenAI 一并放行。
+//
+// targetPlatform 是请求解析后的目标平台；groupPlatform 是分组自身的平台。composite
+// 分组不限定自身平台，只要目标平台落在放行集合内即可复用其规则。
+func modelRoutingAppliesToPlatform(targetPlatform, groupPlatform string) bool {
+	if !modelRoutingAppliesToTargetPlatform(targetPlatform) {
+		return false
+	}
+	return groupPlatform == targetPlatform || groupPlatform == PlatformComposite
+}
+
+// modelRoutingAppliesToTargetPlatform 是放行平台集合的唯一定义处：新增平台只改这里。
+// 在只知道目标平台、还没取到分组的位置（调试日志、取分组前的短路）单独判定用。
+func modelRoutingAppliesToTargetPlatform(targetPlatform string) bool {
+	switch targetPlatform {
+	case PlatformAnthropic, PlatformOpenAI:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *GatewayService) routingAccountIDsForRequest(ctx context.Context, groupID *int64, requestedModel string, platform string) []int64 {
-	if groupID == nil || requestedModel == "" || platform != PlatformAnthropic {
+	if groupID == nil || requestedModel == "" || !modelRoutingAppliesToTargetPlatform(platform) {
 		return nil
 	}
 	group, err := s.resolveGroupByID(ctx, *groupID)
@@ -1035,11 +958,11 @@ func (s *GatewayService) routingAccountIDsForRequest(ctx context.Context, groupI
 		}
 		return nil
 	}
-	// Model routing applies only to requests resolved to Anthropic. Composite
-	// groups may still use those rules once their model resolved to Anthropic.
-	if group.Platform != PlatformAnthropic && group.Platform != PlatformComposite {
+	// 路由规则适用于解析到 Anthropic 或 OpenAI 的请求；composite 分组在其模型解析到
+	// 上述平台后同样可以复用这些规则。
+	if !modelRoutingAppliesToPlatform(platform, group.Platform) {
 		if s.debugModelRoutingEnabled() {
-			logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] skip: non-anthropic group platform: group_id=%d group_platform=%s model=%s", group.ID, group.Platform, requestedModel)
+			logger.LegacyPrintf("service.gateway", "[ModelRoutingDebug] skip: group platform not eligible: group_id=%d group_platform=%s target_platform=%s model=%s", group.ID, group.Platform, platform, requestedModel)
 		}
 		return nil
 	}
@@ -1212,7 +1135,6 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 					"tls_fingerprint", acc.IsTLSFingerprintEnabled())
 			}
 		}
-		filtered = filterPeriodicSchedulePausedAccounts(filtered, time.Now())
 		return s.filterAccountsBySchedulingThreshold(ctx, filtered), useMixed, nil
 	}
 
@@ -1248,7 +1170,6 @@ func (s *GatewayService) listSchedulableAccounts(ctx context.Context, groupID *i
 				"tls_fingerprint", acc.IsTLSFingerprintEnabled())
 		}
 	}
-	accounts = filterPeriodicSchedulePausedAccounts(accounts, time.Now())
 	accounts = s.filterAccountsBySchedulingThreshold(ctx, accounts)
 	if platform == PlatformGrok || strings.EqualFold(platform, PlatformGrok) {
 		accounts = s.filterGrokFreeQuotaAccountsForGateway(ctx, accounts)

@@ -275,6 +275,7 @@ func ProvideAccountTestService(
 		tlsFPProfileService,
 	)
 	service.agentIdentityWS = openAIGatewayService
+	service.SetOpenAIGatewayService(openAIGatewayService)
 	service.SetSettingService(settingService)
 	service.SetPluginManager(pluginManager)
 	return service
@@ -499,7 +500,6 @@ func ProvideRateLimitService(
 	cfg *config.Config,
 	geminiQuotaService *GeminiQuotaService,
 	tempUnschedCache TempUnschedCache,
-	tempUnschedFailureCounterCache TempUnschedFailureCounterCache,
 	firstTokenLatencyStatsCache FirstTokenLatencyStatsCache,
 	timeoutCounterCache TimeoutCounterCache,
 	openAI403CounterCache OpenAI403CounterCache,
@@ -507,7 +507,6 @@ func ProvideRateLimitService(
 	tokenCacheInvalidator TokenCacheInvalidator,
 ) *RateLimitService {
 	svc := NewRateLimitService(accountRepo, usageRepo, cfg, geminiQuotaService, tempUnschedCache)
-	svc.SetTempUnschedFailureCounterCache(tempUnschedFailureCounterCache)
 	svc.SetFirstTokenLatencyStatsCache(firstTokenLatencyStatsCache)
 	if configurable, ok := firstTokenLatencyStatsCache.(TotalDurationLatencyPolicyConfigurable); ok && cfg != nil {
 		configurable.ConfigureTotalDurationLatencyPolicy(TotalDurationLatencyPolicy{

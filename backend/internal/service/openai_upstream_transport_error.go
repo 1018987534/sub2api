@@ -125,18 +125,17 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	if errors.Is(err, context.Canceled) || (errors.Is(err, context.DeadlineExceeded) && errors.Is(ctx.Err(), context.DeadlineExceeded)) {
 		return err
 	}
-	// A plugin that already sent the request cannot safely fail over: replay may
-	// duplicate the upstream action and billing.
+
+	// Transport attempt reached the network path; count as Ollama Cloud activity.
+	if s != nil {
+		scheduleOllamaCloudUsageActivity(s.deferredService, account)
+	}
+
+	// 插件已把请求交给上游时，自动切换账号可能造成重复扣费或重复执行。
 	var pluginErr *PluginTransportError
 	if errors.As(err, &pluginErr) && pluginErr.RequestSent {
 		return err
 	}
-	if s.rateLimitService != nil {
-		s.rateLimitService.HandleTempUnschedulableTransportFailure(ctx, account, err)
-	}
-
-	// Transport attempt reached the network path; count as Ollama Cloud activity.
-	scheduleOllamaCloudUsageActivity(s.deferredService, account)
 
 	if classifyUpstreamTransportError(err).Persistent {
 		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)

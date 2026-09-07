@@ -446,28 +446,6 @@ func TestBuildSchedulerMetadataAccount_KeepsQuotaAutoPauseFields(t *testing.T) {
 	require.Equal(t, false, got.Extra["auto_pause_7d_disabled"])
 }
 
-func TestBuildSchedulerMetadataAccount_KeepsPeriodicPauseFields(t *testing.T) {
-	anchor := time.Now().UTC().Truncate(time.Second)
-	account := service.Account{
-		ID: 89,
-		Extra: map[string]any{
-			service.PeriodicSchedulePauseEnabledExtraKey:  true,
-			service.PeriodicScheduleRunMinutesExtraKey:    30,
-			service.PeriodicSchedulePauseMinutesExtraKey:  5,
-			service.PeriodicSchedulePauseAnchorAtExtraKey: anchor.Format(time.RFC3339),
-			"unrelated": "drop me",
-		},
-	}
-
-	got := buildSchedulerMetadataAccount(account)
-
-	require.Equal(t, true, got.Extra[service.PeriodicSchedulePauseEnabledExtraKey])
-	require.Equal(t, 30, got.Extra[service.PeriodicScheduleRunMinutesExtraKey])
-	require.Equal(t, 5, got.Extra[service.PeriodicSchedulePauseMinutesExtraKey])
-	require.Equal(t, anchor.Format(time.RFC3339), got.Extra[service.PeriodicSchedulePauseAnchorAtExtraKey])
-	require.NotContains(t, got.Extra, "unrelated")
-}
-
 func TestBuildSchedulerMetadataAccount_KeepsQuotaStateForCachedAccounts(t *testing.T) {
 	now := time.Now().UTC()
 	activeStart := now.Add(-time.Hour).Format(time.RFC3339)

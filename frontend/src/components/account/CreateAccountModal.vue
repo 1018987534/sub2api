@@ -2381,46 +2381,13 @@
         </div>
 
         <div v-if="tempUnschedEnabled" class="space-y-3">
-          <div
-            role="tablist"
-            class="inline-flex rounded-lg border border-gray-200 bg-gray-100 p-0.5 text-xs dark:border-dark-600 dark:bg-dark-700"
-          >
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="tempUnschedMode === 'rules'"
-              class="rounded-md px-3 py-1.5 transition-colors"
-              :class="tempUnschedMode === 'rules'
-                ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-dark-600 dark:text-white'
-                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
-              @click="setTempUnschedMode('rules')"
-            >
-              {{ t('admin.accounts.tempUnschedulable.modeRules') }}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="tempUnschedMode === 'consecutive_failures'"
-              class="rounded-md px-3 py-1.5 transition-colors"
-              :class="tempUnschedMode === 'consecutive_failures'
-                ? 'bg-white font-medium text-gray-900 shadow-sm dark:bg-dark-600 dark:text-white'
-                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'"
-              @click="setTempUnschedMode('consecutive_failures')"
-            >
-              {{ t('admin.accounts.tempUnschedulable.modeConsecutiveFailures') }}
-            </button>
-          </div>
-
           <div class="rounded-lg bg-blue-50 p-3 dark:bg-blue-900/20">
               <p class="text-xs text-blue-700 dark:text-blue-400">
                 <Icon name="exclamationTriangle" size="sm" class="mr-1 inline" :stroke-width="2" />
-                {{ t(tempUnschedMode === 'rules'
-                  ? 'admin.accounts.tempUnschedulable.notice'
-                  : 'admin.accounts.tempUnschedulable.failureNotice') }}
+                {{ t('admin.accounts.tempUnschedulable.notice') }}
               </p>
             </div>
 
-          <template v-if="tempUnschedMode === 'rules'">
           <div class="flex flex-wrap gap-2">
             <button
               v-for="preset in tempUnschedPresets"
@@ -2532,64 +2499,6 @@
             </svg>
             {{ t('admin.accounts.tempUnschedulable.addRule') }}
           </button>
-          </template>
-
-          <template v-else>
-            <div v-if="tempUnschedFailureRules.length > 0" class="space-y-3">
-              <div
-                v-for="(rule, index) in tempUnschedFailureRules"
-                :key="getTempUnschedFailureRuleKey(rule)"
-                class="rounded-lg border border-gray-200 p-3 dark:border-dark-600"
-              >
-                <div class="mb-2 flex items-center justify-between">
-                  <span class="text-xs font-medium text-gray-500 dark:text-gray-400">
-                    {{ t('admin.accounts.tempUnschedulable.ruleIndex', { index: index + 1 }) }}
-                  </span>
-                  <button
-                    type="button"
-                    class="rounded p-1 text-red-500 transition-colors hover:text-red-600"
-                    :title="t('common.delete')"
-                    @click="removeTempUnschedFailureRule(index)"
-                  >
-                    <Icon name="x" size="sm" :stroke-width="2" />
-                  </button>
-                </div>
-
-                <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div>
-                    <label class="input-label">{{ t('admin.accounts.tempUnschedulable.windowSeconds') }}</label>
-                    <input v-model.number="rule.window_seconds" type="number" min="1" max="86400" required class="input" />
-                  </div>
-                  <div>
-                    <label class="input-label">{{ t('admin.accounts.tempUnschedulable.failureThreshold') }}</label>
-                    <input v-model.number="rule.failure_threshold" type="number" min="1" max="1000" required class="input" />
-                  </div>
-                  <div>
-                    <label class="input-label">{{ t('admin.accounts.tempUnschedulable.pauseMinutes') }}</label>
-                    <input v-model.number="rule.duration_minutes" type="number" min="1" max="10080" required class="input" />
-                  </div>
-                  <div class="sm:col-span-3">
-                    <label class="input-label">{{ t('admin.accounts.tempUnschedulable.description') }}</label>
-                    <input
-                      v-model="rule.description"
-                      type="text"
-                      class="input"
-                      :placeholder="t('admin.accounts.tempUnschedulable.descriptionPlaceholder')"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-dark-500 dark:text-gray-400 dark:hover:border-dark-400 dark:hover:text-gray-300"
-              @click="addTempUnschedFailureRule()"
-            >
-              <Icon name="plus" size="sm" class="mr-1 inline" :stroke-width="2" />
-              {{ t('admin.accounts.tempUnschedulable.addFailureRule') }}
-            </button>
-          </template>
         </div>
       </div>
 
@@ -3052,6 +2961,14 @@
       <div class="border-t border-gray-200 pt-4 dark:border-dark-600">
         <label class="input-label">{{ t('admin.accounts.expiresAt') }}</label>
         <input v-model="expiresAtInput" type="datetime-local" class="input" />
+        <div class="mt-2 flex gap-2">
+          <button type="button" class="btn btn-secondary btn-sm" @click="form.expires_at = getAccountExpiryTimestamp(1)">
+            {{ t('payment.oneMonth') }}
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" @click="form.expires_at = getAccountExpiryTimestamp(12)">
+            {{ t('payment.oneYear') }}
+          </button>
+        </div>
         <p class="input-hint">
           {{ t('admin.accounts.expiresAtHint') }}
           {{ t('admin.accounts.expiresAtTimezoneHint', { timezone: browserTimeZone }) }}
@@ -3523,7 +3440,6 @@
 
         <!-- Group Selection - 仅标准模式显示 -->
         <GroupSelector
-          v-if="!authStore.isSimpleMode"
           v-model="form.group_ids"
           :groups="groups"
           :platform="form.platform"
@@ -3889,6 +3805,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
+
 import {
   claudeModels,
   getPresetMappingsByPlatform,
@@ -3898,7 +3815,6 @@ import {
   fetchAntigravityDefaultMappings,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
-import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
 import { useQuotaNotifyState } from '@/composables/useQuotaNotifyState'
 import {
@@ -3959,6 +3875,7 @@ import {
   parseDateTimeLocalInput
 } from '@/utils/format'
 import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
+import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
@@ -3988,7 +3905,6 @@ interface OAuthFlowExposed {
 }
 
 const { t } = useI18n()
-const authStore = useAuthStore()
 const browserTimeZone = getBrowserTimeZone()
 
 const oauthStepTitle = computed(() => {
@@ -4128,15 +4044,6 @@ interface ModelMapping {
 interface TempUnschedRuleForm {
   error_code: number | null
   keywords: string
-  duration_minutes: number | null
-  description: string
-}
-
-type TempUnschedMode = 'rules' | 'consecutive_failures'
-
-interface TempUnschedFailureRuleForm {
-  window_seconds: number | null
-  failure_threshold: number | null
   duration_minutes: number | null
   description: string
 }
@@ -4304,7 +4211,7 @@ const openAICompactModelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
 const upstreamModelsPreviewed = ref(false)
-const DEFAULT_POOL_MODE_RETRY_COUNT = 5
+const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
 const DEFAULT_POOL_MODE_RETRY_STATUS_CODES = [401, 403, 429]
 const poolModeEnabled = ref(false)
@@ -4442,14 +4349,11 @@ const vertexClientEmail = ref('')
 const vertexLocation = ref('global')
 const vertexServiceAccountDragActive = ref(false)
 const tempUnschedEnabled = ref(false)
-const tempUnschedMode = ref<TempUnschedMode>('rules')
 const tempUnschedRules = ref<TempUnschedRuleForm[]>([])
-const tempUnschedFailureRules = ref<TempUnschedFailureRuleForm[]>([])
 const getModelMappingKey = createStableObjectKeyResolver<ModelMapping>('create-model-mapping')
 const getOpenAICompactModelMappingKey = createStableObjectKeyResolver<ModelMapping>('create-openai-compact-model-mapping')
 const getAntigravityModelMappingKey = createStableObjectKeyResolver<ModelMapping>('create-antigravity-model-mapping')
 const getTempUnschedRuleKey = createStableObjectKeyResolver<TempUnschedRuleForm>('create-temp-unsched-rule')
-const getTempUnschedFailureRuleKey = createStableObjectKeyResolver<TempUnschedFailureRuleForm>('create-temp-unsched-failure-rule')
 const geminiOAuthType = ref<'code_assist' | 'google_one' | 'ai_studio'>('google_one')
 const geminiAIStudioOAuthEnabled = ref(false)
 const openAICompactModeOptions = computed(() => [
@@ -5043,26 +4947,6 @@ const removeTempUnschedRule = (index: number) => {
   tempUnschedRules.value.splice(index, 1)
 }
 
-const addTempUnschedFailureRule = () => {
-  tempUnschedFailureRules.value.push({
-    window_seconds: 60,
-    failure_threshold: 3,
-    duration_minutes: 10,
-    description: ''
-  })
-}
-
-const removeTempUnschedFailureRule = (index: number) => {
-  tempUnschedFailureRules.value.splice(index, 1)
-}
-
-const setTempUnschedMode = (mode: TempUnschedMode) => {
-  tempUnschedMode.value = mode
-  if (mode === 'consecutive_failures' && tempUnschedFailureRules.value.length === 0) {
-    addTempUnschedFailureRule()
-  }
-}
-
 const moveTempUnschedRule = (index: number, direction: number) => {
   const target = index + direction
   if (target < 0 || target >= tempUnschedRules.value.length) return
@@ -5104,49 +4988,9 @@ const buildTempUnschedRules = (rules: TempUnschedRuleForm[]) => {
   return out
 }
 
-const buildTempUnschedFailureRules = (rules: TempUnschedFailureRuleForm[]) => {
-  const out: Array<{
-    window_seconds: number
-    failure_threshold: number
-    duration_minutes: number
-    description: string
-  }> = []
-
-  for (const rule of rules) {
-    const windowSeconds = Number(rule.window_seconds)
-    const failureThreshold = Number(rule.failure_threshold)
-    const durationMinutes = Number(rule.duration_minutes)
-    if (!Number.isFinite(windowSeconds) || windowSeconds < 1 || windowSeconds > 86400) continue
-    if (!Number.isFinite(failureThreshold) || failureThreshold < 1 || failureThreshold > 1000) continue
-    if (!Number.isFinite(durationMinutes) || durationMinutes < 1 || durationMinutes > 10080) continue
-    out.push({
-      window_seconds: Math.trunc(windowSeconds),
-      failure_threshold: Math.trunc(failureThreshold),
-      duration_minutes: Math.trunc(durationMinutes),
-      description: rule.description.trim()
-    })
-  }
-  return out
-}
-
 const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {
   if (!tempUnschedEnabled.value) {
     delete credentials.temp_unschedulable_enabled
-    delete credentials.temp_unschedulable_mode
-    delete credentials.temp_unschedulable_rules
-    delete credentials.temp_unschedulable_failure_rules
-    return true
-  }
-
-  credentials.temp_unschedulable_enabled = true
-  credentials.temp_unschedulable_mode = tempUnschedMode.value
-  if (tempUnschedMode.value === 'consecutive_failures') {
-    const rules = buildTempUnschedFailureRules(tempUnschedFailureRules.value)
-    if (rules.length === 0 || rules.length !== tempUnschedFailureRules.value.length) {
-      appStore.showError(t('admin.accounts.tempUnschedulable.failureRulesInvalid'))
-      return false
-    }
-    credentials.temp_unschedulable_failure_rules = rules
     delete credentials.temp_unschedulable_rules
     return true
   }
@@ -5156,8 +5000,9 @@ const applyTempUnschedConfig = (credentials: Record<string, unknown>) => {
     appStore.showError(t('admin.accounts.tempUnschedulable.rulesInvalid'))
     return false
   }
+
+  credentials.temp_unschedulable_enabled = true
   credentials.temp_unschedulable_rules = rules
-  delete credentials.temp_unschedulable_failure_rules
   return true
 }
 
@@ -5397,9 +5242,7 @@ const resetForm = () => {
   vertexClientEmail.value = ''
   vertexLocation.value = 'global'
   tempUnschedEnabled.value = false
-  tempUnschedMode.value = 'rules'
   tempUnschedRules.value = []
-  tempUnschedFailureRules.value = []
   geminiOAuthType.value = 'code_assist'
   geminiTierGoogleOne.value = 'google_one_free'
   geminiTierGcp.value = 'gcp_standard'
@@ -6532,7 +6375,7 @@ const handleOpenAIImportCodexPAT = async (accessToken: string) => {
       extra: withUpstreamRequestIdHeader(extra)
     })
 
-    appStore.showSuccess(t('admin.accounts.messages.accountCreated'))
+    appStore.showSuccess(t('admin.accounts.accountCreated'))
     emit('created')
     handleClose()
   } catch (error: any) {
@@ -6999,8 +6842,11 @@ const handleCookieAuth = async (sessionKey: string) => {
       return
     }
 
-    const tempUnschedCredentials: Record<string, unknown> = {}
-    if (!applyTempUnschedConfig(tempUnschedCredentials)) {
+    const tempUnschedPayload = tempUnschedEnabled.value
+      ? buildTempUnschedRules(tempUnschedRules.value)
+      : []
+    if (tempUnschedEnabled.value && tempUnschedPayload.length === 0) {
+      appStore.showError(t('admin.accounts.tempUnschedulable.rulesInvalid'))
       return
     }
 
@@ -7083,7 +6929,10 @@ const handleCookieAuth = async (sessionKey: string) => {
 
         const credentials: Record<string, unknown> = { ...tokenInfo }
         applyInterceptWarmup(credentials, interceptWarmupRequests.value, 'create')
-        Object.assign(credentials, tempUnschedCredentials)
+        if (tempUnschedEnabled.value) {
+          credentials.temp_unschedulable_enabled = true
+          credentials.temp_unschedulable_rules = tempUnschedPayload
+        }
 
         await adminAPI.accounts.create({
           name: accountName,

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -21,6 +22,11 @@ import (
 
 // Account management implementations
 func (s *adminServiceImpl) ListAccounts(ctx context.Context, page, pageSize int, platform, accountType, status, search string, groupID int64, privacyMode string, sortBy, sortOrder string) ([]Account, int64, error) {
+	if groupID > 0 {
+		if err := s.ValidateAccountGroupBindings(ctx, []int64{groupID}); err != nil {
+			return nil, 0, err
+		}
+	}
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
 	accounts, result, err := s.accountRepo.ListWithFilters(ctx, params, platform, accountType, status, search, groupID, privacyMode)
 	if err != nil {
@@ -284,6 +290,9 @@ func (s *adminServiceImpl) DuplicateAccount(ctx context.Context, id int64, actor
 	}
 	autoPauseOnExpired := source.AutoPauseOnExpired
 	groups, groupIDs := duplicateAccountGroups(source)
+	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
+		return nil, err
+	}
 	proxyID := source.ProxyID
 	if source.ProxyFallbackOriginID != nil {
 		// Proxy fallback is transient runtime state; duplicate the configured origin.
@@ -513,6 +522,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err != nil {
 		return nil, err
 	}
+	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
+		return nil, err
+	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
@@ -668,10 +680,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			UpstreamBillingRateSyncEnabledExtraKey,
 			UpstreamBillingRateConversionRatioExtraKey,
 			UpstreamBillingProbeExtraKey,
-			PeriodicSchedulePauseEnabledExtraKey,
-			PeriodicScheduleRunMinutesExtraKey,
-			PeriodicSchedulePauseMinutesExtraKey,
-			PeriodicSchedulePauseAnchorAtExtraKey,
 			OllamaCloudUsageSessionExtraKey,
 			OllamaCloudUsageAutoRefreshExtraKey,
 			OllamaCloudUsageSnapshotExtraKey,
@@ -816,18 +824,13 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	if input.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *input.AutoPauseOnExpired
 	}
-	if err := applyPeriodicSchedulePauseUpdate(
-		account,
-		input.PeriodicScheduleRunMinutes,
-		input.PeriodicSchedulePauseMinutes,
-		time.Now(),
-	); err != nil {
-		return nil, err
-	}
 
 	// 先验证分组是否存在（在任何写操作之前）
 	if input.GroupIDs != nil {
 		if err := s.validateGroupIDsExist(ctx, *input.GroupIDs); err != nil {
+			return nil, err
+		}
+		if err := s.ValidateAccountGroupBindings(ctx, *input.GroupIDs); err != nil {
 			return nil, err
 		}
 
@@ -905,49 +908,6 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	return updated, nil
 }
 
-func applyPeriodicSchedulePauseUpdate(account *Account, runMinutes, pauseMinutes *int, now time.Time) error {
-	if runMinutes == nil && pauseMinutes == nil {
-		return nil
-	}
-	if account == nil {
-		return ErrAccountNotFound
-	}
-	if runMinutes == nil || pauseMinutes == nil {
-		return infraerrors.BadRequest(
-			"INVALID_PERIODIC_SCHEDULE_PAUSE",
-			"periodic_schedule_run_minutes and periodic_schedule_pause_minutes must be provided together",
-		)
-	}
-	if *runMinutes == 0 && *pauseMinutes == 0 {
-		delete(account.Extra, PeriodicSchedulePauseEnabledExtraKey)
-		delete(account.Extra, PeriodicScheduleRunMinutesExtraKey)
-		delete(account.Extra, PeriodicSchedulePauseMinutesExtraKey)
-		delete(account.Extra, PeriodicSchedulePauseAnchorAtExtraKey)
-		return nil
-	}
-	if *runMinutes < 1 || *runMinutes > MaxPeriodicSchedulePauseWindowMinutes ||
-		*pauseMinutes < 1 || *pauseMinutes > MaxPeriodicSchedulePauseWindowMinutes {
-		return infraerrors.BadRequest(
-			"INVALID_PERIODIC_SCHEDULE_PAUSE",
-			fmt.Sprintf("periodic schedule run and pause minutes must be between 1 and %d", MaxPeriodicSchedulePauseWindowMinutes),
-		)
-	}
-
-	anchorAt := now.UTC()
-	if current, ok := account.GetPeriodicSchedulePauseConfig(); ok &&
-		current.RunMinutes == *runMinutes && current.PauseMinutes == *pauseMinutes {
-		anchorAt = current.AnchorAt
-	}
-	if account.Extra == nil {
-		account.Extra = make(map[string]any)
-	}
-	account.Extra[PeriodicSchedulePauseEnabledExtraKey] = true
-	account.Extra[PeriodicScheduleRunMinutesExtraKey] = *runMinutes
-	account.Extra[PeriodicSchedulePauseMinutesExtraKey] = *pauseMinutes
-	account.Extra[PeriodicSchedulePauseAnchorAtExtraKey] = anchorAt.Format(time.RFC3339Nano)
-	return nil
-}
-
 // UpdateAccountExtra 仅对 Extra JSONB 做 key 级合并，避免覆盖其它运行态键
 // （如 model_rate_limits / passive_usage_* 等）。
 func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, updates map[string]any) error {
@@ -1008,6 +968,9 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 	if input.GroupIDs != nil {
 		if err := s.validateGroupIDsExist(ctx, *input.GroupIDs); err != nil {
+			return nil, err
+		}
+		if err := s.ValidateAccountGroupBindings(ctx, *input.GroupIDs); err != nil {
 			return nil, err
 		}
 	}
@@ -1427,6 +1390,9 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 			}
 		}
 	}
+	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
+		return nil, err
+	}
 
 	// 4. 构造影子账号（安全不变量：Credentials 恒不含 auth token，仅含 model_mapping）。
 	// name 为空时默认 "<母账号名> (Spark)"——否则空 name 会在 ent(name NotEmpty)处变成裸 500
@@ -1594,6 +1560,35 @@ func (s *adminServiceImpl) validateGroupIDsExist(ctx context.Context, groupIDs [
 	for _, groupID := range groupIDs {
 		if _, err := s.groupRepo.GetByID(ctx, groupID); err != nil {
 			return fmt.Errorf("get group: %w", err)
+		}
+	}
+	return nil
+}
+
+// ValidateAccountGroupBindings is the shared fail-closed policy boundary for
+// every account path that accepts explicit group bindings.
+func (s *adminServiceImpl) ValidateAccountGroupBindings(ctx context.Context, groupIDs []int64) error {
+	if len(groupIDs) == 0 || s.cfg == nil || s.cfg.RunMode != config.RunModeSimple {
+		return nil
+	}
+	if s.groupRepo == nil {
+		return errors.New("group repository not configured")
+	}
+	seen := make(map[int64]struct{}, len(groupIDs))
+	for _, groupID := range groupIDs {
+		if groupID <= 0 {
+			return fmt.Errorf("get group: %w", ErrGroupNotFound)
+		}
+		if _, ok := seen[groupID]; ok {
+			continue
+		}
+		seen[groupID] = struct{}{}
+		group, err := s.groupRepo.GetByIDLite(ctx, groupID)
+		if err != nil {
+			return fmt.Errorf("get group: %w", err)
+		}
+		if !IsGroupBindableInSimpleMode(group) {
+			return infraerrors.BadRequest("SIMPLE_MODE_GROUP_NOT_BINDABLE", "composite groups cannot be bound in simple mode")
 		}
 	}
 	return nil

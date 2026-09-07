@@ -6,7 +6,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -15,7 +14,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/gin-gonic/gin"
@@ -847,32 +845,6 @@ func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedMode
 	return normalizeOpenAIModelForUpstream(account, upstreamModel)
 }
 
-func (s *OpenAIGatewayService) openAILegacySoftStickyPolicy(
-	ctx context.Context,
-	groupID *int64,
-	sessionHash string,
-	requestedModel string,
-	stickyAccountID int64,
-	preferLowUpstreamRate bool,
-) openAILegacySoftStickyPolicy {
-	if !preferLowUpstreamRate || strings.TrimSpace(sessionHash) == "" || stickyAccountID <= 0 {
-		return openAILegacySoftStickyPolicy{}
-	}
-	if !s.isOpenAILowUpstreamRateSoftStickyEnabled(ctx) {
-		return openAILegacySoftStickyPolicy{}
-	}
-	return openAILegacySoftStickyPolicy{
-		enabled:   true,
-		accountID: stickyAccountID,
-		weight:    openAILegacySessionStickyWeight,
-		seed: deriveOpenAISelectionSeed(OpenAIAccountScheduleRequest{
-			GroupID:        groupID,
-			SessionHash:    sessionHash,
-			RequestedModel: requestedModel,
-		}),
-	}
-}
-
 // ResolveOpenAIAccountUpstreamModelForRequest exposes the scheduler's exact
 // account mapping chain to handler-side outcome reporting.
 func ResolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedModel string, requireCompact bool) string {
@@ -908,7 +880,6 @@ func resolveOpenAIErrorSchedulingModel(billingModel, upstreamModel string) strin
 
 func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (*Account, error) {
 	platform = NormalizeOpenAICompatiblePlatform(platform)
-	softSticky := s.openAILegacySoftStickyPolicy(ctx, groupID, sessionHash, requestedModel, stickyAccountID, preferLowUpstreamRate)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
 			"group_id", derefGroupID(groupID),
@@ -918,10 +889,8 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 
 	// 1. 尝试粘性会话命中
 	// Try sticky session hit
-	if !softSticky.enabled {
-		if account := s.tryStickySessionHit(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability); account != nil {
-			return account, nil
-		}
+	if account := s.tryStickySessionHit(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability); account != nil {
+		return account, nil
 	}
 
 	// 2. 获取可调度的 OpenAI 账号
@@ -933,7 +902,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 
 	// 3. 按优先级 + LRU 选择最佳账号
 	// Select by priority + LRU
-	selected, compactBlocked, filterStats := s.selectBestAccount(ctx, groupID, platform, accounts, requestedModel, excludedIDs, requireCompact, requiredCapability, preferLowUpstreamRate, softSticky)
+	selected, compactBlocked, filterStats := s.selectBestAccount(ctx, groupID, platform, accounts, requestedModel, excludedIDs, requireCompact, requiredCapability, preferLowUpstreamRate)
 
 	if selected == nil {
 		return nil, noAvailableOpenAISelectionError(requestedModel, compactBlocked, filterStats.summary(""))
@@ -947,7 +916,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 	// 4. 设置粘性会话绑定（利润门下推迟到 handler 终检通过后再绑定，
 	// 终检否决的账号不得成为新的粘性目标；无门保持既有 eager 绑定与 TTL）
 	// Set sticky session binding (deferred until terminal admission under a profit gate)
-	if sessionHash != "" && !softSticky.enabled && !gatewayProfitControlGateActive(ctx) {
+	if sessionHash != "" && !gatewayProfitControlGateActive(ctx) {
 		_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, selected.ID, openaiStickySessionTTL)
 	}
 
@@ -1029,7 +998,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 // (only meaningful when the legacy /responses/compact requireCompact flag is
 // true); the third contains deterministic
 // exclusion diagnostics for the evaluated snapshot.
-func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *int64, platform string, accounts []Account, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool, softSticky openAILegacySoftStickyPolicy) (*Account, bool, openAISelectionFilterStats) {
+func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *int64, platform string, accounts []Account, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, preferLowUpstreamRate bool) (*Account, bool, openAISelectionFilterStats) {
 	platform = NormalizeOpenAICompatiblePlatform(platform)
 	compactBlocked := false
 	filterStats := openAISelectionFilterStats{pool: len(accounts)}
@@ -1096,18 +1065,6 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 		}
 		return s.isBetterAccount(a, b)
 	})
-	applyOpenAILegacySoftStickyOrder(
-		eligible,
-		func(account *Account) *Account { return account },
-		rateOrder,
-		softSticky,
-		func(account *Account) int {
-			if !requireCompact || account == nil {
-				return 0
-			}
-			return compactTiers[account.ID]
-		},
-	)
 	return eligible[0], compactBlocked, filterStats
 }
 
@@ -1146,97 +1103,12 @@ func (s *OpenAIGatewayService) isBetterAccount(candidate, current *Account) bool
 
 // SelectAccountWithLoadAwareness selects an account with load-awareness and wait plan.
 func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*AccountSelectionResult, error) {
-	routing, ok := apiKeyGroupRoutesFromContext(ctx, groupID)
-	if !ok {
-		ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
-		ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
-		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
-		return s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
-	}
-
-	var firstWait *AccountSelectionResult
-	var lastNoAccount error
-	for index, route := range routing.routes {
-		group, err := s.resolveOpenAIAPIKeyRouteGroup(ctx, route.GroupID)
-		if err != nil {
-			if errors.Is(err, ErrGroupNotFound) {
-				continue
-			}
-			return nil, err
-		}
-		if !apiKeyRouteAllowedForUser(routing.user, group) ||
-			!apiKeyRouteWithinRateCap(ctx, route, group, s.ResolveUserGroupRateMultiplier, true) {
-			continue
-		}
-		candidateID := route.GroupID
-		attemptCtx := contextWithSelectedAPIKeyGroup(ctx, group)
-		attemptCtx = s.withOpenAIQuotaAutoPauseContext(attemptCtx)
-		attemptCtx = s.withOpenAIGroupPrivacyRequirement(attemptCtx, &candidateID)
-		attemptCtx = s.withOpenAIProfitControlGate(attemptCtx, &candidateID)
-		if index < len(routing.routes)-1 && !s.apiKeyRouteFastPoolAvailable(
-			attemptCtx,
-			group,
-			requestedModel,
-			excludedIDs,
-			OpenAIUpstreamTransportAny,
-			"",
-			"",
-			false,
-		) {
-			continue
-		}
-		subscription, eligible, err := resolveAPIKeyRouteBillingEligibility(ctx, s.userSubRepo, routing.user, group)
-		if err != nil {
-			return nil, err
-		}
-		if !eligible {
-			continue
-		}
-
-		selection, err := s.selectAccountWithLoadAwareness(attemptCtx, &candidateID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
-		if err != nil {
-			if errors.Is(err, ErrNoAvailableAccounts) || errors.Is(err, ErrNoAvailableCompactAccounts) {
-				lastNoAccount = err
-				continue
-			}
-			return nil, err
-		}
-		if selection == nil || selection.Account == nil {
-			lastNoAccount = ErrNoAvailableAccounts
-			continue
-		}
-		selection.attachAPIKeyRoute(group, subscription, index)
-		if selection.Acquired || selection.WaitPlan == nil {
-			return selection, nil
-		}
-		if firstWait == nil {
-			firstWait = selection
-		}
-	}
-	if firstWait != nil {
-		return firstWait, nil
-	}
-	if lastNoAccount != nil {
-		return nil, lastNoAccount
-	}
-	return nil, ErrNoAvailableAccounts
-}
-
-func (s *OpenAIGatewayService) resolveOpenAIAPIKeyRouteGroup(ctx context.Context, groupID int64) (*Group, error) {
-	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && IsGroupContextValid(group) && group.ID == groupID {
-		return group, nil
-	}
-	if s.schedulerSnapshot == nil {
-		return nil, ErrGroupNotFound
-	}
-	group, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
-	if group == nil {
-		return nil, ErrGroupNotFound
-	}
-	return group, nil
+	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	ctx = s.withOpenAIGroupPrivacyRequirement(ctx, groupID)
+	// 分组利润控制：legacy 公共入口同样装门，保证不经
+	// selectAccountWithScheduler 的调用方也无法绕过利润准入。
+	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
+	return s.selectAccountWithLoadAwareness(ctx, groupID, PlatformOpenAI, sessionHash, requestedModel, excludedIDs, false, "", true)
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, platform string, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, requiredCapability OpenAIEndpointCapability, useUpstreamTokenCost bool) (*AccountSelectionResult, error) {
@@ -1263,73 +1135,29 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		stickyAccountID = 0
 	}
-	softSticky := s.openAILegacySoftStickyPolicy(ctx, groupID, sessionHash, requestedModel, stickyAccountID, preferLowUpstreamRate)
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
-		if !softSticky.enabled {
-			account, err := s.selectAccountForModelWithExclusions(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
-			if err != nil {
-				return nil, err
-			}
-			result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
-			if err == nil && result != nil && result.Acquired {
-				return s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
-			}
-			if stickyAccountID > 0 && stickyAccountID == account.ID && s.concurrencyService != nil {
-				waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, account.ID)
-				if waitingCount < cfg.StickySessionMaxWaiting {
-					return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
-						AccountID:      account.ID,
-						MaxConcurrency: account.Concurrency,
-						Timeout:        cfg.StickySessionWaitTimeout,
-						MaxWaiting:     cfg.StickySessionMaxWaiting,
-					})
-				}
-			}
-			return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
-				AccountID:      account.ID,
-				MaxConcurrency: account.Concurrency,
-				Timeout:        cfg.FallbackWaitTimeout,
-				MaxWaiting:     cfg.FallbackMaxWaiting,
-			})
+		account, err := s.selectAccountForModelWithExclusions(ctx, groupID, platform, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
+		if err != nil {
+			return nil, err
 		}
-
-		// LoadBatch 关闭时也逐个尝试已排序候选，避免最低倍率账号满载后
-		// 直接等待而无法落到下一倍率层。
-		effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
-		var waitAccount *Account
-		for {
-			account, err := s.selectAccountForModelWithExclusions(ctx, groupID, platform, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, stickyAccountID, requiredCapability, preferLowUpstreamRate)
-			if err != nil {
-				if waitAccount != nil && errors.Is(err, ErrNoAvailableAccounts) {
-					break
-				}
-				return nil, err
-			}
-			if waitAccount == nil {
-				waitAccount = account
-			}
-			result, acquireErr := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
-			if acquireErr == nil && result != nil && result.Acquired {
-				selection, selectErr := s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
-				if selectErr != nil {
-					return nil, selectErr
-				}
-				if sessionHash != "" && !gatewayProfitControlGateActive(ctx) {
-					_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, account.ID, openaiStickySessionTTL)
-				}
-				return selection, nil
-			}
-			if effectiveExcludedIDs == nil {
-				effectiveExcludedIDs = make(map[int64]struct{})
-			}
-			effectiveExcludedIDs[account.ID] = struct{}{}
+		result, err := s.tryAcquireAccountSlot(ctx, account.ID, account.Concurrency)
+		if err == nil && result != nil && result.Acquired {
+			return s.newAcquiredSelectionResult(ctx, account, result.ReleaseFunc)
 		}
-		if sessionHash != "" && waitAccount != nil && !gatewayProfitControlGateActive(ctx) {
-			_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, waitAccount.ID, openaiStickySessionTTL)
+		if stickyAccountID > 0 && stickyAccountID == account.ID && s.concurrencyService != nil {
+			waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, account.ID)
+			if waitingCount < cfg.StickySessionMaxWaiting {
+				return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+					AccountID:      account.ID,
+					MaxConcurrency: account.Concurrency,
+					Timeout:        cfg.StickySessionWaitTimeout,
+					MaxWaiting:     cfg.StickySessionMaxWaiting,
+				})
+			}
 		}
-		return s.newSelectionResult(ctx, waitAccount, false, nil, &AccountWaitPlan{
-			AccountID:      waitAccount.ID,
-			MaxConcurrency: waitAccount.Concurrency,
+		return s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+			AccountID:      account.ID,
+			MaxConcurrency: account.Concurrency,
 			Timeout:        cfg.FallbackWaitTimeout,
 			MaxWaiting:     cfg.FallbackMaxWaiting,
 		})
@@ -1357,7 +1185,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	// rewriting the durable binding here would make a short burst migrate the
 	// whole conversation to a cache-cold account.
 	stickySpillover := false
-	if sessionHash != "" && !softSticky.enabled {
+	if sessionHash != "" {
 		accountID := stickyAccountID
 		if accountID > 0 && !isExcluded(accountID) {
 			account, err := s.getSchedulableAccount(ctx, accountID)
@@ -1531,19 +1359,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		} else {
 			selectionOrder = append(selectionOrder, available...)
 		}
-		applyOpenAILegacySoftStickyOrder(
-			selectionOrder,
-			func(item accountWithLoad) *Account { return item.account },
-			rateOrder,
-			softSticky,
-			func(account *Account) int {
-				if !requireCompact {
-					return 0
-				}
-				return openAICompactSupportTier(account)
-			},
-		)
-
 		for _, item := range selectionOrder {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, platform, requestedModel, false, requiredCapability)
 			if fresh == nil {
@@ -1583,18 +1398,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if requireCompact {
 			ordered = prioritizeOpenAICompactAccounts(ordered)
 		}
-		applyOpenAILegacySoftStickyOrder(
-			ordered,
-			func(account *Account) *Account { return account },
-			rateOrder,
-			softSticky,
-			func(account *Account) int {
-				if !requireCompact {
-					return 0
-				}
-				return openAICompactSupportTier(account)
-			},
-		)
 		for _, acc := range ordered {
 			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, platform, requestedModel, false, requiredCapability)
 			if fresh == nil {
@@ -1645,18 +1448,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	if requireCompact {
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}
-	applyOpenAILegacySoftStickyOrder(
-		candidates,
-		func(account *Account) *Account { return account },
-		rateOrder,
-		softSticky,
-		func(account *Account) int {
-			if !requireCompact {
-				return 0
-			}
-			return openAICompactSupportTier(account)
-		},
-	)
 	for _, acc := range candidates {
 		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, platform, requestedModel, false, requiredCapability)
 		if fresh == nil {
@@ -1668,9 +1459,6 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 			continue
-		}
-		if sessionHash != "" && softSticky.enabled && !gatewayProfitControlGateActive(ctx) {
-			_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, fresh.ID, openaiStickySessionTTL)
 		}
 		return s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{
 			AccountID:      fresh.ID,
@@ -1711,7 +1499,6 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if err != nil {
 		return nil, fmt.Errorf("query accounts failed: %w", err)
 	}
-	accounts = filterPeriodicSchedulePausedAccounts(accounts, time.Now())
 	accounts = s.filterOpenAIAccountsBySchedulingThreshold(ctx, accounts)
 	if platform == PlatformGrok {
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)

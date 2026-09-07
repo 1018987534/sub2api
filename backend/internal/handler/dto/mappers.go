@@ -87,7 +87,6 @@ func APIKeyFromService(k *service.APIKey) *APIKey {
 		Key:                k.Key,
 		Name:               k.Name,
 		GroupID:            k.GroupID,
-		GroupRoutes:        k.EffectiveGroupRoutes(),
 		Status:             k.Status,
 		IPWhitelist:        k.IPWhitelist,
 		IPBlacklist:        k.IPBlacklist,
@@ -160,7 +159,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		MCPXMLInject:                g.MCPXMLInject,
 		DefaultMappedModel:          g.DefaultMappedModel,
 		MessagesDispatchModelConfig: g.MessagesDispatchModelConfig,
-		ModelsListConfig:            g.ModelsListConfig,
+		ModelAllowlist:              g.ModelAllowlist,
 		CodexModelsManifestConfig:   g.CodexModelsManifestConfig,
 		SupportedModelScopes:        g.SupportedModelScopes,
 		AccountCount:                g.AccountCount,
@@ -237,7 +236,6 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		return nil
 	}
 	redactedCreds, credsStatus := RedactCredentials(a.Credentials)
-	periodicPause := a.PeriodicSchedulePauseStatusAt(time.Now())
 	extra := redactAccountManagedExtra(a.Extra)
 	var ollamaCloudUsage *service.OllamaCloudUsageState
 	if state := service.OllamaCloudUsageStateFromAccount(a); state.Eligible {
@@ -273,21 +271,12 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		OverloadUntil:           a.OverloadUntil,
 		TempUnschedulableUntil:  a.TempUnschedulableUntil,
 		TempUnschedulableReason: a.TempUnschedulableReason,
-		PeriodicSchedulePause: PeriodicSchedulePauseStatus{
-			Enabled:      periodicPause.Enabled,
-			RunMinutes:   periodicPause.RunMinutes,
-			PauseMinutes: periodicPause.PauseMinutes,
-			AnchorAt:     periodicPause.AnchorAt,
-			Paused:       periodicPause.Paused,
-			NextPauseAt:  periodicPause.NextPauseAt,
-			ResumeAt:     periodicPause.ResumeAt,
-		},
-		SessionWindowStart:  a.SessionWindowStart,
-		SessionWindowEnd:    a.SessionWindowEnd,
-		SessionWindowStatus: a.SessionWindowStatus,
-		GroupIDs:            a.GroupIDs,
-		ParentAccountID:     a.ParentAccountID,
-		QuotaDimension:      a.QuotaDimension,
+		SessionWindowStart:      a.SessionWindowStart,
+		SessionWindowEnd:        a.SessionWindowEnd,
+		SessionWindowStatus:     a.SessionWindowStatus,
+		GroupIDs:                a.GroupIDs,
+		ParentAccountID:         a.ParentAccountID,
+		QuotaDimension:          a.QuotaDimension,
 	}
 
 	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）

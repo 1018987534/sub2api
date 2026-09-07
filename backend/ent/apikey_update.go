@@ -17,7 +17,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
-	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 // APIKeyUpdate is the builder for updating APIKey entities.
@@ -118,18 +117,6 @@ func (_u *APIKeyUpdate) SetNillableGroupID(v *int64) *APIKeyUpdate {
 // ClearGroupID clears the value of the "group_id" field.
 func (_u *APIKeyUpdate) ClearGroupID() *APIKeyUpdate {
 	_u.mutation.ClearGroupID()
-	return _u
-}
-
-// SetGroupRoutes sets the "group_routes" field.
-func (_u *APIKeyUpdate) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpdate {
-	_u.mutation.SetGroupRoutes(v)
-	return _u
-}
-
-// AppendGroupRoutes appends value to the "group_routes" field.
-func (_u *APIKeyUpdate) AppendGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpdate {
-	_u.mutation.AppendGroupRoutes(v)
 	return _u
 }
 
@@ -606,14 +593,6 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
 	}
-	if value, ok := _u.mutation.GroupRoutes(); ok {
-		_spec.SetField(apikey.FieldGroupRoutes, field.TypeJSON, value)
-	}
-	if value, ok := _u.mutation.AppendedGroupRoutes(); ok {
-		_spec.AddModifier(func(u *sql.UpdateBuilder) {
-			sqljson.Append(u, apikey.FieldGroupRoutes, value)
-		})
-	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)
 	}
@@ -925,18 +904,6 @@ func (_u *APIKeyUpdateOne) SetNillableGroupID(v *int64) *APIKeyUpdateOne {
 // ClearGroupID clears the value of the "group_id" field.
 func (_u *APIKeyUpdateOne) ClearGroupID() *APIKeyUpdateOne {
 	_u.mutation.ClearGroupID()
-	return _u
-}
-
-// SetGroupRoutes sets the "group_routes" field.
-func (_u *APIKeyUpdateOne) SetGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpdateOne {
-	_u.mutation.SetGroupRoutes(v)
-	return _u
-}
-
-// AppendGroupRoutes appends value to the "group_routes" field.
-func (_u *APIKeyUpdateOne) AppendGroupRoutes(v []domain.APIKeyGroupRoute) *APIKeyUpdateOne {
-	_u.mutation.AppendGroupRoutes(v)
 	return _u
 }
 
@@ -1442,14 +1409,6 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if value, ok := _u.mutation.Name(); ok {
 		_spec.SetField(apikey.FieldName, field.TypeString, value)
-	}
-	if value, ok := _u.mutation.GroupRoutes(); ok {
-		_spec.SetField(apikey.FieldGroupRoutes, field.TypeJSON, value)
-	}
-	if value, ok := _u.mutation.AppendedGroupRoutes(); ok {
-		_spec.AddModifier(func(u *sql.UpdateBuilder) {
-			sqljson.Append(u, apikey.FieldGroupRoutes, value)
-		})
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(apikey.FieldStatus, field.TypeString, value)

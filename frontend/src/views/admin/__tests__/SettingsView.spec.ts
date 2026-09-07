@@ -510,7 +510,6 @@ const baseSettingsResponse = {
   payment_visible_method_alipay_enabled: true,
   payment_visible_method_wxpay_enabled: true,
   openai_low_upstream_rate_priority_enabled: false,
-  openai_low_upstream_rate_sticky_weighted_enabled: false,
   openai_oauth_scheduling_rate_multiplier: 1,
   openai_advanced_scheduler_enabled: false,
   openai_advanced_scheduler_sticky_weighted_enabled: false,
@@ -1384,12 +1383,11 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.text()).not.toContain("OpenAI 高级调度器");
   });
 
-  it("loads and submits mutually exclusive scheduler priority modes", async () => {
+  it("loads and submits independent duration and low-rate scheduler switches", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
       first_token_priority_enabled: true,
       openai_low_upstream_rate_priority_enabled: true,
-      openai_low_upstream_rate_sticky_weighted_enabled: true,
     });
     const wrapper = mountView();
 
@@ -1397,17 +1395,16 @@ describe("admin SettingsView payment visible method controls", () => {
     await openGatewayTab(wrapper);
 
     const firstTokenMode = wrapper.get('[data-testid="scheduler-priority-first-token"]');
-    const lowRateMode = wrapper.get('[data-testid="scheduler-priority-low-rate"]');
-    expect(firstTokenMode.attributes("aria-checked")).toBe("true");
-    expect(lowRateMode.attributes("aria-checked")).toBe("false");
-    await lowRateMode.trigger("click");
+    const lowRateMode = wrapper.get('[data-testid="openai-low-rate-priority-toggle"]');
+    expect((firstTokenMode.element as HTMLInputElement).checked).toBe(true);
+    expect((lowRateMode.element as HTMLInputElement).checked).toBe(true);
+    await lowRateMode.setValue(false);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
     expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
-      first_token_priority_enabled: false,
-      openai_low_upstream_rate_priority_enabled: true,
-      openai_low_upstream_rate_sticky_weighted_enabled: true,
+      first_token_priority_enabled: true,
+      openai_low_upstream_rate_priority_enabled: false,
     }));
   });
 
@@ -1560,12 +1557,8 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
 
     await flushPromises();
-	await wrapper.get('[data-testid="scheduler-priority-first-token"]').trigger("click");
-    expect(
-      wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').exists(),
-    ).toBe(false);
-
-    await wrapper.get('[data-testid="scheduler-priority-low-rate"]').trigger("click");
+    const lowRateToggle = wrapper.get('[data-testid="openai-low-rate-priority-toggle"]');
+    await lowRateToggle.setValue(true);
     const priorityModeText = wrapper.text();
     expect(priorityModeText).toContain(
       "同一分组同时包含 API Key 和 OAuth 账号时，OAuth 账号按此倍率与已探测的 API Key 计费倍率一起排序。",
@@ -1587,7 +1580,6 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(updateSettings).toHaveBeenCalledWith(
       expect.objectContaining({
         openai_low_upstream_rate_priority_enabled: true,
-        openai_low_upstream_rate_sticky_weighted_enabled: true,
         openai_oauth_scheduling_rate_multiplier: 0.05,
       }),
     );
@@ -1595,9 +1587,6 @@ describe("admin SettingsView payment visible method controls", () => {
     await wrapper
       .get('[data-testid="openai-advanced-scheduler-toggle"]')
       .setValue(true);
-    expect(
-      wrapper.find('[data-testid="scheduler-priority-low-rate"]').exists(),
-    ).toBe(false);
     expect(
       wrapper.find('[data-testid="scheduler-priority-first-token"]').exists(),
     ).toBe(false);

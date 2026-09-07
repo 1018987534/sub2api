@@ -137,10 +137,9 @@
             <div class="group/dropdown relative">
               <button
                 :ref="(el) => setGroupButtonRef(row.id, el)"
-                @click="manageGroupRoutes(row)"
+                @click="openGroupSelector(row)"
                 class="-mx-2 -my-1 flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1 transition-all duration-200 hover:bg-gray-100 dark:hover:bg-dark-700"
-                :title="t('keys.manageGroupRoutes')"
-                :data-testid="`group-route-manage-${row.id}`"
+                :title="t('keys.clickToChangeGroup')"
               >
                 <GroupBadge
                   v-if="row.group"
@@ -157,10 +156,7 @@
                 <span v-else class="text-sm text-gray-400 dark:text-dark-500">{{
                   t('keys.noGroup')
                 }}</span>
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.manage') }}</span>
-                <span v-if="row.group_routes?.length > 1" class="text-[11px] text-primary-600 dark:text-primary-400">
-                  +{{ row.group_routes.length - 1 }} {{ t('keys.backupShort') }}
-                </span>
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('keys.selectGroup') }}</span>
                 <svg
                   class="h-3.5 w-3.5 text-gray-400 opacity-60 transition-opacity group-hover/dropdown:opacity-100"
                   fill="none"
@@ -410,7 +406,6 @@
               <button
                 @click="editKey(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
-                :data-testid="`edit-key-${row.id}`"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit') }}</span>
@@ -469,15 +464,48 @@
           />
         </div>
 
-        <ApiKeyGroupRoutesEditor
-          :group-id="formData.group_id"
-          :routes="formData.group_routes"
-          :groups="groups"
-          :user-group-rates="userGroupRates"
-          data-tour="key-form-group"
-          @update:group-id="formData.group_id = $event"
-          @update:routes="formData.group_routes = $event"
-        />
+        <div>
+          <label class="input-label">{{ t('keys.groupLabel') }}</label>
+          <Select
+            v-model="formData.group_id"
+            :options="groupOptions"
+            :placeholder="t('keys.selectGroup')"
+            :searchable="true"
+            :search-placeholder="t('keys.searchGroup')"
+            data-tour="key-form-group"
+          >
+            <template #selected="{ option }">
+              <GroupBadge
+                v-if="option"
+                :name="(option as unknown as GroupOption).label"
+                :platform="(option as unknown as GroupOption).platform"
+                :subscription-type="(option as unknown as GroupOption).subscriptionType"
+                :rate-multiplier="(option as unknown as GroupOption).rate"
+                :user-rate-multiplier="(option as unknown as GroupOption).userRate"
+                :peak-rate-enabled="(option as unknown as GroupOption).peakRateEnabled"
+                :peak-start="(option as unknown as GroupOption).peakStart"
+                :peak-end="(option as unknown as GroupOption).peakEnd"
+                :peak-rate-multiplier="(option as unknown as GroupOption).peakRateMultiplier"
+              />
+              <span v-else class="text-gray-400">{{ t('keys.selectGroup') }}</span>
+            </template>
+            <template #option="{ option, selected }">
+              <GroupOptionItem
+                :name="(option as unknown as GroupOption).label"
+                :platform="(option as unknown as GroupOption).platform"
+                :subscription-type="(option as unknown as GroupOption).subscriptionType"
+                :rate-multiplier="(option as unknown as GroupOption).rate"
+                :user-rate-multiplier="(option as unknown as GroupOption).userRate"
+                :peak-rate-enabled="(option as unknown as GroupOption).peakRateEnabled"
+                :peak-start="(option as unknown as GroupOption).peakStart"
+                :peak-end="(option as unknown as GroupOption).peakEnd"
+                :peak-rate-multiplier="(option as unknown as GroupOption).peakRateMultiplier"
+                :description="(option as unknown as GroupOption).description"
+                :selected="selected"
+              />
+            </template>
+          </Select>
+        </div>
 
         <!-- Custom Key Section (only for create) -->
         <div v-if="!showEditModal" class="space-y-3">
@@ -924,48 +952,6 @@
       </template>
     </BaseDialog>
 
-    <BaseDialog
-      :show="showGroupRoutesModal"
-      :title="t('keys.manageGroupRoutesTitle')"
-      width="normal"
-      @close="closeModals"
-    >
-      <form
-        id="group-routes-form"
-        class="space-y-4"
-        data-testid="group-routes-dialog"
-        @submit.prevent="handleGroupRoutesSubmit"
-      >
-        <p class="text-sm text-gray-500 dark:text-gray-400">
-          {{ t('keys.manageGroupRoutesFor', { name: selectedKey?.name ?? '' }) }}
-        </p>
-        <ApiKeyGroupRoutesEditor
-          :group-id="formData.group_id"
-          :routes="formData.group_routes"
-          :groups="groups"
-          :user-group-rates="userGroupRates"
-          @update:group-id="formData.group_id = $event"
-          @update:routes="formData.group_routes = $event"
-        />
-      </form>
-      <template #footer>
-        <div class="flex justify-end gap-3">
-          <button type="button" class="btn btn-secondary" @click="closeModals">
-            {{ t('common.cancel') }}
-          </button>
-          <button
-            form="group-routes-form"
-            type="submit"
-            class="btn btn-primary"
-            :disabled="submitting"
-            data-testid="save-group-routes"
-          >
-            {{ submitting ? t('keys.saving') : t('common.save') }}
-          </button>
-        </div>
-      </template>
-    </BaseDialog>
-
     <!-- Delete Confirmation Dialog -->
     <ConfirmDialog
       :show="showDeleteDialog"
@@ -1131,7 +1117,7 @@
 </template>
 
 <script setup lang="ts">
-	import { ref, reactive, computed, onMounted, onUnmounted, watch, type ComponentPublicInstance } from 'vue'
+	import { ref, reactive, computed, onMounted, onUnmounted, type ComponentPublicInstance } from 'vue'
 	import { useI18n } from 'vue-i18n'
 	import { useAppStore } from '@/stores/app'
 	import { useOnboardingStore } from '@/stores/onboarding'
@@ -1152,10 +1138,9 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 	import Icon from '@/components/icons/Icon.vue'
 	import UseKeyModal from '@/components/keys/UseKeyModal.vue'
 	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
-	import ApiKeyGroupRoutesEditor from '@/components/keys/ApiKeyGroupRoutesEditor.vue'
 	import GroupBadge from '@/components/common/GroupBadge.vue'
 	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
-import type { ApiKey, ApiKeyGroupRoute, Group, PublicSettings, UpdateApiKeyRequest } from '@/types'
+	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
 import type { Column } from '@/components/common/types'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
 import { formatDateTime } from '@/utils/format'
@@ -1170,6 +1155,20 @@ const formatDateTimeLocal = (isoDate: string): string => {
   const date = new Date(isoDate)
   const pad = (n: number) => n.toString().padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+interface GroupOption {
+  value: number
+  label: string
+  description: string | null
+  rate: number
+  userRate: number | null
+  peakRateEnabled: boolean
+  peakStart: string
+  peakEnd: string
+  peakRateMultiplier: number
+  subscriptionType: SubscriptionType
+  platform: GroupPlatform
 }
 
 const appStore = useAppStore()
@@ -1297,7 +1296,6 @@ const filterGroupId = ref<string | number>('')
 
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
-const showGroupRoutesModal = ref(false)
 const showDeleteDialog = ref(false)
 const showResetQuotaDialog = ref(false)
 const showResetRateLimitDialog = ref(false)
@@ -1332,7 +1330,6 @@ const setGroupButtonRef = (keyId: number, el: Element | ComponentPublicInstance 
 const formData = ref({
   name: '',
   group_id: null as number | null,
-  group_routes: [] as ApiKeyGroupRoute[],
   status: 'active' as 'active' | 'inactive',
   use_custom_key: false,
   custom_key: '',
@@ -1426,28 +1423,6 @@ const groupOptions = computed(() =>
     platform: group.platform
   }))
 )
-
-const syncPrimaryRoute = () => {
-  if (formData.value.group_id === null) {
-    formData.value.group_routes = []
-    return
-  }
-
-  const currentPrimary = formData.value.group_routes[0]?.group_id === formData.value.group_id
-    ? formData.value.group_routes[0]
-    : null
-  formData.value.group_routes = [
-    {
-      group_id: formData.value.group_id,
-      max_rate_multiplier: currentPrimary?.max_rate_multiplier ?? null
-    },
-    ...formData.value.group_routes.slice(1).filter((route) => route.group_id !== formData.value.group_id)
-  ]
-}
-
-watch(() => formData.value.group_id, (groupId) => {
-  if (groupId !== null && (formData.value.group_routes.length === 0 || formData.value.group_routes[0]?.group_id !== groupId)) syncPrimaryRoute()
-})
 
 // Group dropdown search
 const groupSearchQuery = ref('')
@@ -1582,14 +1557,13 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
   loadApiKeys()
 }
 
-const populateFormDataFromKey = (key: ApiKey) => {
+const editKey = (key: ApiKey) => {
   selectedKey.value = key
   const hasIPRestriction = (key.ip_whitelist?.length > 0) || (key.ip_blacklist?.length > 0)
   const hasExpiration = !!key.expires_at
   formData.value = {
     name: key.name,
     group_id: key.group_id,
-    group_routes: (key.group_routes?.length ? key.group_routes : key.group_id ? [{ group_id: key.group_id }] : []).map((route) => ({ ...route })),
     status: key.status === 'quota_exhausted' || key.status === 'expired' ? 'inactive' : key.status,
     use_custom_key: false,
     custom_key: '',
@@ -1606,16 +1580,7 @@ const populateFormDataFromKey = (key: ApiKey) => {
     expiration_preset: 'custom',
     expiration_date: key.expires_at ? formatDateTimeLocal(key.expires_at) : ''
   }
-}
-
-const editKey = (key: ApiKey) => {
-  populateFormDataFromKey(key)
   showEditModal.value = true
-}
-
-const manageGroupRoutes = (key: ApiKey) => {
-  populateFormDataFromKey(key)
-  showGroupRoutesModal.value = true
 }
 
 const toggleKeyStatus = async (key: ApiKey) => {
@@ -1628,6 +1593,40 @@ const toggleKeyStatus = async (key: ApiKey) => {
     loadApiKeys()
   } catch (error) {
     appStore.showError(t('keys.failedToUpdateStatus'))
+  }
+}
+
+const openGroupSelector = (key: ApiKey) => {
+  if (groupSelectorKeyId.value === key.id) {
+    groupSelectorKeyId.value = null
+    dropdownPosition.value = null
+  } else {
+    const buttonEl = groupButtonRefs.value.get(key.id)
+    if (buttonEl) {
+      const rect = buttonEl.getBoundingClientRect()
+      const dropdownEstHeight = 400 // estimated max dropdown height
+      const dropdownEstWidth = Math.min(380, window.innerWidth - 16)
+      const spaceBelow = window.innerHeight - rect.bottom
+      const spaceAbove = rect.top
+      // 夹取 left，避免窄屏下浮层超出视口右缘
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - dropdownEstWidth - 8))
+
+      if (spaceBelow < dropdownEstHeight && spaceAbove > spaceBelow) {
+        // Not enough space below, pop upward
+        dropdownPosition.value = {
+          bottom: window.innerHeight - rect.top + 4,
+          left
+        }
+      } else {
+        // Default: pop downward
+        dropdownPosition.value = {
+          top: rect.bottom + 4,
+          left
+        }
+      }
+    }
+    groupSelectorKeyId.value = key.id
+    groupSearchQuery.value = ''
   }
 }
 
@@ -1666,18 +1665,6 @@ const handleSubmit = async () => {
   // Validate group_id is required
   if (formData.value.group_id === null) {
     appStore.showError(t('keys.groupRequired'))
-    return
-  }
-  syncPrimaryRoute()
-  const groupRoutes = formData.value.group_routes.map((route) => {
-    const rawCap = route.max_rate_multiplier as number | string | null | undefined
-    return {
-      group_id: route.group_id,
-      max_rate_multiplier: rawCap === '' || rawCap == null ? null : Number(rawCap)
-    }
-  })
-  if (groupRoutes.some((route) => route.group_id <= 0 || (route.max_rate_multiplier != null && (!Number.isFinite(route.max_rate_multiplier) || route.max_rate_multiplier <= 0)))) {
-    appStore.showError(t('keys.invalidGroupRoutes'))
     return
   }
 
@@ -1734,7 +1721,6 @@ const handleSubmit = async () => {
       const updates: UpdateApiKeyRequest = {
         name: formData.value.name,
         group_id: formData.value.group_id,
-        group_routes: groupRoutes,
         ip_whitelist: ipWhitelist,
         ip_blacklist: ipBlacklist,
         quota: quota,
@@ -1758,8 +1744,7 @@ const handleSubmit = async () => {
         ipBlacklist,
         quota,
         expiresInDays,
-        rateLimitData,
-        groupRoutes
+        rateLimitData
       )
       appStore.showSuccess(t('keys.keyCreatedSuccess'))
       // Only advance tour if active, on submit step, and creation succeeded
@@ -1773,41 +1758,6 @@ const handleSubmit = async () => {
     const errorMsg = error.response?.data?.detail || t('keys.failedToSave')
     appStore.showError(errorMsg)
     // Don't advance tour on error
-  } finally {
-    submitting.value = false
-  }
-}
-
-const handleGroupRoutesSubmit = async () => {
-  if (!selectedKey.value || formData.value.group_id === null) {
-    appStore.showError(t('keys.groupRequired'))
-    return
-  }
-
-  syncPrimaryRoute()
-  const groupRoutes = formData.value.group_routes.map((route) => {
-    const rawCap = route.max_rate_multiplier as number | string | null | undefined
-    return {
-      group_id: route.group_id,
-      max_rate_multiplier: rawCap === '' || rawCap == null ? null : Number(rawCap)
-    }
-  })
-  if (groupRoutes.some((route) => route.group_id <= 0 || (route.max_rate_multiplier != null && (!Number.isFinite(route.max_rate_multiplier) || route.max_rate_multiplier <= 0)))) {
-    appStore.showError(t('keys.invalidGroupRoutes'))
-    return
-  }
-
-  submitting.value = true
-  try {
-    await keysAPI.update(selectedKey.value.id, {
-      group_id: formData.value.group_id,
-      group_routes: groupRoutes
-    })
-    appStore.showSuccess(t('keys.groupRoutesUpdatedSuccess'))
-    closeModals()
-    loadApiKeys()
-  } catch (error: any) {
-    appStore.showError(error.response?.data?.detail || t('keys.failedToSave'))
   } finally {
     submitting.value = false
   }
@@ -1836,12 +1786,10 @@ const handleDelete = async () => {
 const closeModals = () => {
   showCreateModal.value = false
   showEditModal.value = false
-  showGroupRoutesModal.value = false
   selectedKey.value = null
   formData.value = {
     name: '',
     group_id: null,
-    group_routes: [],
     status: 'active',
     use_custom_key: false,
     custom_key: '',

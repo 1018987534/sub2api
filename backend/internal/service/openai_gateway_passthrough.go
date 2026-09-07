@@ -352,15 +352,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	agentTaskRecoveryTried := false
-	reasoningEffortValue := ""
-	if reasoningEffort != nil {
-		reasoningEffortValue = *reasoningEffort
-	}
-	firstOutputDeadline := time.Time{}
-	firstOutputTimeout := time.Duration(0)
-	if reqStream && account.Platform == PlatformOpenAI {
-		firstOutputDeadline, firstOutputTimeout = s.openAIFirstOutputDeadline(account, reasoningEffortValue, startTime)
-	}
 	compactModelFallbackRetried := false
 	rejectedFieldRetryState := openAIResponsesRejectedFieldRetryStateForRequest(c, body)
 	var resp *http.Response
@@ -376,50 +367,19 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		SetOpsUpstreamModel(c, actualModel)
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-		var headerGuard *openAIFirstOutputHeaderGuard
-		if firstOutputTimeout > 0 {
-			upstreamCtx, headerGuard = newOpenAIFirstOutputHeaderGuard(
-				upstreamCtx, releaseUpstreamCtx, firstOutputDeadline,
-			)
-		}
 		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthrough(upstreamCtx, c, account, body, token)
-		if headerGuard == nil {
-			releaseUpstreamCtx()
-		}
+		releaseUpstreamCtx()
 		if buildErr != nil {
-			if headerGuard != nil {
-				headerGuard.close()
-			}
 			return nil, buildErr
 		}
 
 		upstreamStart := time.Now()
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
-		if headerGuard != nil && headerGuard.stopHeaderWait() {
-			if resp != nil && resp.Body != nil {
-				_ = resp.Body.Close()
-			}
-			headerGuard.close()
-			return nil, s.newOpenAIFirstOutputTimeoutError(
-				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
-				startTime, reqModel, reasoningEffortValue,
-				firstOutputTimeout, "response_headers", nil,
-			)
-		}
 		if err != nil {
-			if resp != nil && resp.Body != nil {
-				_ = resp.Body.Close()
-			}
-			if headerGuard != nil {
-				headerGuard.close()
-			}
 			// Transport-level failure (proxy/DNS/TCP/TLS — no HTTP response). Convert to
 			// a failover so the handler switches to a healthy account.
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
-		}
-		if headerGuard != nil {
-			resp.Body = &openAIRequestContextReadCloser{ReadCloser: resp.Body, cleanup: headerGuard.close}
 		}
 		if resp.StatusCode >= 400 {
 			// Peek only to identify an invalid task. Restore the body so the existing
@@ -459,7 +419,6 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 				)
 				continue
 			}
-
 			// 透传模式默认保持原样代理；容量错误以及 API-key 上游的瞬时
 			// 5xx 应先触发多账号 failover，且此时尚未写入下游响应。
 			// probeBody 已在上方任务探测时读取过一次，直接复用避免重复读取。
@@ -1872,26 +1831,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 	originalModel string,
 	mappedModel string,
 ) (*openaiStreamingResultPassthrough, error) {
-	return s.handleStreamingResponsePassthroughWithReasoning(ctx, resp, c, account, startTime, originalModel, mappedModel, "")
-}
-
-func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
-	ctx context.Context,
-	resp *http.Response,
-	c *gin.Context,
-	account *Account,
-	startTime time.Time,
-	originalModel string,
-	mappedModel string,
-	reasoningEffort string,
-) (*openaiStreamingResultPassthrough, error) {
-	firstOutputDeadline, firstOutputTimeout := s.openAIFirstOutputDeadline(account, reasoningEffort, startTime)
-	var firstOutputGuard *openAIFirstOutputBodyGuard
-	if firstOutputTimeout > 0 {
-		firstOutputGuard = newOpenAIFirstOutputBodyGuard(resp.Body, firstOutputDeadline)
-		resp.Body = firstOutputGuard
-		defer func() { _ = firstOutputGuard.Close() }()
-	}
 	latencyTrace := OpenAILatencyTraceFromContext(ctx)
 	if latencyTrace != nil {
 		defer latencyTrace.LogIfSlow(ctx, OpenAISlowTraceThreshold(s.cfg), "stream_end", account.ID, resp.Header.Get("x-request-id"))
@@ -2162,6 +2101,11 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 						s.handleOpenAIStreamTerminalAccountSideEffects(c, account, dataBytes, failedMessage, resp.Header, mappedModel)
 						bareErrorAccountSideEffectsPending = false
 					}
+					if eventType == "response.failed" {
+						// The stream cannot be replayed after semantic output. Preserve the
+						// terminal event, while making the upstream failure queryable.
+						s.recordOpenAIStreamUpstreamError(c, account, true, upstreamRequestID, "stream_failed", dataBytes, failedMessage)
+					}
 				}
 				if !outputStarted {
 					shouldFailover := false
@@ -2239,9 +2183,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 				openAIResponsesCompletedEventIsEmpty(dataBytes, usage) {
 				return resultWithUsage(), newOpenAIResponsesEmptyCompletedFailoverError(c, account, upstreamRequestID)
 			}
-			if openAIStreamDataStartsVisibleOutput(trimmedData, eventType) && firstOutputGuard != nil {
-				firstOutputGuard.MarkSemanticOutput()
-			}
 			if firstTokenMs == nil && openAIStreamDataStartsTTFT(trimmedData, eventType, forceFlushFailedEvent, ttftMode) {
 				ms := int(time.Since(startTime).Milliseconds())
 				firstTokenMs = &ms
@@ -2288,19 +2229,8 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			failureDelivered = true
 		}
 	}
-	firstOutputDeadlineReached := func() bool {
-		return firstOutputGuard != nil && firstOutputGuard.Fired() && firstTokenMs == nil &&
-			!sawTerminalEvent && !sawFailedEvent && !openAIStreamClientOutputStarted(c, clientOutputStarted)
-	}
 	ensureResponseFailedTerminal()
 	if err := documentScanner.Err(); err != nil {
-		if firstOutputDeadlineReached() {
-			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(
-				ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
-				startTime, originalModel, reasoningEffort,
-				firstOutputTimeout, "semantic_output", resp.Header,
-			)
-		}
 		if (sawDone || sawTerminalEvent) && !sawFailedEvent {
 			s.clearOpenAIProxyStreamDisconnect(account)
 			return resultWithUsage(), nil
@@ -2334,13 +2264,6 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthroughWithReasoning(
 			err,
 		)
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", err)
-	}
-	if firstOutputDeadlineReached() {
-		return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(
-			ctx, c, account, opsUpstreamProxyID(account), opsUpstreamProxyName(account),
-			startTime, originalModel, reasoningEffort,
-			firstOutputTimeout, "semantic_output", resp.Header,
-		)
 	}
 	if sawFailedEvent {
 		return resultWithUsage(), fmt.Errorf("upstream response failed: %s", failedMessage)

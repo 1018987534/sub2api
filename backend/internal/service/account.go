@@ -66,11 +66,6 @@ type Account struct {
 	GroupIDs      []int64
 	Groups        []*Group
 
-	// SelectedAPIKeyGroup is request-local routing metadata. It is attached to
-	// a cloned account after ordered API-key route selection and is never stored.
-	SelectedAPIKeyGroup        *Group
-	SelectedAPIKeySubscription *UserSubscription
-
 	// model_mapping 热路径缓存（非持久化字段）
 	modelMappingCache               map[string]string
 	modelMappingCacheReady          bool
@@ -140,42 +135,6 @@ type TempUnschedulableRule struct {
 	Description     string   `json:"description"`
 }
 
-const (
-	TempUnschedulableModeRules               = "rules"
-	TempUnschedulableModeConsecutiveFailures = "consecutive_failures"
-)
-
-type TempUnschedulableFailureRule struct {
-	WindowSeconds    int    `json:"window_seconds"`
-	FailureThreshold int    `json:"failure_threshold"`
-	DurationMinutes  int    `json:"duration_minutes"`
-	Description      string `json:"description"`
-}
-
-const (
-	PeriodicSchedulePauseEnabledExtraKey  = "periodic_schedule_pause_enabled"
-	PeriodicScheduleRunMinutesExtraKey    = "periodic_schedule_run_minutes"
-	PeriodicSchedulePauseMinutesExtraKey  = "periodic_schedule_pause_minutes"
-	PeriodicSchedulePauseAnchorAtExtraKey = "periodic_schedule_pause_anchor_at"
-	MaxPeriodicSchedulePauseWindowMinutes = 10080
-)
-
-type PeriodicSchedulePauseConfig struct {
-	RunMinutes   int
-	PauseMinutes int
-	AnchorAt     time.Time
-}
-
-type PeriodicSchedulePauseStatus struct {
-	Enabled      bool
-	RunMinutes   int
-	PauseMinutes int
-	AnchorAt     *time.Time
-	Paused       bool
-	NextPauseAt  *time.Time
-	ResumeAt     *time.Time
-}
-
 func (a *Account) IsActive() bool {
 	return a.Status == StatusActive
 }
@@ -220,13 +179,10 @@ func (a *Account) EffectiveLoadFactor() int {
 }
 
 func (a *Account) IsSchedulable() bool {
-	return a.IsSchedulableAt(time.Now())
-}
-
-func (a *Account) IsSchedulableAt(now time.Time) bool {
 	if !a.IsActive() || !a.Schedulable {
 		return false
 	}
+	now := time.Now()
 	if a.AutoPauseOnExpired && a.ExpiresAt != nil && !now.Before(*a.ExpiresAt) {
 		return false
 	}
@@ -239,108 +195,10 @@ func (a *Account) IsSchedulableAt(now time.Time) bool {
 	if a.TempUnschedulableUntil != nil && now.Before(*a.TempUnschedulableUntil) {
 		return false
 	}
-	if a.IsInPeriodicSchedulePause(now) {
-		return false
-	}
 	if a.IsAPIKeyOrBedrock() && a.IsQuotaExceeded() {
 		return false
 	}
 	return true
-}
-
-func (a *Account) GetPeriodicSchedulePauseConfig() (PeriodicSchedulePauseConfig, bool) {
-	if a == nil || a.Extra == nil {
-		return PeriodicSchedulePauseConfig{}, false
-	}
-	enabled, ok := a.Extra[PeriodicSchedulePauseEnabledExtraKey].(bool)
-	if !ok || !enabled {
-		return PeriodicSchedulePauseConfig{}, false
-	}
-	runMinutes := parseTempUnschedInt(a.Extra[PeriodicScheduleRunMinutesExtraKey])
-	pauseMinutes := parseTempUnschedInt(a.Extra[PeriodicSchedulePauseMinutesExtraKey])
-	if runMinutes < 1 || runMinutes > MaxPeriodicSchedulePauseWindowMinutes ||
-		pauseMinutes < 1 || pauseMinutes > MaxPeriodicSchedulePauseWindowMinutes {
-		return PeriodicSchedulePauseConfig{}, false
-	}
-	anchorAt, ok := parsePeriodicSchedulePauseAnchor(a.Extra[PeriodicSchedulePauseAnchorAtExtraKey])
-	if !ok {
-		return PeriodicSchedulePauseConfig{}, false
-	}
-	return PeriodicSchedulePauseConfig{
-		RunMinutes:   runMinutes,
-		PauseMinutes: pauseMinutes,
-		AnchorAt:     anchorAt,
-	}, true
-}
-
-func parsePeriodicSchedulePauseAnchor(value any) (time.Time, bool) {
-	switch v := value.(type) {
-	case time.Time:
-		if v.IsZero() {
-			return time.Time{}, false
-		}
-		return v, true
-	case string:
-		parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(v))
-		if err != nil || parsed.IsZero() {
-			return time.Time{}, false
-		}
-		return parsed, true
-	default:
-		return time.Time{}, false
-	}
-}
-
-func (a *Account) PeriodicSchedulePauseStatusAt(now time.Time) PeriodicSchedulePauseStatus {
-	config, ok := a.GetPeriodicSchedulePauseConfig()
-	if !ok {
-		return PeriodicSchedulePauseStatus{}
-	}
-	anchorAt := config.AnchorAt
-	status := PeriodicSchedulePauseStatus{
-		Enabled:      true,
-		RunMinutes:   config.RunMinutes,
-		PauseMinutes: config.PauseMinutes,
-		AnchorAt:     &anchorAt,
-	}
-
-	runDuration := time.Duration(config.RunMinutes) * time.Minute
-	pauseDuration := time.Duration(config.PauseMinutes) * time.Minute
-	cycleDuration := runDuration + pauseDuration
-	if now.Before(config.AnchorAt) {
-		nextPauseAt := config.AnchorAt.Add(runDuration)
-		status.NextPauseAt = &nextPauseAt
-		return status
-	}
-	elapsed := now.Sub(config.AnchorAt)
-	offset := elapsed % cycleDuration
-	if offset < runDuration {
-		nextPauseAt := now.Add(runDuration - offset)
-		status.NextPauseAt = &nextPauseAt
-		return status
-	}
-	resumeAt := now.Add(cycleDuration - offset)
-	status.Paused = true
-	status.ResumeAt = &resumeAt
-	return status
-}
-
-func (a *Account) IsInPeriodicSchedulePause(now time.Time) bool {
-	return a.PeriodicSchedulePauseStatusAt(now).Paused
-}
-
-func filterPeriodicSchedulePausedAccounts(accounts []Account, now time.Time) []Account {
-	if len(accounts) == 0 {
-		return accounts
-	}
-	filtered := make([]Account, 0, len(accounts))
-	for i := range accounts {
-		if accounts[i].IsInPeriodicSchedulePause(now) {
-			continue
-		}
-		filtered = append(filtered, accounts[i])
-	}
-	return filtered
 }
 
 // IsCredentialUsableForShadow 报告本账号(作为某 spark 影子的母账号)的凭据/传输是否可被影子透传使用。
@@ -568,17 +426,6 @@ func (a *Account) IsTempUnschedulableEnabled() bool {
 	return ok && enabled
 }
 
-func (a *Account) GetTempUnschedulableMode() string {
-	if a == nil || a.Credentials == nil {
-		return TempUnschedulableModeRules
-	}
-	mode := strings.ToLower(parseTempUnschedString(a.Credentials["temp_unschedulable_mode"]))
-	if mode == TempUnschedulableModeConsecutiveFailures {
-		return mode
-	}
-	return TempUnschedulableModeRules
-}
-
 func (a *Account) GetTempUnschedulableRules() []TempUnschedulableRule {
 	if a.Credentials == nil {
 		return nil
@@ -614,43 +461,6 @@ func (a *Account) GetTempUnschedulableRules() []TempUnschedulableRule {
 		rules = append(rules, rule)
 	}
 
-	return rules
-}
-
-func (a *Account) GetTempUnschedulableFailureRules() []TempUnschedulableFailureRule {
-	if a == nil || a.Credentials == nil {
-		return nil
-	}
-	raw, ok := a.Credentials["temp_unschedulable_failure_rules"]
-	if !ok || raw == nil {
-		return nil
-	}
-
-	arr, ok := raw.([]any)
-	if !ok {
-		return nil
-	}
-
-	rules := make([]TempUnschedulableFailureRule, 0, len(arr))
-	for _, item := range arr {
-		entry, ok := item.(map[string]any)
-		if !ok || entry == nil {
-			continue
-		}
-
-		rule := TempUnschedulableFailureRule{
-			WindowSeconds:    parseTempUnschedInt(entry["window_seconds"]),
-			FailureThreshold: parseTempUnschedInt(entry["failure_threshold"]),
-			DurationMinutes:  parseTempUnschedInt(entry["duration_minutes"]),
-			Description:      parseTempUnschedString(entry["description"]),
-		}
-		if rule.WindowSeconds < 1 || rule.WindowSeconds > 86400 ||
-			rule.FailureThreshold < 1 || rule.FailureThreshold > 1000 ||
-			rule.DurationMinutes < 1 || rule.DurationMinutes > 10080 {
-			continue
-		}
-		rules = append(rules, rule)
-	}
 	return rules
 }
 
@@ -2030,9 +1840,10 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 }
 
 // GrokMediaGenerationEligibility reports whether a Grok account may receive
-// new image/video generation requests. OAuth media fails closed unless billing
-// observations provide positive paid-entitlement evidence. An explicit
-// operator override takes precedence over probe data.
+// new image/video generation requests. Explicit evidence of a forbidden or
+// free account blocks media, while an incomplete successful billing response
+// remains eligible for backwards compatibility. An explicit operator
+// override takes precedence over probe data.
 func (a *Account) GrokMediaGenerationEligibility() (bool, string) {
 	if a == nil || !a.IsGrok() {
 		return false, "not_grok"
@@ -2058,7 +1869,12 @@ func (a *Account) GrokMediaGenerationEligibility() (bool, string) {
 		return false, "billing_free_tier"
 	}
 	if !grokBillingHasAuthoritativeQuota(billing) {
-		return false, "billing_inconclusive"
+		// Billing endpoints can return 200 with an account-specific schema that
+		// omits plan/quota fields (for example, some SuperGrok accounts). An
+		// incomplete observation is not proof of ineligibility; keep the account
+		// routable and expose the reason for diagnostics. Operators can still
+		// quarantine a known-bad account with grok_media_eligible=false.
+		return true, "billing_inconclusive"
 	}
 	return true, "eligible"
 }
