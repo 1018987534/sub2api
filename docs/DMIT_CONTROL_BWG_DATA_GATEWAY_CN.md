@@ -32,6 +32,8 @@ Docker 服务名直接连接本机数据层；其余四个应用节点通过 Wir
 动态权重由 DMIT control 的 `gateway_routing_settings` 和
 `GET /api/v1/gateway-routing/runtime` 提供。Worker 的静态百分比仅用于冷启动
 回退。角色迁移不自动改变管理员目标权重；调整权重必须单独记录并验证五个节点之和。
+迁移完成后的初始目标与冷启动回退统一为 BWG 10%、VMISS-01 10%、YT 54%、
+VMISS-02 10%、DMIT 16%，后续可从管理端动态调整。
 
 ## 角色化产物
 

@@ -95,7 +95,8 @@ func TestGatewayRoutingSettingsDefaultsAndValidation(t *testing.T) {
 		settings.Nodes[3].ID,
 		settings.Nodes[4].ID,
 	})
-	require.Equal(t, []int{25, 20, 40, 10, 5}, []int{
+	require.Equal(t, "https://gateway-bwg-origin.xiaohondou.com", settings.Nodes[0].Origin)
+	require.Equal(t, []int{10, 10, 54, 10, 16}, []int{
 		settings.Nodes[0].TargetWeight,
 		settings.Nodes[1].TargetWeight,
 		settings.Nodes[2].TargetWeight,
