@@ -384,6 +384,10 @@ func (s *LotteryService) GetCurrent(ctx context.Context, userID int64) (LotteryC
 		return out, nil
 	}
 	round, err := scanLotteryRound(s.db.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.status='open'`))
+	if errors.Is(err, sql.ErrNoRows) {
+		// Keep the latest completed round visible while the next round is pending.
+		round, err = scanLotteryRound(s.db.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.status='drawn' ORDER BY r.round_no DESC LIMIT 1`))
+	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return LotteryCurrent{}, err
 	}
@@ -395,13 +399,15 @@ func (s *LotteryService) GetCurrent(ctx context.Context, userID int64) (LotteryC
 			if err != nil {
 				return LotteryCurrent{}, err
 			}
-			out.Eligibility, err = s.checkEligibility(ctx, userID, round)
-			if err != nil {
-				return LotteryCurrent{}, err
-			}
-			if out.Joined {
-				out.Eligibility.Eligible = true
-				out.Eligibility.Reason = ""
+			if round.Status == LotteryRoundStatusOpen {
+				out.Eligibility, err = s.checkEligibility(ctx, userID, round)
+				if err != nil {
+					return LotteryCurrent{}, err
+				}
+				if out.Joined {
+					out.Eligibility.Eligible = true
+					out.Eligibility.Reason = ""
+				}
 			}
 		}
 	}
