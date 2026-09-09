@@ -527,7 +527,10 @@ type RedeemCode struct {
 type AdminRedeemCode struct {
 	RedeemCode
 
-	Notes string `json:"notes"`
+	Notes          string   `json:"notes"`
+	LotteryRoundNo int64    `json:"lottery_round_no,omitempty"`
+	BalanceBefore  *float64 `json:"balance_before,omitempty"`
+	BalanceAfter   *float64 `json:"balance_after,omitempty"`
 }
 
 type NullableTimeField struct {

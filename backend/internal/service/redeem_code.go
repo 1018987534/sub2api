@@ -18,6 +18,11 @@ type RedeemCode struct {
 	CreatedAt time.Time
 	ExpiresAt *time.Time
 
+	// Populated only when projecting the lottery ledger into admin balance history.
+	LotteryRoundNo int64
+	BalanceBefore  *float64
+	BalanceAfter   *float64
+
 	GroupID      *int64
 	ValidityDays int
 

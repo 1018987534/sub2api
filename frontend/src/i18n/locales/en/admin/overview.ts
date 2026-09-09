@@ -714,6 +714,8 @@ export default {
       allTypes: 'All Types',
       typeBalance: 'Balance (Redeem)',
       typeAffiliateBalance: 'Balance (Affiliate Transfer)',
+      typeLotteryReward: 'Lottery Reward',
+      rewardBalanceChange: 'Balance: ${before} → ${after}',
       typeAdminBalance: 'Balance (Admin)',
       typeConcurrency: 'Concurrency (Redeem)',
       typeAdminConcurrency: 'Concurrency (Admin)',
