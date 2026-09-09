@@ -40,7 +40,8 @@ export const supportChatAPI = {
     const idempotencyKey = key('user-chat')
     if (file) {
       const form = new FormData(); form.append('content', content); form.append('file', file)
-      return (await apiClient.post<SupportMessage>('/chat/messages', form, { headers: { 'Idempotency-Key': idempotencyKey } })).data
+      // Clear the client's JSON default so Axios keeps FormData and the browser supplies its boundary.
+      return (await apiClient.post<SupportMessage>('/chat/messages', form, { headers: { 'Content-Type': undefined, 'Idempotency-Key': idempotencyKey } })).data
     }
     return (await apiClient.post<SupportMessage>('/chat/messages', { content, kind: 'text', idempotency_key: idempotencyKey }, { headers: { 'Idempotency-Key': idempotencyKey } })).data
   },
@@ -55,7 +56,8 @@ export const supportChatAPI = {
     const idempotencyKey = key('admin-chat')
     if (file) {
       const form = new FormData(); form.append('content', content); form.append('file', file)
-      return (await apiClient.post<SupportMessage>(`/admin/chat/conversations/${id}/messages`, form, { headers: { 'Idempotency-Key': idempotencyKey } })).data
+      // Preserve the multipart body for attachment-only replies as well.
+      return (await apiClient.post<SupportMessage>(`/admin/chat/conversations/${id}/messages`, form, { headers: { 'Content-Type': undefined, 'Idempotency-Key': idempotencyKey } })).data
     }
     return (await apiClient.post<SupportMessage>(`/admin/chat/conversations/${id}/messages`, { content, kind: 'text', idempotency_key: idempotencyKey })).data
   },

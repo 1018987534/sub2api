@@ -14,7 +14,9 @@ describe('support chat attachment types', () => {
     'offers Word documents in %s',
     (view) => {
       const source = readFileSync(resolve(process.cwd(), 'src/views', view), 'utf8')
-      for (const type of wordTypes) expect(source).toContain(type)
+      expect(source).toContain('<SupportMessageComposer')
+      const composer = readFileSync(resolve(process.cwd(), 'src/components/support/SupportMessageComposer.vue'), 'utf8')
+      for (const type of wordTypes) expect(composer).toContain(type)
     },
   )
 })

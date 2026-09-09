@@ -240,11 +240,23 @@ export default {
     adminDescription: '选择左侧会话查看消息',
     insertEmoji: '插入表情',
     attachFile: '添加附件',
+    removeAttachment: '移除附件',
+    composerHint: '支持粘贴图片，Enter 发送，Shift + Enter 换行',
+    unsupportedImage: '支持 PNG、JPEG、GIF 和 WebP 图片',
     fileTooLarge: '文件不能超过 4 MB',
     sendFailed: '发送失败，请稍后重试'
   },
 
   lottery: {
+    alreadyJoined: '已参与',
+    joinNow: '立即参与',
+    notJoined: '您尚未参与本期抽奖',
+    waitNextRound: '本期已开奖，请等待管理员开启下一期',
+    roundLabel: '第 {round} 期',
+    awardedAt: '中奖时间：{time}',
+    rewardCredited: '已发放到账户余额',
+    participationRule: '{rules} 可参与，参与后请等待本期开奖结果。',
+    openRule: '参与后请等待本期开奖结果。',
     title: '抽奖活动',
     description: '参与当前期抽奖，达到人数后自动开奖，中奖奖励直接发放到账户余额。',
     refresh: '刷新',

@@ -266,3 +266,23 @@ func TestSupportChatAttachmentMessagePersistsAtomically(t *testing.T) {
 	require.Equal(t, int64(301), m.Attachment.ID)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestSupportChatContentLimitCountsUnicodeCharacters(t *testing.T) {
+	for _, content := range []string{strings.Repeat("你", 10000), strings.Repeat("😀", 10000)} {
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		h := NewSupportChatHandler(db, nil)
+		now := time.Now()
+		mock.ExpectQuery(`INSERT INTO support_messages .*RETURNING`).
+			WithArgs(int64(41), "user", int64(7), content, "text", "unicode-key").
+			WillReturnRows(supportMessageRows(101, 41, 7, "user", content, now))
+		mock.ExpectExec(`UPDATE support_conversations SET unread_by_admin=`).
+			WithArgs(int64(41), now).WillReturnResult(sqlmock.NewResult(0, 1))
+		_, err = h.insertMessage(supportChatTestContext(), 41, 7, "user", supportMessageInput{Content: content, IdempotencyKey: "unicode-key"})
+		require.NoError(t, err)
+		_, err = h.insertMessage(supportChatTestContext(), 41, 7, "user", supportMessageInput{Content: content + "你"})
+		require.EqualError(t, err, "message content must be between 1 and 10000 characters")
+		require.NoError(t, mock.ExpectationsWereMet())
+		_ = db.Close()
+	}
+}

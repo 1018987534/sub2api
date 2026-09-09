@@ -240,11 +240,23 @@ export default {
     adminDescription: 'Select a conversation to view messages',
     insertEmoji: 'Insert emoji',
     attachFile: 'Attach file',
+    removeAttachment: 'Remove attachment',
+    composerHint: 'Paste images · Enter to send · Shift + Enter for a new line',
+    unsupportedImage: 'Supported images: PNG, JPEG, GIF and WebP',
     fileTooLarge: 'Files must be 4 MB or smaller',
     sendFailed: 'Send failed. Please try again.'
   },
 
   lottery: {
+    alreadyJoined: 'Joined',
+    joinNow: 'Join now',
+    notJoined: 'You have not joined this round',
+    waitNextRound: 'This round has been drawn. Please wait for the next round.',
+    roundLabel: 'Round {round}',
+    awardedAt: 'Won at: {time}',
+    rewardCredited: 'Credited to account balance',
+    participationRule: '{rules} to join. Wait for the results after joining.',
+    openRule: 'Wait for the results after joining.',
     title: 'Lottery',
     description: 'Join the current round. The draw starts when the participant target is reached and rewards are credited to your balance.',
     refresh: 'Refresh',

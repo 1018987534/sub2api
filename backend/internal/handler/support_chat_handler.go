@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	ratelimit "github.com/Wei-Shaw/sub2api/internal/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -174,7 +175,7 @@ func (h *SupportChatHandler) insertMessage(c *gin.Context, conversationID, sende
 	if len(uploads) > 0 {
 		upload = uploads[0]
 	}
-	if (in.Content == "" && upload == nil) || len(in.Content) > 10000 {
+	if (in.Content == "" && upload == nil) || utf8.RuneCountInString(in.Content) > 10000 {
 		return supportMessage{}, fmt.Errorf("message content must be between 1 and 10000 characters")
 	}
 	if upload != nil {

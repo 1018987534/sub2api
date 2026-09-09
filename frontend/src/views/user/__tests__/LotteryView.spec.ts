@@ -25,7 +25,7 @@ vi.mock('@/stores/app', () => ({
 
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
-  return { ...actual, useI18n: () => ({ t: (key: string) => key }) }
+  return { ...actual, useI18n: () => ({ t: (key: string) => key, locale: { value: 'zh-CN' } }) }
 })
 
 const stubs = {
@@ -114,16 +114,16 @@ describe('LotteryView snapshot', () => {
     expect(wrapper.attributes('data-lottery-snapshot-ready')).toBe('true')
     const sections = wrapper.findAll('section')
     expect(sections).toHaveLength(4)
-    expect(sections[0].classes()).toContain('lg:h-[540px]')
-    expect(sections[1].classes()).toContain('lg:h-[540px]')
+    expect(sections[0].classes()).toContain('lg:h-[26rem]')
+    expect(sections[1].classes()).toContain('lg:h-[26rem]')
     expect(wrapper.find('[data-lottery-capture-region="true"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('winner-1@example.com')
     expect(wrapper.text()).toContain('winner-10@example.com')
     expect(wrapper.findAll('[data-lottery-previous-round="true"]')).toHaveLength(1)
-    expect(wrapper.find('[data-lottery-previous-round="true"]').classes()).toEqual([
+    expect(wrapper.find('[data-lottery-previous-round="true"]').classes()).toEqual(expect.arrayContaining([
       'lottery-winner-group',
       'lottery-previous-round-frame',
-    ])
+    ]))
     expect(wrapper.find('[aria-label="common.nextPage"]').exists()).toBe(false)
   })
 
@@ -159,5 +159,29 @@ describe('LotteryView snapshot', () => {
     expect(getAnnouncement).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('winner-1@example.com')
     expect(wrapper.findAll('[data-lottery-previous-round="true"]')).toHaveLength(0)
+  })
+})
+
+describe('LotteryView participation and displayed counts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getRounds.mockResolvedValue({ items: [{ ...round, winner_count: 0 }], total: 1, pages: 1 })
+  })
+
+  it('disables participation after a draw even for an eligible user who has not joined', async () => {
+    getCurrent.mockResolvedValue({ enabled: true, current_round: { ...round, status: 'drawn' }, joined: false, eligibility: { eligible: true }, recent_winners: [], my_recent_winners: [] })
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('lottery.waitNextRound')
+    expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeDefined()
+  })
+
+  it('shows the configured reward and actual counts in history', async () => {
+    getCurrent.mockResolvedValue({ enabled: true, current_round: { ...round, prize_amount: 7.5, prize_count: 4 }, joined: false, eligibility: { eligible: true }, recent_winners: [], my_recent_winners: [] })
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('$7.50')
+    expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeUndefined()
+    expect(wrapper.findAll('tbody td').map(cell => cell.text())).toEqual(['#3', '4', '0', 'lottery.statuses.open'])
   })
 })

@@ -1,151 +1,78 @@
 <template>
-  <AppLayout :data-lottery-snapshot-ready="snapshot && !loading && !!current ? 'true' : undefined">
-    <div class="mx-auto max-w-6xl space-y-6">
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div class="flex items-center gap-3">
-            <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-              <Icon name="gift" size="lg" />
+  <AppLayout class="lottery-page" :data-lottery-snapshot-ready="snapshot && !loading && !!current ? 'true' : undefined">
+    <div class="mx-auto max-w-5xl space-y-6">
+      <div data-lottery-capture-region="true" class="grid items-start gap-4 lg:grid-cols-[1.5fr_1fr]">
+        <section class="card overflow-hidden lg:h-[26rem]">
+          <div class="border-b border-gray-100 px-6 py-5 dark:border-dark-700">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h1 class="text-xl font-semibold text-gray-900 dark:text-white">{{ t('lottery.title') }}</h1>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('lottery.description') }}</p>
+              </div>
+              <div class="flex shrink-0 items-center gap-2">
+                <button type="button" class="btn btn-secondary h-10 px-3" :disabled="loading || refreshing" :title="t('lottery.refresh')" @click="load">
+                  <svg class="h-4 w-4" :class="{ 'animate-spin': refreshing }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M20 20v-5h-5" /><path stroke-linecap="round" stroke-linejoin="round" d="M5.6 9A7 7 0 0117.7 6.3L20 9M18.4 15A7 7 0 016.3 17.7L4 15" /></svg>
+                  <span class="ml-2 hidden sm:inline">{{ t('lottery.refresh') }}</span>
+                </button>
+                <div class="flex h-11 w-11 items-center justify-center rounded-lg bg-amber-100 dark:bg-amber-900/30"><Icon name="gift" size="md" class="text-amber-600 dark:text-amber-300" /></div>
+              </div>
+            </div>
+          </div>
+          <div v-if="loading" class="flex justify-center py-16"><div class="h-7 w-7 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" /></div>
+          <div v-else-if="!current?.enabled || !current.current_round" class="p-6"><div class="rounded-lg border border-gray-200 bg-gray-50 px-4 py-8 text-center dark:border-dark-600 dark:bg-dark-800"><Icon name="gift" size="xl" class="mx-auto text-gray-400" /><p class="mt-3 text-sm text-gray-500 dark:text-gray-400">{{ t('lottery.noRound') }}</p></div></div>
+          <div v-else class="space-y-6 p-6">
+            <div class="grid gap-3 sm:grid-cols-3">
+              <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-800"><p class="text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.prize') }}</p><p class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{{ money(current.current_round.prize_amount) }}</p></div>
+              <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-800"><p class="text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.prizeCount') }}</p><p class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{{ current.current_round.prize_count }}</p></div>
+              <div class="rounded-lg bg-gray-50 p-4 dark:bg-dark-800"><p class="text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.round') }}</p><p class="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">#{{ current.current_round.round_no }}</p></div>
             </div>
             <div>
-              <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">{{ t('lottery.title') }}</h1>
-              <p class="mt-1 text-sm text-gray-500 dark:text-dark-400">{{ t('lottery.description') }}</p>
+              <div class="mb-2 flex items-center justify-between text-sm"><span class="font-medium text-gray-700 dark:text-gray-200">{{ t('lottery.progress') }}</span><span class="text-gray-500 dark:text-gray-400">{{ current.current_round.participant_count }} / {{ current.current_round.participant_threshold }}</span></div>
+              <div class="h-3 overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700"><div class="h-full rounded-full bg-primary-500 transition-all" :style="{ width: `${progress}%` }" /></div>
             </div>
-          </div>
-        </div>
-        <button class="btn btn-secondary self-start sm:self-auto" :disabled="loading" :title="t('lottery.refresh')" @click="load">
-          <Icon name="refresh" size="sm" :class="loading ? 'animate-spin' : ''" />
-          <span>{{ t('lottery.refresh') }}</span>
-        </button>
-      </div>
-      <div v-if="loading" class="card flex justify-center py-16">
-        <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
-      </div>
-
-      <template v-else>
-        <div v-if="!current?.enabled || !current?.current_round" class="card border-dashed p-12 text-center">
-          <Icon name="gift" size="xl" class="mx-auto text-gray-300 dark:text-dark-600" />
-          <h2 class="mt-4 text-lg font-semibold text-gray-900 dark:text-white">{{ t('lottery.noRound') }}</h2>
-        </div>
-
-        <template v-else>
-          <div data-lottery-capture-region="true" class="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)] lg:items-stretch">
-            <section class="flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 shadow-sm dark:border-amber-900/50 dark:from-amber-950/40 dark:via-dark-900 dark:to-orange-950/30 lg:h-[540px] lg:min-h-0">
-              <div class="flex flex-1 flex-col gap-5 p-5 sm:p-7">
-                <div class="min-w-0">
-                  <div class="flex flex-wrap items-center gap-2 text-sm font-medium text-amber-800 dark:text-amber-200">
-                    <span class="rounded-full bg-amber-200/70 px-2.5 py-1 dark:bg-amber-900/60">#{{ current.current_round.round_no }}</span>
-                    <span>{{ t('lottery.progress') }}</span>
-                  </div>
-                  <div class="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    <span class="text-4xl font-bold tracking-tight text-gray-900 dark:text-white">{{ current.current_round.participant_count }}</span>
-                    <span class="text-lg text-gray-500 dark:text-dark-400">/ {{ current.current_round.participant_threshold }}</span>
-                    <span class="text-sm text-gray-500 dark:text-dark-400">{{ t('lottery.round') }} #{{ current.current_round.round_no }}</span>
-                  </div>
-                  <div class="mt-4 h-3 overflow-hidden rounded-full bg-amber-100 dark:bg-amber-900/50">
-                    <div class="h-full rounded-full bg-amber-500 transition-all duration-500" :style="{ width: `${progress}%` }"></div>
-                  </div>
-                  <p class="mt-2 text-xs text-amber-800/80 dark:text-amber-200/80">{{ t(current.current_round.draw_mode === 'manual' ? 'lottery.manualWaiting' : 'lottery.waiting') }}</p>
-                </div>
-
-                <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  <div class="rounded-xl border border-amber-200/80 bg-white/70 p-3 dark:border-amber-900/50 dark:bg-dark-900/50">
-                    <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.prize') }}</p>
-                    <p class="mt-1 text-xl font-semibold text-amber-700 dark:text-amber-300">{{ money(current.current_round.prize_amount) }}</p>
-                  </div>
-                  <div class="rounded-xl border border-amber-200/80 bg-white/70 p-3 dark:border-amber-900/50 dark:bg-dark-900/50">
-                    <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.prizeCount') }}</p>
-                    <p class="mt-1 text-xl font-semibold text-gray-900 dark:text-white">{{ current.current_round.prize_count }}</p>
-                  </div>
-                  <div class="col-span-2 rounded-xl border border-amber-200/80 bg-white/70 p-3 dark:border-amber-900/50 dark:bg-dark-900/50 sm:col-span-1">
-                    <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.eligibility') }}</p>
-                    <p class="mt-1 text-sm font-medium" :class="current.eligibility.eligible || current.joined ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-600 dark:text-dark-300'">
-                      {{ current.joined ? t('lottery.joined') : current.eligibility.eligible ? t('lottery.join') : t('lottery.notEligible') }}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div class="flex flex-col gap-3 border-t border-amber-200/80 bg-white/50 p-4 dark:border-amber-900/50 dark:bg-dark-950/20 sm:flex-row sm:items-center sm:justify-between">
-                <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-dark-300">
-                  <span v-if="current.current_round.require_recharge">{{ t('lottery.rechargeRequired') }}</span>
-                  <span v-if="current.current_round.min_recharge_amount > 0">{{ t('lottery.minRecharge', { amount: money(current.current_round.min_recharge_amount) }) }}</span>
-                  <span v-if="current.current_round.min_account_age_days > 0">{{ t('lottery.accountAge', { days: current.current_round.min_account_age_days }) }}</span>
-                  <span v-if="!current.current_round.require_recharge && current.current_round.min_recharge_amount <= 0 && current.current_round.min_account_age_days <= 0">{{ t('lottery.join') }}</span>
-                </div>
-                <button v-if="!snapshot" class="btn btn-primary w-full sm:w-auto" :disabled="current.joined || !current.eligibility.eligible || showCaptcha" @click="showCaptcha = true">
-                  <Icon name="gift" size="sm" />
-                  <span>{{ current.joined ? t('lottery.joined') : t('lottery.join') }}</span>
-                </button>
-                <router-link v-else to="/login" class="btn btn-primary w-full sm:w-auto">
-                  <Icon name="gift" size="sm" />
-                  <span>{{ t('lottery.join') }}</span>
-                </router-link>
-              </div>
-            </section>
-
-            <section class="flex min-h-[420px] flex-col rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-dark-700 dark:bg-dark-900 sm:p-6 lg:h-[540px] lg:min-h-0">
-              <div class="flex items-center justify-between">
-                <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('lottery.recentWinners') }}</h2>
-                <Icon name="trophy" size="md" class="text-amber-500" />
-              </div>
-              <div v-if="current.recent_winners.length === 0" class="flex flex-1 items-center justify-center py-8 text-sm text-gray-500 dark:text-dark-400">{{ t('common.noData') }}</div>
-              <div v-else data-lottery-winners-scroll="true" class="mt-5 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1" @scroll.passive="onRecentWinnersScroll">
-                <div class="lottery-winner-list">
-                  <div
-                    v-for="(group, groupIndex) in visibleRecentWinnerGroups"
-                    :key="`${group.highlighted ? 'previous' : 'regular'}-${groupIndex}`"
-                    class="lottery-winner-group"
-                    :class="group.highlighted ? 'lottery-previous-round-frame' : ''"
-                    :data-lottery-previous-round="group.highlighted ? 'true' : undefined"
-                  >
-                    <div v-for="winner in group.winners" :key="winner.id" class="lottery-winner-row flex items-center justify-between gap-3 py-3">
-                      <div class="min-w-0">
-                        <p class="truncate text-sm font-medium text-gray-800 dark:text-gray-200">{{ winner.email }}</p>
-                        <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.round') }} #{{ winner.round_no }} · {{ date(winner.awarded_at) }}</p>
-                      </div>
-                      <span class="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-400">+{{ money(winner.prize_amount) }}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
-
-          <section class="card p-5 sm:p-6">
-            <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('lottery.myWinners') }}</h2>
-            <div v-if="current.my_recent_winners.length === 0" class="py-8 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('common.noData') }}</div>
-            <div v-else class="mt-4 divide-y divide-gray-100 dark:divide-dark-800">
-              <div v-for="winner in current.my_recent_winners" :key="winner.id" class="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-                <div>
-                  <p class="text-sm font-medium text-gray-800 dark:text-gray-200">{{ t('lottery.round') }} #{{ winner.round_no }}</p>
-                  <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">{{ date(winner.awarded_at) }}</p>
-                </div>
-                <div class="text-right"><p class="text-sm font-semibold text-emerald-600 dark:text-emerald-400">+{{ money(winner.prize_amount) }}</p><p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.awarded') }}</p></div>
-              </div>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div><p class="text-sm font-medium text-gray-900 dark:text-white">{{ participationStatus }}</p><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ participationRule }}</p></div>
+              <button v-if="!snapshot" type="button" class="btn btn-primary min-w-32" :disabled="!canJoin || showCaptcha" @click="showCaptcha = true"><Icon name="sparkles" size="sm" class="mr-2" />{{ current.joined ? t('lottery.alreadyJoined') : t('lottery.joinNow') }}</button>
+              <router-link v-else to="/login" class="btn btn-primary min-w-32"><Icon name="sparkles" size="sm" class="mr-2" />{{ t('lottery.joinNow') }}</router-link>
             </div>
-          </section>
-        </template>
-
-        <section class="card overflow-hidden">
-          <div class="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-dark-800 sm:px-6">
-            <h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('lottery.history') }}</h2>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="w-full min-w-[560px] text-left text-sm">
-              <thead class="bg-gray-50 text-xs uppercase text-gray-500 dark:bg-dark-900 dark:text-dark-400"><tr><th class="px-5 py-3 font-medium">{{ t('lottery.columns.round') }}</th><th class="px-5 py-3 font-medium">{{ t('lottery.columns.participants') }}</th><th class="px-5 py-3 font-medium">{{ t('lottery.columns.winners') }}</th><th class="px-5 py-3 font-medium">{{ t('lottery.columns.status') }}</th></tr></thead>
-              <tbody class="divide-y divide-gray-100 dark:divide-dark-800"><tr v-for="round in rounds" :key="round.id"><td class="px-5 py-3 font-medium text-gray-900 dark:text-white">#{{ round.round_no }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.participant_count }} / {{ round.participant_threshold }}</td><td class="px-5 py-3 text-gray-600 dark:text-dark-300">{{ round.winner_count }} / {{ round.prize_count }}</td><td class="px-5 py-3"><span class="badge" :class="round.status === 'open' ? 'badge-warning' : round.status === 'drawn' ? 'badge-success' : 'badge-gray'">{{ statusLabel(round.status) }}</span></td></tr><tr v-if="rounds.length === 0"><td colspan="4" class="px-5 py-10 text-center text-sm text-gray-500 dark:text-dark-400">{{ t('common.noData') }}</td></tr></tbody>
-            </table>
           </div>
         </section>
-      </template>
+        <section class="card overflow-hidden lg:flex lg:h-[26rem] lg:flex-col">
+          <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700 lg:shrink-0"><h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('lottery.recentWinners') }}</h2></div>
+          <div data-lottery-winners-scroll="true" class="p-6 lg:min-h-0 lg:overflow-y-auto lg:px-4 lg:py-3" @scroll.passive="onRecentWinnersScroll">
+            <div v-if="!visibleRecentWinners.length" class="py-8 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('common.noData') }}</div>
+            <div v-else class="space-y-3 lg:space-y-1">
+              <div v-for="(group, groupIndex) in visibleRecentWinnerGroups" :key="groupIndex" class="lottery-winner-group space-y-3 lg:space-y-1" :class="{ 'lottery-previous-round-frame': group.highlighted }" :data-lottery-previous-round="group.highlighted ? 'true' : undefined">
+                <div v-for="winner in group.winners" :key="winner.id" class="lottery-winner-row flex items-center justify-between rounded-lg bg-gray-50 p-3 dark:bg-dark-800 lg:h-9 lg:px-3 lg:py-0">
+                  <div class="min-w-0 lg:flex lg:items-center lg:gap-2"><p class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ winner.email }}</p><p class="text-xs text-gray-500 dark:text-dark-400 lg:shrink-0 lg:whitespace-nowrap">{{ t('lottery.roundLabel', { round: winner.round_no }) }}</p></div>
+                  <p class="ml-3 shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-400">+{{ money(winner.prize_amount) }}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+      <section class="card overflow-hidden" data-testid="my-winners-section">
+        <div class="flex items-center gap-2 border-b border-gray-100 px-6 py-4 dark:border-dark-700"><Icon name="trophy" size="sm" class="text-amber-600 dark:text-amber-300" /><h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('lottery.myWinners') }}</h2></div>
+        <div v-if="!current?.my_recent_winners.length" class="px-6 py-8 text-center text-sm text-gray-500 dark:text-gray-400">{{ t('common.noData') }}</div>
+        <ul v-else class="divide-y divide-gray-100 dark:divide-dark-700">
+          <li v-for="winner in current.my_recent_winners" :key="winner.id" class="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="min-w-0"><p class="text-sm font-medium text-gray-900 dark:text-white">{{ t('lottery.roundLabel', { round: winner.round_no }) }}</p><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.awardedAt', { time: date(winner.awarded_at) }) }}</p></div>
+            <div class="flex shrink-0 items-center justify-between gap-4 sm:block sm:text-right"><p class="text-sm font-semibold text-emerald-600 dark:text-emerald-400">+{{ money(winner.prize_amount) }}</p><p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.rewardCredited') }}</p></div>
+          </li>
+        </ul>
+      </section>
+      <section class="card overflow-hidden">
+        <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"><h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ t('lottery.history') }}</h2></div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-100 dark:divide-dark-700">
+            <thead class="bg-gray-50 dark:bg-dark-800"><tr><th v-for="column in ['round', 'participants', 'winners', 'status']" :key="column" class="px-6 py-3 text-left text-xs font-medium uppercase text-gray-500">{{ t(`lottery.columns.${column}`) }}</th></tr></thead>
+            <tbody class="divide-y divide-gray-100 dark:divide-dark-700"><tr v-for="round in rounds" :key="round.id"><td class="px-6 py-3 text-sm text-gray-900 dark:text-white">#{{ round.round_no }}</td><td class="px-6 py-3 text-sm text-gray-600 dark:text-gray-300">{{ round.participant_count }}</td><td class="px-6 py-3 text-sm text-gray-600 dark:text-gray-300">{{ round.winner_count }}</td><td class="px-6 py-3 text-sm text-gray-600 dark:text-gray-300">{{ statusLabel(round.status) }}</td></tr><tr v-if="!rounds.length"><td colspan="4" class="px-6 py-8 text-center text-sm text-gray-500">{{ t('common.noData') }}</td></tr></tbody>
+          </table>
+        </div>
+      </section>
     </div>
-    <LotterySliderCaptcha
-      v-if="!snapshot"
-      :show="showCaptcha"
-      @close="showCaptcha = false"
-      @joined="handleJoined"
-    />
+    <LotterySliderCaptcha v-if="!snapshot" :show="showCaptcha" @close="showCaptcha = false" @joined="handleJoined" />
   </AppLayout>
 </template>
 
@@ -160,15 +87,34 @@ import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const props = defineProps<{ snapshot?: boolean }>()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const appStore = useAppStore()
 const snapshot = computed(() => props.snapshot === true)
 const loading = ref(true)
+const refreshing = ref(false)
 const showCaptcha = ref(false)
 const current = ref<LotteryCurrent | null>(null)
 const rounds = ref<LotteryRound[]>([])
 const recentWinnersVisibleCount = ref(10)
 const recentWinnersBatchSize = 10
+const canJoin = computed(() => current.value?.enabled && current.value.current_round?.status === 'open' && !current.value.joined && current.value.eligibility.eligible)
+const participationStatus = computed(() => {
+  const round = current.value?.current_round
+  if (!round) return ''
+  if (round.status === 'drawn') return t('lottery.waitNextRound')
+  if (round.status === 'cancelled') return t('lottery.statuses.cancelled')
+  if (current.value?.joined) return t('lottery.joined')
+  return t(round.draw_mode === 'manual' ? 'lottery.manualWaiting' : 'lottery.notJoined')
+})
+const participationRule = computed(() => {
+  const round = current.value?.current_round
+  if (!round) return ''
+  const rules = []
+  if (round.min_recharge_amount > 0) rules.push(t('lottery.minRecharge', { amount: money(round.min_recharge_amount) }))
+  else if (round.require_recharge) rules.push(t('lottery.rechargeRequired'))
+  if (round.min_account_age_days > 0) rules.push(t('lottery.accountAge', { days: round.min_account_age_days }))
+  return rules.length ? t('lottery.participationRule', { rules: rules.join(locale.value.startsWith('zh') ? '，' : ', ') }) : t('lottery.openRule')
+})
 const progress = computed(() => {
   const round = current.value?.current_round
   return round ? Math.min(100, Math.round((round.participant_count / Math.max(1, round.participant_threshold)) * 100)) : 0
@@ -200,7 +146,9 @@ const visibleRecentWinnerGroups = computed<Array<{ highlighted: boolean; winners
 })
 
 function money(value: number): string { return `$${Number(value || 0).toFixed(2)}` }
-function date(value: string): string { return new Date(value).toLocaleString() }
+function date(value: string): string {
+  return new Intl.DateTimeFormat(locale.value, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value))
+}
 function statusLabel(status: string): string { return t(`lottery.statuses.${status}`, status) }
 
 function onRecentWinnersScroll(event: Event): void {
@@ -216,7 +164,8 @@ watch(() => current.value?.recent_winners.length ?? 0, () => {
 })
 
 async function load(): Promise<void> {
-  loading.value = true
+  if (refreshing.value) return
+  refreshing.value = true
   try {
     if (snapshot.value) {
       const announcement = await lotteryAPI.getAnnouncement()
@@ -236,7 +185,7 @@ async function load(): Promise<void> {
     }
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, t('lottery.loadFailed')))
-  } finally { loading.value = false }
+  } finally { loading.value = false; refreshing.value = false }
 }
 
 async function handleJoined(): Promise<void> {
@@ -250,28 +199,7 @@ onMounted(load)
 </script>
 
 <style scoped>
-.lottery-winner-group {
-  position: relative;
-}
-
-.lottery-winner-row {
-  padding-right: 8px;
-  padding-left: 8px;
-}
-
-.lottery-winner-row + .lottery-winner-row,
-.lottery-winner-group + .lottery-winner-group .lottery-winner-row:first-child {
-  border-top: 1px solid rgb(243 244 246);
-}
-
-.lottery-winner-list > .lottery-winner-group:first-child .lottery-winner-row:first-child {
-  padding-top: 0;
-}
-
-.lottery-winner-list > .lottery-winner-group:last-child .lottery-winner-row:last-child {
-  padding-bottom: 0;
-}
-
+.lottery-winner-group { position: relative; }
 .lottery-previous-round-frame::after {
   position: absolute;
   inset: 0;
@@ -280,10 +208,5 @@ onMounted(load)
   border-radius: 8px;
   content: '';
   pointer-events: none;
-}
-
-:global(.dark) .lottery-winner-row + .lottery-winner-row,
-:global(.dark) .lottery-winner-group + .lottery-winner-group .lottery-winner-row:first-child {
-  border-top-color: rgb(31 41 55);
 }
 </style>
