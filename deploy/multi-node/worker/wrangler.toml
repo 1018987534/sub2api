@@ -10,7 +10,7 @@ routes = [
 ]
 
 [vars]
-BWG_US_01_ORIGIN = "https://control-origin.xiaohondou.com"
+BWG_US_01_ORIGIN = "https://gateway-bwg-origin.xiaohondou.com"
 BWG_US_01_PERCENT = "25"
 VMISS_US_01_ORIGIN = "https://gateway-origin.xiaohondou.com"
 VMISS_US_01_PERCENT = "20"

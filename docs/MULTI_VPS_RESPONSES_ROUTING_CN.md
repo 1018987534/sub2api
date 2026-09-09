@@ -1,4 +1,9 @@
-# Sub2API 多 VPS 迁移与 `/v1/responses` 分流实施记录
+# Sub2API 多 VPS 迁移与 `/v1/responses` 分流历史记录
+
+> 本文保留 2026-07-31 至 2026-09-09 期间“BWG control + 四个 gateway”的
+> 迁移历史和验收证据。现行生产拓扑、发布顺序、域名和回滚边界以
+> [DMIT_CONTROL_BWG_DATA_GATEWAY_CN.md](DMIT_CONTROL_BWG_DATA_GATEWAY_CN.md)
+> 为准；不要再把本文带有“当前”字样的历史快照用于生产发布。
 
 > 状态：已上线。完整主站和数据层位于新 VPS `95.169.18.157`；旧 VPS
 > `38.47.117.85` 已降级为 Responses-only gateway；新增 VPS `154.23.243.26`、
