@@ -13,22 +13,6 @@ type NotifyEmailEntry struct {
 	Verified bool   `json:"verified"`
 }
 
-// DefaultBalanceNotifyEmails uses the account's primary email as the initial
-// low-balance notification recipient. Registration has already established the
-// primary address as the account email, so it does not require the separate
-// extra-email verification flow.
-func DefaultBalanceNotifyEmails(email string) []NotifyEmailEntry {
-	email = strings.TrimSpace(email)
-	if email == "" {
-		return nil
-	}
-	return []NotifyEmailEntry{{
-		Email:    email,
-		Disabled: false,
-		Verified: true,
-	}}
-}
-
 // parseNotifyEmails parses a JSON string into []NotifyEmailEntry.
 // It auto-detects the format:
 //   - Old format ["email1","email2"] → converted to [{email, disabled:false, verified:true}, ...]

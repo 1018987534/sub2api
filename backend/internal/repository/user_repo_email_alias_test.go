@@ -99,52 +99,6 @@ func TestUserRepositoryCreateWithEmailAliasGuard(t *testing.T) {
 	}))
 }
 
-func TestUserRepositoryCreateDefaultsPrimaryBalanceNotifyEmail(t *testing.T) {
-	repo, _ := newUserEntRepo(t)
-	ctx := context.Background()
-	user := &service.User{
-		Email:        "  Primary.Notify@Example.com  ",
-		Username:     "primary-notify",
-		PasswordHash: "hash",
-		Role:         service.RoleUser,
-		Status:       service.StatusActive,
-	}
-
-	require.NoError(t, repo.CreateWithEmailAliasGuard(ctx, user))
-	require.Equal(t, []service.NotifyEmailEntry{{
-		Email:    "Primary.Notify@Example.com",
-		Disabled: false,
-		Verified: true,
-	}}, user.BalanceNotifyExtraEmails)
-
-	persisted, err := repo.GetByID(ctx, user.ID)
-	require.NoError(t, err)
-	require.Equal(t, user.BalanceNotifyExtraEmails, persisted.BalanceNotifyExtraEmails)
-}
-
-func TestUserRepositoryCreatePreservesExplicitBalanceNotifyEmails(t *testing.T) {
-	repo, _ := newUserEntRepo(t)
-	ctx := context.Background()
-	explicit := []service.NotifyEmailEntry{{
-		Email:    "alerts@example.com",
-		Disabled: true,
-		Verified: true,
-	}}
-	user := &service.User{
-		Email:                    "primary@example.com",
-		Username:                 "custom-notify",
-		PasswordHash:             "hash",
-		Role:                     service.RoleUser,
-		Status:                   service.StatusActive,
-		BalanceNotifyExtraEmails: explicit,
-	}
-
-	require.NoError(t, repo.Create(ctx, user))
-	persisted, err := repo.GetByID(ctx, user.ID)
-	require.NoError(t, err)
-	require.Equal(t, explicit, persisted.BalanceNotifyExtraEmails)
-}
-
 func TestUserRepositoryCountUsersByEmailDomain(t *testing.T) {
 	repo, _ := newUserEntRepo(t)
 	ctx := context.Background()
