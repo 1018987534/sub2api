@@ -123,12 +123,44 @@ func TestAccountHandlerGetFirstTokenPoolStatusesAggregatesGroupsWithoutAccountDe
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.Equal(t, 3, payload.Data.Total)
 	require.Equal(t, []map[string]any{
-		{"group_id": float64(5), "group_name": "PLUS分组", "is_available": true},
-		{"group_id": float64(79), "group_name": "PRO分组", "is_available": true},
-		{"group_id": float64(80), "group_name": "特价分组", "is_available": false},
+		{"group_id": float64(5), "group_name": "PLUS分组", "is_available": true, "normal_total_ms": float64(7_000)},
+		{"group_id": float64(79), "group_name": "PRO分组", "is_available": true, "normal_total_ms": float64(7_000)},
+		{"group_id": float64(80), "group_name": "特价分组", "is_available": false, "normal_total_ms": float64(20_000)},
 	}, payload.Data.Items)
 	require.NotContains(t, recorder.Body.String(), "fast-account")
 	require.NotContains(t, recorder.Body.String(), "predicted_ms")
+}
+
+func TestFirstTokenPoolGroupStatusesUsesDashboardPriorityAccount(t *testing.T) {
+	lowRate := 0.08
+	highRate := 0.2
+	group := service.AccountFirstTokenLatencyGroup{GroupID: 80, GroupName: "特价分组"}
+	items := firstTokenPoolGroupStatuses([]service.AccountFirstTokenLatencyMetric{
+		{AccountID: 4, PredictedMS: 12_000, NormalTotalMS: 12_000, HasPrediction: true, IsFastPool: false, Groups: []service.AccountFirstTokenLatencyGroup{group}},
+		{AccountID: 3, PredictedMS: 8_000, NormalTotalMS: 8_000, HasPrediction: true, IsFastPool: true, SchedulingRateMultiplier: &highRate, Groups: []service.AccountFirstTokenLatencyGroup{group}},
+		{AccountID: 2, PredictedMS: 16_000, NormalTotalMS: 16_000, HasPrediction: true, IsFastPool: true, SchedulingRateMultiplier: &lowRate, Groups: []service.AccountFirstTokenLatencyGroup{group}},
+	})
+
+	require.Equal(t, []firstTokenPoolGroupStatus{{
+		GroupID: 80, GroupName: "特价分组", IsAvailable: true, NormalTotalMS: float64Pointer(16_000),
+	}}, items)
+}
+
+func TestFirstTokenPoolGroupStatusesUsesFastestMeasuredSlowAccount(t *testing.T) {
+	group := service.AccountFirstTokenLatencyGroup{GroupID: 98, GroupName: "低价分组"}
+	items := firstTokenPoolGroupStatuses([]service.AccountFirstTokenLatencyMetric{
+		{AccountID: 1, HasPrediction: false, IsFastPool: false, Groups: []service.AccountFirstTokenLatencyGroup{group}},
+		{AccountID: 3, PredictedMS: 28_000, NormalTotalMS: 28_000, HasPrediction: true, IsFastPool: false, Groups: []service.AccountFirstTokenLatencyGroup{group}},
+		{AccountID: 2, PredictedMS: 22_000, NormalTotalMS: 22_000, HasPrediction: true, IsFastPool: false, Groups: []service.AccountFirstTokenLatencyGroup{group}},
+	})
+
+	require.Equal(t, []firstTokenPoolGroupStatus{{
+		GroupID: 98, GroupName: "低价分组", IsAvailable: false, NormalTotalMS: float64Pointer(22_000),
+	}}, items)
+}
+
+func float64Pointer(value float64) *float64 {
+	return &value
 }
 
 func TestAccountHandlerRequestsFirstTokenManualProbe(t *testing.T) {

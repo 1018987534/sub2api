@@ -881,13 +881,15 @@ func (h *AccountHandler) GetFirstTokenLatencies(c *gin.Context) {
 }
 
 type firstTokenPoolGroupStatus struct {
-	GroupID     int64  `json:"group_id"`
-	GroupName   string `json:"group_name"`
-	IsAvailable bool   `json:"is_available"`
+	GroupID       int64    `json:"group_id"`
+	GroupName     string   `json:"group_name"`
+	IsAvailable   bool     `json:"is_available"`
+	NormalTotalMS *float64 `json:"normal_total_ms"`
 }
 
-// GetFirstTokenPoolStatuses exposes only group-level pool availability to
-// authenticated users. It intentionally omits account and latency details.
+// GetFirstTokenPoolStatuses exposes the pool state and normal total duration
+// of the same highest-priority account shown first for each dashboard group.
+// It intentionally omits account identity and other administrator details.
 func (h *AccountHandler) GetFirstTokenPoolStatuses(c *gin.Context) {
 	metrics, err := h.accountFirstTokenLatencyMetrics(c.Request.Context())
 	if err != nil {
@@ -895,26 +897,70 @@ func (h *AccountHandler) GetFirstTokenPoolStatuses(c *gin.Context) {
 		return
 	}
 
-	statusByGroup := make(map[int64]firstTokenPoolGroupStatus)
+	items := firstTokenPoolGroupStatuses(metrics)
+	response.Success(c, gin.H{"items": items, "total": len(items)})
+}
+
+func firstTokenPoolGroupStatuses(metrics []service.AccountFirstTokenLatencyMetric) []firstTokenPoolGroupStatus {
+	selectedByGroup := make(map[int64]service.AccountFirstTokenLatencyMetric)
+	nameByGroup := make(map[int64]string)
 	for _, metric := range metrics {
 		for _, group := range metric.Groups {
 			if group.GroupID <= 0 {
 				continue
 			}
-			status := statusByGroup[group.GroupID]
-			status.GroupID = group.GroupID
-			status.GroupName = group.GroupName
-			status.IsAvailable = status.IsAvailable || metric.IsFastPool
-			statusByGroup[group.GroupID] = status
+			selected, exists := selectedByGroup[group.GroupID]
+			if !exists || firstTokenPoolMetricPrecedes(metric, selected) {
+				selectedByGroup[group.GroupID] = metric
+				nameByGroup[group.GroupID] = group.GroupName
+			}
 		}
 	}
 
-	items := make([]firstTokenPoolGroupStatus, 0, len(statusByGroup))
-	for _, status := range statusByGroup {
-		items = append(items, status)
+	items := make([]firstTokenPoolGroupStatus, 0, len(selectedByGroup))
+	for groupID, selected := range selectedByGroup {
+		var normalTotalMS *float64
+		if selected.HasPrediction && selected.NormalTotalMS > 0 {
+			value := selected.NormalTotalMS
+			normalTotalMS = &value
+		}
+		items = append(items, firstTokenPoolGroupStatus{
+			GroupID:       groupID,
+			GroupName:     nameByGroup[groupID],
+			IsAvailable:   selected.IsFastPool,
+			NormalTotalMS: normalTotalMS,
+		})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].GroupID < items[j].GroupID })
-	response.Success(c, gin.H{"items": items, "total": len(items)})
+	return items
+}
+
+// Keep this ordering aligned with the dashboard's per-group account table and
+// the scheduler: fast-pool accounts first, then low rate inside the fast pool,
+// then measured normal total duration and account ID.
+func firstTokenPoolMetricPrecedes(left, right service.AccountFirstTokenLatencyMetric) bool {
+	if left.IsFastPool != right.IsFastPool {
+		return left.IsFastPool
+	}
+	if left.IsFastPool && right.IsFastPool {
+		if left.SchedulingRateMultiplier == nil && right.SchedulingRateMultiplier != nil {
+			return false
+		}
+		if left.SchedulingRateMultiplier != nil && right.SchedulingRateMultiplier == nil {
+			return true
+		}
+		if left.SchedulingRateMultiplier != nil && right.SchedulingRateMultiplier != nil &&
+			*left.SchedulingRateMultiplier != *right.SchedulingRateMultiplier {
+			return *left.SchedulingRateMultiplier < *right.SchedulingRateMultiplier
+		}
+	}
+	if left.HasPrediction != right.HasPrediction {
+		return left.HasPrediction
+	}
+	if left.PredictedMS != right.PredictedMS {
+		return left.PredictedMS < right.PredictedMS
+	}
+	return left.AccountID < right.AccountID
 }
 
 func (h *AccountHandler) accountFirstTokenLatencyMetrics(ctx context.Context) ([]service.AccountFirstTokenLatencyMetric, error) {
