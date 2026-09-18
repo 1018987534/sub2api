@@ -8,6 +8,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDefaultBalanceNotifyEmails(t *testing.T) {
+	require.Nil(t, DefaultBalanceNotifyEmails("   "))
+	require.Equal(t, []NotifyEmailEntry{{
+		Email:    "User@Example.com",
+		Disabled: false,
+		Verified: true,
+	}}, DefaultBalanceNotifyEmails("  User@Example.com  "))
+}
+
 // ---------- ParseNotifyEmails ----------
 
 func TestParseNotifyEmails_EmptyString(t *testing.T) {
