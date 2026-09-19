@@ -233,16 +233,12 @@ gateway:
   # Trace threshold in milliseconds (<=0 uses the 3-second default).
   # 追踪阈值（毫秒；<=0 使用 3 秒默认值）。
   openai_slow_request_trace_threshold_ms: 3000
-  # Fast-pool circuit breaker: reset a fast dimension to pending collection
-  # when more than this ratio of its recent requests exceed the slow threshold.
-  # 快池保护：近窗口内超过该比例的请求超过慢阈值时，重置为待采集。
-  total_duration_recent_window_seconds: 300
-  total_duration_recent_slow_threshold_seconds: 60
-  total_duration_recent_slow_ratio: 0.35
-  # Any single completed request above this duration immediately breaks
-  # affinity, moves the dimension to the slow pool, and resets it to pending.
-  # 任意单次请求超过该时长立即熔断粘性，进入慢池并重置为待采集。
-  total_duration_circuit_break_threshold_seconds: 300
+  # Fast-pool circuit breaker: a completed request counts when its total
+  # duration reaches 3 minutes; three counted requests in the rolling 24-hour
+  # sample window reset the account to pending collection.
+  # 快池熔断：单次总耗时达到 3 分钟计数，滚动 24 小时样本累计 3 次后重置为待采集。
+  total_duration_circuit_break_threshold_seconds: 180
+  total_duration_circuit_break_count: 3
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456

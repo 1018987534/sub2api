@@ -474,7 +474,9 @@ import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { isChannelMonitorThroughputHidden, isChannelMonitorUserRankingHidden } from '@/utils/featureFlags'
+import { userGroupsAPI } from '@/api'
 import * as api from '@/api/channelMonitorV2'
+import type { Group } from '@/types'
 import type {
   HealthState,
   MonitorDimensions,
@@ -500,6 +502,10 @@ import {
   monitorErrorCategoryLabel,
   ttftDisplayState,
 } from '@/features/channel-monitor-v2/monitorFormat'
+import {
+  buildMonitorGroupPresentation,
+  decorateAndSortMonitorRows,
+} from '@/features/channel-monitor-v2/groupPresentation'
 
 type Tab = 'models' | 'errors' | 'users'
 type HealthMode = 'overall' | 'success' | 'ttft' | 'cache'
@@ -556,6 +562,8 @@ const matrixGroupBy = ref<MonitorMatrixGroupBy>(parseMatrixGroupBy(route.query.g
 const healthMode = ref<HealthMode>(parseHealthMode(route.query.health_mode))
 const trendView = ref<TrendView>(parseTrendView(route.query.trend_view))
 const dimensions = ref<MonitorDimensions>({ platforms: [], groups: [], models: [] })
+const availableGroups = ref<Group[]>([])
+const userGroupRates = ref<Record<number, number>>({})
 const snapshot = ref<MonitorSnapshot | null>(null)
 const matrix = ref<MonitorMatrixResponse | null>(null)
 const modelRows = ref<MonitorModelRow[]>([])
@@ -655,10 +663,16 @@ const bootstrapPercent = computed(() => {
 const matrixRows = computed(() => {
   const items = matrix.value?.items || []
   // platform_group views should only show real groups, never bare platform placeholders.
-  if (matrixGroupBy.value === 'platform_group' || matrixGroupBy.value === 'platform_group_model') {
-    return items.filter((row) => row.group_id != null && Number(row.group_id) > 0)
+  const visible = matrixGroupBy.value === 'platform_group' || matrixGroupBy.value === 'platform_group_model'
+    ? items.filter((row) => row.group_id != null && Number(row.group_id) > 0)
+    : items
+  if (matrixGroupBy.value !== 'platform_group' && matrixGroupBy.value !== 'platform_group_model') {
+    return visible
   }
-  return items
+  return decorateAndSortMonitorRows(
+    visible,
+    buildMonitorGroupPresentation(availableGroups.value, userGroupRates.value),
+  )
 })
 
 function csv(value: unknown) {
@@ -716,6 +730,16 @@ async function loadDimensions(signal?: AbortSignal, id = sequence) {
   dimensions.value = next
 }
 
+async function loadGroupPresentation(id = sequence) {
+  const [groups, rates] = await Promise.allSettled([
+    userGroupsAPI.getAvailable(),
+    userGroupsAPI.getUserGroupRates(),
+  ])
+  if (id !== sequence) return
+  if (groups.status === 'fulfilled') availableGroups.value = groups.value
+  if (rates.status === 'fulfilled') userGroupRates.value = rates.value
+}
+
 async function loadMetrics(signal?: AbortSignal, id = sequence) {
   const [nextSnapshot, nextMatrix] = await Promise.all([
     api.getSnapshot(filter.value, isAdmin.value, signal),
@@ -740,6 +764,7 @@ async function reload(silent = true) {
     await Promise.all([
       loadDimensions(request.signal, id),
       loadMetrics(request.signal, id),
+      loadGroupPresentation(id),
     ])
   } catch (error) {
     if ((error as { name?: string }).name !== 'CanceledError') {
