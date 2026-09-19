@@ -513,6 +513,7 @@ func ProvideRateLimitService(
 		configurable.ConfigureTotalDurationLatencyPolicy(TotalDurationLatencyPolicy{
 			CircuitBreakThreshold: time.Duration(cfg.Gateway.TotalDurationCircuitBreakThresholdSeconds) * time.Second,
 			CircuitBreakCount:     cfg.Gateway.TotalDurationCircuitBreakCount,
+			CircuitBreakWindow:    time.Duration(cfg.Gateway.TotalDurationCircuitBreakWindowSeconds) * time.Second,
 		})
 	}
 	if healthCache, ok := tempUnschedCache.(OpenAIAPIKeyHealthCache); ok {

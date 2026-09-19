@@ -23,8 +23,8 @@ type cachedAccountCacheStats struct {
 // loadAccountCacheStatsCached returns one snapshot for every requested ID.
 // available=false means the provider could not be read and callers must
 // fail-open. A successful query with no row is available=true with a zero
-// denominator, which represents "no valid samples" and therefore fails an
-// enabled minimum-cache-rate gate.
+// denominator. That means the account has no calculable cache rate yet, so it
+// stays eligible until real usage exists and the threshold can be evaluated.
 func (s *RateLimitService) loadAccountCacheStatsCached(ctx context.Context, accountIDs []int64) map[int64]cachedAccountCacheStats {
 	result := make(map[int64]cachedAccountCacheStats, len(accountIDs))
 	if s == nil || len(accountIDs) == 0 {
@@ -84,7 +84,7 @@ func validEnabledGroupMinCacheRate(v float64) bool {
 
 func groupCacheRateBelowMinimum(stats AccountCacheStats, minimum float64) bool {
 	if stats.CacheRateDenominator <= 0 {
-		return true
+		return false
 	}
 	rate := float64(stats.CacheReadTokens) / float64(stats.CacheRateDenominator)
 	return rate+groupCacheRateEpsilon < minimum
