@@ -1129,6 +1129,11 @@ export default {
         bufferRangeError: '安全缓冲应在 0 到 99.99 之间',
         sumTooHigh: '最低毛利率与安全缓冲之和必须小于 100%，否则将排除全部账号'
       },
+      cacheRateGate: {
+        minimum: '最低缓存率（%）',
+        hint: '仅用于正常总耗时快慢池调度。OpenAI API Key 账号最近 24 小时缓存率不足或没有有效样本时，将直接移出该分组调度；填 0 关闭过滤。',
+        rangeError: '最低缓存率应在 0 到 100 之间'
+      },
       modelAllowlist: {
         title: '模型白名单',
         hint: '开启后，不在白名单中的模型会被拒绝（404 model_not_found），模型列表接口也只展示白名单内的模型。条目支持精确模型 ID 与末尾 * 通配。注意：Claude Code 会用 haiku 系小模型做标题/摘要等探测，/messages/count_tokens 同样受白名单控制，请一并勾选所需的小模型。',

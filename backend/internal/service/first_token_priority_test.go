@@ -763,6 +763,29 @@ func TestAccountFirstTokenLatencyMetricsIncludesRollingCacheRate(t *testing.T) {
 	require.Equal(t, 6, metrics[0].WindowHours)
 }
 
+func TestAccountFirstTokenLatencyMetricsHidesGroupWhenCacheRateIsBelowMinimum(t *testing.T) {
+	now := time.Now()
+	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
+		1: {PredictedMS: 4_000, SampleCount: 20, UpdatedAt: now},
+	}}
+	group := &Group{ID: 10, Name: "PRO", Platform: PlatformOpenAI, Status: StatusActive, MinCacheRate: 0.8}
+	account := Account{
+		ID: 1, Name: "plus-xiaobaishu", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Status: StatusActive, Schedulable: true, GroupIDs: []int64{group.ID}, Groups: []*Group{group},
+		AccountGroups: []AccountGroup{{AccountID: 1, GroupID: group.ID, Group: group}},
+	}
+	svc := &RateLimitService{
+		firstTokenLatencyStatsCache: cache,
+		usageRepo: accountCacheStatsUsageRepo{stats: map[int64]AccountCacheStats{
+			1: {CacheReadTokens: 72, CacheRateDenominator: 100},
+		}},
+	}
+
+	metrics, err := svc.AccountFirstTokenLatencyMetrics(context.Background(), []Account{account})
+	require.NoError(t, err)
+	require.Empty(t, metrics)
+}
+
 func TestAccountFirstTokenLatencyMetricsReportsActualPoolMembership(t *testing.T) {
 	now := time.Now()
 	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{

@@ -384,6 +384,13 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if input.RateMultiplier <= 0 {
 		return nil, errors.New("rate_multiplier must be > 0")
 	}
+	minCacheRate := 0.0
+	if input.MinCacheRate != nil {
+		minCacheRate = *input.MinCacheRate
+	}
+	if err := ValidateGroupMinCacheRate(minCacheRate); err != nil {
+		return nil, infraerrors.BadRequest("INVALID_MIN_CACHE_RATE", err.Error())
+	}
 
 	platform := NormalizeGroupPlatform(input.Platform)
 	// 固定账号 manifest 配置：账号绑定发生在创建之后，创建时无法校验成员关系，
@@ -557,6 +564,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		Description:                     input.Description,
 		Platform:                        platform,
 		RateMultiplier:                  input.RateMultiplier,
+		MinCacheRate:                    minCacheRate,
 		IsExclusive:                     input.IsExclusive,
 		Status:                          StatusActive,
 		SubscriptionType:                subscriptionType,
@@ -774,6 +782,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 			return nil, errors.New("rate_multiplier must be > 0")
 		}
 		group.RateMultiplier = *input.RateMultiplier
+	}
+	if input.MinCacheRate != nil {
+		if err := ValidateGroupMinCacheRate(*input.MinCacheRate); err != nil {
+			return nil, infraerrors.BadRequest("INVALID_MIN_CACHE_RATE", err.Error())
+		}
+		group.MinCacheRate = *input.MinCacheRate
 	}
 	if input.IsExclusive != nil {
 		group.IsExclusive = *input.IsExclusive

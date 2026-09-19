@@ -1218,6 +1218,27 @@ func (_u *GroupUpdate) AddProfitSafetyBuffer(v float64) *GroupUpdate {
 	return _u
 }
 
+// SetMinCacheRate sets the "min_cache_rate" field.
+func (_u *GroupUpdate) SetMinCacheRate(v float64) *GroupUpdate {
+	_u.mutation.ResetMinCacheRate()
+	_u.mutation.SetMinCacheRate(v)
+	return _u
+}
+
+// SetNillableMinCacheRate sets the "min_cache_rate" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableMinCacheRate(v *float64) *GroupUpdate {
+	if v != nil {
+		_u.SetMinCacheRate(*v)
+	}
+	return _u
+}
+
+// AddMinCacheRate adds value to the "min_cache_rate" field.
+func (_u *GroupUpdate) AddMinCacheRate(v float64) *GroupUpdate {
+	_u.mutation.AddMinCacheRate(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdate) AddAPIKeyIDs(ids ...int64) *GroupUpdate {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -1916,6 +1937,12 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.AddedProfitSafetyBuffer(); ok {
 		_spec.AddField(group.FieldProfitSafetyBuffer, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.MinCacheRate(); ok {
+		_spec.SetField(group.FieldMinCacheRate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedMinCacheRate(); ok {
+		_spec.AddField(group.FieldMinCacheRate, field.TypeFloat64, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -3412,6 +3439,27 @@ func (_u *GroupUpdateOne) AddProfitSafetyBuffer(v float64) *GroupUpdateOne {
 	return _u
 }
 
+// SetMinCacheRate sets the "min_cache_rate" field.
+func (_u *GroupUpdateOne) SetMinCacheRate(v float64) *GroupUpdateOne {
+	_u.mutation.ResetMinCacheRate()
+	_u.mutation.SetMinCacheRate(v)
+	return _u
+}
+
+// SetNillableMinCacheRate sets the "min_cache_rate" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableMinCacheRate(v *float64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetMinCacheRate(*v)
+	}
+	return _u
+}
+
+// AddMinCacheRate adds value to the "min_cache_rate" field.
+func (_u *GroupUpdateOne) AddMinCacheRate(v float64) *GroupUpdateOne {
+	_u.mutation.AddMinCacheRate(v)
+	return _u
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by IDs.
 func (_u *GroupUpdateOne) AddAPIKeyIDs(ids ...int64) *GroupUpdateOne {
 	_u.mutation.AddAPIKeyIDs(ids...)
@@ -4140,6 +4188,12 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if value, ok := _u.mutation.AddedProfitSafetyBuffer(); ok {
 		_spec.AddField(group.FieldProfitSafetyBuffer, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.MinCacheRate(); ok {
+		_spec.SetField(group.FieldMinCacheRate, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedMinCacheRate(); ok {
+		_spec.AddField(group.FieldMinCacheRate, field.TypeFloat64, value)
 	}
 	if _u.mutation.APIKeysCleared() {
 		edge := &sqlgraph.EdgeSpec{

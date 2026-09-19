@@ -1132,6 +1132,11 @@ export default {
         bufferRangeError: 'Safety buffer must be between 0 and 99.99',
         sumTooHigh: 'Min gross margin plus safety buffer must be less than 100%, otherwise every account would be excluded'
       },
+      cacheRateGate: {
+        minimum: 'Minimum cache rate (%)',
+        hint: 'Only used by the total-duration fast/slow scheduler. OpenAI API-key accounts below this 24-hour cache rate (or without valid samples) are removed from scheduling. 0 disables the filter.',
+        rangeError: 'Minimum cache rate must be between 0 and 100'
+      },
       modelAllowlist: {
         title: 'Model Allowlist',
         hint: 'When enabled, models outside the allowlist are rejected with 404 model_not_found, and model listing endpoints only show allowlisted models. Entries support exact model IDs and trailing * wildcards. Note: Claude Code probes with haiku-family models for titles/summaries and /messages/count_tokens is also allowlist-controlled, so make sure the small models you need are selected too.',

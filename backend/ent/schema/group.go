@@ -303,6 +303,12 @@ func (Group) Fields() []ent.Field {
 			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
 			Default(0).
 			Comment("安全缓冲，小数；与 margin 相加后从下游倍率中扣除，默认 0"),
+
+		// 快慢池候选过滤（migration 239）：0 表示不限制。
+		field.Float("min_cache_rate").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
+			Default(0).
+			Comment("调度时要求账号最近24小时缓存率达到的最低比例；0 表示不限制"),
 	}
 }
 

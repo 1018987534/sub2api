@@ -22264,6 +22264,8 @@ type GroupMutation struct {
 	addprofit_min_margin                    *float64
 	profit_safety_buffer                    *float64
 	addprofit_safety_buffer                 *float64
+	min_cache_rate                          *float64
+	addmin_cache_rate                       *float64
 	clearedFields                           map[string]struct{}
 	api_keys                                map[int64]struct{}
 	removedapi_keys                         map[int64]struct{}
@@ -25650,6 +25652,62 @@ func (m *GroupMutation) ResetProfitSafetyBuffer() {
 	m.addprofit_safety_buffer = nil
 }
 
+// SetMinCacheRate sets the "min_cache_rate" field.
+func (m *GroupMutation) SetMinCacheRate(f float64) {
+	m.min_cache_rate = &f
+	m.addmin_cache_rate = nil
+}
+
+// MinCacheRate returns the value of the "min_cache_rate" field in the mutation.
+func (m *GroupMutation) MinCacheRate() (r float64, exists bool) {
+	v := m.min_cache_rate
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMinCacheRate returns the old "min_cache_rate" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldMinCacheRate(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMinCacheRate is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMinCacheRate requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMinCacheRate: %w", err)
+	}
+	return oldValue.MinCacheRate, nil
+}
+
+// AddMinCacheRate adds f to the "min_cache_rate" field.
+func (m *GroupMutation) AddMinCacheRate(f float64) {
+	if m.addmin_cache_rate != nil {
+		*m.addmin_cache_rate += f
+	} else {
+		m.addmin_cache_rate = &f
+	}
+}
+
+// AddedMinCacheRate returns the value that was added to the "min_cache_rate" field in this mutation.
+func (m *GroupMutation) AddedMinCacheRate() (r float64, exists bool) {
+	v := m.addmin_cache_rate
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetMinCacheRate resets all changes to the "min_cache_rate" field.
+func (m *GroupMutation) ResetMinCacheRate() {
+	m.min_cache_rate = nil
+	m.addmin_cache_rate = nil
+}
+
 // AddAPIKeyIDs adds the "api_keys" edge to the APIKey entity by ids.
 func (m *GroupMutation) AddAPIKeyIDs(ids ...int64) {
 	if m.api_keys == nil {
@@ -26008,7 +26066,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 66)
+	fields := make([]string, 0, 67)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26207,6 +26265,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.profit_safety_buffer != nil {
 		fields = append(fields, group.FieldProfitSafetyBuffer)
 	}
+	if m.min_cache_rate != nil {
+		fields = append(fields, group.FieldMinCacheRate)
+	}
 	return fields
 }
 
@@ -26347,6 +26408,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.ProfitMinMargin()
 	case group.FieldProfitSafetyBuffer:
 		return m.ProfitSafetyBuffer()
+	case group.FieldMinCacheRate:
+		return m.MinCacheRate()
 	}
 	return nil, false
 }
@@ -26488,6 +26551,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldProfitMinMargin(ctx)
 	case group.FieldProfitSafetyBuffer:
 		return m.OldProfitSafetyBuffer(ctx)
+	case group.FieldMinCacheRate:
+		return m.OldMinCacheRate(ctx)
 	}
 	return nil, fmt.Errorf("unknown Group field %s", name)
 }
@@ -26959,6 +27024,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetProfitSafetyBuffer(v)
 		return nil
+	case group.FieldMinCacheRate:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMinCacheRate(v)
+		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)
 }
@@ -27048,6 +27120,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addprofit_safety_buffer != nil {
 		fields = append(fields, group.FieldProfitSafetyBuffer)
 	}
+	if m.addmin_cache_rate != nil {
+		fields = append(fields, group.FieldMinCacheRate)
+	}
 	return fields
 }
 
@@ -27110,6 +27185,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedProfitMinMargin()
 	case group.FieldProfitSafetyBuffer:
 		return m.AddedProfitSafetyBuffer()
+	case group.FieldMinCacheRate:
+		return m.AddedMinCacheRate()
 	}
 	return nil, false
 }
@@ -27307,6 +27384,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddProfitSafetyBuffer(v)
+		return nil
+	case group.FieldMinCacheRate:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMinCacheRate(v)
 		return nil
 	}
 	return fmt.Errorf("unknown Group numeric field %s", name)
@@ -27667,6 +27751,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldProfitSafetyBuffer:
 		m.ResetProfitSafetyBuffer()
+		return nil
+	case group.FieldMinCacheRate:
+		m.ResetMinCacheRate()
 		return nil
 	}
 	return fmt.Errorf("unknown Group field %s", name)

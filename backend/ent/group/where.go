@@ -345,6 +345,11 @@ func ProfitSafetyBuffer(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldProfitSafetyBuffer, v))
 }
 
+// MinCacheRate applies equality check predicate on the "min_cache_rate" field. It's identical to MinCacheRateEQ.
+func MinCacheRate(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldMinCacheRate, v))
+}
+
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.
 func CreatedAtEQ(v time.Time) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldCreatedAt, v))
@@ -2648,6 +2653,46 @@ func ProfitSafetyBufferLT(v float64) predicate.Group {
 // ProfitSafetyBufferLTE applies the LTE predicate on the "profit_safety_buffer" field.
 func ProfitSafetyBufferLTE(v float64) predicate.Group {
 	return predicate.Group(sql.FieldLTE(FieldProfitSafetyBuffer, v))
+}
+
+// MinCacheRateEQ applies the EQ predicate on the "min_cache_rate" field.
+func MinCacheRateEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldMinCacheRate, v))
+}
+
+// MinCacheRateNEQ applies the NEQ predicate on the "min_cache_rate" field.
+func MinCacheRateNEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldMinCacheRate, v))
+}
+
+// MinCacheRateIn applies the In predicate on the "min_cache_rate" field.
+func MinCacheRateIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldMinCacheRate, vs...))
+}
+
+// MinCacheRateNotIn applies the NotIn predicate on the "min_cache_rate" field.
+func MinCacheRateNotIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldMinCacheRate, vs...))
+}
+
+// MinCacheRateGT applies the GT predicate on the "min_cache_rate" field.
+func MinCacheRateGT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldMinCacheRate, v))
+}
+
+// MinCacheRateGTE applies the GTE predicate on the "min_cache_rate" field.
+func MinCacheRateGTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldMinCacheRate, v))
+}
+
+// MinCacheRateLT applies the LT predicate on the "min_cache_rate" field.
+func MinCacheRateLT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldMinCacheRate, v))
+}
+
+// MinCacheRateLTE applies the LTE predicate on the "min_cache_rate" field.
+func MinCacheRateLTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldMinCacheRate, v))
 }
 
 // HasAPIKeys applies the HasEdge predicate on the "api_keys" edge.

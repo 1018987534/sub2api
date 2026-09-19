@@ -1229,6 +1229,10 @@ func init() {
 	groupDescProfitSafetyBuffer := groupFields[62].Descriptor()
 	// group.DefaultProfitSafetyBuffer holds the default value on creation for the profit_safety_buffer field.
 	group.DefaultProfitSafetyBuffer = groupDescProfitSafetyBuffer.Default.(float64)
+	// groupDescMinCacheRate is the schema descriptor for min_cache_rate field.
+	groupDescMinCacheRate := groupFields[63].Descriptor()
+	// group.DefaultMinCacheRate holds the default value on creation for the min_cache_rate field.
+	group.DefaultMinCacheRate = groupDescMinCacheRate.Default.(float64)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0

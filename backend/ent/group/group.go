@@ -148,6 +148,8 @@ const (
 	FieldProfitMinMargin = "profit_min_margin"
 	// FieldProfitSafetyBuffer holds the string denoting the profit_safety_buffer field in the database.
 	FieldProfitSafetyBuffer = "profit_safety_buffer"
+	// FieldMinCacheRate holds the string denoting the min_cache_rate field in the database.
+	FieldMinCacheRate = "min_cache_rate"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -289,6 +291,7 @@ var Columns = []string{
 	FieldProfitControlEnabled,
 	FieldProfitMinMargin,
 	FieldProfitSafetyBuffer,
+	FieldMinCacheRate,
 }
 
 var (
@@ -434,6 +437,8 @@ var (
 	DefaultProfitMinMargin float64
 	// DefaultProfitSafetyBuffer holds the default value on creation for the "profit_safety_buffer" field.
 	DefaultProfitSafetyBuffer float64
+	// DefaultMinCacheRate holds the default value on creation for the "min_cache_rate" field.
+	DefaultMinCacheRate float64
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -732,6 +737,11 @@ func ByProfitMinMargin(opts ...sql.OrderTermOption) OrderOption {
 // ByProfitSafetyBuffer orders the results by the profit_safety_buffer field.
 func ByProfitSafetyBuffer(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldProfitSafetyBuffer, opts...).ToFunc()
+}
+
+// ByMinCacheRate orders the results by the min_cache_rate field.
+func ByMinCacheRate(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMinCacheRate, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.
