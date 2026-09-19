@@ -43,11 +43,9 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local fast_threshold_ms = tonumber(ARGV[7])
 	local slow_threshold_ms = tonumber(ARGV[8])
 	local confirmations = tonumber(ARGV[9])
-	local recent_window_ms = tonumber(ARGV[10])
-	local recent_slow_threshold_ms = tonumber(ARGV[11])
-	local recent_slow_ratio = tonumber(ARGV[12])
-	local circuit_break_threshold_ms = tonumber(ARGV[13])
-	local request_id = ARGV[14]
+	local circuit_break_threshold_ms = tonumber(ARGV[10])
+	local circuit_break_count = tonumber(ARGV[11])
+	local request_id = ARGV[12]
 	local now = redis.call('TIME')
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 
@@ -55,10 +53,9 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 		return 0
 	end
 
-	-- A single very long completed request is an immediate circuit break. Keep
-	-- an explicit pending hash so the scheduler can expose the reset state and
-	-- sticky selection cannot reuse the old fast-pool decision.
-	local function reset_pending(circuit_broken)
+	-- Keep an explicit pending hash so the scheduler can expose the reset state
+	-- and sticky selection cannot reuse the old fast-pool decision.
+	local function reset_pending()
 		redis.call('DEL', stats_key, samples_key, probe_key, manual_probe_key)
 		redis.call('HSET', stats_key,
 			'sample_count', '0',
@@ -66,15 +63,10 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'is_fast', '0',
 			'enter_fast_streak', '0',
 			'exit_slow_streak', '0',
-			'circuit_broken', tostring(circuit_broken),
+			'circuit_broken', '1',
 			'updated_at_ms', tostring(now_ms),
-			'score_version', '4')
+			'score_version', '5')
 		redis.call('EXPIRE', stats_key, stats_ttl_seconds)
-	end
-
-	if circuit_break_threshold_ms > 0 and duration_ms > circuit_break_threshold_ms then
-		reset_pending(1)
-		return 3
 	end
 
 	redis.call('ZREMRANGEBYSCORE', samples_key, '-inf', now_ms - fallback_window_ms)
@@ -91,6 +83,21 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 		return values
 	end
 
+	-- A three-minute request is a circuit-break sample. Do not reset on the
+	-- first or second occurrence; only the configured accumulated count inside
+	-- the retained 24-hour rolling sample window trips the breaker.
+	if circuit_break_threshold_ms > 0 and circuit_break_count > 0 then
+		local all_samples = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - fallback_window_ms, '+inf'))
+		local circuit_samples = 0
+		for _, value in ipairs(all_samples) do
+			if value >= circuit_break_threshold_ms then circuit_samples = circuit_samples + 1 end
+		end
+		if circuit_samples >= circuit_break_count then
+			reset_pending()
+			return 3
+		end
+	end
+
 	local primary = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - primary_window_ms, '+inf'))
 	local samples = primary
 	local window_hours = 6
@@ -102,20 +109,6 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local is_fast = tonumber(redis.call('HGET', stats_key, 'is_fast')) or 0
 	local enter_fast_streak = tonumber(redis.call('HGET', stats_key, 'enter_fast_streak')) or 0
 	local exit_slow_streak = tonumber(redis.call('HGET', stats_key, 'exit_slow_streak')) or 0
-	local recent = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - recent_window_ms, '+inf'))
-	local recent_slow = 0
-	for _, value in ipairs(recent) do
-		if value > recent_slow_threshold_ms then recent_slow = recent_slow + 1 end
-	end
-	local recent_overload = #recent > 0 and (recent_slow / #recent) > recent_slow_ratio
-	if recent_overload and is_fast == 1 then
-		-- A fast pool that suddenly produces too many minute-plus requests is
-		-- considered untrusted. Drop the whole rolling state so it re-enters
-		-- as "pending collection" instead of carrying stale fast samples.
-		reset_pending(0)
-		return 2
-	end
-
 	if not old_updated or now_ms - old_updated > primary_window_ms then
 		is_fast = 0
 		enter_fast_streak = 0
@@ -132,7 +125,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'exit_slow_streak', '0',
 			'circuit_broken', '0',
 			'updated_at_ms', tostring(now_ms),
-			'score_version', '4')
+			'score_version', '5')
 	else
 		table.sort(samples)
 		local trim = math.floor(#samples * 0.10)
@@ -183,7 +176,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'exit_slow_streak', tostring(exit_slow_streak),
 			'circuit_broken', '0',
 			'updated_at_ms', tostring(now_ms),
-			'score_version', '4')
+			'score_version', '5')
 	end
 
 	redis.call('EXPIRE', stats_key, stats_ttl_seconds)
@@ -259,10 +252,8 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 		totalLatencyFastThresholdMS,
 		totalLatencySlowThresholdMS,
 		3,
-		int64(policy.RecentWindow/time.Millisecond),
-		int64(policy.RecentSlowThreshold/time.Millisecond),
-		policy.RecentSlowRatio,
 		int64(policy.CircuitBreakThreshold/time.Millisecond),
+		policy.CircuitBreakCount,
 		requestID,
 	).Result(); err != nil {
 		return fmt.Errorf("record total-duration stats: %w", err)
@@ -294,8 +285,7 @@ func (c *firstTokenLatencyStatsCache) RecordSampleForDimension(ctx context.Conte
 		durationMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds()), 20,
 		int64((6*time.Hour)/time.Millisecond), int64((24*time.Hour)/time.Millisecond),
 		totalLatencyFastThresholdMS, totalLatencySlowThresholdMS, 3,
-		int64(policy.RecentWindow/time.Millisecond), int64(policy.RecentSlowThreshold/time.Millisecond),
-		policy.RecentSlowRatio, int64(policy.CircuitBreakThreshold/time.Millisecond), requestID).Result(); err != nil {
+		int64(policy.CircuitBreakThreshold/time.Millisecond), policy.CircuitBreakCount, requestID).Result(); err != nil {
 		return fmt.Errorf("record dimension total-duration stats: %w", err)
 	}
 	return c.rdb.HSet(ctx, statsKey, "account_id", dimension.AccountID).Err()

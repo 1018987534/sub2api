@@ -7,6 +7,7 @@ const i18nT = (key: string, params?: Record<string, unknown>) => {
     'channelMonitorV2.matrix.resetZoom': '重置缩放',
     'channelMonitorV2.matrix.dimension': '维度',
     'channelMonitorV2.metrics.successRate': '成功率',
+    'channelMonitorV2.metrics.currentMultiplier': '当前倍率',
     'channelMonitorV2.metrics.ttft': '首 Token',
     'channelMonitorV2.metrics.tps': '每秒 Token',
     'channelMonitorV2.metrics.cacheRate': '缓存率',
@@ -89,6 +90,7 @@ describe('RelayPulseMatrix', () => {
           platform: 'openai',
           group_id: 7,
           group_name: '默认组',
+          current_multiplier: 0.08,
           model: 'gpt-5',
           metrics: metrics(10),
           health,
@@ -127,9 +129,11 @@ describe('RelayPulseMatrix', () => {
     // Summary columns: success · ttft · tokens/s · cache
     const header = wrapper.find('.matrix-header').text()
     expect(header).toContain('成功率')
+    expect(header).toContain('当前倍率')
     expect(header).toContain('首 Token')
     expect(header).toContain('每秒 Token')
     expect(header).toContain('缓存率')
+    expect(wrapper.find('.matrix-row:not(.matrix-header)').text()).toContain('0.08x')
     // Multi-band class from score 52 → score5
     expect(cells[0].classes().some((c) => c.startsWith('health-score'))).toBe(true)
     // Redacted user payloads may have request_count=0 but still include score.

@@ -45,6 +45,7 @@ export default {
       ttftP50: 'First token P50',
       durationP50: 'Duration P50',
       cacheRate: 'Cache rate',
+      currentMultiplier: 'Current rate',
       cacheDetail: 'Read cache share',
       successRate: 'Success rate',
       successRateValue: 'Success rate {value}',

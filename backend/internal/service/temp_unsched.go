@@ -31,6 +31,7 @@ type TempUnschedCache interface {
 type OpenAIAPIKeyHealthCache interface {
 	RecordOpenAIAPIKeyHealthFailure(ctx context.Context, accountID int64, windowMinutes, threshold int) (count int64, tripped bool, err error)
 }
+
 // TimeoutCounterCache 超时计数器缓存接口
 type TimeoutCounterCache interface {
 	// IncrementTimeoutCount 增加账户的超时计数，返回当前计数值
@@ -75,34 +76,24 @@ type TotalDurationLatencyMetric struct {
 }
 
 type TotalDurationLatencyPolicy struct {
-	RecentWindow          time.Duration
-	RecentSlowThreshold   time.Duration
-	RecentSlowRatio       float64
 	CircuitBreakThreshold time.Duration
+	CircuitBreakCount     int
 }
 
 func DefaultTotalDurationLatencyPolicy() TotalDurationLatencyPolicy {
 	return TotalDurationLatencyPolicy{
-		RecentWindow:          5 * time.Minute,
-		RecentSlowThreshold:   time.Minute,
-		RecentSlowRatio:       0.35,
-		CircuitBreakThreshold: 5 * time.Minute,
+		CircuitBreakThreshold: 3 * time.Minute,
+		CircuitBreakCount:     3,
 	}
 }
 
 func NormalizeTotalDurationLatencyPolicy(policy TotalDurationLatencyPolicy) TotalDurationLatencyPolicy {
 	defaults := DefaultTotalDurationLatencyPolicy()
-	if policy.RecentWindow <= 0 {
-		policy.RecentWindow = defaults.RecentWindow
-	}
-	if policy.RecentSlowThreshold <= 0 {
-		policy.RecentSlowThreshold = defaults.RecentSlowThreshold
-	}
-	if policy.RecentSlowRatio <= 0 || policy.RecentSlowRatio >= 1 {
-		policy.RecentSlowRatio = defaults.RecentSlowRatio
-	}
 	if policy.CircuitBreakThreshold <= 0 {
 		policy.CircuitBreakThreshold = defaults.CircuitBreakThreshold
+	}
+	if policy.CircuitBreakCount <= 0 {
+		policy.CircuitBreakCount = defaults.CircuitBreakCount
 	}
 	return policy
 }

@@ -976,13 +976,11 @@ type GatewayConfig struct {
 	// OpenAISlowRequestTraceThresholdMs: slow OpenAI streaming requests emit one
 	// phase breakdown log after the first downstream flush. Values <= 0 use 3s.
 	OpenAISlowRequestTraceThresholdMs int `mapstructure:"openai_slow_request_trace_threshold_ms"`
-	// Total-duration fast-pool circuit breaker. A fast-pool dimension is reset
-	// to pending collection when this share of recent requests exceeds the slow
-	// threshold.
-	TotalDurationRecentWindowSeconds          int     `mapstructure:"total_duration_recent_window_seconds"`
-	TotalDurationRecentSlowThresholdSeconds   int     `mapstructure:"total_duration_recent_slow_threshold_seconds"`
-	TotalDurationRecentSlowRatio              float64 `mapstructure:"total_duration_recent_slow_ratio"`
-	TotalDurationCircuitBreakThresholdSeconds int     `mapstructure:"total_duration_circuit_break_threshold_seconds"`
+	// Total-duration fast-pool circuit breaker. An account is reset to pending
+	// only after this many requests in the rolling sample window each reach the
+	// configured duration threshold.
+	TotalDurationCircuitBreakThresholdSeconds int `mapstructure:"total_duration_circuit_break_threshold_seconds"`
+	TotalDurationCircuitBreakCount            int `mapstructure:"total_duration_circuit_break_count"`
 	// 请求体最大字节数，用于网关请求体大小限制
 	MaxBodySize int64 `mapstructure:"max_body_size"`
 	// TextMaxBodySize limits endpoints that cannot carry inline image/video payloads.
@@ -2439,10 +2437,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_high_effort_first_output_timeout_seconds", 0)
 	viper.SetDefault("gateway.openai_request_trace_enabled", true)
 	viper.SetDefault("gateway.openai_slow_request_trace_threshold_ms", 3000)
-	viper.SetDefault("gateway.total_duration_recent_window_seconds", 300)
-	viper.SetDefault("gateway.total_duration_recent_slow_threshold_seconds", 60)
-	viper.SetDefault("gateway.total_duration_recent_slow_ratio", 0.35)
-	viper.SetDefault("gateway.total_duration_circuit_break_threshold_seconds", 300)
+	viper.SetDefault("gateway.total_duration_circuit_break_threshold_seconds", 180)
+	viper.SetDefault("gateway.total_duration_circuit_break_count", 3)
 	viper.SetDefault("gateway.log_upstream_error_body", true)
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)
@@ -3396,17 +3392,11 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAISlowRequestTraceThresholdMs < 0 {
 		return fmt.Errorf("gateway.openai_slow_request_trace_threshold_ms must be non-negative")
 	}
-	if c.Gateway.TotalDurationRecentWindowSeconds <= 0 {
-		return fmt.Errorf("gateway.total_duration_recent_window_seconds must be positive")
-	}
-	if c.Gateway.TotalDurationRecentSlowThresholdSeconds <= 0 {
-		return fmt.Errorf("gateway.total_duration_recent_slow_threshold_seconds must be positive")
-	}
-	if c.Gateway.TotalDurationRecentSlowRatio <= 0 || c.Gateway.TotalDurationRecentSlowRatio >= 1 {
-		return fmt.Errorf("gateway.total_duration_recent_slow_ratio must be between 0 and 1")
-	}
 	if c.Gateway.TotalDurationCircuitBreakThresholdSeconds <= 0 {
 		return fmt.Errorf("gateway.total_duration_circuit_break_threshold_seconds must be positive")
+	}
+	if c.Gateway.TotalDurationCircuitBreakCount <= 0 {
+		return fmt.Errorf("gateway.total_duration_circuit_break_count must be positive")
 	}
 	if c.Gateway.Live.MaxSessionDurationSeconds <= 0 {
 		c.Gateway.Live.MaxSessionDurationSeconds = 3600

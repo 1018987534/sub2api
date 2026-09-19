@@ -41,6 +41,7 @@
             :class="showThroughput ? 'matrix-row--with-tps' : ''"
           >
             <span>{{ t('channelMonitorV2.matrix.dimension') }}</span>
+            <span>{{ t('channelMonitorV2.metrics.currentMultiplier') }}</span>
             <span>{{ t('channelMonitorV2.metrics.successRate') }}</span>
             <span>{{ t('channelMonitorV2.metrics.ttft') }}</span>
             <span v-if="showThroughput">{{ t('channelMonitorV2.metrics.tps') }}</span>
@@ -60,6 +61,9 @@
               <span :class="['status-dot', cellClass(entry.row.health, entry.row.metrics.request_count)]"></span>
               <strong class="truncate text-xs font-semibold text-gray-800 dark:text-gray-100">{{ rowLabel(entry.row) }}</strong>
             </div>
+            <strong class="summary-value bg-white text-xs font-medium tabular-nums text-gray-600 dark:bg-dark-800 dark:text-gray-300">
+              {{ formatMultiplier(entry.row.current_multiplier) }}
+            </strong>
             <strong class="summary-value bg-white text-xs font-medium tabular-nums text-gray-600 dark:bg-dark-800 dark:text-gray-300">
               {{ successRate(entry.row.metrics) }}
             </strong>
@@ -455,6 +459,11 @@ function formatMs(value: number | null) {
   return formatMonitorMs(value)
 }
 
+function formatMultiplier(value: number | undefined) {
+  if (value == null || !Number.isFinite(value)) return '-'
+  return `${Intl.NumberFormat(locale.value || undefined, { maximumFractionDigits: 4 }).format(value)}x`
+}
+
 function formatAxisTime(value: string) {
   return new Intl.DateTimeFormat(locale.value || undefined, {
     month: '2-digit',
@@ -472,11 +481,12 @@ function formatBucketRange(value: string) {
 </script>
 
 <style scoped>
-/* dimension | success | ttft | cache | pulse */
+/* dimension | multiplier | success | ttft | cache | pulse */
 .matrix-row {
   display: grid;
   grid-template-columns:
     minmax(120px, 1.2fr)
+    minmax(52px, 0.32fr)
     minmax(52px, 0.34fr)
     minmax(58px, 0.36fr)
     minmax(52px, 0.34fr)
@@ -489,6 +499,7 @@ function formatBucketRange(value: string) {
 .matrix-row--with-tps {
   grid-template-columns:
     minmax(110px, 1.15fr)
+    minmax(50px, 0.3fr)
     minmax(48px, 0.3fr)
     minmax(54px, 0.32fr)
     minmax(58px, 0.36fr)
@@ -651,7 +662,7 @@ function formatBucketRange(value: string) {
 
 @media (max-width: 640px) {
   .matrix-row {
-    grid-template-columns: minmax(88px, 1fr) minmax(48px, 0.45fr) minmax(54px, 0.5fr) minmax(96px, 2.6fr);
+    min-width: 520px;
     gap: 0.35rem;
   }
   .matrix-row > :nth-child(2) {

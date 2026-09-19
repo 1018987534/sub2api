@@ -45,6 +45,7 @@ export default {
       ttftP50: '首 Token P50',
       durationP50: '请求时长 P50',
       cacheRate: '缓存率',
+      currentMultiplier: '当前倍率',
       cacheDetail: '读缓存占比',
       successRate: '成功率',
       successRateValue: '成功率 {value}',
