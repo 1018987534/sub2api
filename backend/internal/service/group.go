@@ -21,6 +21,9 @@ type Group struct {
 	Description    string
 	Platform       string
 	RateMultiplier float64
+	// MinCacheRate is the minimum recent cache hit rate required for this
+	// group's total-duration scheduler. Zero disables the gate.
+	MinCacheRate float64
 	// 高峰时段倍率：peak_rate_enabled 为 true 且当前时刻处于 [PeakStart, PeakEnd) 时，
 	// token 计费倍率额外乘以 PeakRateMultiplier。详见 PeakMultiplierAt。
 	PeakRateEnabled    bool
@@ -403,6 +406,16 @@ func computePeakAwareMultipliers(apiKey *APIKey, base float64, now time.Time) (t
 // validProfitControlRatio 判定 margin/buffer 是否为可落库的合法小数：[0,1) 且非 NaN/Inf。
 func validProfitControlRatio(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v < 1
+}
+
+// ValidateGroupMinCacheRate validates the persisted scheduler threshold.
+// The value is stored as a decimal (0.80 = 80%); zero disables the gate and
+// one requires a fully cached 24-hour token window.
+func ValidateGroupMinCacheRate(v float64) error {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1 {
+		return fmt.Errorf("min_cache_rate must be a finite decimal in [0,1], got %v", v)
+	}
+	return nil
 }
 
 // NormalizeGroupPlatform 把创建分组时省略的 platform 归一化为默认平台。

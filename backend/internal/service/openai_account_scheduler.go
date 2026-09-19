@@ -78,6 +78,10 @@ type OpenAIAccountScheduleRequest struct {
 	StickyPreviousAccountID int64
 	StickyWeighted          bool
 	FirstTokenPriority      bool
+	// MinCacheRate is the group-scoped 24-hour cache-rate eligibility gate.
+	// It is only enforced for OpenAI API-key accounts while total-duration
+	// priority is enabled. Zero disables the gate.
+	MinCacheRate            float64
 	FirstTokenProbeEligible bool
 	SubscriptionPriority    bool
 	PreserveStickyBinding   bool
@@ -1525,6 +1529,9 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	if len(accounts) == 0 {
 		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, openAISelectionFilterStats{}.summary(""))
 	}
+	// Warm the short-lived 24-hour cache-rate snapshot in one query so the
+	// per-candidate compatibility checks below do not turn into N queries.
+	s.warmGroupCacheRateStats(ctx, accounts, req)
 	// Local free-tier soft gate on the Grok scheduling path only (not admin probe).
 	accounts = s.filterGrokFreeQuotaAccounts(ctx, accounts)
 	if len(accounts) == 0 {
@@ -1933,6 +1940,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	}
 	if !accountSupportsOpenAICapabilities(account, req.RequiredCapability, req.RequiredImageCapability) {
 		return false, "capability_mismatch"
+	}
+	if compatible, reason := s.isAccountGroupCacheRateCompatible(ctx, account, req); !compatible {
+		return false, reason
 	}
 	// 分组利润控制：不合格账号在候选过滤与抢槽后终检阶段即被排除，
 	// 排序/评分/粘性/熔断只在合格账号之间工作；named reason 进入 filter stats。
@@ -2501,6 +2511,10 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 	}
 	stickyWeighted := s.isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx)
 	firstTokenPriority := s.isFirstTokenPriorityEnabled(ctx)
+	minCacheRate := 0.0
+	if firstTokenPriority {
+		minCacheRate = s.loadOpenAIGroupMinCacheRate(ctx, groupID)
+	}
 	if firstTokenPriority {
 		// Session affinity is applied only after capability, fast-pool and rate
 		// ordering. It therefore cannot hold back a recovered fast-pool or
@@ -2522,6 +2536,7 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		StickyPreviousAccountID: stickyPreviousAccountID,
 		StickyWeighted:          stickyWeighted,
 		FirstTokenPriority:      firstTokenPriority,
+		MinCacheRate:            minCacheRate,
 		FirstTokenProbeEligible: firstTokenProbeEligible(ctx),
 		SubscriptionPriority:    subscriptionPriority,
 		PreserveStickyBinding:   preserveGuardianParentBinding,

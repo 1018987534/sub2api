@@ -200,7 +200,8 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 		if strings.EqualFold(strings.TrimSpace(account.Name), firstTokenLatencyHiddenAccount) {
 			continue
 		}
-		groups, belongsToSchedulableGroup := firstTokenLatencyMetricGroups(account, now)
+		accountCache := cacheStats[account.ID]
+		groups, belongsToSchedulableGroup := firstTokenLatencyMetricGroups(account, accountCache, now)
 		if !belongsToSchedulableGroup {
 			continue
 		}
@@ -210,7 +211,6 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 		if rate, found := openAIFreshUpstreamBillingRate(account, now); found {
 			schedulingRateMultiplier = &rate
 		}
-		accountCache := cacheStats[account.ID]
 		var cacheRate *float64
 		if accountCache.CacheRateDenominator > 0 {
 			rate := float64(accountCache.CacheReadTokens) / float64(accountCache.CacheRateDenominator)
@@ -251,7 +251,7 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 	return metrics, nil
 }
 
-func firstTokenLatencyMetricGroups(account *Account, now time.Time) ([]AccountFirstTokenLatencyGroup, bool) {
+func firstTokenLatencyMetricGroups(account *Account, cacheStats AccountCacheStats, now time.Time) ([]AccountFirstTokenLatencyGroup, bool) {
 	if account == nil {
 		return []AccountFirstTokenLatencyGroup{}, false
 	}
@@ -262,6 +262,9 @@ func firstTokenLatencyMetricGroups(account *Account, now time.Time) ([]AccountFi
 			strings.EqualFold(strings.TrimSpace(group.Name), firstTokenLatencyHiddenGroup) ||
 			(group.Status != "" && group.Status != StatusActive) ||
 			(group.Platform != "" && group.Platform != PlatformOpenAI) {
+			return false
+		}
+		if validEnabledGroupMinCacheRate(group.MinCacheRate) && groupCacheRateBelowMinimum(cacheStats, group.MinCacheRate) {
 			return false
 		}
 		reports := PreviewProfitAdmission([]ProfitPreviewGroupInput{{

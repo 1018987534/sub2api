@@ -626,6 +626,18 @@
           />
           <p class="input-hint">{{ t("admin.groups.rateMultiplierHint") }}</p>
         </div>
+        <div v-if="createForm.platform === 'openai'">
+          <label class="input-label">{{ t("admin.groups.cacheRateGate.minimum") }}</label>
+          <input
+            v-model.number="createForm.min_cache_rate_percent"
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            class="input"
+          />
+          <p class="input-hint">{{ t("admin.groups.cacheRateGate.hint") }}</p>
+        </div>
         <div>
           <label class="input-label">{{ t("admin.groups.form.rpmLimit") }}</label>
           <input
@@ -2263,6 +2275,18 @@
             class="input"
             data-tour="group-form-multiplier"
           />
+        </div>
+        <div v-if="editForm.platform === 'openai'">
+          <label class="input-label">{{ t("admin.groups.cacheRateGate.minimum") }}</label>
+          <input
+            v-model.number="editForm.min_cache_rate_percent"
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            class="input"
+          />
+          <p class="input-hint">{{ t("admin.groups.cacheRateGate.hint") }}</p>
         </div>
         <div>
           <label class="input-label">{{ t("admin.groups.form.rpmLimit") }}</label>
@@ -4350,6 +4374,11 @@ import {
   type ProfitControlFormState,
 } from "./groupsProfitControl";
 import {
+  cacheRateDecimalToPercent,
+  cacheRatePercentToDecimal,
+  isValidCacheRatePercent,
+} from "./groupsCacheRate";
+import {
   normalizeReasoningEffortForPlatform,
   normalizeReasoningEffortOverLimit,
   reasoningEffortMappingsToAPI,
@@ -4933,6 +4962,7 @@ const createForm = reactive({
   description: "",
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
+  min_cache_rate_percent: 0,
   is_exclusive: false,
   subscription_type: "standard" as SubscriptionType,
   daily_limit_usd: null as number | null,
@@ -5297,6 +5327,7 @@ const editForm = reactive({
   description: "",
   platform: "anthropic" as GroupPlatform,
   rate_multiplier: 1.0,
+  min_cache_rate_percent: 0,
   is_exclusive: false,
   status: "active" as "active" | "inactive",
   subscription_type: "standard" as SubscriptionType,
@@ -5760,6 +5791,7 @@ const closeCreateModal = () => {
   createForm.description = "";
   createForm.platform = "anthropic";
   createForm.rate_multiplier = 1.0;
+  createForm.min_cache_rate_percent = 0;
   createForm.is_exclusive = false;
   createForm.subscription_type = "standard";
   createForm.daily_limit_usd = null;
@@ -5872,6 +5904,10 @@ const handleCreateGroup = async () => {
   if (!validateProfitControlForm(createForm)) {
     return;
   }
+  if (!isValidCacheRatePercent(createForm.min_cache_rate_percent)) {
+    appStore.showError(t("admin.groups.cacheRateGate.rangeError"));
+    return;
+  }
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
   if (
     createModelAllowlistState.enabled &&
@@ -5947,9 +5983,14 @@ const handleCreateGroup = async () => {
       profit_safety_buffer: percentToDecimal(
         createForm.profit_safety_buffer_percent,
       ),
+      min_cache_rate:
+        createForm.platform === "openai"
+          ? cacheRatePercentToDecimal(createForm.min_cache_rate_percent)
+          : 0,
     };
     delete (requestData as Record<string, unknown>).profit_min_margin_percent;
     delete (requestData as Record<string, unknown>).profit_safety_buffer_percent;
+    delete (requestData as Record<string, unknown>).min_cache_rate_percent;
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => (v === "" ? null : v);
     requestData.daily_limit_usd = emptyToNull(requestData.daily_limit_usd);
@@ -6029,6 +6070,9 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.description = group.description || "";
   editForm.platform = group.platform;
   editForm.rate_multiplier = group.rate_multiplier;
+  editForm.min_cache_rate_percent = cacheRateDecimalToPercent(
+    group.min_cache_rate ?? 0,
+  );
   editForm.is_exclusive = group.is_exclusive;
   editForm.status = group.status;
   editForm.subscription_type = group.subscription_type || "standard";
@@ -6164,6 +6208,7 @@ const closeEditModal = () => {
   editForm.profit_control_enabled = false;
   editForm.profit_min_margin_percent = 0;
   editForm.profit_safety_buffer_percent = 0;
+  editForm.min_cache_rate_percent = 0;
   editForm.video_rate_independent = false;
   editForm.video_rate_multiplier = 1;
   editForm.video_price_480p = null;
@@ -6201,6 +6246,10 @@ const handleUpdateGroup = async () => {
     return;
   }
   if (!validateProfitControlForm(editForm)) {
+    return;
+  }
+  if (!isValidCacheRatePercent(editForm.min_cache_rate_percent)) {
+    appStore.showError(t("admin.groups.cacheRateGate.rangeError"));
     return;
   }
   // 模型白名单：开启且没有任何条目时阻止提交，与后端 400 对齐。
@@ -6295,9 +6344,14 @@ const handleUpdateGroup = async () => {
       profit_safety_buffer: percentToDecimal(
         editForm.profit_safety_buffer_percent,
       ),
+      min_cache_rate:
+        editForm.platform === "openai"
+          ? cacheRatePercentToDecimal(editForm.min_cache_rate_percent)
+          : 0,
     };
     delete (payload as Record<string, unknown>).profit_min_margin_percent;
     delete (payload as Record<string, unknown>).profit_safety_buffer_percent;
+    delete (payload as Record<string, unknown>).min_cache_rate_percent;
     // v-model.number 清空输入框时产生 ""，转为 null 让后端设为无限制
     const emptyToNull = (v: any) => (v === "" ? null : v);
     payload.daily_limit_usd = emptyToNull(payload.daily_limit_usd);
@@ -6670,6 +6724,9 @@ watch(
       createForm.profit_min_margin_percent = 0;
       createForm.profit_safety_buffer_percent = 0;
     }
+    if (newVal !== "openai") {
+      createForm.min_cache_rate_percent = 0;
+    }
     createForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
       createForm.max_reasoning_effort,
@@ -6726,6 +6783,9 @@ watch(
       editForm.profit_control_enabled = false;
       editForm.profit_min_margin_percent = 0;
       editForm.profit_safety_buffer_percent = 0;
+    }
+    if (newVal !== "openai") {
+      editForm.min_cache_rate_percent = 0;
     }
     editForm.max_reasoning_effort = normalizeReasoningEffortForPlatform(
       newVal,
