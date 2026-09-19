@@ -1131,7 +1131,7 @@ export default {
       },
       cacheRateGate: {
         minimum: '最低缓存率（%）',
-        hint: '仅用于正常总耗时快慢池调度。OpenAI API Key 账号最近 24 小时缓存率不足或没有有效样本时，将直接移出该分组调度；填 0 关闭过滤。',
+        hint: '仅用于正常总耗时快慢池调度。OpenAI API Key 账号有可计算的最近 24 小时缓存率且低于门槛时，将移出该分组调度；没有缓存率的新账号暂时放行。填 0 关闭过滤。',
         rangeError: '最低缓存率应在 0 到 100 之间'
       },
       modelAllowlist: {

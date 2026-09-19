@@ -78,12 +78,14 @@ type TotalDurationLatencyMetric struct {
 type TotalDurationLatencyPolicy struct {
 	CircuitBreakThreshold time.Duration
 	CircuitBreakCount     int
+	CircuitBreakWindow    time.Duration
 }
 
 func DefaultTotalDurationLatencyPolicy() TotalDurationLatencyPolicy {
 	return TotalDurationLatencyPolicy{
 		CircuitBreakThreshold: 3 * time.Minute,
 		CircuitBreakCount:     3,
+		CircuitBreakWindow:    30 * time.Minute,
 	}
 }
 
@@ -94,6 +96,9 @@ func NormalizeTotalDurationLatencyPolicy(policy TotalDurationLatencyPolicy) Tota
 	}
 	if policy.CircuitBreakCount <= 0 {
 		policy.CircuitBreakCount = defaults.CircuitBreakCount
+	}
+	if policy.CircuitBreakWindow <= 0 {
+		policy.CircuitBreakWindow = defaults.CircuitBreakWindow
 	}
 	return policy
 }

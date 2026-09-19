@@ -234,11 +234,12 @@ gateway:
   # 追踪阈值（毫秒；<=0 使用 3 秒默认值）。
   openai_slow_request_trace_threshold_ms: 3000
   # Fast-pool circuit breaker: a completed request counts when its total
-  # duration reaches 3 minutes; three counted requests in the rolling 24-hour
-  # sample window reset the account to pending collection.
-  # 快池熔断：单次总耗时达到 3 分钟计数，滚动 24 小时样本累计 3 次后重置为待采集。
+  # duration exceeds 3 minutes; three counted requests in a rolling 30-minute
+  # window reset the account to pending collection.
+  # 快池熔断：单次总耗时超过 3 分钟计数，滚动 30 分钟内累计 3 次后重置为待采集。
   total_duration_circuit_break_threshold_seconds: 180
   total_duration_circuit_break_count: 3
+  total_duration_circuit_break_window_seconds: 1800
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456

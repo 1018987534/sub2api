@@ -977,10 +977,11 @@ type GatewayConfig struct {
 	// phase breakdown log after the first downstream flush. Values <= 0 use 3s.
 	OpenAISlowRequestTraceThresholdMs int `mapstructure:"openai_slow_request_trace_threshold_ms"`
 	// Total-duration fast-pool circuit breaker. An account is reset to pending
-	// only after this many requests in the rolling sample window each reach the
-	// configured duration threshold.
+	// only after this many requests in the configured rolling window each exceed
+	// the configured duration threshold.
 	TotalDurationCircuitBreakThresholdSeconds int `mapstructure:"total_duration_circuit_break_threshold_seconds"`
 	TotalDurationCircuitBreakCount            int `mapstructure:"total_duration_circuit_break_count"`
+	TotalDurationCircuitBreakWindowSeconds    int `mapstructure:"total_duration_circuit_break_window_seconds"`
 	// 请求体最大字节数，用于网关请求体大小限制
 	MaxBodySize int64 `mapstructure:"max_body_size"`
 	// TextMaxBodySize limits endpoints that cannot carry inline image/video payloads.
@@ -2439,6 +2440,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_slow_request_trace_threshold_ms", 3000)
 	viper.SetDefault("gateway.total_duration_circuit_break_threshold_seconds", 180)
 	viper.SetDefault("gateway.total_duration_circuit_break_count", 3)
+	viper.SetDefault("gateway.total_duration_circuit_break_window_seconds", 1800)
 	viper.SetDefault("gateway.log_upstream_error_body", true)
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)
@@ -3397,6 +3399,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.TotalDurationCircuitBreakCount <= 0 {
 		return fmt.Errorf("gateway.total_duration_circuit_break_count must be positive")
+	}
+	if c.Gateway.TotalDurationCircuitBreakWindowSeconds <= 0 {
+		return fmt.Errorf("gateway.total_duration_circuit_break_window_seconds must be positive")
 	}
 	if c.Gateway.Live.MaxSessionDurationSeconds <= 0 {
 		c.Gateway.Live.MaxSessionDurationSeconds = 3600

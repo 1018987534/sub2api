@@ -711,6 +711,16 @@ func TestLoadOpenAISlowRequestTraceThreshold(t *testing.T) {
 	require.Equal(t, 3000, cfg.Gateway.OpenAISlowRequestTraceThresholdMs)
 }
 
+func TestLoadTotalDurationCircuitBreakWindow(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 180, cfg.Gateway.TotalDurationCircuitBreakThresholdSeconds)
+	require.Equal(t, 3, cfg.Gateway.TotalDurationCircuitBreakCount)
+	require.Equal(t, 1800, cfg.Gateway.TotalDurationCircuitBreakWindowSeconds)
+}
+
 func TestLoadImageNonstreamKeepaliveFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_IMAGE_NONSTREAM_KEEPALIVE_INTERVAL", "15")
@@ -1992,6 +2002,11 @@ func TestValidateConfigErrors(t *testing.T) {
 			name:    "gateway openai proxy stream circuit ttl",
 			mutate:  func(c *Config) { c.Gateway.OpenAIProxyStreamCircuit.TTLSeconds = -1 },
 			wantErr: "gateway.openai_proxy_stream_circuit.ttl_seconds",
+		},
+		{
+			name:    "gateway total duration circuit window",
+			mutate:  func(c *Config) { c.Gateway.TotalDurationCircuitBreakWindowSeconds = 0 },
+			wantErr: "gateway.total_duration_circuit_break_window_seconds",
 		},
 		{
 			name:    "gateway stream data interval range",

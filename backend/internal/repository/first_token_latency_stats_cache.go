@@ -45,7 +45,8 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local confirmations = tonumber(ARGV[9])
 	local circuit_break_threshold_ms = tonumber(ARGV[10])
 	local circuit_break_count = tonumber(ARGV[11])
-	local request_id = ARGV[12]
+	local circuit_break_window_ms = tonumber(ARGV[12])
+	local request_id = ARGV[13]
 	local now = redis.call('TIME')
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 
@@ -83,14 +84,14 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 		return values
 	end
 
-	-- A three-minute request is a circuit-break sample. Do not reset on the
-	-- first or second occurrence; only the configured accumulated count inside
-	-- the retained 24-hour rolling sample window trips the breaker.
-	if circuit_break_threshold_ms > 0 and circuit_break_count > 0 then
-		local all_samples = decode(redis.call('ZRANGEBYSCORE', samples_key, now_ms - fallback_window_ms, '+inf'))
+	-- Only durations strictly above the threshold count. The lower bound is
+	-- exclusive, so a sample expires exactly when the rolling window elapses.
+	if circuit_break_threshold_ms > 0 and circuit_break_count > 0 and circuit_break_window_ms > 0 then
+		local cutoff_ms = now_ms - circuit_break_window_ms
+		local all_samples = decode(redis.call('ZRANGEBYSCORE', samples_key, cutoff_ms + 1, '+inf'))
 		local circuit_samples = 0
 		for _, value in ipairs(all_samples) do
-			if value >= circuit_break_threshold_ms then circuit_samples = circuit_samples + 1 end
+			if value > circuit_break_threshold_ms then circuit_samples = circuit_samples + 1 end
 		end
 		if circuit_samples >= circuit_break_count then
 			reset_pending()
@@ -254,6 +255,7 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 		3,
 		int64(policy.CircuitBreakThreshold/time.Millisecond),
 		policy.CircuitBreakCount,
+		int64(policy.CircuitBreakWindow/time.Millisecond),
 		requestID,
 	).Result(); err != nil {
 		return fmt.Errorf("record total-duration stats: %w", err)
@@ -285,7 +287,8 @@ func (c *firstTokenLatencyStatsCache) RecordSampleForDimension(ctx context.Conte
 		durationMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds()), 20,
 		int64((6*time.Hour)/time.Millisecond), int64((24*time.Hour)/time.Millisecond),
 		totalLatencyFastThresholdMS, totalLatencySlowThresholdMS, 3,
-		int64(policy.CircuitBreakThreshold/time.Millisecond), policy.CircuitBreakCount, requestID).Result(); err != nil {
+		int64(policy.CircuitBreakThreshold/time.Millisecond), policy.CircuitBreakCount,
+		int64(policy.CircuitBreakWindow/time.Millisecond), requestID).Result(); err != nil {
 		return fmt.Errorf("record dimension total-duration stats: %w", err)
 	}
 	return c.rdb.HSet(ctx, statsKey, "account_id", dimension.AccountID).Err()

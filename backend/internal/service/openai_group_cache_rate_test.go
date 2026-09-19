@@ -46,7 +46,7 @@ func TestGroupCacheRateGateFiltersBelowMinimum(t *testing.T) {
 	require.Empty(t, reason)
 }
 
-func TestGroupCacheRateGateTreatsMissingSamplesAsBelowMinimum(t *testing.T) {
+func TestGroupCacheRateGateAllowsMissingSamplesToBootstrap(t *testing.T) {
 	service := &OpenAIGatewayService{rateLimitService: &RateLimitService{
 		usageRepo: cacheRateProviderStub{stats: map[int64]AccountCacheStats{}},
 	}}
@@ -55,8 +55,8 @@ func TestGroupCacheRateGateTreatsMissingSamplesAsBelowMinimum(t *testing.T) {
 		context.Background(), cacheRateTestAccount(3),
 		OpenAIAccountScheduleRequest{FirstTokenPriority: true, MinCacheRate: 0.8},
 	)
-	require.False(t, ok)
-	require.Equal(t, groupCacheRateFilterReason, reason)
+	require.True(t, ok)
+	require.Empty(t, reason)
 }
 
 func TestGroupCacheRateGateFailsOpenOnStatsProviderError(t *testing.T) {

@@ -1134,7 +1134,7 @@ export default {
       },
       cacheRateGate: {
         minimum: 'Minimum cache rate (%)',
-        hint: 'Only used by the total-duration fast/slow scheduler. OpenAI API-key accounts below this 24-hour cache rate (or without valid samples) are removed from scheduling. 0 disables the filter.',
+        hint: 'Only used by the total-duration fast/slow scheduler. OpenAI API-key accounts with a calculable 24-hour cache rate below this threshold are removed from scheduling; new accounts without a cache rate remain eligible. 0 disables the filter.',
         rangeError: 'Minimum cache rate must be between 0 and 100'
       },
       modelAllowlist: {
