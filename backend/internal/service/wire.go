@@ -487,8 +487,11 @@ func ProvideSchedulerSnapshotService(
 	accountRepo AccountRepository,
 	groupRepo GroupRepository,
 	cfg *config.Config,
+	leaderLock LeaderLockCache,
+	db *sql.DB,
 ) *SchedulerSnapshotService {
 	svc := NewSchedulerSnapshotService(cache, outboxRepo, accountRepo, groupRepo, cfg)
+	svc.SetLeaderLock(leaderLock, db)
 	svc.Start()
 	return svc
 }

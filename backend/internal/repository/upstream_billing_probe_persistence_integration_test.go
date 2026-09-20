@@ -12,6 +12,53 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestProbeSnapshotOutboxOnlyWhenStoredRateChanges(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	rate := 0.25
+	account := mustCreateAccount(t, tx.Client(), &service.Account{
+		Name: "probe-outbox-change", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test"}, RateMultiplier: &rate,
+		Extra: map[string]any{service.UpstreamBillingProbeEnabledExtraKey: true, service.UpstreamBillingRateSyncEnabledExtraKey: true},
+	})
+	// The shared fixture helper does not copy RateMultiplier into the ent row.
+	require.NoError(t, tx.Client().Account.UpdateOneID(account.ID).SetRateMultiplier(rate).Exec(ctx))
+	count := func() int {
+		rows, err := tx.QueryContext(ctx, "SELECT COUNT(*) FROM scheduler_outbox WHERE account_id = $1", account.ID)
+		require.NoError(t, err)
+		defer rows.Close()
+		require.True(t, rows.Next())
+		var n int
+		require.NoError(t, rows.Scan(&n))
+		return n
+	}
+	// Release the create-event dedup key so a genuine rate change can enqueue.
+	_, err := tx.ExecContext(ctx, "DELETE FROM scheduler_outbox WHERE account_id = $1", account.ID)
+	require.NoError(t, err)
+	for _, step := range []struct {
+		name       string
+		input      *float64
+		status     string
+		wantEvents int
+	}{
+		{"observation", nil, service.UpstreamBillingProbeStatusOK, 0},
+		{"unchanged rate", &rate, service.UpstreamBillingProbeStatusOK, 0},
+		{"same stored value after numeric rounding", func() *float64 { v := 0.25000001; return &v }(), service.UpstreamBillingProbeStatusOK, 0},
+		{"failed probe ignores rate", func() *float64 { v := 0.5; return &v }(), service.UpstreamBillingProbeStatusFailed, 0},
+		{"changed rate", func() *float64 { v := 0.5; return &v }(), service.UpstreamBillingProbeStatusOK, 1},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			loaded, err := repo.GetByID(ctx, account.ID)
+			require.NoError(t, err)
+			staleRate := 42.0
+			loaded.RateMultiplier = &staleRate // Compare to DB, never this stale field.
+			require.NoError(t, repo.UpdateUpstreamBillingProbeSnapshot(ctx, loaded, &service.UpstreamBillingProbeSnapshot{Status: step.status, LastAttemptAt: time.Now().UTC()}, step.input))
+			require.Equal(t, step.wantEvents, count())
+		})
+	}
+}
+
 func TestAccountUpdatePreservesConcurrentProbeSnapshot(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)

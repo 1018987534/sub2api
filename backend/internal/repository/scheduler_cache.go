@@ -15,18 +15,19 @@ import (
 )
 
 const (
-	schedulerBucketSetKey          = "sched:buckets"
-	schedulerOutboxWatermarkKey    = "sched:outbox:watermark"
-	schedulerAccountPrefix         = "sched:acc:"
-	schedulerAccountMetaPrefix     = "sched:meta:"
-	schedulerAccountLastUsedPrefix = "sched:acc:last_used:"
-	schedulerActivePrefix          = "sched:active:"
-	schedulerReadyPrefix           = "sched:ready:"
-	schedulerVersionPrefix         = "sched:ver:"
-	schedulerEpochPrefix           = "sched:epoch:"
-	schedulerRetiredPrefix         = "sched:retired:"
-	schedulerSnapshotPrefix        = "sched:"
-	schedulerLockPrefix            = "sched:lock:"
+	schedulerBucketSetKey              = "sched:buckets"
+	schedulerOutboxWatermarkKey        = "sched:outbox:watermark"
+	schedulerFullRebuildCompletedAtKey = "sched:full-rebuild:completed-at"
+	schedulerAccountPrefix             = "sched:acc:"
+	schedulerAccountMetaPrefix         = "sched:meta:"
+	schedulerAccountLastUsedPrefix     = "sched:acc:last_used:"
+	schedulerActivePrefix              = "sched:active:"
+	schedulerReadyPrefix               = "sched:ready:"
+	schedulerVersionPrefix             = "sched:ver:"
+	schedulerEpochPrefix               = "sched:epoch:"
+	schedulerRetiredPrefix             = "sched:retired:"
+	schedulerSnapshotPrefix            = "sched:"
+	schedulerLockPrefix                = "sched:lock:"
 
 	defaultSchedulerSnapshotMGetChunkSize  = 128
 	defaultSchedulerSnapshotWriteChunkSize = 256
@@ -698,6 +699,21 @@ func (c *schedulerCache) GetOutboxWatermark(ctx context.Context) (int64, error) 
 
 func (c *schedulerCache) SetOutboxWatermark(ctx context.Context, id int64) error {
 	return c.rdb.Set(ctx, schedulerOutboxWatermarkKey, strconv.FormatInt(id, 10), 0).Err()
+}
+
+func (c *schedulerCache) GetFullRebuildCompletedAt(ctx context.Context) (time.Time, error) {
+	value, err := c.rdb.Get(ctx, schedulerFullRebuildCompletedAtKey).Result()
+	if err == redis.Nil {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Parse(time.RFC3339Nano, value)
+}
+
+func (c *schedulerCache) SetFullRebuildCompletedAt(ctx context.Context, completedAt time.Time) error {
+	return c.rdb.Set(ctx, schedulerFullRebuildCompletedAtKey, completedAt.UTC().Format(time.RFC3339Nano), 0).Err()
 }
 
 func schedulerBucketKey(prefix string, bucket service.SchedulerBucket) string {
