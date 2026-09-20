@@ -1328,6 +1328,8 @@ export interface GatewayRoutingSettings {
   monitor_url: string;
   traffic_protection_enabled: boolean;
   health_protection_enabled: boolean;
+  packet_loss_protection_enabled: boolean;
+  packet_loss_cooldown_minutes: number;
   traffic_threshold_percent: number;
   overflow_node_id: string;
   nodes: GatewayRoutingNodeSettings[];
@@ -1346,6 +1348,7 @@ export interface GatewayRoutingNodeRuntime extends GatewayRoutingNodeSettings {
     | "auto_disabled_monitor_stale"
     | "auto_disabled_monitor_missing"
     | "auto_disabled_monitor_record_unavailable"
+    | "auto_disabled_packet_loss"
     | "unlimited"
     | "monitor_stale";
   traffic_limit_bytes: number;
@@ -1355,6 +1358,10 @@ export interface GatewayRoutingNodeRuntime extends GatewayRoutingNodeSettings {
   unlimited: boolean;
   monitor_stale: boolean;
   monitor_sample_at?: string;
+  packet_loss_state?: string;
+  packet_loss_percent?: number;
+  packet_loss_sample_at?: string;
+  packet_loss_paused_until?: string;
 }
 
 export interface GatewayRoutingRuntime {

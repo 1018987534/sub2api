@@ -165,6 +165,7 @@ type SettingService struct {
 	// It is deliberately per-service so tests and multiple processes do not share state.
 	gatewayRoutingRuntimeCache   atomic.Value // *cachedGatewayRoutingRuntime
 	gatewayRoutingRuntimeSF      singleflight.Group
+	gatewayRoutingPacketLossMu   sync.Mutex
 	gatewayRoutingHTTPClient     *http.Client
 	gatewayRoutingCapacityStore  *GatewayNodeCapacityStore
 	gatewayRoutingAdmissionCache atomic.Value // *cachedGatewayRoutingAdmissionSettings

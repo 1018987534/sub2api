@@ -277,6 +277,37 @@
                     <Toggle v-model="gatewayRoutingForm.health_protection_enabled" />
                   </div>
 
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <label class="font-medium text-gray-900 dark:text-white">
+                        {{ t("admin.settings.gatewayRouting.packetLossProtection") }}
+                      </label>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">
+                        {{ t("admin.settings.gatewayRouting.packetLossProtectionHint") }}
+                      </p>
+                    </div>
+                    <Toggle v-model="gatewayRoutingForm.packet_loss_protection_enabled" />
+                  </div>
+
+                  <div>
+                    <label for="packet-loss-cooldown" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayRouting.packetLossCooldown") }}
+                    </label>
+                    <input
+                      id="packet-loss-cooldown"
+                      v-model.number="gatewayRoutingForm.packet_loss_cooldown_minutes"
+                      type="number"
+                      min="1"
+                      max="120"
+                      step="1"
+                      class="input w-28"
+                      :disabled="!gatewayRoutingForm.packet_loss_protection_enabled"
+                    />
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.gatewayRouting.packetLossCooldownHint") }}
+                    </p>
+                  </div>
+
                   <div>
                     <label
                       class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
@@ -405,6 +436,9 @@
                           <span :class="gatewayRoutingStatusClass(node.id)">
                             {{ gatewayRoutingStatusLabel(node.id) }}
                           </span>
+                          <p v-if="gatewayRoutingRuntimeByID[node.id]?.packet_loss_state" class="mt-1 max-w-xs text-xs text-gray-500 dark:text-gray-400">
+                            {{ gatewayRoutingPacketLossLabel(node.id) }}
+                          </p>
                         </td>
                       </tr>
                     </tbody>
@@ -9392,6 +9426,8 @@ const gatewayRoutingForm = reactive<GatewayRoutingSettings>({
   monitor_url: "",
   traffic_protection_enabled: true,
   health_protection_enabled: true,
+  packet_loss_protection_enabled: true,
+  packet_loss_cooldown_minutes: 5,
   traffic_threshold_percent: 90,
   overflow_node_id: "",
   nodes: [],
@@ -12326,6 +12362,10 @@ function applyGatewayRoutingResponse(response: {
     response.settings.traffic_protection_enabled;
   gatewayRoutingForm.health_protection_enabled =
     response.settings.health_protection_enabled;
+  gatewayRoutingForm.packet_loss_protection_enabled =
+    response.settings.packet_loss_protection_enabled ?? true;
+  gatewayRoutingForm.packet_loss_cooldown_minutes =
+    response.settings.packet_loss_cooldown_minutes ?? 5;
   gatewayRoutingForm.traffic_threshold_percent =
     response.settings.traffic_threshold_percent;
 	gatewayRoutingForm.overflow_node_id = response.settings.overflow_node_id || "";
@@ -12355,6 +12395,11 @@ async function loadGatewayRoutingSettings() {
 }
 
 async function saveGatewayRoutingSettings() {
+  const cooldown = gatewayRoutingForm.packet_loss_cooldown_minutes;
+  if (!Number.isInteger(cooldown) || cooldown < 1 || cooldown > 120) {
+    appStore.showError(t("admin.settings.gatewayRouting.packetLossCooldownError"));
+    return;
+  }
   if (gatewayRoutingTargetWeightTotal.value !== 100) {
     appStore.showError(
       t("admin.settings.gatewayRouting.targetTotalError", {
@@ -12372,6 +12417,9 @@ async function saveGatewayRoutingSettings() {
           gatewayRoutingForm.traffic_protection_enabled,
         health_protection_enabled:
           gatewayRoutingForm.health_protection_enabled,
+        packet_loss_protection_enabled:
+          gatewayRoutingForm.packet_loss_protection_enabled,
+        packet_loss_cooldown_minutes: cooldown,
         traffic_threshold_percent:
           Number(gatewayRoutingForm.traffic_threshold_percent),
 		overflow_node_id: gatewayRoutingForm.overflow_node_id,
@@ -12432,6 +12480,17 @@ function gatewayRoutingConcurrencyLabel(nodeID: string): string {
 function gatewayRoutingStatusLabel(nodeID: string): string {
   const status = gatewayRoutingRuntimeByID.value[nodeID]?.status || "monitor_stale";
   return t(`admin.settings.gatewayRouting.statuses.${status}`);
+}
+
+function gatewayRoutingPacketLossLabel(nodeID: string): string {
+  const node = gatewayRoutingRuntimeByID.value[nodeID];
+  if (!node?.packet_loss_state) return "";
+  const state = t(`admin.settings.gatewayRouting.packetLossStates.${node.packet_loss_state}`);
+  const percent = node.packet_loss_percent == null ? "" : ` · ${node.packet_loss_percent.toFixed(1)}%`;
+  const until = node.packet_loss_paused_until
+    ? ` · ${t("admin.settings.gatewayRouting.packetLossUntil", { time: new Date(node.packet_loss_paused_until).toLocaleString() })}`
+    : "";
+  return `${state}${percent}${until}`;
 }
 
 function gatewayRoutingStatusClass(nodeID: string): string {
