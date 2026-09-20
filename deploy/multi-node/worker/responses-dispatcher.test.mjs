@@ -108,6 +108,23 @@ test("tries the configured zero-weight capacity fallback before random peers", (
   ]);
 });
 
+test("packet-loss pauses exclude a node from weighted and capacity fallback routing until restored", () => {
+  const payload = {
+    overflow_node_id: "yt",
+    nodes: [
+      { id: "peer", origin: "https://peer.example", target_weight: 30, effective_weight: 30 },
+      { id: "yt", origin: "https://yt.example", target_weight: 70, effective_weight: 0, auto_disabled: true, auto_disabled_reason: "packet_loss" },
+    ],
+  };
+  const paused = normalizeRuntimeNodes(payload);
+  for (let roll = 0; roll < 100; roll++) {
+    assert.deepEqual(originsFor(roll, paused), ["https://peer.example"]);
+  }
+  payload.nodes[1].effective_weight = 70;
+  payload.nodes[1].auto_disabled = false;
+  assert.equal(originsFor(30, normalizeRuntimeNodes(payload))[0], "https://yt.example");
+});
+
 test("rejects malformed runtime nodes", () => {
   assert.throws(
     () => normalizeRuntimeNodes({ data: { nodes: [] } }),

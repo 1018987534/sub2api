@@ -2819,8 +2819,8 @@ func (r *accountRepository) UpdateUpstreamBillingProbeSnapshot(
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-		// The durable outbox event is committed with the snapshot. This direct
-		// cache write only reduces visibility latency on the current instance.
+		// Observations need only one account refresh. A real scheduling change
+		// additionally commits its durable outbox event with the snapshot.
 		r.syncSchedulerAccountSnapshot(ctx, account.ID)
 		return nil
 	}
@@ -2885,7 +2885,11 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 	if account.ProxyID != nil {
 		proxyID = *account.ProxyID
 	}
-	result, err := client.ExecContext(ctx, `
+	rows, err := client.QueryContext(ctx, `
+		WITH prior AS MATERIALIZED (
+			SELECT id, rate_multiplier AS old_rate_multiplier
+			FROM accounts WHERE id = $2 FOR UPDATE
+		)
 		UPDATE accounts
 		SET
 			extra = COALESCE(extra, '{}'::jsonb) || $1::jsonb,
@@ -2897,7 +2901,8 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 				ELSE rate_multiplier
 			END,
 			updated_at = NOW()
-		WHERE id = $2
+		FROM prior
+		WHERE accounts.id = $2 AND accounts.id = prior.id
 			AND platform = $3
 			AND type = $4
 			AND credentials = $5::jsonb
@@ -2907,16 +2912,27 @@ func (r *accountRepository) updateUpstreamBillingProbeSnapshotInTx(
 			AND COALESCE(extra -> 'upstream_billing_rate_sync_enabled', 'null'::jsonb) = $9::jsonb
 			AND COALESCE(extra -> 'upstream_billing_rate_conversion_ratio', 'null'::jsonb) = $10::jsonb
 			AND deleted_at IS NULL
+		RETURNING accounts.rate_multiplier IS DISTINCT FROM prior.old_rate_multiplier AS rate_changed
 	`, string(payload), account.ID, account.Platform, account.Type, string(credentials), proxyID, string(expectedSnapshotJSON), string(expectedEnabledJSON), string(expectedRateSyncEnabledJSON), string(expectedRateConversionRatioJSON), rateMultiplier)
 	if err != nil {
 		return err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return service.ErrUpstreamBillingProbeIdentityChanged
+	}
+	var rateChanged bool
+	if err := rows.Scan(&rateChanged); err != nil {
 		return err
 	}
-	if affected == 0 {
-		return service.ErrUpstreamBillingProbeIdentityChanged
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !rateChanged {
+		return nil
 	}
 	return enqueueSchedulerOutbox(ctx, client, service.SchedulerOutboxEventAccountChanged, &account.ID, nil, nil)
 }

@@ -36,12 +36,14 @@ var gatewayRoutingNodeIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62
 // GatewayRoutingSettings is the administrator-owned target percentage configuration.
 // Traffic protection changes only runtime effective weights and never rewrites it.
 type GatewayRoutingSettings struct {
-	MonitorURL               string                       `json:"monitor_url"`
-	TrafficProtectionEnabled bool                         `json:"traffic_protection_enabled"`
-	HealthProtectionEnabled  bool                         `json:"health_protection_enabled"`
-	TrafficThresholdPercent  float64                      `json:"traffic_threshold_percent"`
-	OverflowNodeID           string                       `json:"overflow_node_id"`
-	Nodes                    []GatewayRoutingNodeSettings `json:"nodes"`
+	MonitorURL                  string                       `json:"monitor_url"`
+	TrafficProtectionEnabled    bool                         `json:"traffic_protection_enabled"`
+	HealthProtectionEnabled     bool                         `json:"health_protection_enabled"`
+	PacketLossProtectionEnabled bool                         `json:"packet_loss_protection_enabled"`
+	PacketLossCooldownMinutes   int                          `json:"packet_loss_cooldown_minutes"`
+	TrafficThresholdPercent     float64                      `json:"traffic_threshold_percent"`
+	OverflowNodeID              string                       `json:"overflow_node_id"`
+	Nodes                       []GatewayRoutingNodeSettings `json:"nodes"`
 }
 
 func (s *GatewayRoutingSettings) UnmarshalJSON(data []byte) error {
@@ -71,23 +73,27 @@ type GatewayRoutingRuntime struct {
 }
 
 type GatewayRoutingNodeRuntime struct {
-	ID                  string     `json:"id"`
-	Origin              string     `json:"origin"`
-	TargetWeight        int        `json:"target_weight"`
-	EffectiveWeight     int        `json:"effective_weight"`
-	MaxConcurrency      int        `json:"max_concurrency"`
-	CurrentConcurrency  *int       `json:"current_concurrency"`
-	OverflowFallback    bool       `json:"overflow_fallback"`
-	AutoDisabled        bool       `json:"auto_disabled"`
-	AutoDisabledReason  string     `json:"auto_disabled_reason,omitempty"`
-	Status              string     `json:"status"`
-	TrafficLimitBytes   int64      `json:"traffic_limit_bytes"`
-	TrafficUsedBytes    int64      `json:"traffic_used_bytes"`
-	TrafficUsagePercent *float64   `json:"traffic_usage_percent"`
-	TrafficLimitType    string     `json:"traffic_limit_type,omitempty"`
-	Unlimited           bool       `json:"unlimited"`
-	MonitorStale        bool       `json:"monitor_stale"`
-	MonitorSampleAt     *time.Time `json:"monitor_sample_at,omitempty"`
+	ID                    string     `json:"id"`
+	Origin                string     `json:"origin"`
+	TargetWeight          int        `json:"target_weight"`
+	EffectiveWeight       int        `json:"effective_weight"`
+	MaxConcurrency        int        `json:"max_concurrency"`
+	CurrentConcurrency    *int       `json:"current_concurrency"`
+	OverflowFallback      bool       `json:"overflow_fallback"`
+	AutoDisabled          bool       `json:"auto_disabled"`
+	AutoDisabledReason    string     `json:"auto_disabled_reason,omitempty"`
+	Status                string     `json:"status"`
+	TrafficLimitBytes     int64      `json:"traffic_limit_bytes"`
+	TrafficUsedBytes      int64      `json:"traffic_used_bytes"`
+	TrafficUsagePercent   *float64   `json:"traffic_usage_percent"`
+	TrafficLimitType      string     `json:"traffic_limit_type,omitempty"`
+	Unlimited             bool       `json:"unlimited"`
+	MonitorStale          bool       `json:"monitor_stale"`
+	MonitorSampleAt       *time.Time `json:"monitor_sample_at,omitempty"`
+	PacketLossState       string     `json:"packet_loss_state,omitempty"`
+	PacketLossPercent     *float64   `json:"packet_loss_percent,omitempty"`
+	PacketLossSampleAt    *time.Time `json:"packet_loss_sample_at,omitempty"`
+	PacketLossPausedUntil *time.Time `json:"packet_loss_paused_until,omitempty"`
 }
 
 type cachedGatewayRoutingRuntime struct {
@@ -132,10 +138,12 @@ type gatewayRoutingRecordResult struct {
 
 func DefaultGatewayRoutingSettings() *GatewayRoutingSettings {
 	return &GatewayRoutingSettings{
-		MonitorURL:               defaultGatewayRoutingMonitorURL,
-		TrafficProtectionEnabled: true,
-		HealthProtectionEnabled:  true,
-		TrafficThresholdPercent:  defaultGatewayRoutingThresholdPercent,
+		MonitorURL:                  defaultGatewayRoutingMonitorURL,
+		TrafficProtectionEnabled:    true,
+		HealthProtectionEnabled:     true,
+		PacketLossProtectionEnabled: true,
+		PacketLossCooldownMinutes:   defaultGatewayPacketLossCooldownMinutes,
+		TrafficThresholdPercent:     defaultGatewayRoutingThresholdPercent,
 		Nodes: []GatewayRoutingNodeSettings{
 			{ID: "bwg-us-01", Origin: "https://gateway-bwg-origin.xiaohondou.com", TargetWeight: 10},
 			{ID: "vmiss-us-01", Origin: "https://gateway-origin.xiaohondou.com", TargetWeight: 10},
@@ -200,6 +208,9 @@ func normalizeAndValidateGatewayRoutingSettings(settings *GatewayRoutingSettings
 		return errors.New("gateway routing settings are required")
 	}
 	settings.MonitorURL = strings.TrimRight(strings.TrimSpace(settings.MonitorURL), "/")
+	if settings.PacketLossCooldownMinutes == 0 && !settings.PacketLossProtectionEnabled {
+		settings.PacketLossCooldownMinutes = defaultGatewayPacketLossCooldownMinutes
+	}
 	settings.OverflowNodeID = strings.ToLower(strings.TrimSpace(settings.OverflowNodeID))
 	for i := range settings.Nodes {
 		settings.Nodes[i].ID = strings.ToLower(strings.TrimSpace(settings.Nodes[i].ID))
@@ -217,6 +228,9 @@ func validateGatewayRoutingSettings(settings *GatewayRoutingSettings) error {
 	}
 	if settings.TrafficThresholdPercent < 1 || settings.TrafficThresholdPercent > 100 {
 		return errors.New("traffic_threshold_percent must be between 1 and 100")
+	}
+	if settings.PacketLossCooldownMinutes < 1 || settings.PacketLossCooldownMinutes > 120 {
+		return errors.New("packet_loss_cooldown_minutes must be between 1 and 120")
 	}
 	if len(settings.Nodes) == 0 || len(settings.Nodes) > maxGatewayRoutingNodes {
 		return fmt.Errorf("nodes must contain between 1 and %d entries", maxGatewayRoutingNodes)
@@ -409,6 +423,7 @@ func (s *SettingService) GetGatewayRoutingRuntime(ctx context.Context) (*Gateway
 		if monitorErr != nil {
 			cacheTTL = gatewayRoutingRuntimeErrorTTL
 			runtime = staleGatewayRoutingRuntime(settings, previous, time.Now().UTC(), monitorErr.Error())
+			s.applyGatewayPacketLossProtection(context.WithoutCancel(ctx), settings, runtime, nil, time.Now().UTC())
 		}
 		s.gatewayRoutingRuntimeCache.Store(&cachedGatewayRoutingRuntime{
 			runtime:   cloneGatewayRoutingRuntime(runtime),
@@ -490,6 +505,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 
 	group, groupCtx := errgroup.WithContext(ctx)
 	results := make([]gatewayRoutingRecordResult, len(matched))
+	pingResults := make([]gatewayPacketLossSignal, len(matched))
 	for resultIndex, item := range matched {
 		resultIndex := resultIndex
 		item := item
@@ -503,6 +519,12 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 			}
 			return nil
 		})
+		if settings.PacketLossProtectionEnabled {
+			group.Go(func() error {
+				pingResults[resultIndex] = fetchGatewayPacketLossSignal(groupCtx, client, settings.MonitorURL, item.node.UUID, now)
+				return nil
+			})
+		}
 	}
 	_ = group.Wait()
 
@@ -562,6 +584,11 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 			applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[result.index], "traffic_threshold")
 		}
 	}
+	pingSignals := make(map[string]gatewayPacketLossSignal, len(results))
+	for i, result := range results {
+		pingSignals[settings.Nodes[result.index].ID] = pingResults[i]
+	}
+	s.applyGatewayPacketLossProtection(ctx, settings, runtime, pingSignals, now)
 	for _, node := range runtime.Nodes {
 		if node.MonitorStale {
 			runtime.MonitorStale = true

@@ -104,7 +104,8 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	usageBillingRepository := repository.NewUsageBillingRepository(client, db)
 	gatewayCache := repository.NewGatewayCache(redisClient)
 	schedulerOutboxRepository := repository.NewSchedulerOutboxRepository(db)
-	schedulerSnapshotService := service.ProvideSchedulerSnapshotService(schedulerCache, schedulerOutboxRepository, accountRepository, groupRepository, configConfig)
+	leaderLockCache := repository.NewLeaderLockCache(redisClient)
+	schedulerSnapshotService := service.ProvideSchedulerSnapshotService(schedulerCache, schedulerOutboxRepository, accountRepository, groupRepository, configConfig, leaderLockCache, db)
 	pricingRemoteClient := repository.ProvidePricingRemoteClient(configConfig)
 	pricingService, err := service.ProvidePricingService(configConfig, pricingRemoteClient)
 	if err != nil {
@@ -119,7 +120,6 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	geminiTokenCache := repository.NewGeminiTokenCache(redisClient)
 	compositeTokenCacheInvalidator := service.NewCompositeTokenCacheInvalidator(geminiTokenCache)
 	httpUpstream := repository.NewHTTPUpstream(configConfig)
-	leaderLockCache := repository.NewLeaderLockCache(redisClient)
 	ollamaCloudUsageService := service.ProvideOllamaCloudUsageService(accountRepository, httpUpstream, settingService, secretEncryptor, configConfig, leaderLockCache, db)
 	rateLimitService := service.ProvideRateLimitService(accountRepository, usageLogRepository, configConfig, geminiQuotaService, tempUnschedCache, firstTokenLatencyStatsCache, timeoutCounterCache, openAI403CounterCache, settingService, compositeTokenCacheInvalidator, ollamaCloudUsageService)
 	identityCache := repository.NewIdentityCache(redisClient)

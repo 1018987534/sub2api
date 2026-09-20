@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"hash/fnv"
 	"time"
@@ -45,7 +46,11 @@ func tryAcquireDBAdvisoryLockWithError(ctx context.Context, db *sql.DB, lockID i
 	release := func() {
 		unlockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_, _ = conn.ExecContext(unlockCtx, "SELECT pg_advisory_unlock($1)", lockID)
+		if _, err := conn.ExecContext(unlockCtx, "SELECT pg_advisory_unlock($1)", lockID); err != nil {
+			// A session lock must never return to the pool still held. Discard the
+			// physical connection so PostgreSQL releases it even if unlock failed.
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
 		_ = conn.Close()
 	}
 	return release, true, nil

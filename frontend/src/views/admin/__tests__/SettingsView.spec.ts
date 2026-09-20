@@ -2199,4 +2199,29 @@ describe("admin SettingsView platform quota matrix", () => {
 	const payload = updateGatewayRoutingSettings.mock.calls.at(-1)![0];
 	expect(payload.nodes.every((node) => typeof node.max_concurrency === "number")).toBe(true);
   });
+
+  it("丢包暂停时长支持修改、回显和边界校验", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const cooldown = wrapper.get('#packet-loss-cooldown');
+    expect((cooldown.element as HTMLInputElement).value).toBe('5');
+    const save = wrapper.findAll('button').find((button) => button.text().includes('common.save'))!;
+    await cooldown.setValue('7');
+    await save.trigger('click');
+    await flushPromises();
+    expect(updateGatewayRoutingSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      packet_loss_protection_enabled: true,
+      packet_loss_cooldown_minutes: 7,
+    }));
+    expect((wrapper.get('#packet-loss-cooldown').element as HTMLInputElement).value).toBe('7');
+    updateGatewayRoutingSettings.mockClear();
+    for (const invalid of ['0', '121', '1.5', '']) {
+      await cooldown.setValue(invalid);
+      await save.trigger('click');
+      await flushPromises();
+      expect(updateGatewayRoutingSettings).not.toHaveBeenCalled();
+      expect(showError).toHaveBeenLastCalledWith('admin.settings.gatewayRouting.packetLossCooldownError');
+    }
+  });
 });
