@@ -893,10 +893,10 @@ func TestListModelNamesByProvider_CaseInsensitive(t *testing.T) {
 	}
 
 	got := svc.ListModelNamesByProvider("openai")
-	require.Equal(t, []string{"gpt-4o"}, got)
+	require.Equal(t, []string{"gpt-4o", "gpt-6-luna", "gpt-6-sol"}, got)
 
 	got2 := svc.ListModelNamesByProvider("OPENAI")
-	require.Equal(t, []string{"gpt-4o"}, got2)
+	require.Equal(t, []string{"gpt-4o", "gpt-6-luna", "gpt-6-sol"}, got2)
 }
 
 func TestListModelNamesByProvider_NoMatch(t *testing.T) {
@@ -911,14 +911,14 @@ func TestListModelNamesByProvider_NoMatch(t *testing.T) {
 	require.Empty(t, got)
 }
 
-func TestListModelNamesByProvider_EmptyCatalog(t *testing.T) {
+func TestListModelNamesByProvider_EmptyCatalogIncludesSupplemental(t *testing.T) {
 	svc := &PricingService{
 		pricingData: map[string]*LiteLLMModelPricing{},
 	}
 
 	got := svc.ListModelNamesByProvider("openai")
 	require.NotNil(t, got)
-	require.Empty(t, got)
+	require.Equal(t, []string{"gpt-6-luna", "gpt-6-sol"}, got)
 }
 
 // --- above_XXXk 绝对价字段折算为阈值+倍率 ---

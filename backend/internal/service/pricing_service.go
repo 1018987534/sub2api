@@ -1623,9 +1623,8 @@ func (s *PricingService) getHashFilePath() string {
 	return filepath.Join(s.cfg.Pricing.DataDir, "model_pricing.sha256")
 }
 
-// ListModelNamesByProvider returns all model names in the catalog whose
-// LiteLLMProvider matches the given provider string (case-insensitive).
-// The returned slice is sorted alphabetically.
+// ListModelNamesByProvider returns catalog models matching the provider
+// (case-insensitive), plus supplemental OpenAI models, sorted alphabetically.
 func (s *PricingService) ListModelNamesByProvider(provider string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

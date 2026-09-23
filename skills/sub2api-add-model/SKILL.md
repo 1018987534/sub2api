@@ -60,6 +60,7 @@ literal stdout/stderr/退出码及可执行回滚脚本。证据放仓库外，�
 ```sh
 cd "$REPO/backend"
 CGO_ENABLED=0 go test ./internal/pkg/openai ./internal/service -run 'Supplemental|GPT6|Pricing|Reasoning|CodexModel' -count=1
+CGO_ENABLED=0 go test ./...
 cd "$REPO/frontend"
 pnpm exec vitest run src/components/account/__tests__/ModelWhitelistSelector.spec.ts src/components/keys/__tests__/UseKeyModal.spec.ts
 pnpm run typecheck
@@ -67,6 +68,8 @@ pnpm run typecheck
 
 至少覆盖两个兜底、远端目录更新、标准/Fast/priority/Flex、272000 与 272001
 的边界、输入/缓存读取/输出成本、缓存写入为零、模型别名和客户端配置。
+补充模型会进入 `ListModelNamesByProvider("openai")`，即使远端目录为空；
+更新现有目录枚举测试的预期，完整 Go 测试通过后才能交付或发布。
 Mac 本地若默认 CGO 链接报 `unknown architecture arm64e.x1`，保留错误证据后
 改用 `CGO_ENABLED=0`；不要修改系统 SDK。
 
