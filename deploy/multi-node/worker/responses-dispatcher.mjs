@@ -2,7 +2,7 @@ const DEFAULT_VMISS_US_01_PERCENT = 10;
 const DEFAULT_YT_US_01_PERCENT = 54;
 const DEFAULT_VMISS_US_02_PERCENT = 10;
 const DEFAULT_DMIT_US_01_PERCENT = 16;
-const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 15;
+const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 5;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
 const MAX_INGRESS_ERROR_BODY_BYTES = 8 * 1024;
 const MAX_CLOUDFLARE_520_BODY_BYTES = 32 * 1024;
@@ -156,7 +156,7 @@ function normalizeRuntimeNodes(payload) {
   });
 }
 
-function fetchRoutingNodes(env, metadata = null) {
+async function fetchRoutingNodes(env, metadata = null) {
   const configURL = String(env.ROUTING_CONFIG_URL ?? "").trim();
   if (!configURL) {
     if (metadata) metadata.source = "static";
@@ -211,12 +211,8 @@ function fetchRoutingNodes(env, metadata = null) {
         "routing config refresh failed",
         error instanceof Error ? error.message : String(error),
       );
-      if (routingConfigCache?.configURL === configURL) {
-        if (metadata) metadata.source = "stale";
-        return routingConfigCache.nodes;
-      }
-      if (metadata) metadata.source = "fallback";
-      return staticRoutingNodes(env);
+      if (metadata) metadata.source = "unavailable";
+      throw error;
     } finally {
       routingConfigPromise = null;
     }
@@ -225,38 +221,11 @@ function fetchRoutingNodes(env, metadata = null) {
   return routingConfigPromise;
 }
 
-function scheduleRoutingConfigRefresh(env, ctx) {
-  const refresh = fetchRoutingNodes(env);
-  // waitUntil keeps the isolate alive without delaying the request that noticed
-  // an expired (or cold) routing cache. The promise is already single-flight.
-  if (ctx && typeof ctx.waitUntil === "function") {
-    ctx.waitUntil(refresh);
-  } else {
-    void refresh;
-  }
-}
-
-function resolveRoutingNodes(env, ctx, metadata = null) {
-  const configURL = String(env.ROUTING_CONFIG_URL ?? "").trim();
-  if (!configURL) {
-    if (metadata) metadata.source = "static";
-    return staticRoutingNodes(env);
-  }
-
-  const matchingCache = routingConfigCache?.configURL === configURL;
-  if (matchingCache && Date.now() < routingConfigCache.expiresAt) {
-    if (metadata) metadata.source = "cache";
-    return routingConfigCache.nodes;
-  }
-
-  scheduleRoutingConfigRefresh(env, ctx);
-  if (matchingCache) {
-    if (metadata) metadata.source = "stale_refresh";
-    return routingConfigCache.nodes;
-  }
-
-  if (metadata) metadata.source = "static_refresh";
-  return staticRoutingNodes(env);
+function resolveRoutingNodes(env, metadata = null) {
+  // Once the cache expires, wait for authoritative runtime weights before
+  // selecting an origin. Static routing is only for deployments without a
+  // runtime endpoint; stale weights can reintroduce an isolated node.
+  return fetchRoutingNodes(env, metadata);
 }
 
 function randomIndex(randomSource, length) {
@@ -554,10 +523,18 @@ function canRetry(request) {
 }
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const routingMetadata = {};
     const routingStart = Date.now();
-    const routingNodes = resolveRoutingNodes(env, ctx, routingMetadata);
+    let routingNodes;
+    try {
+      routingNodes = await resolveRoutingNodes(env, routingMetadata);
+    } catch {
+      return Response.json(
+        { error: "Routing configuration is temporarily unavailable" },
+        { status: 503, headers: { "Retry-After": "1", "Cache-Control": "no-store" } },
+      );
+    }
     const routingWaitMs = Math.max(0, Date.now() - routingStart);
     const origins = selectOrigins(env, crypto, routingNodes);
     if (origins.length === 0) {

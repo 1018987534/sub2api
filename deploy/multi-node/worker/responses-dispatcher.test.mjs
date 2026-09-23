@@ -156,7 +156,7 @@ test("rejects malformed runtime nodes", () => {
   );
 });
 
-test("fetches runtime weights and keeps the last good value on refresh failure", async () => {
+test("fetches runtime weights and rejects refresh failure instead of using stale values", async () => {
   resetRoutingConfigCache();
   const originalFetch = globalThis.fetch;
   const originalDateNow = Date.now;
@@ -195,9 +195,9 @@ test("fetches runtime weights and keeps the last good value on refresh failure",
     // Fresh cache avoids a network call.
     assert.deepEqual(await fetchRoutingNodes(runtimeEnv), first);
     assert.equal(calls, 1);
-    // Once expired, a temporary fetch failure preserves the last good nodes.
+    // Once expired, a temporary fetch failure must not route with old nodes.
     now += 6000;
-    assert.deepEqual(await fetchRoutingNodes(runtimeEnv), first);
+    await assert.rejects(fetchRoutingNodes(runtimeEnv), /temporary failure/);
     assert.equal(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
@@ -211,7 +211,7 @@ test("falls back to static nodes when no runtime endpoint is configured", async 
   assert.deepEqual(await fetchRoutingNodes(env), staticRoutingNodes(env));
 });
 
-test("cold routing cache uses static nodes while runtime config refreshes", async () => {
+test("cold routing cache waits for runtime config instead of using static nodes", async () => {
   resetRoutingConfigCache();
   const originalFetch = globalThis.fetch;
   let finishRefresh;
@@ -219,7 +219,6 @@ test("cold routing cache uses static nodes while runtime config refreshes", asyn
     finishRefresh = resolve;
   });
   globalThis.fetch = async () => refreshResponse;
-  const background = [];
   const metadata = {};
   const runtimeEnv = {
     ...env,
@@ -228,16 +227,8 @@ test("cold routing cache uses static nodes while runtime config refreshes", asyn
   };
 
   try {
-    assert.deepEqual(
-      resolveRoutingNodes(
-        runtimeEnv,
-        { waitUntil: (promise) => background.push(promise) },
-        metadata,
-      ),
-      staticRoutingNodes(runtimeEnv),
-    );
-    assert.equal(metadata.source, "static_refresh");
-    assert.equal(background.length, 1);
+    const pending = resolveRoutingNodes(runtimeEnv, metadata);
+    assert.equal(metadata.source, undefined);
 
     finishRefresh(
       Response.json({
@@ -249,10 +240,14 @@ test("cold routing cache uses static nodes while runtime config refreshes", asyn
         },
       }),
     );
-    await background[0];
+    assert.deepEqual((await pending).map((node) => node.origin), [
+      "https://control.example",
+      "https://new.example",
+    ]);
+    assert.equal(metadata.source, "refresh");
 
     const cachedMetadata = {};
-    assert.equal(resolveRoutingNodes(runtimeEnv, null, cachedMetadata).length, 2);
+    assert.equal((await resolveRoutingNodes(runtimeEnv, cachedMetadata)).length, 2);
     assert.equal(cachedMetadata.source, "cache");
   } finally {
     globalThis.fetch = originalFetch;
@@ -260,7 +255,7 @@ test("cold routing cache uses static nodes while runtime config refreshes", asyn
   }
 });
 
-test("expired routing cache is served immediately and refreshed once", async () => {
+test("expired routing cache waits for refresh instead of serving stale nodes", async () => {
   resetRoutingConfigCache();
   const originalFetch = globalThis.fetch;
   const originalDateNow = Date.now;
@@ -292,29 +287,12 @@ test("expired routing cache is served immediately and refreshed once", async () 
   };
 
   try {
-    const initial = await fetchRoutingNodes(runtimeEnv);
+    await fetchRoutingNodes(runtimeEnv);
     now += 6000;
-    const background = [];
     const metadata = {};
-    assert.deepEqual(
-      resolveRoutingNodes(
-        runtimeEnv,
-        { waitUntil: (promise) => background.push(promise) },
-        metadata,
-      ),
-      initial,
-    );
-    assert.deepEqual(
-      resolveRoutingNodes(
-        runtimeEnv,
-        { waitUntil: (promise) => background.push(promise) },
-      ),
-      initial,
-    );
-    assert.equal(metadata.source, "stale_refresh");
+    const pending = resolveRoutingNodes(runtimeEnv, metadata);
+    const pendingSecond = resolveRoutingNodes(runtimeEnv);
     assert.equal(calls, 2);
-    assert.equal(background.length, 2);
-    assert.equal(background[0], background[1]);
 
     finishRefresh(
       Response.json({
@@ -325,13 +303,165 @@ test("expired routing cache is served immediately and refreshed once", async () 
         },
       }),
     );
-    await background[0];
+    assert.deepEqual((await pending).map((node) => node.origin), [
+      "https://control.example",
+    ]);
+    assert.deepEqual((await pendingSecond).map((node) => node.origin), [
+      "https://control.example",
+    ]);
+    assert.equal(metadata.source, "refresh");
   } finally {
     globalThis.fetch = originalFetch;
     Date.now = originalDateNow;
     resetRoutingConfigCache();
   }
 });
+
+test("waits for authoritative zero YT weight before the first POST", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  const runtimeURL = "https://control.example/api/v1/gateway-routing/runtime";
+  globalThis.fetch = async (request) => {
+    const url = typeof request === "string" ? request : request.url;
+    if (url === runtimeURL) {
+      return Response.json({
+        data: {
+          nodes: [
+            { id: "bwg-us-01", origin: "https://control.example", effective_weight: 100 },
+            { id: "yt-us-01", origin: "https://yt.example", effective_weight: 0, auto_disabled: true },
+          ],
+        },
+      });
+    }
+    forwarded.push(url);
+    return new Response("ok");
+  };
+
+  try {
+    const response = await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        body: "{}",
+      }),
+      {
+        ...env,
+        BWG_US_01_PERCENT: "0",
+        VMISS_US_01_PERCENT: "0",
+        YT_US_01_PERCENT: "100",
+        VMISS_US_02_PERCENT: "0",
+        DMIT_US_01_PERCENT: "0",
+        ROUTING_CONFIG_URL: runtimeURL,
+        ROUTING_CONFIG_TOKEN: "runtime-secret",
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(forwarded, ["https://control.example/v1/responses"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("returns 503 without an origin POST when runtime routing is unavailable", async () => {
+  resetRoutingConfigCache();
+  const originalFetch = globalThis.fetch;
+  const forwarded = [];
+  const runtimeURL = "https://control.example/api/v1/gateway-routing/runtime";
+  globalThis.fetch = async (request) => {
+    const url = typeof request === "string" ? request : request.url;
+    if (url === runtimeURL) {
+      throw new Error("runtime unavailable");
+    }
+    forwarded.push(url);
+    return new Response("unexpected");
+  };
+
+  try {
+    const response = await responsesDispatcher.fetch(
+      new Request("https://public.example/v1/responses", {
+        method: "POST",
+        body: "{}",
+      }),
+      {
+        ...env,
+        ROUTING_CONFIG_URL: runtimeURL,
+        ROUTING_CONFIG_TOKEN: "runtime-secret",
+      },
+    );
+    assert.equal(response.status, 503);
+    assert.deepEqual(forwarded, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+for (const refreshFails of [false, true]) {
+  test(`expired positive YT cache ${refreshFails ? "fails closed and recovers on next request" : "waits before sending concurrent POSTs"}`, async () => {
+    resetRoutingConfigCache();
+    const originalFetch = globalThis.fetch;
+    const originalDateNow = Date.now;
+    const forwarded = [];
+    let now = 1_000_000;
+    let configCalls = 0;
+    let finishRefresh;
+    const gate = new Promise((resolve) => { finishRefresh = resolve; });
+    const runtimeEnv = {
+      ...env,
+      ROUTING_CONFIG_URL: "https://control.example/api/v1/gateway-routing/runtime",
+      ROUTING_CONFIG_TTL_SECONDS: "5",
+    };
+    Date.now = () => now;
+    globalThis.fetch = async (request) => {
+      if (request === runtimeEnv.ROUTING_CONFIG_URL) {
+        configCalls += 1;
+        if (configCalls === 2) {
+          await gate;
+          if (refreshFails) throw new Error("runtime refresh unavailable");
+        }
+        return Response.json({ nodes: [
+          { id: "bwg-us-01", origin: env.BWG_US_01_ORIGIN, effective_weight: configCalls === 1 ? 0 : 100 },
+          { id: "yt-us-01", origin: env.YT_US_01_ORIGIN, effective_weight: configCalls === 1 ? 100 : 0, auto_disabled: configCalls !== 1 },
+        ] });
+      }
+      forwarded.push({ url: request.url, body: await request.text() });
+      return new Response("ok");
+    };
+    const post = () => responsesDispatcher.fetch(new Request("https://public.example/v1/responses", {
+      method: "POST", body: '{"input":"fixture"}',
+    }), runtimeEnv);
+    try {
+      await fetchRoutingNodes(runtimeEnv);
+      now += 5000;
+      const first = post();
+      const second = post();
+      await Promise.resolve();
+      assert.equal(configCalls, 2);
+      assert.deepEqual(forwarded, [], "no origin request while config is pending");
+      finishRefresh();
+      const responses = await Promise.all([first, second]);
+      assert.deepEqual(responses.map((response) => response.status), refreshFails ? [503, 503] : [200, 200]);
+      if (refreshFails) {
+        assert.deepEqual(forwarded, []);
+        assert.equal(responses[0].headers.get("retry-after"), "1");
+        assert.equal(responses[0].headers.get("cache-control"), "no-store");
+        assert.equal((await post()).status, 200);
+        assert.equal(configCalls, 3);
+      }
+      assert.equal(forwarded.length, refreshFails ? 1 : 2);
+      for (const request of forwarded) {
+        assert.equal(request.url, "https://control.example/v1/responses");
+        assert.equal(request.body, '{"input":"fixture"}');
+      }
+    } finally {
+      finishRefresh();
+      globalThis.fetch = originalFetch;
+      Date.now = originalDateNow;
+      resetRoutingConfigCache();
+    }
+  });
+}
 
 test("POST forwarding overwrites and sends edge routing trace headers", async () => {
   resetRoutingConfigCache();
