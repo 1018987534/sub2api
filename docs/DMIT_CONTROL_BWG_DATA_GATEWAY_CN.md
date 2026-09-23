@@ -30,9 +30,12 @@ Docker 服务名直接连接本机数据层；其余四个应用节点通过 Wir
   `/backend-api/codex/responses*`，不得恢复退役域名路由。
 
 动态权重由 DMIT control 的 `gateway_routing_settings` 和
-`GET /api/v1/gateway-routing/runtime` 提供。Worker 的静态百分比仅用于冷启动
-回退。角色迁移不自动改变管理员目标权重；调整权重必须单独记录并验证五个节点之和。
-迁移完成后的初始目标与冷启动回退统一为 BWG 10%、VMISS-01 10%、YT 54%、
+`GET /api/v1/gateway-routing/runtime` 提供。配置该地址后，Worker 冷启动或缓存过期
+都必须先等待运行时配置；获取失败返回 503，不使用静态或过期权重。当前 Worker 缓存
+TTL 为 5 秒，权威配置摘流后仍有最多约 5 秒的缓存传播窗口；已经发往源站的流无法迁移。
+静态百分比仅用于未配置运行时地址的部署。角色迁移不自动改变管理员目标权重；
+调整权重必须单独记录并验证五个节点之和。
+迁移完成后的初始目标与静态变量统一为 BWG 10%、VMISS-01 10%、YT 54%、
 VMISS-02 10%、DMIT 16%，后续可从管理端动态调整。
 
 ## 角色化产物
