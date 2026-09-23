@@ -255,6 +255,7 @@
 </template>
 
 <script setup lang="ts">
+import { supplementalOpenAIModels } from '@/constants/supplementalOpenAIModels'
 import { ref, computed, h, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { saveAs } from 'file-saver'
@@ -1327,6 +1328,12 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
     }
   }
   const openaiModels = {
+    ...Object.fromEntries(supplementalOpenAIModels.map(model => [model.id, {
+      name: model.name,
+      limit: { context: model.context, output: model.output },
+      options: { store: false },
+      variants: Object.fromEntries(model.reasoning.map(effort => [effort, {}]))
+    }])),
     'gpt-6': {
       name: 'GPT-6 (Astra)',
       limit: {

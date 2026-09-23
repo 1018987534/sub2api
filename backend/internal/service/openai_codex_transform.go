@@ -1263,6 +1263,9 @@ func SupportsVerbosity(model string) bool {
 }
 
 func getNormalizedCodexModel(modelID string) string {
+	if model := openai.NormalizeSupplementalModel(modelID); model != "" {
+		return model
+	}
 	key := codexModelLookupKey(modelID)
 	if key == "" {
 		return ""

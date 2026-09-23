@@ -1,9 +1,12 @@
+import { supplementalOpenAIModels } from '@/constants/supplementalOpenAIModels'
+
 // =====================
 // 模型列表（硬编码，与 new-api 一致）
 // =====================
 
 // OpenAI
 const openaiModels = [
+  ...supplementalOpenAIModels.map(model => model.id),
   // GPT-5.2 系列
   'gpt-5.2', 'gpt-5.2-2025-12-11', 'gpt-5.2-chat-latest',
   'gpt-5.2-pro', 'gpt-5.2-pro-2025-12-11',
@@ -296,6 +299,7 @@ const anthropicPresetMappings = [
 ]
 
 const openaiPresetMappings = [
+  ...supplementalOpenAIModels.map(model => ({ label: model.name, from: model.id, to: model.id, color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' })),
   { label: 'GPT-4o', from: 'gpt-4o', to: 'gpt-4o', color: 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400' },
   { label: 'GPT-4o Mini', from: 'gpt-4o-mini', to: 'gpt-4o-mini', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400' },
   { label: 'GPT-4.1', from: 'gpt-4.1', to: 'gpt-4.1', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },

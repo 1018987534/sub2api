@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 )
@@ -924,6 +925,10 @@ func (s *BillingService) initFallbackPricing() {
 
 // getFallbackPricing 根据模型系列获取回退价格
 func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
+	if price := supplementalBillingPricing[openai.NormalizeSupplementalModel(model)]; price != nil {
+		copy := *price
+		return &copy
+	}
 	modelLower := strings.ToLower(model)
 
 	// 按模型系列匹配
@@ -1824,6 +1829,9 @@ func (s *BillingService) applyModelSpecificPricingPolicyEx(model string, pricing
 // 的标准价倍率：gpt-5.6 / gpt-6-astra / gpt-5.4 为 2x，gpt-5.5 为 2.5x。未定义 Fast
 // 档的模型（如 gpt-5.5-pro、gpt-5.4-mini/nano）返回 0。
 func openAIModelFastPricingRatio(normalized string) float64 {
+	if price := supplementalModelPricing(normalized); price != nil {
+		return price.InputCostPerTokenPriority / price.InputCostPerToken
+	}
 	switch normalized {
 	case "gpt-5.4", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra":
 		return 2.0
