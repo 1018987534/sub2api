@@ -176,6 +176,10 @@ func (r *paymentFulfillmentAffiliateRepoStub) TransferQuotaToBalance(_ context.C
 	return r.transferAmount, r.transferBalance, nil
 }
 
+func (r *paymentFulfillmentAffiliateRepoStub) WithdrawQuota(context.Context, int64, float64, string) (*AffiliateWithdrawResult, error) {
+	panic("unexpected WithdrawQuota call")
+}
+
 func (r *paymentFulfillmentAffiliateRepoStub) ListInvitees(context.Context, int64, int) ([]AffiliateInvitee, error) {
 	return []AffiliateInvitee{}, nil
 }

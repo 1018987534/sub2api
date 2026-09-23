@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -262,6 +263,7 @@ func loadCodexGroupCatalogAccounts(ctx context.Context, repo AccountRepository, 
 			PlatformZhipu,
 			PlatformDeepseek,
 			PlatformMiniMax,
+			PlatformOpenCodeGo,
 		},
 		false,
 	)
@@ -443,7 +445,7 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		Priority:                          configuredCodexModelPriority,
 		AdditionalSpeedTiers:              []string{},
 		ServiceTiers:                      []configuredCodexServiceTier{},
-		ModelMessages:                     configuredCodexModelMessages{InstructionsTemplate: openai.CodexBaseInstructionsForModel(modelID)},
+		ModelMessages:                     configuredCodexModelMessages{InstructionsTemplate: codexInstructionsTemplateForModel(modelID)},
 		SupportsReasoningSummaryParameter: true,
 		DefaultReasoningSummary:           "auto",
 		WebSearchToolType:                 "text",
@@ -484,6 +486,10 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 	}
 
 	if isClaudeCodexModel(modelID) {
+		if claude.IsOpus55(modelID) {
+			descriptor.ContextWindow = 1_000_000
+			descriptor.MaxContextWindow = 1_000_000
+		}
 		descriptor.DisplayName = claudeCodexDisplayName(modelID)
 		descriptor.Description = "Claude coding and reasoning model routed through Sub2API."
 		descriptor.SupportsParallelToolCalls = true
@@ -508,11 +514,9 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 			descriptor.SupportedReasoningLevels = configuredCodexGPTReasoningLevels(modelID)
 			descriptor.DefaultReasoningSummary = "none"
 			descriptor.TruncationPolicy = configuredCodexTruncationPolicy{Mode: "tokens", Limit: configuredCodexToolOutputMaxTokens}
-			if context := openai.SupplementalModelContexts[openai.NormalizeSupplementalModel(modelID)]; context > 0 {
-				descriptor.ContextWindow = int64(context)
-				descriptor.MaxContextWindow = int64(context)
-			}
-			if isOpenAIGPT56Model(modelID) {
+			// GPT-6 Sol/Luna retain the existing 5.6 Codex window as an offline
+			// compatibility template; live account metadata remains authoritative.
+			if isOpenAIGPT56Model(modelID) || openai.IsGPT6SolOrLunaModelSpelling(modelID) {
 				descriptor.MaxContextWindow = configuredCodexGPT56MaxContext
 			}
 			if isOpenAIGPT6AstraModel(modelID) {
@@ -561,8 +565,8 @@ func configuredCodexSupportsPriorityServiceTier(modelID string) bool {
 			return true
 		}
 	}
-	// GPT-6 Astra advertises Fast via service_tier=priority in public model metadata.
-	return isSupplementalOpenAIModel(modelID) || isOpenAIGPT6AstraModel(modelID)
+	// GPT-6 models advertise Fast via service_tier=priority in public model metadata.
+	return isOpenAIGPT6Model(modelID)
 }
 
 func configuredCodexSupportsUltrafastServiceTier(modelID string) bool {
@@ -618,16 +622,6 @@ func claudeCodexDefaultReasoningLevel(levels []configuredCodexReasoningLevel) st
 }
 
 func configuredCodexGPTReasoningLevels(modelID string) []configuredCodexReasoningLevel {
-	if isSupplementalOpenAIModel(modelID) {
-		return []configuredCodexReasoningLevel{
-			{Effort: "none", Description: "No reasoning"},
-			{Effort: "low", Description: "Light reasoning"},
-			{Effort: "medium", Description: "Balanced reasoning"},
-			{Effort: "high", Description: "Deep reasoning"},
-			{Effort: "xhigh", Description: "Extra-high reasoning"},
-			{Effort: "max", Description: "Maximum reasoning"},
-		}
-	}
 	levels := []configuredCodexReasoningLevel{
 		{Effort: "low", Description: "Fast responses with lighter reasoning"},
 		{Effort: "medium", Description: "Balanced reasoning for most coding tasks"},
@@ -635,7 +629,7 @@ func configuredCodexGPTReasoningLevels(modelID string) []configuredCodexReasonin
 		{Effort: "xhigh", Description: "Extra-high reasoning depth for difficult tasks"},
 	}
 	normalized := getNormalizedCodexModel(modelID)
-	if isOpenAIGPT56Model(modelID) || isOpenAIGPT6AstraModel(modelID) {
+	if isOpenAIGPT56Model(modelID) || isOpenAIGPT6Model(modelID) {
 		levels = append(levels, configuredCodexReasoningLevel{
 			Effort:      "max",
 			Description: "Maximum reasoning depth for complex tasks",
@@ -650,6 +644,47 @@ func configuredCodexGPTReasoningLevels(modelID string) []configuredCodexReasonin
 	return levels
 }
 
+// codexGPTIdentityPatterns match the GPT self-identification that the bundled
+// Codex prompts open with:
+//   - "You are Codex, a coding agent based on GPT-5." / "…an agent based on GPT-6." / "You are Codex, based on GPT-5."
+//   - "You are GPT-5.1 running in the Codex CLI, …"
+var codexGPTIdentityPatterns = []struct {
+	re   *regexp.Regexp
+	repl string
+}{
+	{regexp.MustCompile(`,?\s*based on GPT-\d+(?:\.\d+)?(?:-[A-Za-z0-9]+)*`), ""},
+	{regexp.MustCompile(`\bYou are GPT-\d+(?:\.\d+)?(?:-[A-Za-z0-9]+)*`), "You are Codex"},
+}
+
+// codexInstructionsTemplateForModel returns the Codex base prompt advertised for
+// modelID in the models manifest.
+//
+// OpenAI GPT models keep the bundled prompt verbatim. Every other family the
+// manifest can list (Gemini, Claude, DeepSeek, Grok, gpt-oss, custom aliases)
+// gets the same prompt without the GPT self-identification: the claim is false
+// for those models, and Google's Antigravity backend answers requests whose
+// system prompt is the Codex prompt carrying a "GPT-5" identity with
+// 429 RESOURCE_EXHAUSTED — which also puts the account into rate-limit
+// cooldown. Codex sends this template as `instructions` for the selected model.
+func codexInstructionsTemplateForModel(modelID string) string {
+	base := openai.CodexBaseInstructionsForModel(modelID)
+	if codexModelKeepsGPTIdentity(modelID) {
+		return base
+	}
+	for _, p := range codexGPTIdentityPatterns {
+		base = p.re.ReplaceAllString(base, p.repl)
+	}
+	return base
+}
+
+// codexModelKeepsGPTIdentity reports whether modelID is an OpenAI GPT model
+// whose Codex prompt may claim a GPT identity. gpt-oss models are open-weight
+// and typically served by non-OpenAI providers, so they do not.
+func codexModelKeepsGPTIdentity(modelID string) bool {
+	return isOpenAICodexGPTModel(modelID) &&
+		!strings.HasPrefix(canonicalizeOpenAIModelAliasSpelling(modelID), "gpt-oss")
+}
+
 func isOpenAICodexGPTModel(modelID string) bool {
 	normalized := canonicalizeOpenAIModelAliasSpelling(modelID)
 	if normalized == "" || strings.HasPrefix(normalized, "gpt-image") {
@@ -660,12 +695,12 @@ func isOpenAICodexGPTModel(modelID string) bool {
 
 func isOpenAICodexReasoningGPTModel(modelID string) bool {
 	normalized := canonicalizeOpenAIModelAliasSpelling(modelID)
-	return isSupplementalOpenAIModel(normalized) || isOpenAIGPT6AstraModel(normalized) || strings.HasPrefix(normalized, "gpt-5")
+	return isOpenAIGPT6Model(normalized) || strings.HasPrefix(normalized, "gpt-5")
 }
 
 func isOpenAICodexImageInputModel(modelID string) bool {
 	normalized := canonicalizeOpenAIModelAliasSpelling(modelID)
-	return isSupplementalOpenAIModel(normalized) || isOpenAIGPT6AstraModel(normalized) ||
+	return isOpenAIGPT6Model(normalized) ||
 		strings.HasPrefix(normalized, "gpt-5") ||
 		strings.HasPrefix(normalized, "gpt-4o") ||
 		strings.HasPrefix(normalized, "gpt-4.1") ||
@@ -1088,7 +1123,7 @@ func groupCodexModelSupportsImageInput(
 			return false
 		}
 	}
-	if platform != PlatformOpenAI && platform != PlatformGrok && platform != PlatformDeepseek {
+	if platform != PlatformOpenAI && platform != PlatformGrok && platform != PlatformDeepseek && platform != PlatformOpenCodeGo {
 		return false
 	}
 
@@ -1227,7 +1262,7 @@ func accountCodexModelSupportsImageInput(account *Account, upstreamModel string)
 		return false
 	}
 	switch account.Platform {
-	case PlatformOpenAI, PlatformDeepseek:
+	case PlatformOpenAI, PlatformDeepseek, PlatformOpenCodeGo:
 		if metadata, ok := account.GetUpstreamModelMetadata(upstreamModel); ok {
 			if modalities := normalizeCodexInputModalities(metadata.InputModalities); len(modalities) > 0 {
 				// Official GPT-6 Astra metadata briefly shipped with a stale
@@ -1281,6 +1316,7 @@ func isGrokCodexImageInputModel(model string) bool {
 	case "grok-4.3",
 		"grok-4.5",
 		"grok-4.6",
+		"grok-4.7",
 		"grok-build-0.1",
 		"grok-4.20-0309-reasoning",
 		"grok-4.20-0309-non-reasoning",
@@ -2060,7 +2096,7 @@ func adjustAPIKeyCodexModelsManifest(body []byte, account *Account) ([]byte, err
 		if isOpenAIGPT6AstraModel(target) {
 			target = "gpt-6-astra"
 		}
-		if _, targeted := apiKeyCodexModelsWithoutResponsesLite[target]; !targeted && !isSupplementalOpenAIModel(target) {
+		if _, targeted := apiKeyCodexModelsWithoutResponsesLite[target]; !targeted {
 			continue
 		}
 		var useResponsesLite bool

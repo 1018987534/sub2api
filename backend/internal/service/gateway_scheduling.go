@@ -757,7 +757,8 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 			for _, candidate := range baseline {
 				accounts = append(accounts, candidate.account)
 			}
-			rateOrder := newOpenAILegacyUpstreamRateOrder(accounts, time.Now(), defaultOpenAIOAuthSchedulingRateMultiplier)
+			defaultRate := defaultOpenAIOAuthSchedulingRateMultiplier
+			rateOrder := newOpenAILegacyUpstreamRateOrder(accounts, time.Now(), &defaultRate)
 			if rateOrder.enabled {
 				sort.SliceStable(baseline, func(i, j int) bool {
 					return rateOrder.compare(baseline[i].account, baseline[j].account) < 0
@@ -1948,10 +1949,10 @@ func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, 
 	preferOAuth := platform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, platform)
 
-	// require_privacy_set: 获取分组信息
+	// require_privacy_set: 获取分组配置。GetByID 会聚合账号计数，旧选号路径不能用它。
 	var schedGroup *Group
 	if groupID != nil && s.groupRepo != nil {
-		schedGroup, _ = s.groupRepo.GetByID(ctx, *groupID)
+		schedGroup, _ = s.groupRepo.GetByIDLite(ctx, *groupID)
 	}
 
 	var accounts []Account
@@ -2214,10 +2215,10 @@ func (s *GatewayService) selectAccountWithMixedScheduling(ctx context.Context, g
 	preferOAuth := nativePlatform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, nativePlatform)
 
-	// require_privacy_set: 获取分组信息
+	// require_privacy_set: 获取分组配置。GetByID 会聚合账号计数，旧选号路径不能用它。
 	var schedGroup *Group
 	if groupID != nil && s.groupRepo != nil {
-		schedGroup, _ = s.groupRepo.GetByID(ctx, *groupID)
+		schedGroup, _ = s.groupRepo.GetByIDLite(ctx, *groupID)
 	}
 
 	var accounts []Account

@@ -67,6 +67,7 @@ type AccountHandler struct {
 	ollamaCloudUsage        *service.OllamaCloudUsageService
 	codexTicketSettings     *service.SettingService
 	cfg                     *config.Config
+	opencodeGoUsage         *service.OpenCodeGoUsageService
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
@@ -81,6 +82,10 @@ func (h *AccountHandler) SetOllamaCloudUsageService(usage *service.OllamaCloudUs
 // SetCodexTicketSettings supplies the live policy without mutating shared config.
 func (h *AccountHandler) SetCodexTicketSettings(settings *service.SettingService) {
 	h.codexTicketSettings = settings
+}
+
+func (h *AccountHandler) SetOpenCodeGoUsageService(usage *service.OpenCodeGoUsageService) {
+	h.opencodeGoUsage = usage
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -141,24 +146,24 @@ type CreateAccountRequest struct {
 // UpdateAccountRequest represents update account request
 // 使用指针类型来区分"未提供"和"设置为0"
 type UpdateAccountRequest struct {
-	Name                         string         `json:"name"`
-	Notes                        *string        `json:"notes"`
-	Type                         string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
-	Credentials                  map[string]any `json:"credentials"`
-	Extra                        map[string]any `json:"extra"`
-	ProxyID                      *int64         `json:"proxy_id"`
-	Concurrency                  *int           `json:"concurrency"`
-	Priority                     *int           `json:"priority"`
-	RateMultiplier               *float64       `json:"rate_multiplier"`
-	LoadFactor                   *int           `json:"load_factor"`
-	Status                       string         `json:"status" binding:"omitempty,oneof=active inactive error"`
-	GroupIDs                     *[]int64       `json:"group_ids"`
-	ExpiresAt                    *int64         `json:"expires_at"`
-	AutoPauseOnExpired           *bool          `json:"auto_pause_on_expired"`
-	ProbeEnabled                 *bool          `json:"upstream_billing_probe_enabled"`
-	RateSyncEnabled              *bool          `json:"upstream_billing_rate_sync_enabled"`
-	RateConversionRatio          *float64       `json:"upstream_billing_rate_conversion_ratio"`
-	ConfirmMixedChannelRisk      *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+	Name                    string         `json:"name"`
+	Notes                   *string        `json:"notes"`
+	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Credentials             map[string]any `json:"credentials"`
+	Extra                   map[string]any `json:"extra"`
+	ProxyID                 *int64         `json:"proxy_id"`
+	Concurrency             *int           `json:"concurrency"`
+	Priority                *int           `json:"priority"`
+	RateMultiplier          *float64       `json:"rate_multiplier"`
+	LoadFactor              *int           `json:"load_factor"`
+	Status                  string         `json:"status" binding:"omitempty,oneof=active inactive error"`
+	GroupIDs                *[]int64       `json:"group_ids"`
+	ExpiresAt               *int64         `json:"expires_at"`
+	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
+	ProbeEnabled            *bool          `json:"upstream_billing_probe_enabled"`
+	RateSyncEnabled         *bool          `json:"upstream_billing_rate_sync_enabled"`
+	RateConversionRatio     *float64       `json:"upstream_billing_rate_conversion_ratio"`
+	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
 }
 
 // BulkUpdateAccountsRequest represents the payload for bulk editing accounts
@@ -693,14 +698,22 @@ func (h *AccountHandler) List(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if h.ollamaCloudUsage != nil && len(accounts) > 0 {
+	if len(accounts) > 0 {
 		accountPointers := make([]*service.Account, len(accounts))
 		for index := range accounts {
 			accountPointers[index] = &accounts[index]
 		}
-		if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), accountPointers); err != nil {
-			response.ErrorFrom(c, err)
-			return
+		if h.ollamaCloudUsage != nil {
+			if err := h.ollamaCloudUsage.ResolveAccounts(c.Request.Context(), accountPointers); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+		}
+		if h.opencodeGoUsage != nil {
+			if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), accountPointers); err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
 		}
 	}
 
@@ -1112,6 +1125,12 @@ func (h *AccountHandler) GetByID(c *gin.Context) {
 			return
 		}
 	}
+	if h.opencodeGoUsage != nil {
+		if err := h.opencodeGoUsage.ResolveOpenCodeGoUsageAccounts(c.Request.Context(), []*service.Account{account}); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
 
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
@@ -1324,24 +1343,24 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
 	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
-		Name:                         req.Name,
-		Notes:                        req.Notes,
-		Type:                         req.Type,
-		Credentials:                  req.Credentials,
-		Extra:                        req.Extra,
-		ProxyID:                      req.ProxyID,
-		Concurrency:                  req.Concurrency, // 指针类型，nil 表示未提供
-		Priority:                     req.Priority,    // 指针类型，nil 表示未提供
-		RateMultiplier:               req.RateMultiplier,
-		LoadFactor:                   req.LoadFactor,
-		Status:                       req.Status,
-		GroupIDs:                     req.GroupIDs,
-		ExpiresAt:                    req.ExpiresAt,
-		AutoPauseOnExpired:           req.AutoPauseOnExpired,
-		ProbeEnabled:                 req.ProbeEnabled,
-		RateSyncEnabled:              req.RateSyncEnabled,
-		RateConversionRatio:          req.RateConversionRatio,
-		SkipMixedChannelCheck:        skipCheck,
+		Name:                  req.Name,
+		Notes:                 req.Notes,
+		Type:                  req.Type,
+		Credentials:           req.Credentials,
+		Extra:                 req.Extra,
+		ProxyID:               req.ProxyID,
+		Concurrency:           req.Concurrency, // 指针类型，nil 表示未提供
+		Priority:              req.Priority,    // 指针类型，nil 表示未提供
+		RateMultiplier:        req.RateMultiplier,
+		LoadFactor:            req.LoadFactor,
+		Status:                req.Status,
+		GroupIDs:              req.GroupIDs,
+		ExpiresAt:             req.ExpiresAt,
+		AutoPauseOnExpired:    req.AutoPauseOnExpired,
+		ProbeEnabled:          req.ProbeEnabled,
+		RateSyncEnabled:       req.RateSyncEnabled,
+		RateConversionRatio:   req.RateConversionRatio,
+		SkipMixedChannelCheck: skipCheck,
 	})
 	if err != nil {
 		// 检查是否为混合渠道错误
@@ -1780,6 +1799,10 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 		return
 	}
 
+	// Re-auth only returns authentication fields. Preserve account configuration
+	// stored alongside them (for example model_mapping), while allowing the new
+	// OAuth values to replace their existing counterparts.
+	req.Credentials = service.MergeCredentials(existing.Credentials, req.Credentials)
 	// Drop SSO/password residue; re-auth must leave only OAuth tokens on disk.
 	req.Credentials = service.SanitizeStoredCredentials(existing.Platform, req.Credentials)
 
