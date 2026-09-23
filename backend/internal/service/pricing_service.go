@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1130,6 +1131,9 @@ func (s *PricingService) validatePricingURL(raw string) (string, error) {
 
 // GetModelPricing 获取模型价格（带模糊匹配）
 func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing {
+	if price := supplementalModelPricing(modelName); price != nil {
+		return price
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1166,6 +1170,12 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 func (s *PricingService) lookupIdentifiedModelPricingLocked(lookupCandidates []string) *LiteLLMModelPricing {
 	if len(lookupCandidates) == 0 {
 		return nil
+	}
+
+	for _, candidate := range lookupCandidates {
+		if price := supplementalModelPricing(candidate); price != nil {
+			return price
+		}
 	}
 
 	// 1. 精确匹配
@@ -1625,6 +1635,13 @@ func (s *PricingService) ListModelNamesByProvider(provider string) []string {
 	for name, p := range s.pricingData {
 		if strings.ToLower(p.LiteLLMProvider) == provider {
 			names = append(names, name)
+		}
+	}
+	if provider == "openai" {
+		for name := range supplementalPricing {
+			if !slices.Contains(names, name) {
+				names = append(names, name)
+			}
 		}
 	}
 	sort.Strings(names)

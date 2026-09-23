@@ -83,7 +83,7 @@ func accountCodexToolCapabilities(account *Account, modelID string) map[string]j
 			target = "gpt-6-astra"
 		}
 		_, disabled := apiKeyCodexModelsWithoutResponsesLite[target]
-		if disabled && bytes.Equal(capabilities["use_responses_lite"], []byte("true")) {
+		if (disabled || isSupplementalOpenAIModel(target)) && bytes.Equal(capabilities["use_responses_lite"], []byte("true")) {
 			capabilities["use_responses_lite"] = json.RawMessage("false")
 		}
 	}
