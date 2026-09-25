@@ -34,7 +34,7 @@ beforeEach(() => {
 describe('intelligence admin', () => {
   it('saves actual interval and keyword changes while keeping the fixed public caption', async () => {
     const wrapper = mountView(); await flushPromises()
-    expect(wrapper.text()).toContain('gpt-6-astra · low · 每分钟检测 · 近 60 分钟 · 仅显示已检测记录')
+    expect(wrapper.text()).toContain('actual-model · low · 每分钟检测 · 近 60 次 · 仅显示已检测记录')
     const textareas = wrapper.findAll('textarea')
     await textareas[1].setValue('42\nnew')
     await wrapper.findAll('input[type="number"]')[0].setValue(15)
@@ -43,6 +43,18 @@ describe('intelligence admin', () => {
     await flushPromises()
     expect(saveIntelligenceConfig).toHaveBeenCalledWith(expect.objectContaining({ interval_minutes: 15, expected: ['42', 'new'], version: 2, model: 'actual-model' }))
     expect(wrapper.text()).toContain('实际运行间隔为 15 分钟')
+    wrapper.unmount()
+  })
+  it('previews dynamic model and effort without altering the fixed suffix or schedule', async () => {
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.findAll('.form-section')).toHaveLength(3)
+    expect(wrapper.get('[aria-pressed="true"]').text()).toContain('Group One')
+    await wrapper.get('input[maxlength="128"]').setValue('configured-model')
+    const effort = wrapper.findAll('select').find(s => s.find('option[value="xhigh"]').exists())!
+    await effort.setValue('high')
+    expect(wrapper.get('[data-testid="public-caption"]').text()).toBe('configured-model · high · 每分钟检测 · 近 60 次 · 仅显示已检测记录')
+    expect((wrapper.findAll('input[type="number"]')[0].element as HTMLInputElement).value).toBe('10')
+    expect(saveIntelligenceConfig).not.toHaveBeenCalled()
     wrapper.unmount()
   })
   it('reports manual enqueue failure and does not synthesize a successful result', async () => {
