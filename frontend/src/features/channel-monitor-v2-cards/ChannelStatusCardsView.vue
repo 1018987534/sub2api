@@ -1,15 +1,15 @@
 <template>
  <AppLayout>
-  <div class="space-y-7 pb-12">
-   <section class="card overflow-hidden !rounded-3xl">
-    <header class="flex items-center justify-between gap-4 p-6"><div><h1 class="text-xl font-bold">渠道状态 V2 · 卡片</h1><p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ snapshot ? '更新至 ' + new Date(snapshot.coverage.data_through).toLocaleString() : '正在读取监控数据' }}</p></div><button class="btn btn-secondary" :disabled="loading || !enabled" aria-label="刷新渠道状态" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button></header>
-    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-6 py-3 text-xs dark:border-dark-600"><div class="flex flex-wrap items-center gap-2"><button v-for="period in periods" :key="period" class="rounded-lg px-3 py-1.5 font-semibold" :class="range === period ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300' : 'text-gray-500'" :aria-pressed="range === period" @click="range = period">{{ period }}</button><span class="border-l border-gray-300 pl-3 text-gray-500 dark:border-dark-600">V2 被动用量 · 缓存率与可用率</span></div><span v-if="snapshot" class="text-gray-500 dark:text-gray-400">可用率 {{ percent(1 - snapshot.metrics.error_rate, snapshot.health.overall !== 'unknown') }} · 缓存率 {{ percent(snapshot.metrics.cache_rate, snapshot.health.overall !== 'unknown') }}</span></div>
+  <div class="space-y-5 pb-12">
+   <section class="glass-card overflow-hidden p-0">
+    <header class="flex items-center justify-between gap-4 px-5 py-4 sm:px-6"><div><h1 class="text-xl font-bold">渠道状态</h1><p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ snapshot ? '更新至 ' + new Date(snapshot.coverage.data_through).toLocaleString() : '正在读取监控数据' }}</p></div><button class="btn btn-secondary" :disabled="loading || !enabled" aria-label="刷新渠道状态" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button></header>
+    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-5 py-3 text-xs dark:border-dark-600"><div class="flex flex-wrap items-center gap-2"><button v-for="period in periods" :key="period" class="rounded-lg px-3 py-1.5 font-semibold" :class="range === period ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300' : 'text-gray-500'" :aria-pressed="range === period" @click="range = period">{{ period }}</button><span class="border-l border-gray-300 pl-3 text-gray-500 dark:border-dark-600">V2 被动用量 · 缓存率与可用率</span></div><span v-if="snapshot" class="text-gray-500 dark:text-gray-400">可用率 {{ percent(1 - snapshot.metrics.error_rate, snapshot.health.overall !== 'unknown') }} · 缓存率 {{ percent(snapshot.metrics.cache_rate, snapshot.health.overall !== 'unknown') }}</span></div>
    </section>
-   <p v-if="!enabled" class="card p-6">请先在系统配置中启用渠道监控 V2。官方监控页面保持不变。</p>
+   <p v-if="!enabled" class="card p-6">请先在系统配置中启用渠道监控 V2。</p>
    <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ error }}；已保留上次成功数据，请刷新重试。</p>
    <p v-if="probeError" role="alert" class="rounded-xl bg-amber-50 p-4 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">降智检测状态暂时无法更新，未把失败伪装成正常。</p>
    <p v-if="snapshot && !snapshot.coverage.coverage_complete" class="text-xs text-amber-600">当前时间范围数据尚未聚合完整，指标仅反映已覆盖区间。</p>
-   <section v-for="section in sections" :key="section.platform" class="space-y-4"><h2 class="flex items-center gap-3 text-base font-semibold"><span class="rounded-full bg-emerald-500/10 p-2 text-emerald-600"><PlatformIcon :platform="section.platform as GroupPlatform" size="md" /></span>{{ platformName(section.platform) }}<span class="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-500 dark:bg-dark-600">{{ section.rows.length }}</span></h2><div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"><GroupMonitorCard v-for="row in section.rows" :key="row.platform + ':' + row.group_id" :row="row" :records="probes[String(row.group_id)]" :now="now + serverOffset" :countdown="countdown" /></div></section>
+   <section v-for="section in sections" :key="section.platform" class="monitor-platform-section space-y-4"><h2 class="flex items-center gap-2.5 text-sm font-semibold"><span class="grid h-7 w-7 shrink-0 place-items-center rounded-full text-gray-900 dark:text-gray-100" :class="platformIconClass(section.platform)"><PlatformIcon :platform="section.platform as GroupPlatform" size="md" /></span>{{ platformName(section.platform) }}<span class="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-500 dark:bg-dark-600">{{ section.rows.length }}</span></h2><div class="grid grid-cols-1 items-start gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"><GroupMonitorCard v-for="row in section.rows" :key="row.platform + ':' + row.group_id" :row="row" :records="probes[String(row.group_id)]" :now="now + serverOffset" :countdown="countdown" :timeline-length="timelineLength" /></div></section>
    <div v-if="enabled && !loading && !error && !sections.length" class="card p-10 text-center text-gray-500">当前没有可展示的分组数据</div>
   </div>
  </AppLayout>
@@ -23,9 +23,10 @@ import { getMatrix, getSnapshot, type MonitorRange, type MonitorMatrixRow, type 
 import { getIntelligenceStatus, type IntelligenceRecord } from '@/api/intelligence'
 import { isChannelMonitorV2Mode } from '@/utils/featureFlags'
 import GroupMonitorCard from './GroupMonitorCard.vue'
-import { percent, platformGroups, platformName } from './presentation'
+import { percent, platformGroups, platformName, platformIconClass } from './presentation'
 const periods: MonitorRange[] = ['90m', '24h', '7d', '30d']
 const range = ref<MonitorRange>('90m')
+const timelineLength = computed(() => ({ '90m': 18, '24h': 24, '7d': 14, '30d': 30 })[range.value])
 const rows = ref<MonitorMatrixRow[]>([])
 const snapshot = ref<MonitorSnapshot | null>(null)
 const probes = ref<Record<string, IntelligenceRecord[]>>({})
@@ -62,3 +63,7 @@ watch([range, enabled], () => { void load() })
 onMounted(() => { void load(); timer = setInterval(() => { now.value = Date.now(); if (!loading.value && enabled.value && now.value >= nextRefresh.value) void load() }, 1000) })
 onUnmounted(() => { generation++; abort?.abort(); if (timer) clearInterval(timer) })
 </script>
+
+<style scoped>
+.monitor-platform-section + .monitor-platform-section{margin-top:32px}
+</style>

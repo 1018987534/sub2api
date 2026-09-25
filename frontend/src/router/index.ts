@@ -541,9 +541,8 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/monitor-v2',
-    name: 'ChannelStatusCards',
-    component: () => import('@/features/channel-monitor-v2-cards/ChannelStatusCardsView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: false, title: '渠道状态 V2 · 卡片' }
+    // Old bookmarks keep working without adding a second customer entry.
+    redirect: '/monitor'
   },
   {
     path: '/admin/intelligence-checks',

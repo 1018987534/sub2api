@@ -41,9 +41,11 @@ describe('independent V2 cards', () => {
     expect(wrapper.text()).toContain('暂无检测')
     expect(wrapper.text()).toContain('近 60 分钟没有已完成检测')
   })
-  it('omits an unconfigured detection block', () => {
+  it('keeps an empty gray detection track for unconfigured OpenAI groups', () => {
     const wrapper = mount(GroupMonitorCard, { props: { row, now, countdown: 60 }, global: { stubs: { PlatformIcon: true } } })
-    expect(wrapper.find('[aria-label="降智状态"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="降智状态"]').exists()).toBe(true)
+    expect(wrapper.findAll('.probe-slot')).toHaveLength(60)
+    expect(wrapper.findAll('.probe-bar')).toHaveLength(0)
   })
   it('filters future and invalid times and sorts without changing input', () => {
     const input = [...records, { ...records[0], id: 9, checked_at: 'bad' }, { ...records[0], id: 10, checked_at: new Date(now + 1).toISOString() }]
@@ -59,4 +61,51 @@ describe('independent V2 cards', () => {
     expect(wrapper.find('[role="status"]').text()).toContain('2.4s')
     expect(wrapper.text()).not.toContain('private answer')
   })
+})
+
+describe('reference card geometry and density', () => {
+ const card = (overrides = {}) => mount(GroupMonitorCard, { props: { row, now, countdown: 30, ...overrides }, global: { stubs: { PlatformIcon: true } } })
+ it('uses the Anthropic warm gradient, neutral glyph and orange tag', () => {
+  const wrapper = card({ row: { ...row, platform: 'anthropic' } })
+  expect(wrapper.find('.platform-icon').classes()).toContain('dark:from-orange-500/10')
+  expect(wrapper.find('.platform-icon').classes()).toContain('dark:text-gray-100')
+  expect(wrapper.find('.platform-badge').classes()).toContain('dark:text-orange-300')
+  expect(wrapper.find('.intelligence-section').exists()).toBe(false)
+  expect(wrapper.classes()).toContain('p-5')
+  expect(wrapper.classes()).toContain('rounded-[24px]')
+ })
+ it('always renders an 18-slot passive gray baseline with no samples', () => {
+  const wrapper = card()
+  expect(wrapper.findAll('.history-slot')).toHaveLength(18)
+  expect(wrapper.findAll('.history-bar')).toHaveLength(0)
+  expect(wrapper.findAll('.passive-track .empty-bar')).toHaveLength(18)
+  expect(wrapper.findAll('.probe-track .empty-bar')).toHaveLength(60)
+ })
+ it('does not stretch sparse passive buckets or sparse probes', () => {
+  const wrapper = card({ row: { ...row, buckets: [{ bucket_start: new Date(now).toISOString(), health: { ...row.health, overall: 'warning' }, metrics: row.metrics }] }, records })
+  expect(wrapper.findAll('.history-slot')).toHaveLength(18)
+  expect(wrapper.findAll('.history-bar')).toHaveLength(1)
+  expect(wrapper.find('.history-bar').attributes('style')).toContain('65%')
+  expect(wrapper.findAll('.probe-slot')).toHaveLength(60)
+  expect(wrapper.findAll('.probe-bar')).toHaveLength(6)
+  expect(wrapper.findAll('.probe-track .empty-bar')).toHaveLength(54)
+ })
+ it('retains duplicate minute results without manufacturing extra time slots', () => {
+  const wrapper = card({ records: [records[0], { ...records[0], id: 99, status: 'error' }] })
+  expect(wrapper.findAll('.probe-slot')).toHaveLength(60)
+  expect(wrapper.findAll('.probe-bar')).toHaveLength(2)
+  expect(wrapper.findAll('.probe-slot').filter(slot => slot.findAll('.probe-bar').length === 2)).toHaveLength(1)
+ })
+ it.each([18, 24, 14, 30])('keeps %i passive slots for the selected range', timelineLength => {
+  expect(card({ timelineLength }).findAll('.history-slot')).toHaveLength(timelineLength)
+ })
+ it('renders full-density 60-minute history and ages results to gray', async () => {
+  const full = Array.from({ length: 60 }, (_, i) => ({ ...records[0], id: i, checked_at: new Date(now - i * 60000).toISOString() }))
+  const wrapper = card({ records: full })
+  expect(wrapper.findAll('.probe-bar')).toHaveLength(60)
+  expect(wrapper.findAll('.probe-track .empty-bar')).toHaveLength(0)
+  await wrapper.setProps({ now: now + 61 * 60000 })
+  expect(wrapper.findAll('.probe-bar')).toHaveLength(0)
+  expect(wrapper.findAll('.probe-track .empty-bar')).toHaveLength(60)
+ })
 })

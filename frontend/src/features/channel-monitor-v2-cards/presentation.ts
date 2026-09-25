@@ -1,5 +1,5 @@
 import type { IntelligenceRecord } from '@/api/intelligence'
-import type { MonitorMatrixRow, MonitorMetric, HealthState } from '@/api/channelMonitorV2'
+import type { MonitorMatrixRow, MonitorMetric, HealthState, MonitorMatrixBucket } from '@/api/channelMonitorV2'
 import { INTELLIGENCE_WINDOW_MS } from './constants'
 
 export const statusLabels = { normal: '正常', degraded: '答案异常', error: '超时或错误' }
@@ -22,8 +22,43 @@ export function platformGroups(rows: MonitorMatrixRow[]): Array<{ platform: stri
   if (!grouped.has(row.platform)) grouped.set(row.platform, [])
   grouped.get(row.platform)!.push(row)
  }
- return [...grouped].map(([platform, items]) => ({ platform, rows: items }))
+ const order = ['openai', 'anthropic', 'grok', 'gemini']
+ return [...grouped].map(([platform, items]) => ({ platform, rows: items })).sort((a, b) => (order.indexOf(a.platform) < 0 ? 99 : order.indexOf(a.platform)) - (order.indexOf(b.platform) < 0 ? 99 : order.indexOf(b.platform)) || a.platform.localeCompare(b.platform))
 }
 export function platformName(platform: string): string {
  return ({ openai: 'OpenAI', anthropic: 'Anthropic', claude: 'Anthropic', gemini: 'Gemini', antigravity: 'Antigravity', grok: 'Grok' } as Record<string, string>)[platform] || platform
+}
+
+export function platformIconClass(platform: string): string {
+ const colors: Record<string, string> = {
+  openai: 'from-emerald-50 to-emerald-100 dark:from-emerald-500/10 dark:to-emerald-500/20',
+  anthropic: 'from-orange-50 to-amber-100 dark:from-orange-500/10 dark:to-amber-500/20',
+  gemini: 'from-sky-50 to-indigo-100 dark:from-sky-500/10 dark:to-indigo-500/20',
+  grok: 'from-zinc-50 to-neutral-200 dark:from-zinc-500/10 dark:to-neutral-500/20'
+ }
+ return 'bg-gradient-to-br ' + (colors[platform === 'claude' ? 'anthropic' : platform] || 'from-gray-50 to-gray-100 dark:from-gray-500/10 dark:to-gray-500/20')
+}
+export function platformBadgeClass(platform: string): string {
+ return ({ openai: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300', anthropic: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300', claude: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300', gemini: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300', grok: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-500/15 dark:text-zinc-300' } as Record<string, string>)[platform] || 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+}
+export const barHeight = (bucket: MonitorMatrixBucket): number => ({ healthy: 100, warning: 65, critical: 35, unknown: 15 })[bucket.health.overall]
+// Match the reference availability palette; insufficient samples remain gray.
+export function passiveColor(bucket: MonitorMatrixBucket): string {
+ const availability = (1 - bucket.metrics.error_rate) * 100
+ if (bucket.health.overall === 'unknown' || !Number.isFinite(availability)) return 'bg-gray-300 dark:bg-dark-600'
+ if (availability < 30) return 'bg-gray-950 dark:bg-black'
+ if (availability < 50) return 'bg-red-500 dark:bg-red-400'
+ if (availability < 60) return 'bg-amber-400 dark:bg-amber-300'
+ if (availability < 80) return 'bg-yellow-300 dark:bg-yellow-200'
+ if (availability < 90) return 'bg-emerald-400 dark:bg-emerald-300'
+ return 'bg-emerald-600 dark:bg-emerald-400'
+}
+export function probeMinuteSlots(records: IntelligenceRecord[], now: number): IntelligenceRecord[][] {
+ const slots = Array.from({ length: 60 }, () => [] as IntelligenceRecord[])
+ for (const record of recentRecords(records, now)) {
+  // Keep every actual result, including multiple manual checks in one minute.
+  const slot = Math.max(0, 59 - Math.floor((now - Date.parse(record.checked_at)) / 60000))
+  slots[slot].push(record)
+ }
+ return slots
 }

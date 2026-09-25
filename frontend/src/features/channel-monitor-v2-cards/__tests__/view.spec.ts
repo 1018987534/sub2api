@@ -34,7 +34,7 @@ describe('cards view independent read path', () => {
     ;(state.enabled as { value: boolean }).value = false
     await flushPromises()
     expect(wrapper.text()).not.toContain('Visible Group')
-    expect(wrapper.text()).toContain('官方监控页面保持不变')
+    expect(wrapper.text()).toContain('请先在系统配置中启用渠道监控 V2')
     wrapper.unmount()
   })
   it('retains passive metrics and marks a detection API failure explicitly', async () => {
