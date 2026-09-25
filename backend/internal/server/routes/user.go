@@ -165,6 +165,11 @@ func RegisterUserRoutes(
 			monitors.GET("/:id/status", h.ChannelMonitor.GetStatus)
 		}
 
+		// Independent active-check read endpoint. Same group/privacy scope as V2.
+		intelligenceChecks := authenticated.Group("/intelligence-checks")
+		intelligenceChecks.Use(panelRateLimiter.Heavy(), channelMonitorModeV2Guard(settingService))
+		intelligenceChecks.GET("/status", h.Intelligence.Status)
+
 		// V2 passive views require feature on + mode=v2.
 		monitorV2 := authenticated.Group("/channel-monitor-v2")
 		monitorV2.Use(panelRateLimiter.Heavy())
