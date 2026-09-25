@@ -58,7 +58,7 @@ func (s *SQLStore) Save(ctx context.Context, c Config) (Config, error) {
  SELECT $1,$2,$3,$4,$5 WHERE $6=0
  ON CONFLICT (group_id) DO NOTHING RETURNING version`, c.GroupID, raw, c.Enabled, c.IntervalMinutes, c.TimeoutSeconds, c.Version).Scan(&version)
 	if errors.Is(err, sql.ErrNoRows) && c.Version > 0 {
-		err = s.DB.QueryRowContext(ctx, `UPDATE intelligence_check_configs SET config=$2,enabled=$3,interval_minutes=$4,timeout_seconds=$5,version=version+1,next_run_at=NOW()+($4 * INTERVAL '1 minute'),updated_at=NOW() WHERE group_id=$1 AND version=$6 RETURNING version`, c.GroupID, raw, c.Enabled, c.IntervalMinutes, c.TimeoutSeconds, c.Version).Scan(&version)
+		err = s.DB.QueryRowContext(ctx, `UPDATE intelligence_check_configs SET config=$2,enabled=$3,interval_minutes=$4,timeout_seconds=$5,version=version+1,next_run_at=NOW()+($4::integer * INTERVAL '1 minute'),updated_at=NOW() WHERE group_id=$1 AND version=$6 RETURNING version`, c.GroupID, raw, c.Enabled, c.IntervalMinutes, c.TimeoutSeconds, c.Version).Scan(&version)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, ErrConflict
