@@ -540,6 +540,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/monitor-v2',
+    name: 'ChannelStatusCards',
+    component: () => import('@/features/channel-monitor-v2-cards/ChannelStatusCardsView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: false, title: '渠道状态 V2 · 卡片' }
+  },
+  {
+    path: '/admin/intelligence-checks',
+    name: 'AdminIntelligenceChecks',
+    component: () => import('@/views/admin/IntelligenceView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: '降智检测' }
+  },
+  {
     path: '/monitor',
     name: 'ChannelStatus',
     component: () => import('@/views/user/ChannelStatusView.vue'),

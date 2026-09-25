@@ -118,6 +118,7 @@ func RegisterAdminRoutes(
 		// 渠道监控
 		registerChannelMonitorRoutes(admin, h, settingService)
 		registerChannelMonitorV2Routes(admin, h, settingService)
+		registerIntelligenceRoutes(admin, h, settingService)
 
 		// 风控中心
 		registerContentModerationRoutes(admin, h)
