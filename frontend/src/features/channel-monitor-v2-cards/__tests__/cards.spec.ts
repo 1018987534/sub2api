@@ -148,3 +148,10 @@ describe('group-management ordering', () => {
   expect(platformGroups(rows)[0].rows.map(item => item.group_id)).toEqual([10, 11, 20])
  })
 })
+
+ describe('configured group multiplier', () => {
+  it.each([0, 0.2, 1.5])('renders group rate %s even without usage', (rate) => {
+   const wrapper = mount(GroupMonitorCard, { props: { row: { ...row, current_multiplier: rate, health: { ...row.health, overall: 'unknown' } }, now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
+   expect(wrapper.text()).toContain('用户倍率 ' + rate.toFixed(2) + 'x')
+  })
+ })

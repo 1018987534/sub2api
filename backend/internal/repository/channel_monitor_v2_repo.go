@@ -467,6 +467,10 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 		if key.groupID > 0 {
 			groupID := key.groupID
 			row.GroupID = &groupID
+			if info, ok := groupInfo[groupID]; ok {
+				rate := info.rateMultiplier
+				row.CurrentMultiplier = &rate
+			}
 		}
 		bucketKeys := make([]string, 0, len(acc.buckets))
 		for bucket := range acc.buckets {
@@ -650,9 +654,10 @@ func channelMonitorV2RestrictedGroupScopeEmpty(filter service.ChannelMonitorV2Fi
 }
 
 type channelMonitorV2GroupInfo struct {
-	name      string
-	platform  string
-	sortOrder int
+	rateMultiplier float64
+	name           string
+	platform       string
+	sortOrder      int
 }
 
 func (r *channelMonitorV2Repository) listActiveGroupIDs(ctx context.Context) ([]int64, error) {
@@ -677,7 +682,7 @@ func (r *channelMonitorV2Repository) loadChannelMonitorV2GroupInfo(ctx context.C
 	if len(groupIDs) == 0 {
 		return out, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id, COALESCE(name, ''), lower(COALESCE(NULLIF(TRIM(platform), ''), 'unknown')), sort_order FROM groups WHERE id = ANY($1) AND deleted_at IS NULL AND status = 'active'`, pq.Array(groupIDs))
+	rows, err := r.db.QueryContext(ctx, `SELECT id, COALESCE(name, ''), lower(COALESCE(NULLIF(TRIM(platform), ''), 'unknown')), sort_order, rate_multiplier FROM groups WHERE id = ANY($1) AND deleted_at IS NULL AND status = 'active'`, pq.Array(groupIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -686,10 +691,11 @@ func (r *channelMonitorV2Repository) loadChannelMonitorV2GroupInfo(ctx context.C
 		var id int64
 		var name, platform string
 		var sortOrder int
-		if err := rows.Scan(&id, &name, &platform, &sortOrder); err != nil {
+		var rateMultiplier float64
+		if err := rows.Scan(&id, &name, &platform, &sortOrder, &rateMultiplier); err != nil {
 			return nil, err
 		}
-		out[id] = channelMonitorV2GroupInfo{name: name, platform: platform, sortOrder: sortOrder}
+		out[id] = channelMonitorV2GroupInfo{name: name, platform: platform, sortOrder: sortOrder, rateMultiplier: rateMultiplier}
 	}
 	return out, rows.Err()
 }
