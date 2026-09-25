@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -489,8 +491,8 @@ func TestChannelMonitorV2GroupManagementSortOrder(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 	repo := &channelMonitorV2Repository{db: db}
-	mock.ExpectQuery("SELECT id, COALESCE.*sort_order FROM groups").WithArgs(pq.Array([]int64{20, 11, 10})).WillReturnRows(
-		sqlmock.NewRows([]string{"id", "name", "platform", "sort_order"}).AddRow(20, "A", "openai", 20).AddRow(11, "B", "openai", 10).AddRow(10, "Z", "openai", 10))
+	mock.ExpectQuery("SELECT id, COALESCE.*sort_order, rate_multiplier FROM groups").WithArgs(pq.Array([]int64{20, 11, 10})).WillReturnRows(
+		sqlmock.NewRows([]string{"id", "name", "platform", "sort_order", "rate_multiplier"}).AddRow(20, "A", "openai", 20, 0.2).AddRow(11, "B", "openai", 10, 0.5).AddRow(10, "Z", "openai", 10, 0.5))
 	info, err := repo.loadChannelMonitorV2GroupInfo(context.Background(), []int64{20, 11, 10})
 	require.NoError(t, err)
 	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}, GroupIDs: []int64{20, 11, 10}}
@@ -505,4 +507,32 @@ func TestChannelMonitorV2GroupManagementSortOrder(t *testing.T) {
 	sortChannelMonitorV2MatrixRows(rows)
 	require.Equal(t, []int64{10, 11, 20}, []int64{*rows[0].GroupID, *rows[1].GroupID, *rows[2].GroupID})
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestChannelMonitorV2MatrixIncludesConfiguredGroupRateWithoutUsage(t *testing.T) {
+	for _, rate := range []float64{0, 0.2, 1.5} {
+		t.Run(fmt.Sprint(rate), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			repo := &channelMonitorV2Repository{db: db}
+			mock.ExpectQuery("SELECT usage_coverage_start").WillReturnRows(sqlmock.NewRows([]string{"usage", "error", "through", "computed", "backfill"}))
+			mock.ExpectQuery("SELECT .*m.platform.*SUM.*").WillReturnRows(sqlmock.NewRows([]string{"unused"}))
+			mock.ExpectQuery("SELECT .*h.platform.*SUM.*").WillReturnRows(sqlmock.NewRows([]string{"unused"}))
+			mock.ExpectQuery("SELECT id, COALESCE.*sort_order, rate_multiplier FROM groups").WithArgs(pq.Array([]int64{80})).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "platform", "sort_order", "rate_multiplier"}).AddRow(80, "group", "openai", 10, rate))
+			now := time.Now().UTC()
+			cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}, GroupIDs: []int64{80}}
+			matrix, err := repo.GetMatrix(context.Background(), service.ChannelMonitorV2Filter{Start: now.Add(-90 * time.Minute), End: now, Bucket: 5 * time.Minute}, cfg, service.ChannelMonitorV2GroupByPlatformGroup, false)
+			require.NoError(t, err)
+			require.Len(t, matrix.Items, 1)
+			require.NotNil(t, matrix.Items[0].CurrentMultiplier)
+			require.Equal(t, rate, *matrix.Items[0].CurrentMultiplier)
+			raw, err := json.Marshal(matrix.Items[0])
+			require.NoError(t, err)
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(raw, &body))
+			require.Equal(t, rate, body["current_multiplier"])
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }

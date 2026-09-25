@@ -163,6 +163,7 @@ export interface MonitorMatrixRow {
   group_id?: number
   group_name?: string
   sort_order?: number
+  /** Current group rate_multiplier; not a per-user override or historical usage rate. */
   current_multiplier?: number
   model?: string
   metrics: MonitorMetric
