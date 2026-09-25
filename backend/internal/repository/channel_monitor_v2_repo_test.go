@@ -483,3 +483,26 @@ func TestChannelMonitorV2CatalogFilterClearsMultiSelectDimensions(t *testing.T) 
 	require.Equal(t, []int64{3, 4}, configuredChannelMonitorV2GroupIDs(catalog, cfg))
 	require.Equal(t, []int64{3}, configuredChannelMonitorV2GroupIDs(filter, cfg))
 }
+
+func TestChannelMonitorV2GroupManagementSortOrder(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	repo := &channelMonitorV2Repository{db: db}
+	mock.ExpectQuery("SELECT id, COALESCE.*sort_order FROM groups").WithArgs(pq.Array([]int64{20, 11, 10})).WillReturnRows(
+		sqlmock.NewRows([]string{"id", "name", "platform", "sort_order"}).AddRow(20, "A", "openai", 20).AddRow(11, "B", "openai", 10).AddRow(10, "Z", "openai", 10))
+	info, err := repo.loadChannelMonitorV2GroupInfo(context.Background(), []int64{20, 11, 10})
+	require.NoError(t, err)
+	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}, GroupIDs: []int64{20, 11, 10}}
+	accs := seedChannelMonitorV2MatrixAccumulators(service.ChannelMonitorV2Filter{}, cfg, service.ChannelMonitorV2GroupByPlatformGroup, info)
+	var rows []service.ChannelMonitorV2MatrixRow
+	for _, id := range []int64{20, 11, 10} {
+		acc := accs[channelMonitorV2MatrixKey{platform: "openai", groupID: id}]
+		require.Equal(t, info[id].sortOrder, acc.sortOrder) // Includes groups with no traffic.
+		groupID := id
+		rows = append(rows, service.ChannelMonitorV2MatrixRow{Platform: "openai", GroupID: &groupID, GroupName: acc.groupName, SortOrder: acc.sortOrder})
+	}
+	sortChannelMonitorV2MatrixRows(rows)
+	require.Equal(t, []int64{10, 11, 20}, []int64{*rows[0].GroupID, *rows[1].GroupID, *rows[2].GroupID})
+	require.NoError(t, mock.ExpectationsWereMet())
+}

@@ -361,6 +361,7 @@ type channelMonitorV2MatrixKey struct {
 
 type channelMonitorV2MatrixAccumulator struct {
 	groupName string
+	sortOrder int
 	total     *metricAccumulator
 	buckets   map[string]*metricAccumulator
 }
@@ -411,11 +412,15 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 		key := channelMonitorV2MatrixDimensionKey(groupBy, cfg, fact.Platform, fact.GroupID, fact.Model)
 		acc := accs[key]
 		if acc == nil {
-			acc = &channelMonitorV2MatrixAccumulator{total: newMetricAccumulator(), buckets: make(map[string]*metricAccumulator)}
+			info := groupInfo[key.groupID]
+			acc = &channelMonitorV2MatrixAccumulator{groupName: info.name, sortOrder: info.sortOrder, total: newMetricAccumulator(), buckets: make(map[string]*metricAccumulator)}
 			accs[key] = acc
 		}
 		if key.groupID > 0 {
 			acc.groupName = fact.GroupName
+			if info, ok := groupInfo[key.groupID]; ok {
+				acc.sortOrder = info.sortOrder
+			}
 		}
 		bucket := acc.buckets[fact.BucketStart]
 		if bucket == nil {
@@ -458,7 +463,7 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 		}
 		metrics := acc.total.metric(minutes, admin)
 		applyIgnoredErrors(&metrics, ignoredByDim[key])
-		row := service.ChannelMonitorV2MatrixRow{Platform: key.platform, GroupName: acc.groupName, Model: key.model, Metrics: metrics, Health: service.ChannelMonitorV2HealthForWithThresholds(metrics, cfg.HealthThresholds), Buckets: []service.ChannelMonitorV2TrendPoint{}}
+		row := service.ChannelMonitorV2MatrixRow{Platform: key.platform, GroupName: acc.groupName, SortOrder: acc.sortOrder, Model: key.model, Metrics: metrics, Health: service.ChannelMonitorV2HealthForWithThresholds(metrics, cfg.HealthThresholds), Buckets: []service.ChannelMonitorV2TrendPoint{}}
 		if key.groupID > 0 {
 			groupID := key.groupID
 			row.GroupID = &groupID
@@ -479,20 +484,27 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 		}
 		result.Items = append(result.Items, row)
 	}
-	sort.Slice(result.Items, func(i, j int) bool {
-		a, b := result.Items[i], result.Items[j]
+	sortChannelMonitorV2MatrixRows(result.Items)
+	return result, nil
+}
+
+func sortChannelMonitorV2MatrixRows(items []service.ChannelMonitorV2MatrixRow) {
+	sort.Slice(items, func(i, j int) bool {
+		a, b := items[i], items[j]
 		if a.Platform != b.Platform {
 			return a.Platform < b.Platform
 		}
-		if a.GroupName != b.GroupName {
-			return a.GroupName < b.GroupName
+		if a.SortOrder != b.SortOrder {
+			return a.SortOrder < b.SortOrder
 		}
 		if a.GroupID != nil && b.GroupID != nil && *a.GroupID != *b.GroupID {
 			return *a.GroupID < *b.GroupID
 		}
+		if a.GroupName != b.GroupName {
+			return a.GroupName < b.GroupName
+		}
 		return a.Model < b.Model
 	})
-	return result, nil
 }
 
 func channelMonitorV2MatrixDimensionKey(groupBy service.ChannelMonitorV2GroupBy, cfg service.ChannelMonitorV2Config, platform string, groupID int64, model string) channelMonitorV2MatrixKey {
@@ -558,7 +570,7 @@ func seedChannelMonitorV2MatrixAccumulators(filter service.ChannelMonitorV2Filte
 					key.model = model
 				}
 				if accs[key] == nil {
-					accs[key] = &channelMonitorV2MatrixAccumulator{groupName: info.name, total: newMetricAccumulator(), buckets: make(map[string]*metricAccumulator)}
+					accs[key] = &channelMonitorV2MatrixAccumulator{groupName: info.name, sortOrder: info.sortOrder, total: newMetricAccumulator(), buckets: make(map[string]*metricAccumulator)}
 				}
 			}
 		}
@@ -638,8 +650,9 @@ func channelMonitorV2RestrictedGroupScopeEmpty(filter service.ChannelMonitorV2Fi
 }
 
 type channelMonitorV2GroupInfo struct {
-	name     string
-	platform string
+	name      string
+	platform  string
+	sortOrder int
 }
 
 func (r *channelMonitorV2Repository) listActiveGroupIDs(ctx context.Context) ([]int64, error) {
@@ -664,7 +677,7 @@ func (r *channelMonitorV2Repository) loadChannelMonitorV2GroupInfo(ctx context.C
 	if len(groupIDs) == 0 {
 		return out, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id, COALESCE(name, ''), lower(COALESCE(NULLIF(TRIM(platform), ''), 'unknown')) FROM groups WHERE id = ANY($1) AND deleted_at IS NULL AND status = 'active'`, pq.Array(groupIDs))
+	rows, err := r.db.QueryContext(ctx, `SELECT id, COALESCE(name, ''), lower(COALESCE(NULLIF(TRIM(platform), ''), 'unknown')), sort_order FROM groups WHERE id = ANY($1) AND deleted_at IS NULL AND status = 'active'`, pq.Array(groupIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -672,10 +685,11 @@ func (r *channelMonitorV2Repository) loadChannelMonitorV2GroupInfo(ctx context.C
 	for rows.Next() {
 		var id int64
 		var name, platform string
-		if err := rows.Scan(&id, &name, &platform); err != nil {
+		var sortOrder int
+		if err := rows.Scan(&id, &name, &platform, &sortOrder); err != nil {
 			return nil, err
 		}
-		out[id] = channelMonitorV2GroupInfo{name: name, platform: platform}
+		out[id] = channelMonitorV2GroupInfo{name: name, platform: platform, sortOrder: sortOrder}
 	}
 	return out, rows.Err()
 }

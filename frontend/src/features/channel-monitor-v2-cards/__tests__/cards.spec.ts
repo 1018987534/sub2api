@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import GroupMonitorCard from '../GroupMonitorCard.vue'
-import { recentRecords, percent } from '../presentation'
+import { recentRecords, percent, platformGroups } from '../presentation'
 import { INTELLIGENCE_CAPTION } from '../constants'
 import type { IntelligenceRecord } from '@/api/intelligence'
 import type { MonitorMatrixRow } from '@/api/channelMonitorV2'
@@ -55,10 +55,14 @@ describe('independent V2 cards', () => {
     expect(percent(0, false)).toBe('—')
     expect(percent(NaN)).toBe('—')
   })
-  it('reveals only the timestamp, status and duration on click', async () => {
+  it('uses non-clickable probe marks and reveals no detail panel', async () => {
     const wrapper = mount(GroupMonitorCard, { props: { row, records: records.map(r => ({ ...r, answer: 'private answer' })), now, countdown: 0 }, global: { stubs: { PlatformIcon: true } } })
     await wrapper.find('.probe-bar').trigger('click')
-    expect(wrapper.find('[role="status"]').text()).toContain('2.4s')
+    expect(wrapper.find('.probe-bar').element.tagName).toBe('SPAN')
+    expect(wrapper.find('.probe-bar').attributes('title')).toContain('2.4s')
+    expect(wrapper.find('[role="status"]').exists()).toBe(false)
+    expect(wrapper.findAll('button')).toHaveLength(0)
+    expect(wrapper.text()).toContain('21 绿 · 其他黄 · 错误红')
     expect(wrapper.text()).not.toContain('private answer')
   })
 })
@@ -107,5 +111,40 @@ describe('reference card geometry and density', () => {
   await wrapper.setProps({ now: now + 61 * 60000 })
   expect(wrapper.findAll('.probe-bar')).toHaveLength(0)
   expect(wrapper.findAll('.probe-track .empty-bar')).toHaveLength(60)
+ })
+})
+
+describe('passive hover only interaction', () => {
+ it('shows a floating tooltip and neighbor animation without opening a click panel', async () => {
+  const buckets = Array.from({ length: 18 }, (_, i) => ({ bucket_start: new Date(now - i * 300000).toISOString(), health: row.health, metrics: row.metrics }))
+  const wrapper = mount(GroupMonitorCard, { attachTo: document.body, props: { row: { ...row, buckets }, records, now, countdown: 30 } })
+  const mark = wrapper.findAll('.history-hitbox')[8]
+  expect(mark.element.tagName).toBe('SPAN')
+  expect(mark.attributes('title')).toBeUndefined()
+  await mark.trigger('click')
+  expect(wrapper.find('[role="status"]').exists()).toBe(false)
+  await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).toBeNull())
+  await wrapper.findAll('.history-slot')[8].trigger('mouseenter')
+  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('可用率 98.0% · 缓存率 85.3% · 首 Token 2.1s')
+  expect(wrapper.findAll('.history-visual')[8].attributes('style')).toContain('scaleY(1.1)')
+  expect(wrapper.findAll('.history-visual')[7].attributes('style')).not.toContain('opacity: 1;')
+  await wrapper.findAll('.history-slot')[8].trigger('mouseleave')
+  await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).toBeNull())
+  await mark.trigger('focus')
+  expect(document.querySelector('[role="tooltip"]')).not.toBeNull()
+  await mark.trigger('keydown', { key: 'Escape' })
+  await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).toBeNull())
+  wrapper.unmount()
+ })
+})
+
+describe('group-management ordering', () => {
+ it('keeps cards in groups.sort_order order with stable id fallback', () => {
+  const rows = [
+   { ...row, group_id: 20, group_name: 'later', sort_order: 20 },
+   { ...row, group_id: 10, group_name: 'first', sort_order: 10 },
+   { ...row, group_id: 11, group_name: 'same-order', sort_order: 10 },
+  ]
+  expect(platformGroups(rows)[0].rows.map(item => item.group_id)).toEqual([10, 11, 20])
  })
 })

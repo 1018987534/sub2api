@@ -23,7 +23,16 @@ export function platformGroups(rows: MonitorMatrixRow[]): Array<{ platform: stri
   grouped.get(row.platform)!.push(row)
  }
  const order = ['openai', 'anthropic', 'grok', 'gemini']
- return [...grouped].map(([platform, items]) => ({ platform, rows: items })).sort((a, b) => (order.indexOf(a.platform) < 0 ? 99 : order.indexOf(a.platform)) - (order.indexOf(b.platform) < 0 ? 99 : order.indexOf(b.platform)) || a.platform.localeCompare(b.platform))
+ return [...grouped].map(([platform, items]) => ({
+  platform,
+  rows: [...items].sort((a, b) => {
+   const sortOrder = (a.sort_order ?? 0) - (b.sort_order ?? 0)
+   if (sortOrder !== 0) return sortOrder
+   const groupID = (a.group_id ?? 0) - (b.group_id ?? 0)
+   if (groupID !== 0) return groupID
+   return (a.group_name || '').localeCompare(b.group_name || '')
+  }),
+ })).sort((a, b) => (order.indexOf(a.platform) < 0 ? 99 : order.indexOf(a.platform)) - (order.indexOf(b.platform) < 0 ? 99 : order.indexOf(b.platform)) || a.platform.localeCompare(b.platform))
 }
 export function platformName(platform: string): string {
  return ({ openai: 'OpenAI', anthropic: 'Anthropic', claude: 'Anthropic', gemini: 'Gemini', antigravity: 'Antigravity', grok: 'Grok' } as Record<string, string>)[platform] || platform
