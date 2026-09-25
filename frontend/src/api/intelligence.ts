@@ -26,7 +26,7 @@ export interface IntelligenceRecord {
  error?: string
  config?: IntelligenceConfig
 }
-export interface IntelligenceStatus { groups: Record<string, IntelligenceRecord[]>; server_time: string; window_minutes: number }
+export interface IntelligenceStatus { groups: Record<string, IntelligenceRecord[]>; server_time: string; window_minutes: number; record_limit?: number }
 export async function getIntelligenceStatus(groupIds: number[], signal?: AbortSignal) {
  const { data } = await apiClient.get<IntelligenceStatus>('/intelligence-checks/status', {
   params: { group_id: groupIds }, paramsSerializer: { serialize: repeatedArrayParamsSerializer }, signal

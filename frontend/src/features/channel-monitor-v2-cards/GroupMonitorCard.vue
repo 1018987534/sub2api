@@ -3,7 +3,7 @@
   <header class="flex items-start gap-3">
    <span class="platform-icon grid h-9 w-9 shrink-0 place-items-center rounded-xl text-gray-900 ring-1 ring-black/5 dark:text-gray-100 dark:ring-white/10" :class="platformIconClass(row.platform)"><PlatformIcon :platform="row.platform as GroupPlatform" size="lg" /></span>
    <div class="min-w-0 flex-1"><h3 class="truncate text-base font-semibold text-gray-900 dark:text-gray-100" :title="row.group_name">{{ row.group_name || '分组 #' + row.group_id }}</h3>
-    <div class="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] font-medium"><span class="platform-badge rounded-md px-1.5 py-0.5" :class="platformBadgeClass(row.platform)">{{ platformName(row.platform) }}</span><span class="rounded-md bg-primary-50 px-1.5 py-0.5 font-mono text-primary-700 dark:bg-dark-700 dark:text-gray-300">用户倍率 {{ row.current_multiplier != null ? row.current_multiplier.toFixed(2) + 'x' : '—' }}</span></div>
+    <div class="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] font-medium"><span class="platform-badge rounded-md px-1.5 py-0.5" :class="platformBadgeClass(row.platform)">{{ platformName(row.platform) }}</span><span class="rounded-md bg-primary-50 px-1.5 py-0.5 font-mono text-primary-700 dark:bg-dark-700 dark:text-gray-300">用户倍率 {{ groupMultiplier(row.current_multiplier) }}</span></div>
    </div>
    <span class="state-pill" :class="row.health.overall">{{ healthLabels[row.health.overall] }}</span>
   </header>
@@ -28,12 +28,12 @@
   <section v-if="row.platform === 'openai' || records !== undefined" class="intelligence-section mt-4 border-t border-gray-200/70 pt-3 dark:border-dark-700/60" aria-label="降智状态">
    <div class="flex items-center justify-between gap-2 text-xs font-medium"><h4 class="font-semibold">降智状态</h4><span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full" :class="last ? last.status : 'unknown'" />{{ last ? statusLabels[last.status] : '暂无检测' }}</span></div>
    <p class="intelligence-caption mt-1 text-[10px] leading-[15px] text-gray-500 dark:text-gray-400">{{ INTELLIGENCE_CAPTION }}</p>
-   <div class="timeline-track probe-track mt-2" aria-label="近 60 分钟真实检测记录">
+   <div class="timeline-track probe-track mt-2" aria-label="最近 60 次真实检测记录">
     <div v-for="(slot, index) in probeSlots" :key="index" class="probe-slot">
      <span v-for="record in slot" :key="record.id" role="img" tabindex="0" class="probe-bar" :class="record.status" :title="recordTitle(record)" :aria-label="recordTitle(record)" />
      <span v-if="!slot.length" class="empty-bar" aria-hidden="true" />
     </div>
-   </div><span v-if="!recent.length" class="sr-only">近 60 分钟没有已完成检测</span>
+   </div><span v-if="!recent.length" class="sr-only">暂无已完成检测</span>
    <div class="mt-1.5 flex justify-between text-[10px] text-gray-500 dark:text-gray-400"><span>{{ INTELLIGENCE_LEGEND }}</span><time v-if="last">{{ new Date(last.checked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</time></div>
 
   </section>
@@ -45,15 +45,18 @@
  </article>
 </template>
 <script setup lang="ts">
-import { computed, ref, onMounted, onUnmounted }  from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted }  from 'vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import type { GroupPlatform } from '@/types'
 import type { MonitorMatrixRow, MonitorMatrixBucket } from '@/api/channelMonitorV2'
 import type { IntelligenceRecord } from '@/api/intelligence'
 import { INTELLIGENCE_CAPTION, INTELLIGENCE_LEGEND } from './constants'
-import { healthLabels, statusLabels, recentRecords, percent, latency, platformName, platformIconClass, platformBadgeClass, passiveColor, barHeight, probeMinuteSlots } from './presentation'
+import { healthLabels, statusLabels, appendHistory, groupMultiplier, percent, latency, platformName, platformIconClass, platformBadgeClass, passiveColor, barHeight } from './presentation'
 const props = withDefaults(defineProps<{ row: MonitorMatrixRow; records?: IntelligenceRecord[]; now: number; countdown: number; timelineLength?: number }>(), { timelineLength: 18 })
-const recent = computed(() => recentRecords(props.records || [], props.now))
+const recent = ref<IntelligenceRecord[]>([])
+watch(() => props.records, records => {
+ recent.value = appendHistory(recent.value, (records || []).filter(record => Date.parse(record.checked_at) <= props.now), record => record.id, record => Date.parse(record.checked_at), 60)
+}, { immediate: true, deep: true })
 const last = computed(() => recent.value.at(-1))
 const known = computed(() => props.row.health.overall !== 'unknown')
 const buckets = computed(() => [...props.row.buckets].sort((a, b) => a.bucket_start.localeCompare(b.bucket_start)))
@@ -84,7 +87,7 @@ const passiveSlots = computed(() => {
  const visible = buckets.value.slice(-props.timelineLength)
  return [...Array<null>(Math.max(0, props.timelineLength - visible.length)).fill(null), ...visible]
 })
-const probeSlots = computed(() => probeMinuteSlots(recent.value, props.now))
+const probeSlots = computed(() => [...recent.value.map(record => [record]), ...Array.from({ length: 60 - recent.value.length }, () => [] as IntelligenceRecord[])])
 const bucketTitle = (b: MonitorMatrixBucket) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(b.bucket_start)) + ' · 可用率 ' + percent(1 - b.metrics.error_rate, b.health.overall !== 'unknown') + ' · 缓存率 ' + percent(b.metrics.cache_rate, b.health.overall !== 'unknown') + ' · 首 Token ' + latency(b.metrics)
 const recordTitle = (r: IntelligenceRecord) => new Date(r.checked_at).toLocaleString() + ' · ' + statusLabels[r.status] + ' · ' + (r.duration_ms / 1000).toFixed(1) + 's'
 </script>
