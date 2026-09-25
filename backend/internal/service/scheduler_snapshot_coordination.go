@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -53,9 +55,7 @@ func (s *SchedulerSnapshotService) tryAcquireSchedulerLeaderLock(ctx context.Con
 	}
 	if s.leaderLockDB != nil {
 		// Give the fallback its own timeout after a Redis timeout exhausted lockCtx.
-		dbCtx, dbCancel := context.WithTimeout(ctx, 2*time.Second)
-		defer dbCancel()
-		dbRelease, acquired, err := tryAcquireDBAdvisoryLockWithError(dbCtx, s.leaderLockDB, hashAdvisoryLockID(key))
+		dbRelease, acquired, err := tryAcquireSchedulerDBFence(ctx, s.leaderLockDB, hashAdvisoryLockID(key))
 		if err != nil || !acquired {
 			redisRelease()
 			return nil, false, err
@@ -64,6 +64,56 @@ func (s *SchedulerSnapshotService) tryAcquireSchedulerLeaderLock(ctx context.Con
 	}
 	// Unit fixtures without either backend retain their in-process behavior.
 	return sync.OnceFunc(redisRelease), true, nil
+}
+
+// Use the SAME advisory-lock namespace as older nodes during rolling releases.
+// Unlike a session lock, this transaction fence has a server-enforced lifetime:
+// an abandoned connection behind a TCP relay cannot block the fleet forever.
+// Production work is bounded to two minutes, below this three-minute lease.
+func tryAcquireSchedulerDBFence(ctx context.Context, db *sql.DB, lockID int64) (func(), bool, error) {
+	leaseCtx, leaseCancel := context.WithTimeout(ctx, schedulerCoordinationLockTTL)
+	acquireCtx, acquireCancel := context.WithTimeout(leaseCtx, 2*time.Second)
+	defer acquireCancel()
+	conn, err := db.Conn(acquireCtx)
+	if err != nil {
+		leaseCancel()
+		return nil, false, fmt.Errorf("open scheduler fence connection: %w", err)
+	}
+	// Begin with the work/lease context, NOT acquireCtx, which is canceled when
+	// acquisition returns and would otherwise immediately release the fence.
+	tx, err := conn.BeginTx(leaseCtx, nil)
+	if err != nil {
+		leaseCancel()
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		_ = conn.Close()
+		return nil, false, fmt.Errorf("begin scheduler fence: %w", err)
+	}
+	release := sync.OnceFunc(func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		}
+		leaseCancel()
+		_ = conn.Close()
+	})
+	for _, query := range []string{
+		"SET LOCAL idle_in_transaction_session_timeout = '180s'",
+		"SET LOCAL statement_timeout = '2s'",
+	} {
+		if _, err := tx.ExecContext(acquireCtx, query); err != nil {
+			release()
+			return nil, false, fmt.Errorf("configure scheduler fence lifetime: %w", err)
+		}
+	}
+	var acquired bool
+	if err := tx.QueryRowContext(acquireCtx, "SELECT pg_try_advisory_xact_lock($1)", lockID).Scan(&acquired); err != nil {
+		release()
+		return nil, false, fmt.Errorf("acquire scheduler transaction fence: %w", err)
+	}
+	if !acquired {
+		release()
+		return nil, false, nil
+	}
+	return release, true, nil
 }
 
 func (s *SchedulerSnapshotService) runPeriodicFullRebuild(interval time.Duration) error {
