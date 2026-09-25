@@ -10,6 +10,7 @@ import (
 func registerIntelligenceRoutes(admin *gin.RouterGroup, h *handler.Handlers, settings *service.SettingService) {
 	checks := admin.Group("/intelligence-checks")
 	checks.GET("/config", h.Intelligence.Configs)
+	checks.GET("/:groupID/keys", h.Intelligence.KeyOptions)
 	checks.PUT("/:groupID/config", h.Intelligence.Save)
 	checks.GET("/:groupID/history", h.Intelligence.History)
 	checks.POST("/:groupID/run", channelMonitorModeV2Guard(settings), h.Intelligence.Run)
