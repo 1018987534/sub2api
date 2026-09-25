@@ -25,7 +25,7 @@ const row: MonitorMatrixRow = {
 }
 describe('independent V2 cards', () => {
   it('preserves the requested display copy without inventing minute samples', () => {
-    expect(INTELLIGENCE_CAPTION).toBe('gpt-6-astra · low · 最近 60 次检测 · 仅显示已检测记录')
+    expect(INTELLIGENCE_CAPTION).toBe('每分钟检测 · 近 60 次 · 仅显示已检测记录')
     const wrapper = mount(GroupMonitorCard, { props: { row, records, now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
     expect(wrapper.findAll('.probe-bar')).toHaveLength(6)
     expect(wrapper.text()).toContain(INTELLIGENCE_CAPTION)
@@ -213,3 +213,13 @@ it('does not draw gray underline or empty-sample marks for either timeline', () 
  expect(cardSource).not.toContain('empty-bar')
  w.unmount()
 })
+
+ it('renders current group model and effort dynamically while preserving the fixed suffix', async () => {
+  const w = mount(GroupMonitorCard, { props: { row, records: [], now, countdown: 30, probeMetadata: { model: 'gpt-6-astra', reasoning_effort: 'low' } }, global: { stubs: { PlatformIcon: true } } })
+  expect(w.find('.intelligence-caption').text()).toBe('gpt-6-astra · low · 每分钟检测 · 近 60 次 · 仅显示已检测记录')
+  await w.setProps({ probeMetadata: { model: 'configured-model', reasoning_effort: 'high' } })
+  expect(w.find('.intelligence-caption').text()).toBe('configured-model · high · 每分钟检测 · 近 60 次 · 仅显示已检测记录')
+  await w.setProps({ probeMetadata: undefined })
+  expect(w.find('.intelligence-caption').text()).toBe('— · — · 每分钟检测 · 近 60 次 · 仅显示已检测记录')
+  w.unmount()
+ })

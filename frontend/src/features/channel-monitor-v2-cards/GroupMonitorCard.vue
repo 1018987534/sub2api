@@ -26,7 +26,7 @@
   </div>
   <section v-if="row.platform === 'openai' || records !== undefined" class="intelligence-section mt-4 border-t border-gray-200/70 pt-3 dark:border-dark-700/60" aria-label="降智状态">
    <div class="flex items-center justify-between gap-2 text-xs font-medium"><h4 class="font-semibold">降智状态</h4><span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full" :class="last ? last.status : 'unknown'" />{{ last ? statusLabels[last.status] : '暂无检测' }}</span></div>
-   <p class="intelligence-caption mt-1 text-[10px] leading-[15px] text-gray-500 dark:text-gray-400">{{ INTELLIGENCE_CAPTION }}</p>
+   <p class="intelligence-caption mt-1 text-[10px] leading-[15px] text-gray-500 dark:text-gray-400">{{ intelligenceCaption }}</p>
    <div class="timeline-track probe-track mt-2" aria-label="最近 60 次真实检测记录">
     <div v-for="(slot, index) in probeSlots" :key="index" class="probe-slot">
      <span v-for="record in slot" :key="record.id" role="img" tabindex="0" class="probe-bar" :class="record.status" :title="recordTitle(record)" :aria-label="recordTitle(record)" />
@@ -47,10 +47,11 @@ import { computed, ref, watch, onMounted, onUnmounted }  from 'vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import type { GroupPlatform } from '@/types'
 import type { MonitorMatrixRow, MonitorMatrixBucket } from '@/api/channelMonitorV2'
-import type { IntelligenceRecord } from '@/api/intelligence'
+import type { IntelligenceRecord, IntelligenceMetadata } from '@/api/intelligence'
 import { INTELLIGENCE_CAPTION, INTELLIGENCE_LEGEND } from './constants'
 import { healthLabels, statusLabels, appendHistory, groupMultiplier, percent, latency, platformName, platformIconClass, platformBadgeClass, passiveColor, barHeight } from './presentation'
-const props = withDefaults(defineProps<{ row: MonitorMatrixRow; records?: IntelligenceRecord[]; now: number; countdown: number; timelineLength?: number }>(), { timelineLength: 18 })
+const props = withDefaults(defineProps<{ row: MonitorMatrixRow; records?: IntelligenceRecord[]; probeMetadata?: IntelligenceMetadata; now: number; countdown: number; timelineLength?: number }>(), { timelineLength: 18 })
+const intelligenceCaption = computed(() => `${props.probeMetadata?.model || '—'} · ${props.probeMetadata?.reasoning_effort || '—'} · ${INTELLIGENCE_CAPTION}`)
 const recent = ref<IntelligenceRecord[]>([])
 watch(() => props.records, records => {
  recent.value = appendHistory(recent.value, (records || []).filter(record => Date.parse(record.checked_at) <= props.now), record => record.id, record => Date.parse(record.checked_at), 60)

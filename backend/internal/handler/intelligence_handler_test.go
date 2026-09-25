@@ -31,7 +31,10 @@ type intelligenceHistoryStore struct {
 }
 
 func (s *intelligenceHistoryStore) Configs(context.Context) ([]intelligence.Config, error) {
-	return []intelligence.Config{intelligence.DefaultConfig(1), intelligence.DefaultConfig(2), intelligence.DefaultConfig(3)}, nil
+	c := intelligence.DefaultConfig(1)
+	c.Model = "configured-model"
+	c.ReasoningEffort = "high"
+	return []intelligence.Config{c, intelligence.DefaultConfig(2), intelligence.DefaultConfig(3)}, nil
 }
 func (s *intelligenceHistoryStore) History(_ context.Context, id int64, since time.Time, before int64, limit int) ([]intelligence.Record, error) {
 	s.requested = append(s.requested, id)
@@ -56,14 +59,15 @@ func TestIntelligenceStatusAuthorizationAndRedaction(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, []int64{1}, store.requested)
 	body := w.Body.String()
-	for _, secret := range []string{"secret", "prompt", "answer", "api_key_id", "updated_by", "config"} {
+	for _, secret := range []string{"secret", "prompt", "answer", "api_key_id", "updated_by", `"config":`} {
 		require.NotContains(t, body, secret)
 	}
 	var decoded struct {
 		Data struct {
 			Groups        map[string][]intelligence.Record
-			WindowMinutes int `json:"window_minutes"`
-			RecordLimit   int `json:"record_limit"`
+			Metadata      map[string]map[string]string `json:"metadata"`
+			WindowMinutes int                          `json:"window_minutes"`
+			RecordLimit   int                          `json:"record_limit"`
 		}
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &decoded))
@@ -72,6 +76,7 @@ func TestIntelligenceStatusAuthorizationAndRedaction(t *testing.T) {
 	require.Equal(t, []int{60}, store.limits)
 	require.WithinDuration(t, time.Now().Add(-7*24*time.Hour), store.since[0], 5*time.Second)
 	require.Len(t, decoded.Data.Groups, 1)
+	require.Equal(t, map[string]map[string]string{"1": {"model": "configured-model", "reasoning_effort": "high"}}, decoded.Data.Metadata)
 	require.Equal(t, "normal", decoded.Data.Groups["1"][0].Status)
 }
 func TestIntelligenceStatusRejectsUnauthorizedAndDisabled(t *testing.T) {

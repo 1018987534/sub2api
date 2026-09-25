@@ -9,7 +9,7 @@
    <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ error }}；已保留上次成功数据，请刷新重试。</p>
    <p v-if="probeError" role="alert" class="rounded-xl bg-amber-50 p-4 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">降智检测状态暂时无法更新，未把失败伪装成正常。</p>
    <p v-if="snapshot && !snapshot.coverage.coverage_complete" class="text-xs text-amber-600">当前时间范围数据尚未聚合完整，指标仅反映已覆盖区间。</p>
-   <section v-for="section in sections" :key="section.platform" class="monitor-platform-section space-y-4"><h2 class="flex items-center gap-2.5 text-sm font-semibold"><span class="grid h-7 w-7 shrink-0 place-items-center rounded-full text-gray-900 dark:text-gray-100" :class="platformIconClass(section.platform)"><PlatformIcon :platform="section.platform as GroupPlatform" size="md" /></span>{{ platformName(section.platform) }}<span class="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-500 dark:bg-dark-600">{{ section.rows.length }}</span></h2><div class="grid grid-cols-1 items-start gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"><GroupMonitorCard v-for="row in section.rows" :key="row.platform + ':' + row.group_id" :row="row" :records="probes[String(row.group_id)]" :now="now + serverOffset" :countdown="countdown" :timeline-length="timelineLength" /></div></section>
+   <section v-for="section in sections" :key="section.platform" class="monitor-platform-section space-y-4"><h2 class="flex items-center gap-2.5 text-sm font-semibold"><span class="grid h-7 w-7 shrink-0 place-items-center rounded-full text-gray-900 dark:text-gray-100" :class="platformIconClass(section.platform)"><PlatformIcon :platform="section.platform as GroupPlatform" size="md" /></span>{{ platformName(section.platform) }}<span class="rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-500 dark:bg-dark-600">{{ section.rows.length }}</span></h2><div class="grid grid-cols-1 items-start gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"><GroupMonitorCard v-for="row in section.rows" :key="row.platform + ':' + row.group_id" :row="row" :records="probes[String(row.group_id)]" :probe-metadata="probeMetadata[String(row.group_id)]" :now="now + serverOffset" :countdown="countdown" :timeline-length="timelineLength" /></div></section>
    <div v-if="enabled && !loading && !error && !sections.length" class="card p-10 text-center text-gray-500">当前没有可展示的分组数据</div>
   </div>
  </AppLayout>
@@ -20,7 +20,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import type { GroupPlatform } from '@/types'
 import { getMatrix, getSnapshot, type MonitorRange, type MonitorMatrixRow, type MonitorSnapshot } from '@/api/channelMonitorV2'
-import { getIntelligenceStatus, type IntelligenceRecord } from '@/api/intelligence'
+import { getIntelligenceStatus, type IntelligenceRecord, type IntelligenceMetadata } from '@/api/intelligence'
 import { isChannelMonitorV2Mode } from '@/utils/featureFlags'
 import GroupMonitorCard from './GroupMonitorCard.vue'
 import { percent, platformGroups, platformName, platformIconClass } from './presentation'
@@ -30,6 +30,7 @@ const timelineLength = computed(() => ({ '90m': 18, '24h': 24, '7d': 14, '30d': 
 const rows = ref<MonitorMatrixRow[]>([])
 const snapshot = ref<MonitorSnapshot | null>(null)
 const probes = ref<Record<string, IntelligenceRecord[]>>({})
+const probeMetadata = ref<Record<string, IntelligenceMetadata>>({})
 const loading = ref(false), error = ref(''), probeError = ref(false)
 const now = ref(Date.now()), serverOffset = ref(0), nextRefresh = ref(Date.now() + 60000)
 const enabled = computed(() => isChannelMonitorV2Mode())
@@ -41,7 +42,7 @@ async function load() {
  const current = ++generation
  abort?.abort(); abort = new AbortController()
  const signal = abort.signal
- if (!enabled.value) { loading.value = false; rows.value = []; probes.value = {}; snapshot.value = null; error.value = ''; probeError.value = false; return }
+ if (!enabled.value) { loading.value = false; rows.value = []; probes.value = {}; probeMetadata.value = {}; snapshot.value = null; error.value = ''; probeError.value = false; return }
  loading.value = true; error.value = ''
  const filter = { range: range.value, platforms: [], groupIds: [], models: [] }
  try {
@@ -53,6 +54,7 @@ async function load() {
    const results = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) => getIntelligenceStatus(ids.slice(i * 100, (i + 1) * 100), signal)))
    if (current !== generation) return
    probes.value = Object.assign({}, ...results.map(result => result.groups))
+   probeMetadata.value = Object.assign({}, ...results.map(result => result.metadata || {}))
    if (results.length) serverOffset.value = Date.parse(results[0].server_time) - Date.now()
    probeError.value = false
   } catch { if (!signal.aborted) probeError.value = true }

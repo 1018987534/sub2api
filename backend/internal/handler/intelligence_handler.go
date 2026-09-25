@@ -221,6 +221,7 @@ func (h *IntelligenceHandler) Status(c *gin.Context) {
 		return
 	}
 	result := map[int64][]intelligence.Record{}
+	metadata := map[int64]gin.H{}
 	now := time.Now()
 	for _, cfg := range items {
 		if !allowed[cfg.GroupID] || !ids[cfg.GroupID] {
@@ -238,6 +239,8 @@ func (h *IntelligenceHandler) Status(c *gin.Context) {
 			records[i].Config = nil
 		}
 		result[cfg.GroupID] = records
+		// Expose only display metadata for requested, authorized groups.
+		metadata[cfg.GroupID] = gin.H{"model": cfg.Model, "reasoning_effort": cfg.ReasoningEffort}
 	}
-	response.Success(c, gin.H{"groups": result, "window_minutes": 7 * 24 * 60, "record_limit": 60, "server_time": now.UTC()})
+	response.Success(c, gin.H{"groups": result, "metadata": metadata, "window_minutes": 7 * 24 * 60, "record_limit": 60, "server_time": now.UTC()})
 }
