@@ -19,7 +19,6 @@
      <span v-if="bucket" class="history-hitbox" role="img" tabindex="0" :aria-label="bucketTitle(bucket)" :aria-describedby="activeIndex === index ? tooltipId : undefined" @focus="showBucket(bucket, index, $event)" @blur="hideBucket" @keydown.esc="hideBucket">
       <span class="history-visual" :style="barStyle(index)" aria-hidden="true"><span class="history-bar" :class="passiveColor(bucket)" :style="{ height: barHeight(bucket) + '%' }" /></span>
      </span>
-     <span v-else class="empty-bar" aria-hidden="true" />
     </div>
    </div><span v-if="!buckets.length" class="sr-only">暂无用量记录</span>
    <div class="mt-1 flex justify-between text-[9px] uppercase tracking-widest text-gray-400"><span>PAST</span><span>NOW</span></div>
@@ -31,7 +30,6 @@
    <div class="timeline-track probe-track mt-2" aria-label="最近 60 次真实检测记录">
     <div v-for="(slot, index) in probeSlots" :key="index" class="probe-slot">
      <span v-for="record in slot" :key="record.id" role="img" tabindex="0" class="probe-bar" :class="record.status" :title="recordTitle(record)" :aria-label="recordTitle(record)" />
-     <span v-if="!slot.length" class="empty-bar" aria-hidden="true" />
     </div>
    </div><span v-if="!recent.length" class="sr-only">暂无已完成检测</span>
    <div class="mt-1.5 flex justify-between text-[10px] text-gray-500 dark:text-gray-400"><span>{{ INTELLIGENCE_LEGEND }}</span><time v-if="last">{{ new Date(last.checked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</time></div>
@@ -87,7 +85,8 @@ const passiveSlots = computed(() => {
  const visible = buckets.value.slice(-props.timelineLength)
  return [...Array<null>(Math.max(0, props.timelineLength - visible.length)).fill(null), ...visible]
 })
-const probeSlots = computed(() => [...recent.value.map(record => [record]), ...Array.from({ length: 60 - recent.value.length }, () => [] as IntelligenceRecord[])])
+// Newest stays at the right edge; only a new record shifts existing marks left.
+const probeSlots = computed(() => [...Array.from({ length: 60 - recent.value.length }, () => [] as IntelligenceRecord[]), ...recent.value.map(record => [record])])
 const bucketTitle = (b: MonitorMatrixBucket) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(b.bucket_start)) + ' · 可用率 ' + percent(1 - b.metrics.error_rate, b.health.overall !== 'unknown') + ' · 缓存率 ' + percent(b.metrics.cache_rate, b.health.overall !== 'unknown') + ' · 首 Token ' + latency(b.metrics)
 const recordTitle = (r: IntelligenceRecord) => new Date(r.checked_at).toLocaleString() + ' · ' + statusLabels[r.status] + ' · ' + (r.duration_ms / 1000).toFixed(1) + 's'
 </script>
@@ -101,11 +100,9 @@ dt{font-size:10px;line-height:15px;font-weight:600;letter-spacing:.05em;color:#9
 .state-pill{border-radius:999px;padding:4px 10px;font-size:12px;line-height:16px;font-weight:600;white-space:nowrap;flex-shrink:0}.state-pill.healthy{color:#047857;background:#d1fae5}.state-pill.warning{color:#b45309;background:#fef3c7}.state-pill.critical{color:#b91c1c;background:#fee2e2}.state-pill.unknown{color:#4b5563;background:#f3f4f6}
 .state-pill.healthy:is(.dark *){color:#6ee7b7;background:#10b98126}.state-pill.warning:is(.dark *){color:#fcd34d;background:#f59e0b26}.state-pill.critical:is(.dark *){color:#fca5a5;background:#ef444426}.state-pill.unknown:is(.dark *){color:#d1d5db;background:#334155}
 .timeline-track{display:grid;position:relative;height:20px;width:100%;isolation:isolate}
-.timeline-track:before{content:'';position:absolute;inset:auto 0 0;height:3px;border-radius:3px;background:#d1d5db;z-index:-1}
-.timeline-track:is(.dark *):before,.empty-bar:is(.dark *){background:#475569}
 .passive-track{gap:4px}.probe-track{grid-template-columns:repeat(60,minmax(0,1fr));gap:1px}
 .history-slot,.probe-slot{display:flex;align-items:flex-end;min-width:0;height:100%}.probe-slot{gap:1px}
-.history-bar,.probe-bar,.empty-bar{display:block;min-width:0;width:100%;border-radius:3px}.history-bar{min-height:3px}.probe-bar{flex:1;height:100%;border-radius:2px}.empty-bar{height:3px;background:#d1d5db}
+.history-bar,.probe-bar{display:block;min-width:0;width:100%;border-radius:3px}.history-bar{min-height:3px}.probe-bar{flex:1;height:100%;border-radius:2px}
 .history-hitbox:focus-visible,.probe-bar:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
 .normal{background:#10b981}.degraded{background:#fbbf24}.error{background:#ef4444}.unknown:not(.state-pill){background:#9ca3af}
 .normal:is(.dark *){background:#34d399}.error:is(.dark *){background:#f87171}

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import GroupMonitorCard from '../GroupMonitorCard.vue'
+import cardSource from '../GroupMonitorCard.vue?raw'
 import { recentRecords, percent, platformGroups, appendHistory, groupMultiplier } from '../presentation'
 import { INTELLIGENCE_CAPTION } from '../constants'
 import type { IntelligenceRecord } from '@/api/intelligence'
@@ -38,9 +39,9 @@ describe('independent V2 cards', () => {
     const wrapper = mount(GroupMonitorCard, { props: { row, records, now, countdown: 0 }, global: { stubs: { PlatformIcon: true } } })
     await wrapper.setProps({ now: now + 60 * 60000 })
     expect(wrapper.findAll('.probe-bar')).toHaveLength(6)
-    expect(wrapper.findAll('.probe-slot')[0].find('.probe-bar').exists()).toBe(true)
+    expect(wrapper.findAll('.probe-slot')[59].find('.probe-bar').exists()).toBe(true)
   })
-  it('keeps an empty gray detection track for unconfigured OpenAI groups', () => {
+  it('keeps detection space without a baseline for unconfigured OpenAI groups', () => {
     const wrapper = mount(GroupMonitorCard, { props: { row, now, countdown: 60 }, global: { stubs: { PlatformIcon: true } } })
     expect(wrapper.find('[aria-label="降智状态"]').exists()).toBe(true)
     expect(wrapper.findAll('.probe-slot')).toHaveLength(60)
@@ -77,12 +78,12 @@ describe('reference card geometry and density', () => {
   expect(wrapper.classes()).toContain('p-5')
   expect(wrapper.classes()).toContain('rounded-[24px]')
  })
- it('always renders an 18-slot passive gray baseline with no samples', () => {
+ it('preserves slot geometry without drawing either baseline', () => {
   const wrapper = card()
   expect(wrapper.findAll('.history-slot')).toHaveLength(18)
   expect(wrapper.findAll('.history-bar')).toHaveLength(0)
-  expect(wrapper.findAll('.passive-track .empty-bar')).toHaveLength(18)
-  expect(wrapper.findAll('.probe-track .empty-bar')).toHaveLength(60)
+  expect(wrapper.findAll('.passive-track .empty-bar')).toHaveLength(0)
+  expect(wrapper.findAll('.probe-track .empty-bar')).toHaveLength(0)
  })
  it('does not stretch sparse passive buckets or sparse probes', () => {
   const wrapper = card({ row: { ...row, buckets: [{ bucket_start: new Date(now).toISOString(), health: { ...row.health, overall: 'warning' }, metrics: row.metrics }] }, records })
@@ -91,7 +92,7 @@ describe('reference card geometry and density', () => {
   expect(wrapper.find('.history-bar').attributes('style')).toContain('65%')
   expect(wrapper.findAll('.probe-slot')).toHaveLength(60)
   expect(wrapper.findAll('.probe-bar')).toHaveLength(6)
-  expect(wrapper.findAll('.probe-track .empty-bar')).toHaveLength(54)
+  expect(wrapper.findAll('.probe-track .empty-bar')).toHaveLength(0)
  })
  it('places same-minute results in consecutive record slots', () => {
   const wrapper = card({ records: [records[0], { ...records[0], id: 99, status: 'error' }] })
@@ -161,11 +162,11 @@ describe('append-only real sample history', () => {
   const real = [bucket(-20), bucket(-10)]
   const wrapper = mount(GroupMonitorCard, { props: { row: { ...row, buckets: [real[0], bucket(-15, 0), real[1]] }, records: [records[0], records[2]], now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
   const positions = (slot: string, mark: string) => wrapper.findAll(slot).flatMap((el, i) => el.find(mark).exists() ? [i] : [])
-  expect(positions('.probe-slot', '.probe-bar')).toEqual([0, 1])
+  expect(positions('.probe-slot', '.probe-bar')).toEqual([58, 59])
   await wrapper.setProps({ now: now + 2 * 3600000, records: [], row: { ...row, buckets: [] } })
-  expect(positions('.probe-slot', '.probe-bar')).toEqual([0, 1])
+  expect(positions('.probe-slot', '.probe-bar')).toEqual([58, 59])
   await wrapper.setProps({ records: [{ ...records[0], id: 100, checked_at: new Date(now + 3600000).toISOString() }], row: { ...row, buckets: [bucket(60)] } })
-  expect(positions('.probe-slot', '.probe-bar')).toEqual([0, 1, 2])
+  expect(positions('.probe-slot', '.probe-bar')).toEqual([57, 58, 59])
   wrapper.unmount()
  })
  it('deduplicates refreshes and evicts only when new records exceed capacity', () => {
@@ -179,4 +180,36 @@ describe('append-only real sample history', () => {
   expect(groupMultiplier(0)).toBe('0.00x')
   expect(groupMultiplier(0.2)).toBe('0.20x')
  })
+})
+
+describe('right-aligned detection sequence', () => {
+ it('pins newest on the right and moves old records left only for a new detection', async () => {
+  const first = { ...records[0], id: 101, checked_at: new Date(now - 600000).toISOString(), status: 'normal' as const }
+  const second = { ...first, id: 102, checked_at: new Date(now - 60000).toISOString(), status: 'degraded' as const }
+  const third = { ...first, id: 103, checked_at: new Date(now).toISOString(), status: 'error' as const }
+  const w = mount(GroupMonitorCard, { props: { row, records: [second, first], now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
+  const marks = () => w.findAll('.probe-slot').flatMap((slot, index) => slot.find('.probe-bar').exists() ? [{ index, title: slot.find('.probe-bar').attributes('title') }] : [])
+  expect(marks().map(x => x.index)).toEqual([58, 59])
+  expect(marks()[0].title).toContain('正常')
+  expect(marks()[1].title).toContain('答案异常')
+  const initial = marks()
+  await w.setProps({ now: now + 7200000, records: [first, second] })
+  expect(marks()).toEqual(initial)
+  await w.setProps({ records: [third, second, first] })
+  expect(marks().map(x => x.index)).toEqual([57, 58, 59])
+  expect(marks()[2].title).toContain('超时或错误')
+  await w.setProps({ records: [] })
+  expect(marks().map(x => x.index)).toEqual([57, 58, 59])
+  w.unmount()
+ })
+})
+
+it('does not draw gray underline or empty-sample marks for either timeline', () => {
+ const w = mount(GroupMonitorCard, { props: { row, records: [], now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
+ expect(w.findAll('.empty-bar')).toHaveLength(0)
+ expect(w.findAll('.history-slot')).toHaveLength(18)
+ expect(w.findAll('.probe-slot')).toHaveLength(60)
+ expect(cardSource).not.toMatch(/\.timeline-track:{1,2}before/)
+ expect(cardSource).not.toContain('empty-bar')
+ w.unmount()
 })
