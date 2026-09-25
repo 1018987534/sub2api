@@ -45,3 +45,19 @@ export async function runIntelligenceCheck(groupId: number) {
 export async function getIntelligenceHistory(groupId: number, beforeId = 0) {
  return (await apiClient.get<{ items: IntelligenceRecord[]; has_more: boolean }>('/admin/intelligence-checks/' + groupId + '/history', { params: { before_id: beforeId } })).data
 }
+
+// Safe metadata only: no API credential is returned by this endpoint.
+export interface IntelligenceKeyOption {
+ id: number
+ name: string
+ group_id: number
+ available: boolean
+ unavailable_reason?: string
+ quota_remaining: number
+ expires_at: string | null
+}
+export async function getIntelligenceKeyOptions(groupId: number, page = 1, search = '', signal?: AbortSignal) {
+ return (await apiClient.get<{ items: IntelligenceKeyOption[]; page: number; has_more: boolean }>(
+  '/admin/intelligence-checks/' + groupId + '/keys', { params: { page, search }, signal }
+ )).data
+}
