@@ -71,3 +71,15 @@ export function probeMinuteSlots(records: IntelligenceRecord[], now: number): In
  }
  return slots
 }
+
+// Keep loaded history stable across clock ticks and empty rolling-window refreshes.
+// Only actual incoming records can append, update an existing sample or evict the oldest.
+export function appendHistory<T>(previous: T[], incoming: T[], id: (item: T) => string | number, time: (item: T) => number, limit: number): T[] {
+ const merged = new Map(previous.map(item => [id(item), item]))
+ for (const item of incoming) if (Number.isFinite(time(item))) merged.set(id(item), item)
+ return [...merged.values()].sort((a, b) => time(a) - time(b) || String(id(a)).localeCompare(String(id(b)), undefined, { numeric: true })).slice(-limit)
+}
+export function groupMultiplier(value: number | undefined): string {
+ if (value == null || !Number.isFinite(value)) return '—'
+ return value.toFixed(4).replace(/(\.\d{2})0+$/, '$1').replace(/(\.\d{2,}?)0+$/, '$1') + 'x'
+}

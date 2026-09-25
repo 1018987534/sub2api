@@ -226,7 +226,7 @@ func (h *IntelligenceHandler) Status(c *gin.Context) {
 		if !allowed[cfg.GroupID] || !ids[cfg.GroupID] {
 			continue
 		}
-		records, err := h.store.History(c.Request.Context(), cfg.GroupID, now.Add(-time.Hour), 0, 1000)
+		records, err := h.store.History(c.Request.Context(), cfg.GroupID, now.Add(-7*24*time.Hour), 0, 60)
 		if err != nil {
 			response.InternalError(c, "无法读取检测状态")
 			return
@@ -239,5 +239,5 @@ func (h *IntelligenceHandler) Status(c *gin.Context) {
 		}
 		result[cfg.GroupID] = records
 	}
-	response.Success(c, gin.H{"groups": result, "window_minutes": 60, "server_time": now.UTC()})
+	response.Success(c, gin.H{"groups": result, "window_minutes": 7 * 24 * 60, "record_limit": 60, "server_time": now.UTC()})
 }

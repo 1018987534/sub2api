@@ -26,6 +26,8 @@ func (r *intelligenceMonitorRepo) GetConfig(context.Context) (*service.ChannelMo
 type intelligenceHistoryStore struct {
 	intelligence.Store
 	requested []int64
+	limits    []int
+	since     []time.Time
 }
 
 func (s *intelligenceHistoryStore) Configs(context.Context) ([]intelligence.Config, error) {
@@ -33,6 +35,8 @@ func (s *intelligenceHistoryStore) Configs(context.Context) ([]intelligence.Conf
 }
 func (s *intelligenceHistoryStore) History(_ context.Context, id int64, since time.Time, before int64, limit int) ([]intelligence.Record, error) {
 	s.requested = append(s.requested, id)
+	s.limits = append(s.limits, limit)
+	s.since = append(s.since, since)
 	c := intelligence.DefaultConfig(id)
 	c.Prompt = "secret prompt"
 	c.APIKeyID = 123
@@ -59,10 +63,14 @@ func TestIntelligenceStatusAuthorizationAndRedaction(t *testing.T) {
 		Data struct {
 			Groups        map[string][]intelligence.Record
 			WindowMinutes int `json:"window_minutes"`
+			RecordLimit   int `json:"record_limit"`
 		}
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &decoded))
-	require.Equal(t, 60, decoded.Data.WindowMinutes)
+	require.Equal(t, 7*24*60, decoded.Data.WindowMinutes)
+	require.Equal(t, 60, decoded.Data.RecordLimit)
+	require.Equal(t, []int{60}, store.limits)
+	require.WithinDuration(t, time.Now().Add(-7*24*time.Hour), store.since[0], 5*time.Second)
 	require.Len(t, decoded.Data.Groups, 1)
 	require.Equal(t, "normal", decoded.Data.Groups["1"][0].Status)
 }
