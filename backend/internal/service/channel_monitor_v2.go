@@ -244,9 +244,12 @@ type ChannelMonitorV2ModelRow struct {
 }
 
 type ChannelMonitorV2MatrixRow struct {
-	Platform  string                       `json:"platform"`
-	GroupID   *int64                       `json:"group_id,omitempty"`
-	GroupName string                       `json:"group_name,omitempty"`
+	Platform  string `json:"platform"`
+	GroupID   *int64 `json:"group_id,omitempty"`
+	GroupName string `json:"group_name,omitempty"`
+	// SortOrder mirrors groups.sort_order so monitor cards use the same stable
+	// order as the admin group-management list.
+	SortOrder int                          `json:"sort_order"`
 	Model     string                       `json:"model,omitempty"`
 	Metrics   ChannelMonitorV2Metric       `json:"metrics"`
 	Health    ChannelMonitorV2Health       `json:"health"`
