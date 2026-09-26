@@ -106,7 +106,7 @@ export default {
       firstTokenCacheRate: 'Cache rate',
       firstTokenActions: 'Actions',
       firstTokenManualProbe: 'Probe {account} now',
-      firstTokenManualProbeQueued: '{account} is queued for the next total-duration probe',
+      firstTokenManualProbeQueued: '{account} has highest probe priority for the next eligible request, including movable sticky sessions. It stays queued while busy, for up to 10 minutes.',
       firstTokenManualProbeFailed: 'Failed to queue total-duration probe'
     },
 

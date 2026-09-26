@@ -24,6 +24,7 @@ const (
 	openAIAccountScheduleLayerGuardianParent   = "guardian_parent"
 	openAIAccountScheduleLayerSessionSticky    = "session_hash"
 	openAIAccountScheduleLayerLoadBalance      = "load_balance"
+	openAIAccountScheduleLayerManualProbe      = "manual_probe"
 	openAIAdvancedSchedulerSettingKey          = "openai_advanced_scheduler_enabled"
 )
 
@@ -403,6 +404,19 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	}()
 
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
+	// Explicit admin work gets the first eligible scheduling opportunity, even
+	// for a fast sticky session. Never move a continuation whose tool context
+	// cannot be reconstructed on another account.
+	if previousResponseID == "" || req.PreviousResponseCanMove {
+		if selection := s.selectManualProbe(ctx, req); selection != nil {
+			decision.Layer = openAIAccountScheduleLayerManualProbe
+			decision.SelectedAccountID = selection.Account.ID
+			decision.SelectedAccountType = selection.Account.Type
+			decision.StickyPreviousHit = req.StickyPreviousAccountID > 0 && selection.Account.ID == req.StickyPreviousAccountID
+			decision.StickySessionHit = req.StickyAccountID > 0 && selection.Account.ID == req.StickyAccountID
+			return selection, decision, nil
+		}
+	}
 	if previousResponseID != "" && NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI &&
 		(!req.StickyWeighted || !req.PreviousResponseCanMove) {
 		selection, err := s.service.selectAccountByPreviousResponseIDForCapability(
@@ -514,6 +528,57 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 	}
 	return selection, decision, nil
+}
+
+func (s *defaultOpenAIAccountScheduler) selectManualProbe(ctx context.Context, req OpenAIAccountScheduleRequest) *AccountSelectionResult {
+	if !req.FirstTokenPriority || !req.FirstTokenProbeEligible || NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI ||
+		s == nil || s.service == nil || s.service.rateLimitService == nil {
+		return nil
+	}
+	queue, ok := s.service.rateLimitService.firstTokenLatencyStatsCache.(FirstTokenManualProbeQueue)
+	if !ok {
+		return nil
+	}
+	accountIDs, err := queue.PendingManualProbeAccountIDs(ctx)
+	if err != nil {
+		slog.Warn("manual_probe_queue_read_failed", "error", err)
+		return nil
+	}
+	budget := newOpenAISelectionProbeBudget()
+	budget.enableLimit()
+	for _, accountID := range accountIDs {
+		if _, excluded := req.ExcludedIDs[accountID]; excluded {
+			continue
+		}
+		account, err := s.service.getSchedulableAccount(ctx, accountID)
+		if err != nil || !isFirstTokenPriorityAccount(account) || !account.IsSchedulable() ||
+			!s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) ||
+			!s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+			continue
+		}
+		// Reuse the normal slot acquisition and fresh account rechecks. Keep the
+		// old binding until Redis atomically awards this request the probe.
+		probeReq := req
+		probeReq.PreserveStickyBinding = true
+		selection, _, err := s.tryAcquireOpenAISelectionOrderWithBudget(ctx, probeReq,
+			[]openAIAccountCandidateScore{{account: account}}, budget)
+		if err != nil || selection == nil {
+			continue
+		}
+		claimedID, claimed, claimErr := queue.TryClaimManualProbe(ctx, []int64{accountID}, firstTokenPriorityProbeLease)
+		if claimErr != nil || !claimed || claimedID != accountID {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			continue
+		}
+		if req.SessionHash != "" && !req.PreserveStickyBinding {
+			_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, accountID)
+		}
+		slog.Info("total_duration_manual_probe_selected", "account_id", accountID, "previous_sticky_account_id", req.StickyAccountID)
+		return selection
+	}
+	return nil
 }
 
 func (s *defaultOpenAIAccountScheduler) shouldUseFirstTokenDefaultSticky(ctx context.Context, req OpenAIAccountScheduleRequest) bool {
@@ -1154,7 +1219,7 @@ func applyOpenAIFirstTokenPriorityOrder(
 			accounts,
 			cache,
 			allowProbe,
-			allowProbe,
+			false, // Manual probes are claimed only after selectManualProbe acquires a slot.
 			&req,
 		)
 		sort.SliceStable(selectionOrder[start:end], func(i, j int) bool {

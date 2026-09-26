@@ -16,6 +16,7 @@ const totalLatencyStatsPrefix = "scheduler:total_duration:account:"
 const totalLatencySamplesPrefix = "scheduler:total_duration:samples:"
 const totalLatencyProbePrefix = "scheduler:total_duration:probe:"
 const totalLatencyManualProbePrefix = "scheduler:total_duration:manual_probe:"
+const totalLatencyManualProbeQueueKey = "scheduler:total_duration:manual_probe_queue"
 const totalLatencyDimensionStatsPrefix = "scheduler:total_duration:dimension:account:"
 const totalLatencyDimensionSamplesPrefix = "scheduler:total_duration:dimension:samples:"
 const totalLatencyDimensionProbePrefix = "scheduler:total_duration:dimension:probe:"
@@ -33,7 +34,6 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local samples_key = KEYS[2]
 	local dedupe_key = KEYS[3]
 	local probe_key = KEYS[4]
-	local manual_probe_key = KEYS[5]
 	local duration_ms = tonumber(ARGV[1])
 	local stats_ttl_seconds = tonumber(ARGV[2])
 	local dedupe_ttl_seconds = tonumber(ARGV[3])
@@ -57,7 +57,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	-- Keep an explicit pending hash so the scheduler can expose the reset state
 	-- and sticky selection cannot reuse the old fast-pool decision.
 	local function reset_pending()
-		redis.call('DEL', stats_key, samples_key, probe_key, manual_probe_key)
+		redis.call('DEL', stats_key, samples_key, probe_key)
 		redis.call('HSET', stats_key,
 			'sample_count', '0',
 			'window_hours', '0',
@@ -182,8 +182,32 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 
 	redis.call('EXPIRE', stats_key, stats_ttl_seconds)
 	redis.call('DEL', probe_key)
-	redis.call('DEL', manual_probe_key)
+	-- A stream already in flight when the admin clicked is not the requested
+	-- scheduling attempt. Only the scheduler may consume pending manual work.
 	return 1
+`)
+
+var totalLatencyManualProbeRequestScript = redis.NewScript(`
+	local now = redis.call('TIME')
+	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+	redis.call('SET', KEYS[1], '1', 'PX', ARGV[2])
+	redis.call('ZADD', KEYS[2], 'NX', now_ms, ARGV[1])
+	if redis.call('PTTL', KEYS[2]) < tonumber(ARGV[2]) then
+		redis.call('PEXPIRE', KEYS[2], ARGV[2])
+	end
+	return 1
+`)
+
+var totalLatencyManualProbePendingScript = redis.NewScript(`
+	local pending = {}
+	for _, account_id in ipairs(redis.call('ZRANGE', KEYS[1], 0, -1)) do
+		if redis.call('EXISTS', ARGV[1] .. account_id) == 1 then
+			table.insert(pending, account_id)
+		else
+			redis.call('ZREM', KEYS[1], account_id)
+		end
+	end
+	return pending
 `)
 
 var totalLatencyManualProbeClaimScript = redis.NewScript(`
@@ -192,6 +216,9 @@ var totalLatencyManualProbeClaimScript = redis.NewScript(`
 	for index = 1, candidate_count do
 		if redis.call('GET', KEYS[index]) then
 			redis.call('DEL', KEYS[index])
+			if KEYS[candidate_count * 2 + 1] then
+				redis.call('ZREM', KEYS[candidate_count * 2 + 1], ARGV[2 + index])
+			end
 			redis.call('SET', KEYS[candidate_count + index], '1', 'EX', lease_seconds)
 			return index
 		end
@@ -349,10 +376,28 @@ func (c *firstTokenLatencyStatsCache) RequestManualProbe(ctx context.Context, ac
 	if accountID <= 0 || ttl <= 0 {
 		return nil
 	}
-	if err := c.rdb.Set(ctx, fmt.Sprintf("%s%d", totalLatencyManualProbePrefix, accountID), "1", ttl).Err(); err != nil {
+	if err := totalLatencyManualProbeRequestScript.Run(ctx, c.rdb,
+		[]string{fmt.Sprintf("%s%d", totalLatencyManualProbePrefix, accountID), totalLatencyManualProbeQueueKey},
+		accountID, ttl.Milliseconds()).Err(); err != nil {
 		return fmt.Errorf("queue total-duration manual probe: %w", err)
 	}
 	return nil
+}
+
+func (c *firstTokenLatencyStatsCache) PendingManualProbeAccountIDs(ctx context.Context) ([]int64, error) {
+	values, err := totalLatencyManualProbePendingScript.Run(ctx, c.rdb,
+		[]string{totalLatencyManualProbeQueueKey}, totalLatencyManualProbePrefix).StringSlice()
+	if err != nil {
+		return nil, fmt.Errorf("read total-duration manual probe queue: %w", err)
+	}
+	accountIDs := make([]int64, 0, len(values))
+	for _, value := range values {
+		accountID, err := strconv.ParseInt(value, 10, 64)
+		if err == nil && accountID > 0 {
+			accountIDs = append(accountIDs, accountID)
+		}
+	}
+	return accountIDs, nil
 }
 
 func (c *firstTokenLatencyStatsCache) TryClaimManualProbe(ctx context.Context, accountIDs []int64, lease time.Duration) (int64, bool, error) {
@@ -374,7 +419,12 @@ func (c *firstTokenLatencyStatsCache) TryClaimManualProbe(ctx context.Context, a
 	for _, accountID := range validAccountIDs {
 		keys = append(keys, fmt.Sprintf("%s%d", totalLatencyProbePrefix, accountID))
 	}
-	claimedIndex, err := totalLatencyManualProbeClaimScript.Run(ctx, c.rdb, keys, len(validAccountIDs), int(lease.Seconds())).Int()
+	keys = append(keys, totalLatencyManualProbeQueueKey)
+	args := []any{len(validAccountIDs), int(lease.Seconds())}
+	for _, accountID := range validAccountIDs {
+		args = append(args, accountID)
+	}
+	claimedIndex, err := totalLatencyManualProbeClaimScript.Run(ctx, c.rdb, keys, args...).Int()
 	if err != nil {
 		return 0, false, fmt.Errorf("claim total-duration manual probe: %w", err)
 	}
