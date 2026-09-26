@@ -1017,7 +1017,7 @@ func (h *AccountHandler) accountFirstTokenLatencyMetrics(ctx context.Context) ([
 	return metrics, nil
 }
 
-// RequestFirstTokenManualProbe queues one account for the next fresh streaming
+// RequestFirstTokenManualProbe queues one account ahead of movable sticky streaming
 // assignment that can produce a completed total-duration sample.
 func (h *AccountHandler) RequestFirstTokenManualProbe(c *gin.Context) {
 	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)

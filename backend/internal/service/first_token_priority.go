@@ -113,6 +113,13 @@ type FirstTokenManualProbeCache interface {
 	TryClaimManualProbe(ctx context.Context, accountIDs []int64, lease time.Duration) (int64, bool, error)
 }
 
+// FirstTokenManualProbeQueue lets the scheduler inspect pending admin work
+// without consuming it before the account has passed validation and acquired a slot.
+type FirstTokenManualProbeQueue interface {
+	FirstTokenManualProbeCache
+	PendingManualProbeAccountIDs(ctx context.Context) ([]int64, error)
+}
+
 func isFirstTokenPriorityAccount(account *Account) bool {
 	return account != nil && account.Platform == PlatformOpenAI && account.Type == AccountTypeAPIKey && account.IsActive() && account.Schedulable
 }

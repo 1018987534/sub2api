@@ -106,7 +106,7 @@ export default {
       firstTokenCacheRate: '缓存率',
       firstTokenActions: '操作',
       firstTokenManualProbe: '立即探测 {account}',
-      firstTokenManualProbeQueued: '已安排 {account} 进入下一次总耗时探测',
+      firstTokenManualProbeQueued: '已将 {account} 设为最高探测优先级；下一次符合条件的请求（含可迁移的粘性会话）将优先尝试，账号忙时继续等待，10 分钟内有效',
       firstTokenManualProbeFailed: '安排总耗时探测失败'
     },
 
