@@ -31,7 +31,8 @@ const rows = ref<MonitorMatrixRow[]>([])
 const snapshot = ref<MonitorSnapshot | null>(null)
 const probes = ref<Record<string, IntelligenceRecord[]>>({})
 const probeMetadata = ref<Record<string, IntelligenceMetadata>>({})
-const loading = ref(false), error = ref(''), probeError = ref(false)
+const loading = ref(false), matrixError = ref(''), snapshotError = ref(''), probeError = ref(false)
+const error = computed(() => [matrixError.value, snapshotError.value].filter(Boolean).join('；'))
 const now = ref(Date.now()), serverOffset = ref(0), nextRefresh = ref(Date.now() + 60000)
 const enabled = computed(() => isChannelMonitorV2Mode())
 const countdown = computed(() => Math.max(0, Math.ceil((nextRefresh.value - now.value) / 1000)))
@@ -42,24 +43,34 @@ async function load() {
  const current = ++generation
  abort?.abort(); abort = new AbortController()
  const signal = abort.signal
- if (!enabled.value) { loading.value = false; rows.value = []; probes.value = {}; probeMetadata.value = {}; snapshot.value = null; error.value = ''; probeError.value = false; return }
- loading.value = true; error.value = ''
+ if (!enabled.value) { loading.value = false; rows.value = []; probes.value = {}; probeMetadata.value = {}; snapshot.value = null; matrixError.value = ''; snapshotError.value = ''; probeError.value = false; return }
+ loading.value = true; matrixError.value = ''; snapshotError.value = ''
  const filter = { range: range.value, platforms: [], groupIds: [], models: [] }
- try {
-  const [matrix, snap] = await Promise.all([getMatrix(filter, 'platform_group', false, signal), getSnapshot(filter, false, signal)])
-  if (current !== generation) return
-  rows.value = matrix.items; snapshot.value = snap
-  const ids = [...new Set(matrix.items.map(row => row.group_id).filter((id): id is number => !!id))]
+ // Each read commits independently, so a delayed summary cannot hide ready cards.
+ const matrixTask = (async () => {
   try {
-   const results = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) => getIntelligenceStatus(ids.slice(i * 100, (i + 1) * 100), signal)))
-   if (current !== generation) return
-   probes.value = Object.assign({}, ...results.map(result => result.groups))
-   probeMetadata.value = Object.assign({}, ...results.map(result => result.metadata || {}))
-   if (results.length) serverOffset.value = Date.parse(results[0].server_time) - Date.now()
-   probeError.value = false
-  } catch { if (!signal.aborted) probeError.value = true }
- } catch { if (!signal.aborted) error.value = '监控数据加载失败' }
- finally { if (current === generation) { loading.value = false; nextRefresh.value = Date.now() + (snapshot.value?.config.refresh_interval_seconds || 60) * 1000 } }
+   const matrix = await getMatrix(filter, 'platform_group', false, signal)
+   if (current !== generation || signal.aborted) return
+   rows.value = matrix.items
+   const ids = [...new Set(matrix.items.map(row => row.group_id).filter((id): id is number => !!id))]
+   try {
+    const results = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) => getIntelligenceStatus(ids.slice(i * 100, (i + 1) * 100), signal)))
+    if (current !== generation || signal.aborted) return
+    probes.value = Object.assign({}, ...results.map(result => result.groups))
+    probeMetadata.value = Object.assign({}, ...results.map(result => result.metadata || {}))
+    if (results.length) serverOffset.value = Date.parse(results[0].server_time) - Date.now()
+    probeError.value = false
+   } catch { if (current === generation && !signal.aborted) probeError.value = true }
+  } catch { if (current === generation && !signal.aborted) matrixError.value = '监控数据加载失败' }
+ })()
+ const snapshotTask = (async () => {
+  try {
+   const snap = await getSnapshot(filter, false, signal)
+   if (current === generation && !signal.aborted) snapshot.value = snap
+  } catch { if (current === generation && !signal.aborted) snapshotError.value = '监控汇总加载失败' }
+ })()
+ await Promise.all([matrixTask, snapshotTask])
+ if (current === generation) { loading.value = false; nextRefresh.value = Date.now() + (snapshot.value?.config.refresh_interval_seconds || 60) * 1000 }
 }
 watch([range, enabled], () => { void load() })
 onMounted(() => { void load(); timer = setInterval(() => { now.value = Date.now(); if (!loading.value && enabled.value && now.value >= nextRefresh.value) void load() }, 1000) })

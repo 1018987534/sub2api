@@ -69,7 +69,7 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 		AliyunCaptchaPrefix:                 settings.AliyunCaptchaPrefix,
 		AliyunCaptchaRegion:                 settings.AliyunCaptchaRegion,
 		SiteName:                            settings.SiteName,
-		SiteLogo:                            settings.SiteLogo,
+		SiteLogo:                            service.PublicSiteLogoURL(settings.SiteLogo),
 		SiteSubtitle:                        settings.SiteSubtitle,
 		APIBaseURL:                          settings.APIBaseURL,
 		ContactInfo:                         settings.ContactInfo,
@@ -126,6 +126,37 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 
 		AllowUserViewErrorRequests: settings.AllowUserViewErrorRequests,
 	})
+}
+
+func (h *SettingHandler) GetSiteLogo(c *gin.Context) {
+	asset, err := h.settingService.GetSiteLogoAsset(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if asset == nil || c.Param("version") != asset.Version {
+		c.Header("Cache-Control", "no-store")
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	etag := `"` + asset.Version + `"`
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Security-Policy", "default-src 'none'; sandbox")
+	for _, candidate := range strings.Split(c.GetHeader("If-None-Match"), ",") {
+		candidate = strings.TrimSpace(candidate)
+		candidate = strings.TrimSpace(strings.TrimPrefix(candidate, "W/"))
+		if candidate == "*" || candidate == etag {
+			c.AbortWithStatus(http.StatusNotModified)
+			return
+		}
+	}
+	if c.Request.Method == http.MethodHead {
+		c.Data(http.StatusOK, asset.ContentType, nil)
+		return
+	}
+	c.Data(http.StatusOK, asset.ContentType, asset.Data)
 }
 
 // UnsubscribeNotificationEmail handles optional notification email opt-outs.

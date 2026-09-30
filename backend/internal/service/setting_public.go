@@ -683,7 +683,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		AliyunCaptchaPrefix:                 settings.AliyunCaptchaPrefix,
 		AliyunCaptchaRegion:                 settings.AliyunCaptchaRegion,
 		SiteName:                            settings.SiteName,
-		SiteLogo:                            settings.SiteLogo,
+		SiteLogo:                            PublicSiteLogoURL(settings.SiteLogo),
 		SiteSubtitle:                        settings.SiteSubtitle,
 		APIBaseURL:                          settings.APIBaseURL,
 		ContactInfo:                         settings.ContactInfo,

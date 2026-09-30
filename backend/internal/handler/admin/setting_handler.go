@@ -98,6 +98,23 @@ func (h *SettingHandler) SetStepUpDeps(totpService *service.TotpService, userSer
 	h.userService = userService
 }
 
+// GetSidebarSettings omits branding, credentials and payment-provider configuration.
+func (h *SettingHandler) GetSidebarSettings(c *gin.Context) {
+	settings, err := h.settingService.GetSidebarSettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	opsEnabled := h.opsService != nil && h.opsService.IsMonitoringEnabled(c.Request.Context())
+	response.Success(c, gin.H{
+		"ops_monitoring_enabled":          opsEnabled && settings.OpsMonitoringEnabled,
+		"ops_realtime_monitoring_enabled": settings.OpsRealtimeMonitoringEnabled,
+		"ops_query_mode_default":          settings.OpsQueryModeDefault,
+		"custom_menu_items":               dto.ParseCustomMenuItems(settings.CustomMenuItems),
+		"payment_enabled":                 settings.PaymentEnabled,
+	})
+}
+
 // GetSettings 获取所有系统设置
 // GET /api/v1/admin/settings
 func (h *SettingHandler) GetSettings(c *gin.Context) {
