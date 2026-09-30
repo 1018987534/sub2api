@@ -267,6 +267,7 @@ func (h *SettingHandler) GetSettings(c *gin.Context) {
 		DefaultSignupAPIKeyGroupID:                             settings.DefaultSignupAPIKeyGroupID,
 		RiskControlEnabled:                                     settings.RiskControlEnabled,
 		CyberSessionBlockEnabled:                               settings.CyberSessionBlockEnabled,
+		CyberPolicyUserAllowlist:                               settings.CyberPolicyUserAllowlist,
 		CyberSessionBlockTTLSeconds:                            settings.CyberSessionBlockTTLSeconds,
 		AffiliateRebateRate:                                    settings.AffiliateRebateRate,
 		AffiliateRebateFreezeHours:                             settings.AffiliateRebateFreezeHours,
