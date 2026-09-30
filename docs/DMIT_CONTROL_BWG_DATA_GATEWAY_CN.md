@@ -22,12 +22,15 @@ Docker 服务名直接连接本机数据层；其余四个应用节点通过 Wir
 
 ## 边缘路由
 
-- `xiaohondou.com` 的普通网页和非 Responses API 固定进入 DMIT control。
+- `xiaohondou.com` 的普通网页和未参与分流的 API 固定进入 DMIT control；
+  Responses 和 Chat Completions 按同一份有效权重分流。
 - `control-origin.xiaohondou.com` 指向 DMIT，只服务 control 运行时和运维验证。
 - `gateway3-origin.xiaohondou.com` 仍指向 DMIT，供 Responses Worker 独立访问。
-- `gateway-bwg-origin.xiaohondou.com` 指向 BWG，只允许 health 和三类 Responses 路径。
-- Worker 继续只绑定 canonical 域名的 `/v1/responses*`、`/responses*` 和
-  `/backend-api/codex/responses*`，不得恢复退役域名路由。
+- `gateway-bwg-origin.xiaohondou.com` 指向 BWG，只允许 health、三类 Responses 路径和
+  `/v1/chat/completions`、`/chat/completions`。
+- Worker 只绑定 canonical 域名的 `/v1/responses*`、`/responses*`、
+  `/backend-api/codex/responses*`、`/v1/chat/completions*`、`/chat/completions*`，
+  不得恢复退役域名路由。Chat Completions 保留请求体、流式响应、鉴权和并发准入。
 
 动态权重由 DMIT control 的 `gateway_routing_settings` 和
 `GET /api/v1/gateway-routing/runtime` 提供。配置该地址后，Worker 冷启动或缓存过期
@@ -35,6 +38,20 @@ Docker 服务名直接连接本机数据层；其余四个应用节点通过 Wir
 TTL 为 5 秒，权威配置摘流后仍有最多约 5 秒的缓存传播窗口；已经发往源站的流无法迁移。
 静态百分比仅用于未配置运行时地址的部署。角色迁移不自动改变管理员目标权重；
 调整权重必须单独记录并验证五个节点之和。
+
+配置 `GATEWAY_ROUTING_RUNTIME_TOKEN` 的多节点部署中，降智检测的 Responses 和
+Chat Completions 请求改走管理员配置的公共 `api_base_url`，由同一 Worker 根据有效
+权重分流（包括管理员显式配置的满载兜底规则）。URL 只允许 HTTPS 公网域名或地址，
+以及根路径或 `/v1` 后缀；配置缺失、读取失败、路由不可用时记录检测错误，不回退
+本机、不重放模型 POST、不跟随重定向。未配置多节点路由的
+单机部署，以及尚未分流的 Messages 检测，保留原本机入口。
+
+首次发布 Chat Completions 分流时，先更新四个 gateway 的应用及 Nginx 白名单
+（参照 `deploy/multi-node/nginx/sub2api-gateway.conf.example`，保留现有 TLS、Host
+和访问控制），确认两个 Chat Completions 路径已进入鉴权，再发布 Worker 的五条路由，
+最后更新 control，确保检测切换公共入口时 Chat Completions 已能分流。
+仅推送代码不改变线上 Worker 或 Nginx 配置。
+
 迁移完成后的初始目标与静态变量统一为 BWG 10%、VMISS-01 10%、YT 54%、
 VMISS-02 10%、DMIT 16%，后续可从管理端动态调整。
 

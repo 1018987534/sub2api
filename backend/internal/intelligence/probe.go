@@ -18,12 +18,14 @@ type Prober interface {
 	Run(context.Context, Config) Record
 }
 
-// Endpoint is set by the host bridge to the local gateway, never by user input.
-// Credentials therefore cannot be forwarded to an arbitrary origin or redirect.
+// Endpoints are supplied by the host bridge from deployment configuration or
+// administrator-owned routing origins, never from a probe's user input.
+// Redirects remain forbidden so credentials stay on the selected origin.
 type HTTPProbe struct {
-	Endpoint string
-	Resolve  CredentialResolver
-	Client   *http.Client
+	Endpoint        string
+	ResolveEndpoint func(context.Context, Config) (string, error)
+	Resolve         CredentialResolver
+	Client          *http.Client
 }
 
 func (p *HTTPProbe) Run(parent context.Context, c Config) Record {
@@ -46,6 +48,14 @@ func (p *HTTPProbe) Run(parent context.Context, c Config) Record {
 }
 
 func (p *HTTPProbe) request(ctx context.Context, c Config) (string, error) {
+	endpoint := p.Endpoint
+	if p.ResolveEndpoint != nil {
+		var err error
+		endpoint, err = p.ResolveEndpoint(ctx, c)
+		if err != nil || strings.TrimSpace(endpoint) == "" {
+			return "", errors.New("检测分流入口不可用，请检查公共 API 地址配置")
+		}
+	}
 	key, err := p.Resolve(ctx, c)
 	if err != nil || strings.TrimSpace(key) == "" {
 		return "", errors.New("专用 API Key 不可用、已失效或分组/所有者不匹配")
@@ -78,7 +88,7 @@ func (p *HTTPProbe) request(ctx context.Context, c Config) (string, error) {
 	if err != nil {
 		return "", errors.New("无法编码检测请求")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.Endpoint+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+path, bytes.NewReader(raw))
 	if err != nil {
 		return "", errors.New("无法构造检测请求")
 	}

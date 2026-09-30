@@ -7,6 +7,8 @@ routes = [
   { pattern = "xiaohondou.com/v1/responses*", zone_name = "xiaohondou.com" },
   { pattern = "xiaohondou.com/responses*", zone_name = "xiaohondou.com" },
   { pattern = "xiaohondou.com/backend-api/codex/responses*", zone_name = "xiaohondou.com" },
+  { pattern = "xiaohondou.com/v1/chat/completions*", zone_name = "xiaohondou.com" },
+  { pattern = "xiaohondou.com/chat/completions*", zone_name = "xiaohondou.com" },
 ]
 
 [vars]

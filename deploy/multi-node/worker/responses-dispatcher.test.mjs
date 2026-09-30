@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import responsesDispatcher, {
   fetchRoutingNodes,
@@ -22,6 +23,49 @@ const env = {
   DMIT_US_01_ORIGIN: "https://dmit.example",
   DMIT_US_01_PERCENT: "5",
 };
+
+for (const path of ["/v1/chat/completions", "/chat/completions"]) {
+  test(`Chat Completions routing contract: ${path}`, async () => {
+    const config = readFileSync(new URL("./wrangler.toml", import.meta.url), "utf8");
+    assert.ok(config.includes(`pattern = "xiaohondou.com${path}*"`));
+    const nginx = readFileSync(new URL("../nginx/sub2api-gateway.conf.example", import.meta.url), "utf8");
+    const allowed = [...nginx.matchAll(/location ~ (\S+) \{/g)].some((match) => new RegExp(match[1]).test(path));
+    assert.ok(allowed, "gateway Nginx must admit the routed endpoint");
+    const originalFetch = globalThis.fetch;
+    const body = JSON.stringify({ model: "gpt-6-astra", messages: [{ role: "user", content: "fixture" }], stream: true });
+    try {
+      for (const status of [200, 503]) {
+        resetRoutingConfigCache();
+        let modelCalls = 0;
+        globalThis.fetch = async (input) => {
+          if (String(input) === "https://control.example/runtime") {
+            return Response.json({ nodes: [
+              { id: "dmit", origin: "https://dmit.example", effective_weight: 0 },
+              { id: "active", origin: "https://active.example", effective_weight: 100 },
+              { id: "peer", origin: "https://peer.example", effective_weight: 0 },
+            ] });
+          }
+          modelCalls++;
+          assert.equal(input.url, `https://active.example${path}`);
+          assert.equal(input.headers.get("Authorization"), "Bearer fixture-key");
+          assert.equal(await input.text(), body);
+          return new Response(status === 200 ? "data: [DONE]\n\n" : '{"error":"upstream failure"}', {
+            status, headers: { "Content-Type": status === 200 ? "text/event-stream" : "application/json" },
+          });
+        };
+        const response = await responsesDispatcher.fetch(new Request(`https://xiaohondou.com${path}`, {
+          method: "POST", headers: { Authorization: "Bearer fixture-key", "Content-Type": "application/json" }, body,
+        }), { ROUTING_CONFIG_URL: "https://control.example/runtime" });
+        assert.equal(response.status, status);
+        assert.equal(modelCalls, 1, "ordinary failures must not replay a billable POST");
+        if (status === 200) assert.equal(await response.text(), "data: [DONE]\n\n");
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      resetRoutingConfigCache();
+    }
+  });
+}
 
 function originsFor(randomValue, nodes = null) {
   return selectOrigins(

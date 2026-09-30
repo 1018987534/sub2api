@@ -58,7 +58,7 @@ func newGatewayRoutesTestRouterWithConfig(cfg *config.Config, platform ...string
 	return router
 }
 
-func TestResponsesGatewayRoutesExposeOnlyResponsesSurface(t *testing.T) {
+func TestResponsesGatewayRoutesExposeOnlyInferenceSurface(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	cfg := &config.Config{Gateway: config.GatewayConfig{MaxBodySize: 1024 * 1024}}
@@ -84,7 +84,7 @@ func TestResponsesGatewayRoutesExposeOnlyResponsesSurface(t *testing.T) {
 		require.True(t, registered[http.MethodGet+" "+path])
 		require.True(t, registered[http.MethodPost+" "+path+"/*subpath"])
 	}
-	for _, path := range []string{"/v1/chat/completions", "/v1/models", "/api/v1/admin/users", "/images/generations"} {
+	for _, path := range []string{"/v1/models", "/api/v1/admin/users", "/images/generations"} {
 		require.False(t, registered[http.MethodPost+" "+path])
 		require.False(t, registered[http.MethodGet+" "+path])
 	}
