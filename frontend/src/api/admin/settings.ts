@@ -1085,6 +1085,16 @@ export async function getSettings(): Promise<SystemSettings> {
   return data;
 }
 
+export type SidebarSettings = Pick<SystemSettings,
+  "ops_monitoring_enabled" | "ops_realtime_monitoring_enabled" |
+  "ops_query_mode_default" | "custom_menu_items" | "payment_enabled"
+>;
+
+export async function getSidebarSettings(): Promise<SidebarSettings> {
+  const { data } = await apiClient.get<SidebarSettings>("/admin/settings/sidebar");
+  return data;
+}
+
 /**
  * Update system settings
  * @param settings - Partial settings to update
@@ -1673,6 +1683,7 @@ export async function resetWebSearchUsage(payload: {
 
 export const settingsAPI = {
   getSettings,
+  getSidebarSettings,
   updateSettings,
   testSmtpConnection,
   sendTestEmail,
