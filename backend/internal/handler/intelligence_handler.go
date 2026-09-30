@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -36,7 +35,11 @@ func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyR
 		c, err := monitor.GetConfig(ctx)
 		return err == nil && c.Enabled
 	}
-	probe := &intelligence.HTTPProbe{Endpoint: fmt.Sprintf("http://127.0.0.1:%d", cfg.Server.Port), Resolve: h.credential}
+	var routing intelligenceRoutingProvider
+	if settings != nil {
+		routing = settings
+	}
+	probe := &intelligence.HTTPProbe{ResolveEndpoint: intelligenceProbeEndpoint(cfg, routing), Resolve: h.credential}
 	h.runner = intelligence.NewRunner(h.store, probe, enabled)
 	if cfg.IsControl() && os.Getenv("INTELLIGENCE_CHECKS_DISABLE_RUNNER") != "1" {
 		h.runner.Start()

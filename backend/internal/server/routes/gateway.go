@@ -237,13 +237,13 @@ func RegisterGatewayRoutes(
 			h.OpenAIGateway.ResponsesWebSocket(c)
 		}))
 		// OpenAI Chat Completions API: auto-route based on group platform
-		gateway.POST("/chat/completions", func(c *gin.Context) {
+		gateway.POST("/chat/completions", capacityAdmission(func(c *gin.Context) {
 			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 				h.OpenAIGateway.ChatCompletions(c)
 				return
 			}
 			h.Gateway.ChatCompletions(c)
-		})
+		}))
 		gateway.POST("/embeddings", textBodyLimit, func(c *gin.Context) {
 			if !isOpenAIOnlyEndpointGatewayPlatform(c) {
 				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
@@ -401,13 +401,13 @@ func RegisterGatewayRoutes(
 		codexDirect.GET("/models", codexModelsHandler)
 	}
 	// OpenAI Chat Completions API（不带v1前缀的别名）— auto-route based on group platform
-	rootRoute(http.MethodPost, "/chat/completions", bodyLimit, func(c *gin.Context) {
+	rootRoute(http.MethodPost, "/chat/completions", bodyLimit, capacityAdmission(func(c *gin.Context) {
 		if isOpenAIResponsesCompatibleGatewayPlatform(c) {
 			h.OpenAIGateway.ChatCompletions(c)
 			return
 		}
 		h.Gateway.ChatCompletions(c)
-	})
+	}))
 	rootRoute(http.MethodPost, "/embeddings", textBodyLimit, func(c *gin.Context) {
 		if !isOpenAIOnlyEndpointGatewayPlatform(c) {
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
@@ -532,7 +532,8 @@ func RegisterGatewayRoutes(
 // RegisterResponsesGatewayRoutes registers the narrow public surface used by a
 // gateway instance. It keeps the existing authentication, scheduling, billing,
 // usage-recording and streaming handlers, while avoiding registration of the
-// panel, payment, Gemini, image, and other non-Responses routes.
+// panel, payment, Gemini and image routes. Chat Completions shares the same
+// weighted edge routing and capacity admission as Responses.
 func RegisterResponsesGatewayRoutes(
 	r *gin.Engine,
 	h *handler.Handlers,
@@ -562,6 +563,21 @@ func RegisterResponsesGatewayRoutes(
 	for _, path := range []string{"/v1/responses", "/responses", "/backend-api/codex/responses"} {
 		r.POST(path, append(chain, capacityAdmission(responsesHandler))...)
 		r.POST(path+"/*subpath", append(chain, capacityAdmission(responsesHandler))...)
+	}
+	chatHandler := func(c *gin.Context) {
+		switch getGroupPlatform(c) {
+		case service.PlatformOpenAI, service.PlatformGrok,
+			service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek,
+			service.PlatformMiniMax, service.PlatformOpenCodeGo:
+			h.OpenAIGateway.ChatCompletions(c)
+		default:
+			h.Gateway.ChatCompletions(c)
+		}
+	}
+	chatChain := []gin.HandlerFunc{bodyLimit, clientRequestID, opsErrorLogger, endpointNorm,
+		gin.HandlerFunc(apiKeyAuth), middleware.GroupModelAllowlist(), compositeTarget, requireGroup}
+	for _, path := range []string{"/v1/chat/completions", "/chat/completions"} {
+		r.POST(path, append(chatChain, capacityAdmission(chatHandler))...)
 	}
 	ws := func(c *gin.Context) { h.OpenAIGateway.ResponsesWebSocket(c) }
 	for _, path := range []string{"/v1/responses", "/responses", "/backend-api/codex/responses"} {
