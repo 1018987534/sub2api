@@ -171,6 +171,7 @@ type SystemSettings struct {
 	DefaultSignupAPIKeyGroupID   int64
 	RiskControlEnabled           bool
 	CyberSessionBlockEnabled     bool
+	CyberPolicyUserAllowlist     string
 	CyberSessionBlockTTLSeconds  int
 	AffiliateEnabled             bool
 	AffiliateRebateRate          float64
