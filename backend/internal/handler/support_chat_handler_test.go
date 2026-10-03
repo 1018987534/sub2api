@@ -3,6 +3,7 @@ package handler
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"database/sql"
 	"mime/multipart"
 	"net/http/httptest"
@@ -104,9 +105,41 @@ func TestSupportChatAdminReadClearsAdminUnread(t *testing.T) {
 		WithArgs(int64(41)).WillReturnResult(sqlmock.NewResult(0, 1))
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Params = gin.Params{{Key: "id", Value: "41"}}
+	c.Request = httptest.NewRequest("POST", "/admin/chat/conversations/41/read", nil)
 	h.AdminRead(c)
 	require.Equal(t, 200, c.Writer.Status())
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSupportChatUnreadQueryStopsWhenRequestIsCancelled(t *testing.T) {
+	for _, admin := range []bool{false, true} {
+		t.Run(map[bool]string{false: "user", true: "admin"}[admin], func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+			query := mock.ExpectQuery("SELECT .* FROM support_conversations")
+			if !admin {
+				query.WithArgs(int64(7))
+			}
+			query.WillDelayFor(200 * time.Millisecond).
+				WillReturnRows(sqlmock.NewRows([]string{"unread_count"}).AddRow(0))
+
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer cancel()
+			c := supportChatTestContext()
+			c.Request = c.Request.WithContext(ctx)
+			h := NewSupportChatHandler(db, nil)
+			if admin {
+				h.AdminUnreadCount(c)
+			} else {
+				h.UnreadCount(c)
+			}
+
+			require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+			require.Equal(t, 500, c.Writer.Status(), "cancelled SQL must not return a successful unread count")
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }
 
 func TestSupportChatAdminConversationsHidesEmptyConversations(t *testing.T) {
