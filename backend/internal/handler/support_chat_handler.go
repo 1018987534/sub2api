@@ -106,11 +106,11 @@ func (h *SupportChatHandler) ensureConversation(c *gin.Context, userID int64) (s
 	if h.db == nil {
 		return supportConversation{}, fmt.Errorf("support chat database is unavailable")
 	}
-	if _, err := h.db.ExecContext(c, `INSERT INTO support_conversations (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, userID); err != nil {
+	if _, err := h.db.ExecContext(c.Request.Context(), `INSERT INTO support_conversations (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`, userID); err != nil {
 		return supportConversation{}, err
 	}
 	var out supportConversation
-	err := h.db.QueryRowContext(c, `SELECT id,user_id,unread_by_user,unread_by_admin,manually_unread_by_admin,last_message_at,updated_at FROM support_conversations WHERE user_id=$1`, userID).Scan(&out.ID, &out.UserID, &out.UnreadByUser, &out.UnreadByAdmin, &out.ManuallyUnreadByAdmin, &out.LastMessageAt, &out.UpdatedAt)
+	err := h.db.QueryRowContext(c.Request.Context(), `SELECT id,user_id,unread_by_user,unread_by_admin,manually_unread_by_admin,last_message_at,updated_at FROM support_conversations WHERE user_id=$1`, userID).Scan(&out.ID, &out.UserID, &out.UnreadByUser, &out.UnreadByAdmin, &out.ManuallyUnreadByAdmin, &out.LastMessageAt, &out.UpdatedAt)
 	return out, err
 }
 
@@ -145,7 +145,7 @@ func (h *SupportChatHandler) listMessages(c *gin.Context, id int64) {
 	if n, e := strconv.Atoi(c.Query("page_size")); e == nil && n > 0 && n <= 200 {
 		limit = n
 	}
-	rows, err := h.db.QueryContext(c, `SELECT m.id,m.conversation_id,m.sender_type,m.sender_id,m.content,m.kind,m.created_at,m.recalled_at,a.id,a.filename,a.content_type,a.size_bytes FROM support_messages m LEFT JOIN support_attachments a ON a.message_id=m.id WHERE m.conversation_id=$1 ORDER BY m.created_at ASC,m.id ASC LIMIT $2`, id, limit)
+	rows, err := h.db.QueryContext(c.Request.Context(), `SELECT m.id,m.conversation_id,m.sender_type,m.sender_id,m.content,m.kind,m.created_at,m.recalled_at,a.id,a.filename,a.content_type,a.size_bytes FROM support_messages m LEFT JOIN support_attachments a ON a.message_id=m.id WHERE m.conversation_id=$1 ORDER BY m.created_at ASC,m.id ASC LIMIT $2`, id, limit)
 	if err != nil {
 		response.Error(c, 500, err.Error())
 		return
@@ -188,13 +188,13 @@ func (h *SupportChatHandler) insertMessage(c *gin.Context, conversationID, sende
 		in.IdempotencyKey = fmt.Sprintf("%s-%d-%d", senderType, senderID, time.Now().UnixNano())
 	}
 	var m supportMessage
-	err := h.db.QueryRowContext(c, `INSERT INTO support_messages (conversation_id,sender_type,sender_id,content,kind,idempotency_key) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id,conversation_id,sender_type,sender_id,content,kind,created_at,recalled_at`, conversationID, senderType, senderID, in.Content, in.Kind, in.IdempotencyKey).Scan(&m.ID, &m.ConversationID, &m.SenderType, &m.SenderID, &m.Content, &m.Kind, &m.CreatedAt, &m.RecalledAt)
+	err := h.db.QueryRowContext(c.Request.Context(), `INSERT INTO support_messages (conversation_id,sender_type,sender_id,content,kind,idempotency_key) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id,conversation_id,sender_type,sender_id,content,kind,created_at,recalled_at`, conversationID, senderType, senderID, in.Content, in.Kind, in.IdempotencyKey).Scan(&m.ID, &m.ConversationID, &m.SenderType, &m.SenderID, &m.Content, &m.Kind, &m.CreatedAt, &m.RecalledAt)
 	isNew := true
 	if err == sql.ErrNoRows {
 		// A retried request returns the original message and must not increment
 		// the unread counter again. Keep the key scoped to its original sender
 		// and conversation so a key cannot replay another conversation's message.
-		err = h.db.QueryRowContext(c, `SELECT id,conversation_id,sender_type,sender_id,content,kind,created_at,recalled_at FROM support_messages WHERE idempotency_key=$1 AND conversation_id=$2 AND sender_type=$3 AND sender_id=$4`, in.IdempotencyKey, conversationID, senderType, senderID).Scan(&m.ID, &m.ConversationID, &m.SenderType, &m.SenderID, &m.Content, &m.Kind, &m.CreatedAt, &m.RecalledAt)
+		err = h.db.QueryRowContext(c.Request.Context(), `SELECT id,conversation_id,sender_type,sender_id,content,kind,created_at,recalled_at FROM support_messages WHERE idempotency_key=$1 AND conversation_id=$2 AND sender_type=$3 AND sender_id=$4`, in.IdempotencyKey, conversationID, senderType, senderID).Scan(&m.ID, &m.ConversationID, &m.SenderType, &m.SenderID, &m.Content, &m.Kind, &m.CreatedAt, &m.RecalledAt)
 		if err != nil {
 			return m, err
 		}
@@ -209,7 +209,7 @@ func (h *SupportChatHandler) insertMessage(c *gin.Context, conversationID, sende
 	if senderType == "user" {
 		column = "unread_by_admin"
 	}
-	_, err = h.db.ExecContext(c, fmt.Sprintf(`UPDATE support_conversations SET %s=%s+1,last_message_at=$2,updated_at=$2 WHERE id=$1`, column, column), conversationID, m.CreatedAt)
+	_, err = h.db.ExecContext(c.Request.Context(), fmt.Sprintf(`UPDATE support_conversations SET %s=%s+1,last_message_at=$2,updated_at=$2 WHERE id=$1`, column, column), conversationID, m.CreatedAt)
 	return m, err
 }
 
@@ -217,7 +217,7 @@ func (h *SupportChatHandler) insertMessageWithAttachment(c *gin.Context, convers
 	if upload == nil || len(upload.Data) == 0 {
 		return supportMessage{}, fmt.Errorf("attachment is empty")
 	}
-	tx, err := h.db.BeginTx(c, nil)
+	tx, err := h.db.BeginTx(c.Request.Context(), nil)
 	if err != nil {
 		return supportMessage{}, err
 	}
@@ -226,9 +226,9 @@ func (h *SupportChatHandler) insertMessageWithAttachment(c *gin.Context, convers
 		in.IdempotencyKey = fmt.Sprintf("%s-%d-%d", senderType, senderID, time.Now().UnixNano())
 	}
 	var m supportMessage
-	err = tx.QueryRowContext(c, `INSERT INTO support_messages (conversation_id,sender_type,sender_id,content,kind,idempotency_key) VALUES ($1,$2,$3,$4,'file',$5) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id,conversation_id,sender_type,sender_id,content,kind,created_at,recalled_at`, conversationID, senderType, senderID, in.Content, in.IdempotencyKey).Scan(&m.ID, &m.ConversationID, &m.SenderType, &m.SenderID, &m.Content, &m.Kind, &m.CreatedAt, &m.RecalledAt)
+	err = tx.QueryRowContext(c.Request.Context(), `INSERT INTO support_messages (conversation_id,sender_type,sender_id,content,kind,idempotency_key) VALUES ($1,$2,$3,$4,'file',$5) ON CONFLICT (idempotency_key) DO NOTHING RETURNING id,conversation_id,sender_type,sender_id,content,kind,created_at,recalled_at`, conversationID, senderType, senderID, in.Content, in.IdempotencyKey).Scan(&m.ID, &m.ConversationID, &m.SenderType, &m.SenderID, &m.Content, &m.Kind, &m.CreatedAt, &m.RecalledAt)
 	if err == sql.ErrNoRows {
-		err = tx.QueryRowContext(c, `SELECT id,conversation_id,sender_type,sender_id,content,kind,created_at,recalled_at FROM support_messages WHERE idempotency_key=$1 AND conversation_id=$2 AND sender_type=$3 AND sender_id=$4`, in.IdempotencyKey, conversationID, senderType, senderID).Scan(&m.ID, &m.ConversationID, &m.SenderType, &m.SenderID, &m.Content, &m.Kind, &m.CreatedAt, &m.RecalledAt)
+		err = tx.QueryRowContext(c.Request.Context(), `SELECT id,conversation_id,sender_type,sender_id,content,kind,created_at,recalled_at FROM support_messages WHERE idempotency_key=$1 AND conversation_id=$2 AND sender_type=$3 AND sender_id=$4`, in.IdempotencyKey, conversationID, senderType, senderID).Scan(&m.ID, &m.ConversationID, &m.SenderType, &m.SenderID, &m.Content, &m.Kind, &m.CreatedAt, &m.RecalledAt)
 		if err != nil {
 			return m, err
 		}
@@ -242,7 +242,7 @@ func (h *SupportChatHandler) insertMessageWithAttachment(c *gin.Context, convers
 		return m, err
 	}
 	var attachmentID int64
-	err = tx.QueryRowContext(c, `INSERT INTO support_attachments (message_id,conversation_id,uploader_type,uploader_id,filename,content_type,size_bytes,data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, m.ID, conversationID, senderType, senderID, upload.Filename, upload.ContentType, len(upload.Data), upload.Data).Scan(&attachmentID)
+	err = tx.QueryRowContext(c.Request.Context(), `INSERT INTO support_attachments (message_id,conversation_id,uploader_type,uploader_id,filename,content_type,size_bytes,data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, m.ID, conversationID, senderType, senderID, upload.Filename, upload.ContentType, len(upload.Data), upload.Data).Scan(&attachmentID)
 	if err != nil {
 		return m, err
 	}
@@ -250,7 +250,7 @@ func (h *SupportChatHandler) insertMessageWithAttachment(c *gin.Context, convers
 	if senderType == "user" {
 		column = "unread_by_admin"
 	}
-	if _, err = tx.ExecContext(c, fmt.Sprintf(`UPDATE support_conversations SET %s=%s+1,last_message_at=$2,updated_at=$2 WHERE id=$1`, column, column), conversationID, m.CreatedAt); err != nil {
+	if _, err = tx.ExecContext(c.Request.Context(), fmt.Sprintf(`UPDATE support_conversations SET %s=%s+1,last_message_at=$2,updated_at=$2 WHERE id=$1`, column, column), conversationID, m.CreatedAt); err != nil {
 		return m, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -262,7 +262,7 @@ func (h *SupportChatHandler) insertMessageWithAttachment(c *gin.Context, convers
 
 func (h *SupportChatHandler) attachmentMetadata(c *gin.Context, messageID int64) *supportAttachment {
 	var a supportAttachment
-	if err := h.db.QueryRowContext(c, `SELECT id,filename,content_type,size_bytes FROM support_attachments WHERE message_id=$1`, messageID).Scan(&a.ID, &a.Filename, &a.ContentType, &a.SizeBytes); err != nil {
+	if err := h.db.QueryRowContext(c.Request.Context(), `SELECT id,filename,content_type,size_bytes FROM support_attachments WHERE message_id=$1`, messageID).Scan(&a.ID, &a.Filename, &a.ContentType, &a.SizeBytes); err != nil {
 		return nil
 	}
 	return &a
@@ -402,7 +402,7 @@ func (h *SupportChatHandler) serveAttachment(c *gin.Context, admin bool) {
 	}
 	var filename, contentType string
 	var data []byte
-	if err := h.db.QueryRowContext(c, query, args...).Scan(&filename, &contentType, &data); err == sql.ErrNoRows {
+	if err := h.db.QueryRowContext(c.Request.Context(), query, args...).Scan(&filename, &contentType, &data); err == sql.ErrNoRows {
 		response.NotFound(c, "Attachment not found")
 		return
 	} else if err != nil {
@@ -446,7 +446,7 @@ func (h *SupportChatHandler) Read(c *gin.Context) {
 		response.Unauthorized(c, "User not authenticated")
 		return
 	}
-	_, err := h.db.ExecContext(c, `UPDATE support_conversations SET unread_by_user=0,updated_at=NOW() WHERE user_id=$1`, s.UserID)
+	_, err := h.db.ExecContext(c.Request.Context(), `UPDATE support_conversations SET unread_by_user=0,updated_at=NOW() WHERE user_id=$1`, s.UserID)
 	if err != nil {
 		response.Error(c, 500, err.Error())
 		return
@@ -460,7 +460,7 @@ func (h *SupportChatHandler) UnreadCount(c *gin.Context) {
 		return
 	}
 	var n int
-	err := h.db.QueryRowContext(c, `SELECT unread_by_user FROM support_conversations WHERE user_id=$1`, s.UserID).Scan(&n)
+	err := h.db.QueryRowContext(c.Request.Context(), `SELECT unread_by_user FROM support_conversations WHERE user_id=$1`, s.UserID).Scan(&n)
 	if err == sql.ErrNoRows {
 		n = 0
 		err = nil
@@ -475,7 +475,7 @@ func (h *SupportChatHandler) UnreadCount(c *gin.Context) {
 func (h *SupportChatHandler) AdminConversations(c *gin.Context) {
 	search := strings.TrimSpace(c.Query("search"))
 	unread := c.Query("unread_only") == "1" || strings.EqualFold(c.Query("unread_only"), "true")
-	rows, err := h.db.QueryContext(c, `SELECT c.id,c.user_id,u.email,u.username,c.unread_by_user,c.unread_by_admin,c.manually_unread_by_admin,c.last_message_at,c.updated_at FROM support_conversations c JOIN users u ON u.id=c.user_id WHERE EXISTS (SELECT 1 FROM support_messages m WHERE m.conversation_id=c.id) AND ($1='' OR u.email ILIKE '%'||$1||'%' OR u.username ILIKE '%'||$1||'%') AND ($2=false OR c.unread_by_admin>0 OR c.manually_unread_by_admin) ORDER BY COALESCE(c.last_message_at,c.updated_at) DESC,c.id DESC LIMIT 100`, search, unread)
+	rows, err := h.db.QueryContext(c.Request.Context(), `SELECT c.id,c.user_id,u.email,u.username,c.unread_by_user,c.unread_by_admin,c.manually_unread_by_admin,c.last_message_at,c.updated_at FROM support_conversations c JOIN users u ON u.id=c.user_id WHERE EXISTS (SELECT 1 FROM support_messages m WHERE m.conversation_id=c.id) AND ($1='' OR u.email ILIKE '%'||$1||'%' OR u.username ILIKE '%'||$1||'%') AND ($2=false OR c.unread_by_admin>0 OR c.manually_unread_by_admin) ORDER BY COALESCE(c.last_message_at,c.updated_at) DESC,c.id DESC LIMIT 100`, search, unread)
 	if err != nil {
 		response.Error(c, 500, err.Error())
 		return
@@ -529,7 +529,7 @@ func (h *SupportChatHandler) AdminSend(c *gin.Context) {
 }
 func (h *SupportChatHandler) AdminRead(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	_, err := h.db.ExecContext(c, `UPDATE support_conversations SET unread_by_admin=0,manually_unread_by_admin=false,updated_at=NOW() WHERE id=$1`, id)
+	_, err := h.db.ExecContext(c.Request.Context(), `UPDATE support_conversations SET unread_by_admin=0,manually_unread_by_admin=false,updated_at=NOW() WHERE id=$1`, id)
 	if err != nil {
 		response.Error(c, 500, err.Error())
 		return
@@ -538,7 +538,7 @@ func (h *SupportChatHandler) AdminRead(c *gin.Context) {
 }
 func (h *SupportChatHandler) AdminUnreadCount(c *gin.Context) {
 	var n int
-	err := h.db.QueryRowContext(c, `SELECT COALESCE(SUM(unread_by_admin),0) FROM support_conversations`).Scan(&n)
+	err := h.db.QueryRowContext(c.Request.Context(), `SELECT COALESCE(SUM(unread_by_admin),0) FROM support_conversations`).Scan(&n)
 	if err != nil {
 		response.Error(c, 500, err.Error())
 		return

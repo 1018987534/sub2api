@@ -24,12 +24,13 @@ import SupportMessageComposer from '@/components/support/SupportMessageComposer.
 import supportChatAPI, { type SupportMessage } from '@/api/supportChat'
 
 const { t, locale } = useI18n(); const messages = ref<SupportMessage[]>([]); const draft = ref(''); const file = ref<File | null>(null); const error = ref(''); const loading = ref(false); const sending = ref(false); const messagePane = ref<HTMLElement | null>(null); let timer: ReturnType<typeof setInterval> | undefined
+let disposed = false
 const formatTime = (value: string) => new Intl.DateTimeFormat(locale.value, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 const formatBytes = (value: number) => value < 1024 * 1024 ? `${Math.ceil(value / 1024)} KB` : `${(value / 1024 / 1024).toFixed(1)} MB`
 async function openAttachment(attachment: NonNullable<SupportMessage['attachment']>) { const blob = await supportChatAPI.fetchAttachment(attachment.id); const url = URL.createObjectURL(blob); window.open(url, '_blank', 'noopener'); setTimeout(() => URL.revokeObjectURL(url), 60000) }
 async function scrollBottom() { await nextTick(); if (messagePane.value) messagePane.value.scrollTop = messagePane.value.scrollHeight }
 async function load() { loading.value = true; try { const page = await supportChatAPI.messages(); messages.value = page.items; await supportChatAPI.read(); await scrollBottom() } finally { loading.value = false } }
 async function send() { const content = draft.value.trim(); if ((!content && !file.value) || sending.value) return; sending.value = true; error.value = ''; try { const message = await supportChatAPI.send(content, file.value || undefined); messages.value = [...messages.value, message]; draft.value = ''; file.value = null; await scrollBottom() } catch (err: any) { error.value = err?.message || t('supportChat.sendFailed') } finally { sending.value = false } }
-onMounted(async () => { await load(); timer = setInterval(() => { if (document.visibilityState === 'visible' && !sending.value) void load() }, 15000) })
-onBeforeUnmount(() => { if (timer) clearInterval(timer) })
+onMounted(async () => { await load(); if (disposed) return; timer = setInterval(() => { if (document.visibilityState === 'visible' && !sending.value) void load() }, 15000) })
+onBeforeUnmount(() => { disposed = true; if (timer) clearInterval(timer) })
 </script>

@@ -266,10 +266,12 @@ let supportUnreadTimer: ReturnType<typeof setInterval> | undefined
 let supportUnreadRequest: Promise<void> | null = null
 let lotteryAvailabilityTimer: ReturnType<typeof setInterval> | undefined
 let lotteryAvailabilityRequest: Promise<void> | null = null
+let sidebarPollingActive = false
 
 const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
 
 async function refreshSupportUnread() {
+  if (!sidebarPollingActive) return
   if (!authStore.isAuthenticated) {
     supportUnreadCount.value = 0
     return
@@ -299,6 +301,7 @@ function handleSupportChatRead() {
 }
 
 async function refreshLotteryAvailability() {
+  if (!sidebarPollingActive) return
   if (!authStore.isAuthenticated) {
     lotteryAvailable.value = false
     return
@@ -307,6 +310,7 @@ async function refreshLotteryAvailability() {
   lotteryAvailabilityRequest = (async () => {
     try {
       const current = await lotteryAPI.getCurrent()
+      if (!sidebarPollingActive) return
       if (appStore.cachedPublicSettings?.lottery_enabled !== current.enabled) {
         await appStore.fetchPublicSettings(true)
       }
@@ -1113,11 +1117,9 @@ function persistSidebarScrollPosition() {
   appStore.sidebarScrollTop = lastKnownSidebarScrollTop.value
 }
 
-onMounted(() => {
-  void refreshBatchImageAccess()
-  if (isAdmin.value) {
-    adminSettingsStore.fetch()
-  }
+function startSidebarPolling() {
+  if (sidebarPollingActive) return
+  sidebarPollingActive = true
   void refreshSupportUnread()
   supportUnreadTimer = setInterval(() => {
     if (document.visibilityState === 'visible') void refreshSupportUnread()
@@ -1128,20 +1130,35 @@ onMounted(() => {
   }, 15000)
   window.addEventListener('support-chat-read', handleSupportChatRead)
   window.addEventListener('lottery-availability-changed', handleLotteryAvailabilityChanged)
+}
+
+function stopSidebarPolling() {
+  sidebarPollingActive = false
+  if (supportUnreadTimer) clearInterval(supportUnreadTimer)
+  if (lotteryAvailabilityTimer) clearInterval(lotteryAvailabilityTimer)
+  supportUnreadTimer = undefined
+  lotteryAvailabilityTimer = undefined
+  window.removeEventListener('support-chat-read', handleSupportChatRead)
+  window.removeEventListener('lottery-availability-changed', handleLotteryAvailabilityChanged)
+}
+
+onMounted(() => {
+  void refreshBatchImageAccess()
+  if (isAdmin.value) {
+    adminSettingsStore.fetch()
+  }
+  startSidebarPolling()
   restoreSidebarScrollPosition()
 })
 
 // ImageStudioView is kept alive together with its layout. The DOM can report
 // scrollTop=0 after deactivation, so persist the last value captured by scroll.
 onActivated(restoreSidebarScrollPosition)
+onActivated(startSidebarPolling)
 onDeactivated(persistSidebarScrollPosition)
+onDeactivated(stopSidebarPolling)
 onBeforeUnmount(persistSidebarScrollPosition)
-onBeforeUnmount(() => {
-  if (supportUnreadTimer) clearInterval(supportUnreadTimer)
-  if (lotteryAvailabilityTimer) clearInterval(lotteryAvailabilityTimer)
-  window.removeEventListener('support-chat-read', handleSupportChatRead)
-  window.removeEventListener('lottery-availability-changed', handleLotteryAvailabilityChanged)
-})
+onBeforeUnmount(stopSidebarPolling)
 </script>
 
 <style scoped>
