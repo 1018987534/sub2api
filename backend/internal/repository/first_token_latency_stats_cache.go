@@ -21,8 +21,8 @@ const totalLatencyDimensionStatsPrefix = "scheduler:total_duration:dimension:acc
 const totalLatencyDimensionSamplesPrefix = "scheduler:total_duration:dimension:samples:"
 const totalLatencyDimensionProbePrefix = "scheduler:total_duration:dimension:probe:"
 const totalLatencyDimensionManualProbePrefix = "scheduler:total_duration:dimension:manual_probe:"
-const totalLatencyFastThresholdMS = 17_000
-const totalLatencySlowThresholdMS = 21_000
+const totalLatencyFastThresholdMS = 30_000
+const totalLatencySlowThresholdMS = 33_000
 
 // Each completed, billable stream updates one timestamped 24-hour window and
 // atomically derives the scheduling score. The score is the 10%-90% trimmed
@@ -51,6 +51,9 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 
 	if redis.call('SET', dedupe_key, '1', 'NX', 'EX', dedupe_ttl_seconds) == false then
+		return 0
+	end
+	if tonumber(redis.call('HGET', stats_key, 'intelligence_pause_until_ms') or '0') > now_ms then
 		return 0
 	end
 
@@ -186,6 +189,31 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	-- scheduling attempt. Only the scheduler may consume pending manual work.
 	return 1
 `)
+
+var totalLatencyIntelligenceResetScript = redis.NewScript(`
+ redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
+ redis.call('ZREM', KEYS[5], ARGV[1])
+ local now = redis.call('TIME')
+ local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+ redis.call('HSET', KEYS[1], 'sample_count', '0', 'window_hours', '0',
+   'is_fast', '0', 'enter_fast_streak', '0', 'exit_slow_streak', '0',
+   'circuit_broken', '1', 'score_version', '5', 'updated_at_ms', tostring(now_ms),
+   'intelligence_pause_until_ms', ARGV[2])
+ redis.call('EXPIRE', KEYS[1], 93600)
+ return 1
+`)
+
+func (c *firstTokenLatencyStatsCache) ResetForIntelligencePause(ctx context.Context, accountID int64, until time.Time) error {
+	if accountID <= 0 || !until.After(time.Now()) {
+		return fmt.Errorf("invalid intelligence pause")
+	}
+	id := strconv.FormatInt(accountID, 10)
+	return totalLatencyIntelligenceResetScript.Run(ctx, c.rdb, []string{
+		totalLatencyStatsPrefix + id, totalLatencySamplesPrefix + id,
+		totalLatencyProbePrefix + id, totalLatencyManualProbePrefix + id,
+		totalLatencyManualProbeQueueKey,
+	}, id, until.UnixMilli()).Err()
+}
 
 var totalLatencyManualProbeRequestScript = redis.NewScript(`
 	local now = redis.call('TIME')

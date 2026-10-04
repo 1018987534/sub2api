@@ -69,7 +69,7 @@ func TestIntelligenceFinishFencing(t *testing.T) {
 			}
 			mock.ExpectExec("UPDATE intelligence_check_configs SET lease_token=NULL").WithArgs(int64(1), "fence").WillReturnResult(sqlmock.NewResult(0, rows))
 			if owned {
-				mock.ExpectExec("INSERT INTO intelligence_check_runs").WithArgs(int64(1), sqlmock.AnyArg(), int64(1), "normal", "21", "", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec("INSERT INTO intelligence_check_runs").WithArgs(int64(1), sqlmock.AnyArg(), int64(1), "normal", "21", "", sqlmock.AnyArg(), int64(0), "", false).WillReturnResult(sqlmock.NewResult(1, 1))
 				mock.ExpectCommit()
 			} else {
 				mock.ExpectRollback()

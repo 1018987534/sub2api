@@ -26,8 +26,17 @@ type IntelligenceHandler struct {
 	monitor *service.ChannelMonitorV2Service
 }
 
-func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyRepository, groups service.GroupRepository, access *service.APIKeyService, settings *service.SettingService, monitor *service.ChannelMonitorV2Service) *IntelligenceHandler {
+func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyRepository, groups service.GroupRepository, access *service.APIKeyService, settings *service.SettingService, monitor *service.ChannelMonitorV2Service, gateway *service.OpenAIGatewayService) *IntelligenceHandler {
 	h := &IntelligenceHandler{store: &intelligence.SQLStore{DB: db}, keys: keys, groups: groups, access: access, monitor: monitor}
+	if gateway != nil && groups != nil {
+		h.store.(*intelligence.SQLStore).Protect = func(ctx context.Context, c intelligence.Config, accountID int64) (bool, error) {
+			group, err := groups.GetByID(ctx, c.GroupID)
+			if err != nil {
+				return false, err
+			}
+			return gateway.ProtectDegradedIntelligenceAccount(ctx, group, accountID, c.Model, c.UpdatedBy)
+		}
+	}
 	enabled := func(ctx context.Context) bool {
 		if !cfg.IsControl() || settings == nil || !settings.GetChannelMonitorRuntime(ctx).PassiveAggregationAllowed() {
 			return false
@@ -240,6 +249,8 @@ func (h *IntelligenceHandler) Status(c *gin.Context) {
 			records[i].Answer = ""
 			records[i].Error = ""
 			records[i].Config = nil
+			records[i].AccountID = 0
+			records[i].Paused = false
 		}
 		result[cfg.GroupID] = records
 		// Expose only display metadata for requested, authorized groups.

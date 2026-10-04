@@ -13,7 +13,7 @@ import (
 const (
 	firstTokenPriorityMinimumSamples = 20
 	firstTokenPriorityFreshFor       = 6 * time.Hour
-	firstTokenPriorityFastThreshold  = 17_000.0
+	firstTokenPriorityFastThreshold  = 30_000.0
 	firstTokenPriorityProbeBase      = 2 * time.Minute
 	firstTokenPriorityRecoveryProbe  = 30 * time.Second
 	firstTokenPriorityProbeMax       = 6 * time.Hour
@@ -164,7 +164,13 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 	eligible := make([]Account, 0, len(accounts))
 	accountIDs := make([]int64, 0, len(accounts))
 	for _, account := range accounts {
-		if !isFirstTokenPriorityAccount(&account) || !account.IsSchedulable() {
+		visible := account
+		// Keep intelligence-paused accounts visible as pending collection in the
+		// admin pool view. This copy is for display only, never for scheduling.
+		if strings.HasPrefix(account.TempUnschedulableReason, "intelligence:") {
+			visible.TempUnschedulableUntil = nil
+		}
+		if !isFirstTokenPriorityAccount(&account) || !visible.IsSchedulable() {
 			continue
 		}
 		eligible = append(eligible, account)
@@ -478,7 +484,8 @@ func firstTokenPriorityOrderWithStats(accountIDs []int64, stats map[int64]FirstT
 		}
 		ranked = append(ranked, firstTokenRankedAccount{id: accountID, stats: stat, known: known, original: index})
 	}
-	// A confirmed account at or below 17 seconds is in a separate fast pool. Keep the
+	// A confirmed account enters at 30 seconds and retains its pool through the
+	// 33-second exit boundary. Keep the
 	// caller's baseline order inside that pool (the scheduler has already
 	// applied low-rate ordering), and put slower/unknown accounts behind it.
 	// This preserves fast-pool priority even when one account remains slow.
@@ -628,9 +635,9 @@ func firstTokenPriorityStatsFast(stats FirstTokenLatencyStats, now time.Time) bo
 	age := now.Sub(stats.UpdatedAt)
 	confirmed := stats.ReliableFast
 	if !stats.FastConfirmationTracked {
-		confirmed = stats.SampleCount >= 3
+		confirmed = stats.SampleCount >= 3 && stats.PredictedMS <= firstTokenPriorityFastThreshold
 	}
-	return confirmed && firstTokenPriorityStatsReliable(stats) && age >= 0 && age <= firstTokenPriorityFreshFor && stats.PredictedMS <= firstTokenPriorityFastThreshold
+	return confirmed && firstTokenPriorityStatsReliable(stats) && age >= 0 && age <= firstTokenPriorityFreshFor
 }
 
 // Hard session affinity is allowed only inside the current fast pool. A slow or

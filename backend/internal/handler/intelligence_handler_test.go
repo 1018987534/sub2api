@@ -44,7 +44,7 @@ func (s *intelligenceHistoryStore) History(_ context.Context, id int64, since ti
 	c.Prompt = "secret prompt"
 	c.APIKeyID = 123
 	c.UpdatedBy = 456
-	return []intelligence.Record{{ID: 1, GroupID: id, CheckedAt: time.Now(), Status: "normal", Answer: "secret answer", Error: "secret error", Config: &c}}, nil
+	return []intelligence.Record{{ID: 1, GroupID: id, AccountID: 99, Paused: true, RequestID: "private-request", CheckedAt: time.Now(), Status: "normal", Answer: "secret answer", Error: "secret error", Config: &c}}, nil
 }
 func TestIntelligenceStatusAuthorizationAndRedaction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -59,7 +59,7 @@ func TestIntelligenceStatusAuthorizationAndRedaction(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, []int64{1}, store.requested)
 	body := w.Body.String()
-	for _, secret := range []string{"secret", "prompt", "answer", "api_key_id", "updated_by", `"config":`} {
+	for _, secret := range []string{"secret", "prompt", "answer", "api_key_id", "updated_by", "account_id", "paused", "private-request", `"config":`} {
 		require.NotContains(t, body, secret)
 	}
 	var decoded struct {
