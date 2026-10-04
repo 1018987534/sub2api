@@ -238,30 +238,26 @@ type PricingRemoteClient interface {
 
 // LiteLLMRawEntry 用于解析原始JSON数据
 type LiteLLMRawEntry struct {
-	InputCostPerToken                    *float64 `json:"input_cost_per_token"`
-	InputCostPerTokenAbove272K           *float64 `json:"input_cost_per_token_above_272k_tokens"`
-	InputCostPerTokenPriority            *float64 `json:"input_cost_per_token_priority"`
-	OutputCostPerToken                   *float64 `json:"output_cost_per_token"`
-	OutputCostPerTokenAbove272K          *float64 `json:"output_cost_per_token_above_272k_tokens"`
-	OutputCostPerTokenPriority           *float64 `json:"output_cost_per_token_priority"`
-	CacheCreationInputTokenCost          *float64 `json:"cache_creation_input_token_cost"`
-	CacheCreationInputTokenCostAbove272K *float64 `json:"cache_creation_input_token_cost_above_272k_tokens"`
-	CacheCreationInputTokenCostPriority  *float64 `json:"cache_creation_input_token_cost_priority"`
-	CacheCreationInputTokenCostAbove1hr  *float64 `json:"cache_creation_input_token_cost_above_1hr"`
-	CacheReadInputTokenCost              *float64 `json:"cache_read_input_token_cost"`
-	CacheReadInputTokenCostAbove272K     *float64 `json:"cache_read_input_token_cost_above_272k_tokens"`
-	CacheReadInputTokenCostPriority      *float64 `json:"cache_read_input_token_cost_priority"`
-	LongContextInputTokenThreshold       *int     `json:"long_context_input_token_threshold"`
-	LongContextInputCostMultiplier       *float64 `json:"long_context_input_cost_multiplier"`
-	LongContextOutputCostMultiplier      *float64 `json:"long_context_output_cost_multiplier"`
-	SupportsServiceTier                  bool     `json:"supports_service_tier"`
-	LiteLLMProvider                      string   `json:"litellm_provider"`
-	Mode                                 string   `json:"mode"`
-	SupportsPromptCaching                bool     `json:"supports_prompt_caching"`
-	OutputCostPerImage                   *float64 `json:"output_cost_per_image"`
-	OutputCostPerImageToken              *float64 `json:"output_cost_per_image_token"`
-	InputCostPerImageToken               *float64 `json:"input_cost_per_image_token"`
-	CacheReadInputImageTokenCost         *float64 `json:"cache_read_input_image_token_cost"`
+	InputCostPerToken                   *float64 `json:"input_cost_per_token"`
+	InputCostPerTokenPriority           *float64 `json:"input_cost_per_token_priority"`
+	OutputCostPerToken                  *float64 `json:"output_cost_per_token"`
+	OutputCostPerTokenPriority          *float64 `json:"output_cost_per_token_priority"`
+	CacheCreationInputTokenCost         *float64 `json:"cache_creation_input_token_cost"`
+	CacheCreationInputTokenCostPriority *float64 `json:"cache_creation_input_token_cost_priority"`
+	CacheCreationInputTokenCostAbove1hr *float64 `json:"cache_creation_input_token_cost_above_1hr"`
+	CacheReadInputTokenCost             *float64 `json:"cache_read_input_token_cost"`
+	CacheReadInputTokenCostPriority     *float64 `json:"cache_read_input_token_cost_priority"`
+	LongContextInputTokenThreshold      *int     `json:"long_context_input_token_threshold"`
+	LongContextInputCostMultiplier      *float64 `json:"long_context_input_cost_multiplier"`
+	LongContextOutputCostMultiplier     *float64 `json:"long_context_output_cost_multiplier"`
+	SupportsServiceTier                 bool     `json:"supports_service_tier"`
+	LiteLLMProvider                     string   `json:"litellm_provider"`
+	Mode                                string   `json:"mode"`
+	SupportsPromptCaching               bool     `json:"supports_prompt_caching"`
+	OutputCostPerImage                  *float64 `json:"output_cost_per_image"`
+	OutputCostPerImageToken             *float64 `json:"output_cost_per_image_token"`
+	InputCostPerImageToken              *float64 `json:"input_cost_per_image_token"`
+	CacheReadInputImageTokenCost        *float64 `json:"cache_read_input_image_token_cost"`
 }
 
 // PricingService 动态价格服务
@@ -684,9 +680,6 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			SupportsServiceTier:   entry.SupportsServiceTier,
 			TokenPricingAbsent:    entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
 		}
-		hasExplicitLongContext := entry.LongContextInputTokenThreshold != nil ||
-			entry.LongContextInputCostMultiplier != nil ||
-			entry.LongContextOutputCostMultiplier != nil
 
 		if entry.InputCostPerToken != nil {
 			pricing.InputCostPerToken = *entry.InputCostPerToken
@@ -738,6 +731,9 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 			pricing.CacheReadInputImageTokenCost = *entry.CacheReadInputImageTokenCost
 		}
 
+		hasExplicitLongContext := entry.LongContextInputTokenThreshold != nil ||
+			entry.LongContextInputCostMultiplier != nil ||
+			entry.LongContextOutputCostMultiplier != nil
 		if !hasExplicitLongContext {
 			deriveLongContextFromAboveTierFields(rawEntry, pricing)
 			if isLopsidedLongContextLadder(pricing) {
@@ -1599,6 +1595,7 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 			Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6-luna(static)"))
 		return openAIGPT56LunaFallbackPricing
 	}
+
 	// GPT-5.5 回退到 GPT-5.4 定价
 	if strings.HasPrefix(model, "gpt-5.5") {
 		logger.With(zap.String("component", "service.pricing")).
@@ -1712,8 +1709,9 @@ func (s *PricingService) getHashFilePath() string {
 	return filepath.Join(s.cfg.Pricing.DataDir, "model_pricing.sha256")
 }
 
-// ListModelNamesByProvider returns catalog models matching the provider
-// (case-insensitive), sorted alphabetically.
+// ListModelNamesByProvider returns all model names in the catalog whose
+// LiteLLMProvider matches the given provider string (case-insensitive).
+// The returned slice is sorted alphabetically.
 func (s *PricingService) ListModelNamesByProvider(provider string) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

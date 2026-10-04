@@ -123,12 +123,6 @@ type ModelPricing struct {
 	ImageOutputPriceExplicit           bool               // 是否由渠道定价显式设定（为 true 时即使 == 0 也不回退）
 }
 
-const (
-	openAIGPT54LongContextInputThreshold   = 272000
-	openAIGPT54LongContextInputMultiplier  = 2.0
-	openAIGPT54LongContextOutputMultiplier = 1.5
-)
-
 func normalizeBillingServiceTier(serviceTier string) string {
 	return strings.ToLower(strings.TrimSpace(serviceTier))
 }
@@ -555,9 +549,9 @@ func (s *BillingService) initFallbackPricing() {
 		CacheCreationPricePerTokenPriority: 25e-6,
 		CacheReadPricePerToken:             1e-6,
 		CacheReadPricePerTokenPriority:     2e-6,
-		LongContextInputThreshold:          openAIGPT54LongContextInputThreshold,
-		LongContextInputMultiplier:         openAIGPT54LongContextInputMultiplier,
-		LongContextOutputMultiplier:        openAIGPT54LongContextOutputMultiplier,
+		LongContextInputThreshold:          272_000,
+		LongContextInputMultiplier:         2,
+		LongContextOutputMultiplier:        1.5,
 	}
 
 	// GPT-6 Sol/Luna official rates, 2026-09-22.
@@ -634,6 +628,7 @@ func (s *BillingService) initFallbackPricing() {
 		CacheReadPricePerToken:             0.02e-6,
 		CacheReadPricePerTokenPriority:     0.04e-6,
 	}
+
 	s.fallbackPrices["gpt-5.4-mini"] = &ModelPricing{
 		InputPricePerToken:     7.5e-7,
 		OutputPricePerToken:    4.5e-6,
