@@ -456,7 +456,7 @@ export default {
         accountSchedulingThresholdsRangeHint: '整数 1–100（百分比）。仅 OpenAI / Anthropic / Grok。',
         priorityModeTitle: 'OpenAI 调度优先模式',
         firstTokenPriorityTitle: '总耗时快慢池',
-        firstTokenPriorityDescription: '正常总耗时不超过 30 秒连续 3 次进入快池，超过 33 秒连续 3 次退出，30–33 秒保持原池状态；快池低倍率优先，慢池按总耗时优先。不降智分组的账号连续 2 次检测降智且有其他可调度账号时，暂停调度 20 分钟并重置为待采集。探测只用于没有既有粘性的新调度。',
+        firstTokenPriorityDescription: '正常总耗时不超过 30 秒连续 3 次进入快池，超过 33 秒连续 3 次退出，30–33 秒保持原池状态；快池低倍率优先，慢池按总耗时优先。仅计入不降智分组的检测，按账号跨组累计：连续 2 次降智暂停 20 分钟并重置为待采集。若某分组只有该账号可用，则仅保留该分组调度，其他分组持续隔离；任一不降智分组检测正常后立即解除限制。',
         lowRateModeDescription: '按计费倍率优先，并自动启用同倍率内的粘性加权。'
       },
       upstreamBillingProbe: {

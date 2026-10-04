@@ -931,11 +931,15 @@ export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
 
 export interface AccountFirstTokenLatencyGroup {
+  intelligence_blocked?: boolean
+  intelligence_exempt?: boolean
   group_id: number
   group_name: string
 }
 
 export interface AccountFirstTokenLatencyMetric {
+  intelligence_blocked?: boolean
+  intelligence_exempt?: boolean
   account_id: number
   account_name: string
   predicted_ms: number

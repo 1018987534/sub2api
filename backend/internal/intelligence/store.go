@@ -20,8 +20,10 @@ type Store interface {
 }
 
 type SQLStore struct {
-	DB      *sql.DB
-	Protect func(context.Context, Config, int64) (bool, error)
+	DB                 *sql.DB
+	Protect            func(context.Context, Config, int64) (bool, error)
+	ProtectionEligible func(context.Context, Config) (bool, error)
+	Recover            func(context.Context, int64) error
 }
 
 func (s *SQLStore) Configs(ctx context.Context) ([]Config, error) {
@@ -120,23 +122,30 @@ func (s *SQLStore) Finish(ctx context.Context, claim *Claim, r Record) error {
 	if r.GroupID != claim.Config.GroupID {
 		return ErrInvalid
 	}
-	if s.Protect != nil && r.AccountID > 0 && r.Status == "degraded" {
-		var previousAccount int64
+	eligible := false
+	if s.ProtectionEligible != nil {
+		eligible, err = s.ProtectionEligible(ctx, claim.Config)
+		if err != nil {
+			return err
+		}
+	}
+	if eligible && r.AccountID > 0 {
+		// Lock before reading AND writing history. Results from different groups
+		// must observe each other's committed account streak and recovery.
+		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('intelligence_account_protection'))`); err != nil {
+			return err
+		}
 		var previousStatus string
-		var previousPaused bool
-		// An unattributed run breaks the streak conservatively. Other accounts'
-		// attributed runs do not change this account's consecutive results.
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(account_id,0),status,paused FROM intelligence_check_runs
- WHERE group_id=$1 AND (account_id=$2 OR account_id IS NULL) ORDER BY id DESC LIMIT 1`, r.GroupID, r.AccountID).
-			Scan(&previousAccount, &previousStatus, &previousPaused)
+		err = tx.QueryRowContext(ctx, `SELECT status FROM intelligence_check_runs
+ WHERE account_id=$1 AND protection_eligible ORDER BY id DESC LIMIT 1`, r.AccountID).Scan(&previousStatus)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if err == nil && previousAccount == r.AccountID && previousStatus == "degraded" && !previousPaused {
-			// Serialize protection across overlapping groups as well as controls.
-			if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('intelligence_account_protection'))`); err != nil {
+		if r.Status == "normal" && s.Recover != nil {
+			if err = s.Recover(ctx, r.AccountID); err != nil {
 				return err
 			}
+		} else if r.Status == "degraded" && previousStatus == "degraded" && s.Protect != nil {
 			r.Paused, err = s.Protect(ctx, claim.Config, r.AccountID)
 			if err != nil {
 				slog.Error("intelligence account protection failed", "group_id", r.GroupID, "account_id", r.AccountID, "error", err)
@@ -147,7 +156,7 @@ func (s *SQLStore) Finish(ctx context.Context, claim *Claim, r Record) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO intelligence_check_runs(group_id,checked_at,duration_ms,status,answer,error,config_snapshot,account_id,request_id,paused) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,0),$9,$10)`, r.GroupID, r.CheckedAt, r.DurationMS, r.Status, r.Answer, r.Error, raw, r.AccountID, r.RequestID, r.Paused)
+	_, err = tx.ExecContext(ctx, `INSERT INTO intelligence_check_runs(group_id,checked_at,duration_ms,status,answer,error,config_snapshot,account_id,request_id,paused,protection_eligible) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,0),$9,$10,$11)`, r.GroupID, r.CheckedAt, r.DurationMS, r.Status, r.Answer, r.Error, raw, r.AccountID, r.RequestID, r.Paused, eligible)
 	if err != nil {
 		return err
 	}
@@ -217,4 +226,62 @@ func (s *SQLStore) Prune(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// ReconcileLegacyProtection converts only still-active pauses written by the
+// previous release, using existing check history. It never generates a probe.
+func (s *SQLStore) ReconcileLegacyProtection(ctx context.Context) error {
+	if s.Protect == nil {
+		return nil
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('intelligence_account_protection'))`); err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT a.id,r.status,r.config_snapshot FROM accounts a
+ JOIN LATERAL (SELECT status,config_snapshot FROM intelligence_check_runs
+ WHERE account_id=a.id AND protection_eligible ORDER BY id DESC LIMIT 1) r ON TRUE
+ WHERE a.temp_unschedulable_until>NOW() AND a.temp_unschedulable_reason LIKE 'intelligence:%'`)
+	if err != nil {
+		return err
+	}
+	type pending struct {
+		id     int64
+		status string
+		config Config
+	}
+	var items []pending
+	for rows.Next() {
+		var item pending
+		var raw []byte
+		if err = rows.Scan(&item.id, &item.status, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		if err = json.Unmarshal(raw, &item.config); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.status == "normal" && s.Recover != nil {
+			err = s.Recover(ctx, item.id)
+		} else {
+			_, err = s.Protect(ctx, item.config, item.id)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

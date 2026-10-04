@@ -12,6 +12,7 @@ type intelligenceProtectionRepo struct {
 	schedulerTestOpenAIAccountRepo
 	pausedID int64
 	until    time.Time
+	groups   []Group
 }
 
 func (r *intelligenceProtectionRepo) SetTempUnschedulable(_ context.Context, id int64, until time.Time, _ string) error {
@@ -19,6 +20,35 @@ func (r *intelligenceProtectionRepo) SetTempUnschedulable(_ context.Context, id 
 	for i := range r.accounts {
 		if r.accounts[i].ID == id {
 			r.accounts[i].TempUnschedulableUntil = &until
+		}
+	}
+	return nil
+}
+
+func (r *intelligenceProtectionRepo) GetGroups(context.Context, int64) ([]Group, error) {
+	return r.groups, nil
+}
+func (r *intelligenceProtectionRepo) UpdateExtra(_ context.Context, id int64, updates map[string]any) error {
+	for i := range r.accounts {
+		if r.accounts[i].ID == id {
+			if r.accounts[i].Extra == nil {
+				r.accounts[i].Extra = map[string]any{}
+			}
+			for k, v := range updates {
+				r.accounts[i].Extra[k] = v
+			}
+			r.pausedID = id
+			r.until, _ = time.Parse(time.RFC3339Nano, r.accounts[i].GetExtraString(intelligencePauseUntilKey))
+		}
+	}
+	return nil
+}
+
+func (r *intelligenceProtectionRepo) ClearIntelligenceTempUnschedulable(_ context.Context, id int64, reason string) error {
+	for i := range r.accounts {
+		if r.accounts[i].ID == id && r.accounts[i].TempUnschedulableReason == reason {
+			r.accounts[i].TempUnschedulableUntil = nil
+			r.accounts[i].TempUnschedulableReason = ""
 		}
 	}
 	return nil
@@ -33,6 +63,8 @@ func (c *intelligenceResetCache) ResetForIntelligencePause(_ context.Context, id
 	c.resetID = id
 	return nil
 }
+
+func (c *intelligenceResetCache) ClearIntelligencePause(context.Context, int64) error { return nil }
 
 func TestIntelligenceAccountProtection(t *testing.T) {
 	for _, scenario := range []string{"two", "only", "disabled", "cooldown", "model", "cache_rate", "profit", "ordinary_group", "pool_disabled"} {
@@ -68,7 +100,7 @@ func TestIntelligenceAccountProtection(t *testing.T) {
 			if scenario == "only" {
 				accounts = accounts[:1]
 			}
-			repo := &intelligenceProtectionRepo{schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}}
+			repo := &intelligenceProtectionRepo{schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts}, groups: []Group{*group}}
 			cache := &intelligenceResetCache{}
 			settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyTotalDurationPriorityEnabled: enabled}}
 			svc := &OpenAIGatewayService{accountRepo: repo, rateLimitService: &RateLimitService{firstTokenLatencyStatsCache: cache, usageRepo: provider, settingService: &SettingService{settingRepo: settings}}}

@@ -41,6 +41,7 @@ func (r *Runner) Start() {
 		defer tick.Stop()
 		prune := time.NewTicker(time.Hour)
 		defer prune.Stop()
+		legacyReconciled := false
 		for {
 			select {
 			case <-r.ctx.Done():
@@ -48,6 +49,20 @@ func (r *Runner) Start() {
 			case <-tick.C:
 				ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
 				if r.Enabled == nil || r.Enabled(ctx) {
+					if !legacyReconciled {
+						if reconciler, ok := r.Store.(interface{ ReconcileLegacyProtection(context.Context) error }); ok {
+							reconcileCtx, done := context.WithTimeout(r.ctx, 30*time.Second)
+							err := reconciler.ReconcileLegacyProtection(reconcileCtx)
+							done()
+							if err != nil {
+								slog.Warn("intelligence legacy pause reconciliation failed", "error", err)
+							} else {
+								legacyReconciled = true
+							}
+						} else {
+							legacyReconciled = true
+						}
+					}
 					for i := 0; i < cap(r.slots); i++ {
 						if err := r.launch(ctx, 0, false); err != nil {
 							if !errors.Is(err, ErrConflict) && ctx.Err() == nil {

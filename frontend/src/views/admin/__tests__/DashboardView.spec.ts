@@ -330,6 +330,33 @@ describe('admin DashboardView', () => {
     wrapper.unmount()
   })
 
+  it('shows shared account isolation separately for each group', async () => {
+    getFirstTokenLatencies.mockResolvedValueOnce({ items: [{
+      account_id: 12463, account_name: 'shared-degraded', predicted_ms: 0,
+      has_prediction: false, is_fast_pool: false, circuit_broken: true,
+      scheduling_rate_multiplier: 0.08, sample_count: 0, window_hours: 6,
+      updated_at: '2026-10-05T00:00:00Z', slow_streak: 0, recovery_fast_streak: 0,
+      probe_interval_seconds: 60, cache_rate: null, cache_read_tokens: 0, cache_rate_denominator: 0,
+      groups: [
+        { group_id: 111, group_name: '010不降智', intelligence_exempt: true },
+        { group_id: 5, group_name: '013不降智', intelligence_blocked: true }
+      ]
+    }], total: 1 })
+    const wrapper = mount(DashboardView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true,
+      Icon: true, DateRangePicker: true, Select: true, ModelDistributionChart: true,
+      TokenUsageTrend: true, Line: true
+    } } })
+    await flushPromises()
+    const rows = wrapper.findAll('[data-testid="first-token-latency-row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('admin.dashboard.firstTokenIntelligenceExempt')
+    expect(rows[1].text()).toContain('admin.dashboard.firstTokenIntelligenceBlocked')
+    expect(rows[0].get('button').attributes('disabled')).toBeUndefined()
+    expect(rows[1].get('button').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
   it('refreshes first-token metrics periodically and stops after unmount', async () => {
     vi.useFakeTimers()
     const wrapper = mount(DashboardView, {

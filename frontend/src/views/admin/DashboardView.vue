@@ -265,7 +265,8 @@
                   <span v-if="group.id > 0" class="text-xs text-gray-400">#{{ group.id }}</span>
                 </div>
                 <span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">
-                  {{ t('admin.dashboard.firstTokenPoolCounts', { total: group.metrics.length, fast: group.fastCount, slow: group.slowCount }) }}
+                  {{ t('admin.dashboard.firstTokenPoolCounts', { total: group.metrics.length - group.pausedCount, fast: group.fastCount, slow: group.slowCount }) }}
+                  <span v-if="group.pausedCount"> · {{ t('admin.dashboard.firstTokenPausedCount', { count: group.pausedCount }) }}</span>
                 </span>
               </div>
               <div class="divide-y divide-gray-100 md:hidden dark:divide-dark-700">
@@ -283,7 +284,7 @@
                       <button
                         type="button"
                         class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-600 disabled:cursor-wait disabled:opacity-50 dark:border-dark-600 dark:text-gray-400 dark:hover:border-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-400"
-                        :disabled="isFirstTokenManualProbeLoading(metric.account_id)"
+                        :disabled="metric.intelligence_blocked || isFirstTokenManualProbeLoading(metric.account_id)"
                         :title="t('admin.dashboard.firstTokenManualProbe', { account: metric.account_name })"
                         :aria-label="t('admin.dashboard.firstTokenManualProbe', { account: metric.account_name })"
                         data-testid="first-token-manual-probe"
@@ -370,7 +371,7 @@
                         <button
                           type="button"
                           class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-600 disabled:cursor-wait disabled:opacity-50 dark:border-dark-600 dark:text-gray-400 dark:hover:border-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-400"
-                          :disabled="isFirstTokenManualProbeLoading(metric.account_id)"
+                          :disabled="metric.intelligence_blocked || isFirstTokenManualProbeLoading(metric.account_id)"
                           :title="t('admin.dashboard.firstTokenManualProbe', { account: metric.account_name })"
                           :aria-label="t('admin.dashboard.firstTokenManualProbe', { account: metric.account_name })"
                           data-testid="first-token-manual-probe"
@@ -590,6 +591,7 @@ interface FirstTokenGroupSection {
   metrics: AccountFirstTokenLatencyMetric[]
   fastCount: number
   slowCount: number
+  pausedCount: number
 }
 
 const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
@@ -600,9 +602,10 @@ const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
       : [{ group_id: 0, group_name: t('admin.dashboard.firstTokenUngrouped') }]
     for (const group of groups) {
       const name = group.group_name || `#${group.group_id}`
-      const section = sections.get(group.group_id) ?? { id: group.group_id, name, metrics: [], fastCount: 0, slowCount: 0 }
-      section.metrics.push(metric)
-      if (metric.is_fast_pool) section.fastCount += 1
+      const section = sections.get(group.group_id) ?? { id: group.group_id, name, metrics: [], fastCount: 0, slowCount: 0, pausedCount: 0 }
+      section.metrics.push({ ...metric, intelligence_blocked: group.intelligence_blocked, intelligence_exempt: group.intelligence_exempt })
+      if (group.intelligence_blocked) section.pausedCount += 1
+      else if (metric.is_fast_pool) section.fastCount += 1
       else section.slowCount += 1
       sections.set(group.group_id, section)
     }
@@ -642,6 +645,8 @@ const visibleFirstTokenGroups = computed(() => {
 })
 
 const firstTokenPoolLabel = (metric: AccountFirstTokenLatencyMetric) => {
+  if (metric.intelligence_blocked) return t('admin.dashboard.firstTokenIntelligenceBlocked')
+  if (metric.intelligence_exempt) return t('admin.dashboard.firstTokenIntelligenceExempt')
   if (metric.is_fast_pool) return t('admin.dashboard.firstTokenFastPool')
   if (metric.circuit_broken) return t('admin.dashboard.firstTokenCircuitBrokenPool')
   if (metric.recovery_fast_streak > 0) {
