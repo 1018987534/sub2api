@@ -88,8 +88,10 @@ type AccountFirstTokenLatencyMetric struct {
 }
 
 type AccountFirstTokenLatencyGroup struct {
-	GroupID   int64  `json:"group_id"`
-	GroupName string `json:"group_name"`
+	GroupID             int64  `json:"group_id"`
+	GroupName           string `json:"group_name"`
+	IntelligenceBlocked bool   `json:"intelligence_blocked,omitempty"`
+	IntelligenceExempt  bool   `json:"intelligence_exempt,omitempty"`
 }
 
 // AccountCacheStats is the rolling cache-token aggregate used alongside the
@@ -219,6 +221,9 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 			continue
 		}
 		stat := input.stat
+		if intelligenceIsolationActive(account, now) {
+			stat = FirstTokenLatencyStats{CircuitBroken: true, UpdatedAt: stat.UpdatedAt}
+		}
 		hasPrediction := stat.PredictedMS > 0
 		var schedulingRateMultiplier *float64
 		if rate, found := openAIFreshUpstreamBillingRate(account, now); found {
@@ -315,7 +320,7 @@ func firstTokenLatencyMetricGroups(account *Account, cacheStats AccountCacheStat
 	for groupID := range membershipIDs {
 		group := groupByID[groupID]
 		if includeGroup(group) {
-			groups = append(groups, AccountFirstTokenLatencyGroup{GroupID: groupID, GroupName: group.Name})
+			groups = append(groups, AccountFirstTokenLatencyGroup{GroupID: groupID, GroupName: group.Name, IntelligenceBlocked: intelligenceAccountBlocked(account, &groupID, now), IntelligenceExempt: intelligenceIsolationActive(account, now) && !intelligenceAccountBlocked(account, &groupID, now)})
 		}
 	}
 	sort.Slice(groups, func(i, j int) bool { return groups[i].GroupID < groups[j].GroupID })
@@ -323,7 +328,7 @@ func firstTokenLatencyMetricGroups(account *Account, cacheStats AccountCacheStat
 }
 
 func (s *RateLimitService) ObserveTotalDurationLatency(ctx context.Context, account *Account, usageLog *UsageLog) {
-	if s == nil || s.firstTokenLatencyStatsCache == nil || !isFirstTokenPriorityAccount(account) || usageLog == nil || account.ID <= 0 ||
+	if s == nil || s.firstTokenLatencyStatsCache == nil || !isFirstTokenPriorityAccount(account) || usageLog == nil || account.ID <= 0 || intelligenceIsolationActive(account, time.Now()) ||
 		!usageLog.Stream || usageLog.EffectiveRequestType() != RequestTypeStream || usageLog.ActualCost <= 0 ||
 		usageLog.DurationMs == nil || *usageLog.DurationMs <= 0 {
 		return

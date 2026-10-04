@@ -215,6 +215,12 @@ func (c *firstTokenLatencyStatsCache) ResetForIntelligencePause(ctx context.Cont
 	}, id, until.UnixMilli()).Err()
 }
 
+// Clear only intelligence sample suppression; retain the pending score so
+// recovery collects fresh data instead of restoring a stale fast-pool score.
+func (c *firstTokenLatencyStatsCache) ClearIntelligencePause(ctx context.Context, accountID int64) error {
+	return c.rdb.HDel(ctx, totalLatencyStatsPrefix+strconv.FormatInt(accountID, 10), "intelligence_pause_until_ms").Err()
+}
+
 var totalLatencyManualProbeRequestScript = redis.NewScript(`
 	local now = redis.call('TIME')
 	local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)

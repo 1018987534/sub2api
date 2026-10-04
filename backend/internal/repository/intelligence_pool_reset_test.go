@@ -69,3 +69,32 @@ func TestTotalLatencyThirtyThirtyThreeStaircase(t *testing.T) {
 		}
 	}
 }
+
+func TestIntelligenceIsolationSchedulerProjection(t *testing.T) {
+	extra := map[string]any{"intelligence_pause_until": "2030-01-01T00:00:00Z", "intelligence_allowed_groups": []int64{111}, "intelligence_recovery_required": true}
+	require.Equal(t, extra, filterSchedulerExtra(extra))
+	require.True(t, shouldEnqueueSchedulerOutboxForExtraUpdates(extra))
+}
+
+func TestIntelligenceNormalResultResumesSamplesImmediately(t *testing.T) {
+	_, _, cache := newTotalLatencyTestCache(t)
+	ctx := context.Background()
+	require.NoError(t, cache.ResetForIntelligencePause(ctx, 7, time.Now().Add(20*time.Minute)))
+	require.NoError(t, cache.ClearIntelligencePause(ctx, 7))
+	require.NoError(t, cache.RecordSample(ctx, 7, "after-normal", 1000))
+	stats, err := cache.GetStatsBatch(ctx, []int64{7})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), stats[7].SampleCount)
+	require.False(t, stats[7].ReliableFast)
+}
+
+func TestIntelligenceLegacyClearMatchesReasonAndOutbox(t *testing.T) {
+	exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
+	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+	require.NoError(t, repo.ClearIntelligenceTempUnschedulable(context.Background(), 7, "intelligence: old pause"))
+	require.Len(t, exec.execQueries, 1)
+	require.Contains(t, exec.execQueries[0], "temp_unschedulable_reason=$2")
+	require.Contains(t, exec.execQueries[0], "INSERT INTO scheduler_outbox")
+	require.NoError(t, repo.ClearIntelligenceTempUnschedulable(context.Background(), 7, "unrelated"))
+	require.Len(t, exec.execQueries, 1)
+}

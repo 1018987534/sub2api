@@ -3,22 +3,80 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
 
+const intelligencePauseUntilKey = "intelligence_pause_until"
+const intelligenceAllowedGroupsKey = "intelligence_allowed_groups"
+const intelligenceRecoveryRequiredKey = "intelligence_recovery_required"
+
 type IntelligencePoolResetter interface {
 	ResetForIntelligencePause(context.Context, int64, time.Time) error
 }
+type intelligencePoolRecoverer interface {
+	ClearIntelligencePause(context.Context, int64) error
+}
 
-// ProtectDegradedIntelligenceAccount is called under the shared database
-// protection lock, after two attributed degraded results for this account.
+func IntelligenceProtectionGroupEligible(group *Group) bool {
+	return group != nil && group.Platform == PlatformOpenAI && group.Status == StatusActive && strings.Contains(group.Name, "不降智")
+}
+
+func intelligenceAllowedGroups(account *Account) []int64 {
+	if account == nil {
+		return nil
+	}
+	var groups []int64
+	switch values := account.Extra[intelligenceAllowedGroupsKey].(type) {
+	case []int64:
+		groups = values
+	case []any:
+		for _, value := range values {
+			switch id := value.(type) {
+			case float64:
+				groups = append(groups, int64(id))
+			case int64:
+				groups = append(groups, id)
+			case int:
+				groups = append(groups, int64(id))
+			}
+		}
+	}
+	return groups
+}
+
+func intelligenceIsolationActive(account *Account, now time.Time) bool {
+	if account == nil {
+		return false
+	}
+	until, _ := time.Parse(time.RFC3339Nano, account.GetExtraString(intelligencePauseUntilKey))
+	// A last-account exception supplies ongoing checks. Keep other groups isolated
+	// until a normal result, instead of returning a known degraded account on TTL.
+	recovery, _ := account.Extra[intelligenceRecoveryRequiredKey].(bool)
+	return until.After(now) || recovery
+}
+
+func intelligenceAccountBlocked(account *Account, groupID *int64, now time.Time) bool {
+	if !intelligenceIsolationActive(account, now) {
+		return false
+	}
+	if groupID != nil {
+		for _, id := range intelligenceAllowedGroups(account) {
+			if id == *groupID {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// ProtectDegradedIntelligenceAccount runs under the global result lock. The
+// account's streak is shared, but sole-account exceptions are group-specific.
 func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Context, group *Group, accountID int64, model string, userID int64) (bool, error) {
-	if s == nil || group == nil || group.Platform != PlatformOpenAI || group.Status != StatusActive ||
-		!strings.Contains(group.Name, "不降智") || !s.isFirstTokenPriorityEnabled(ctx) {
+	if s == nil || !IntelligenceProtectionGroupEligible(group) || !s.isFirstTokenPriorityEnabled(ctx) {
 		return false, nil
 	}
 	if s.rateLimitService == nil || s.accountRepo == nil {
@@ -28,7 +86,81 @@ func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Co
 	if !ok {
 		return false, errors.New("intelligence pool reset unavailable")
 	}
-	// Read current database state rather than a potentially stale fleet snapshot.
+	target, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return false, err
+	}
+	if target == nil {
+		return false, nil
+	}
+	legacyReason := target.TempUnschedulableReason
+	legacyPause := strings.HasPrefix(legacyReason, "intelligence:")
+	if legacyPause {
+		copy := *target
+		copy.TempUnschedulableUntil = nil
+		target = &copy
+	}
+	if !isFirstTokenPriorityAccount(target) || !target.IsSchedulable() {
+		return false, nil
+	}
+	memberships, ok := s.accountRepo.(interface {
+		GetGroups(context.Context, int64) ([]Group, error)
+	})
+	if !ok {
+		return false, errors.New("intelligence account memberships unavailable")
+	}
+	groups, err := memberships.GetGroups(ctx, accountID)
+	if err != nil {
+		return false, err
+	}
+	now := time.Now()
+	allowed := []int64{}
+	restricted := 0
+	for i := range groups {
+		candidateGroup := &groups[i]
+		if candidateGroup.Platform != PlatformOpenAI || candidateGroup.Status != StatusActive {
+			continue
+		}
+		alternative, err := s.intelligenceGroupHasAlternative(ctx, candidateGroup, accountID, model, userID)
+		if err != nil {
+			return false, err
+		}
+		if alternative {
+			restricted++
+		} else {
+			allowed = append(allowed, candidateGroup.ID)
+		}
+	}
+	if restricted == 0 && !intelligenceIsolationActive(target, now) {
+		if legacyPause {
+			return false, s.clearLegacyIntelligencePause(ctx, accountID, legacyReason)
+		}
+		return false, nil
+	}
+	sort.Slice(allowed, func(i, j int) bool { return allowed[i] < allowed[j] })
+	until := now.Add(20 * time.Minute)
+	active := intelligenceIsolationActive(target, now)
+	if active {
+		if previous, err := time.Parse(time.RFC3339Nano, target.GetExtraString(intelligencePauseUntilKey)); err == nil && previous.After(now) {
+			until = previous
+		}
+	} else if err := resetter.ResetForIntelligencePause(ctx, accountID, until); err != nil {
+		return false, err
+	}
+	// Extra updates atomically merge only these keys and invalidate shared
+	// scheduler snapshots. Never remove memberships or globally disable the account.
+	err = s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{
+		intelligencePauseUntilKey:       until.Format(time.RFC3339Nano),
+		intelligenceAllowedGroupsKey:    allowed,
+		intelligenceRecoveryRequiredKey: len(allowed) > 0,
+	})
+	if err == nil && legacyPause {
+		err = s.clearLegacyIntelligencePause(ctx, accountID, legacyReason)
+	}
+	return err == nil, err
+}
+
+func (s *OpenAIGatewayService) intelligenceGroupHasAlternative(ctx context.Context, group *Group, accountID int64, model string, userID int64) (bool, error) {
 	accounts, err := s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, group.ID, PlatformOpenAI)
 	if err != nil {
 		return false, err
@@ -36,37 +168,62 @@ func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Co
 	ctx = context.WithValue(ctx, ctxkey.Group, group)
 	ctx = context.WithValue(ctx, ctxkey.UserID, userID)
 	ctx = s.withOpenAIProfitControlGate(ctx, &group.ID)
-	req := OpenAIAccountScheduleRequest{GroupID: &group.ID, Platform: PlatformOpenAI, RequestedModel: model,
-		FirstTokenPriority: true, MinCacheRate: group.MinCacheRate, RequirePrivacySet: group.RequirePrivacySet}
+	req := OpenAIAccountScheduleRequest{GroupID: &group.ID, Platform: PlatformOpenAI, RequestedModel: model, FirstTokenPriority: true, MinCacheRate: group.MinCacheRate, RequirePrivacySet: group.RequirePrivacySet}
 	scheduler := &defaultOpenAIAccountScheduler{service: s}
 	scheduler.warmGroupCacheRateStats(ctx, accounts, req)
 	thresholds := s.rateLimitService.settingService.GetAccountSchedulingThresholds(ctx)
-	var target *Account
-	alternative := false
 	for i := range accounts {
 		account := &accounts[i]
-		if account.ID == accountID {
-			target = account
-			continue
-		}
-		if account.Platform == PlatformOpenAI && account.IsSchedulable() &&
-			!EvaluateAccountSchedulingThreshold(account, thresholds, time.Now()).ShouldPause &&
-			scheduler.isAccountRequestCompatible(ctx, account, req) {
-			alternative = true
+		if account.ID != accountID && account.Platform == PlatformOpenAI && account.IsSchedulable() &&
+			!EvaluateAccountSchedulingThreshold(account, thresholds, time.Now()).ShouldPause && scheduler.isAccountRequestCompatible(ctx, account, req) {
+			return true, nil
 		}
 	}
-	if !alternative || !isFirstTokenPriorityAccount(target) || !target.IsSchedulable() {
-		return false, nil
+	return false, nil
+}
+
+// A single normal attributed check in any eligible group clears the shared
+// intelligence restriction immediately, without undoing other cooldowns.
+func (s *OpenAIGatewayService) RecoverIntelligenceAccount(ctx context.Context, accountID int64) error {
+	if s == nil || s.accountRepo == nil {
+		return errors.New("intelligence recovery dependencies unavailable")
 	}
-	until := time.Now().Add(20 * time.Minute)
-	// Reset first so a database/cache failure never pauses an account with its
-	// old fast-pool score. Late in-flight samples are suppressed until expiry.
-	if err := resetter.ResetForIntelligencePause(ctx, accountID, until); err != nil {
-		return false, err
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return err
 	}
-	if err := s.accountRepo.SetTempUnschedulable(ctx, accountID, until,
-		fmt.Sprintf("intelligence: group %d consecutive degraded checks; paused 20 minutes", group.ID)); err != nil {
-		return false, err
+	if account == nil {
+		return nil
 	}
-	return true, nil
+	legacy := strings.HasPrefix(account.TempUnschedulableReason, "intelligence:")
+	if !legacy && account.GetExtraString(intelligencePauseUntilKey) == "" {
+		return nil
+	}
+	if s.rateLimitService == nil {
+		return errors.New("intelligence recovery cache unavailable")
+	}
+	cache, ok := s.rateLimitService.firstTokenLatencyStatsCache.(intelligencePoolRecoverer)
+	if !ok {
+		return errors.New("intelligence recovery cache unavailable")
+	}
+	if err := cache.ClearIntelligencePause(ctx, accountID); err != nil {
+		return err
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{intelligencePauseUntilKey: nil, intelligenceAllowedGroupsKey: nil, intelligenceRecoveryRequiredKey: nil}); err != nil {
+		return err
+	}
+	if legacy {
+		return s.clearLegacyIntelligencePause(ctx, accountID, account.TempUnschedulableReason)
+	}
+	return nil
+}
+
+func (s *OpenAIGatewayService) clearLegacyIntelligencePause(ctx context.Context, id int64, reason string) error {
+	repo, ok := s.accountRepo.(interface {
+		ClearIntelligenceTempUnschedulable(context.Context, int64, string) error
+	})
+	if !ok {
+		return errors.New("legacy intelligence pause recovery unavailable")
+	}
+	return repo.ClearIntelligenceTempUnschedulable(ctx, id, reason)
 }

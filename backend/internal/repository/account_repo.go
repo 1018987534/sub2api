@@ -2621,6 +2621,30 @@ func (r *accountRepository) SetGrokCredentialTempUnschedulableIfMatch(
 	return true, nil
 }
 
+// Clear only the exact legacy intelligence pause observed by the caller.
+// A concurrent quota/network/admin cooldown must not be cleared.
+func (r *accountRepository) ClearIntelligenceTempUnschedulable(ctx context.Context, id int64, reason string) error {
+	if !strings.HasPrefix(reason, "intelligence:") {
+		return nil
+	}
+	result, err := r.sql.ExecContext(ctx, `WITH updated AS (
+ UPDATE accounts SET temp_unschedulable_until=NULL,temp_unschedulable_reason=NULL,updated_at=NOW()
+ WHERE id=$1 AND deleted_at IS NULL AND temp_unschedulable_reason=$2 RETURNING id
+ ) INSERT INTO scheduler_outbox(event_type,account_id,created_at)
+ SELECT $3,id,NOW() FROM updated`, id, reason, service.SchedulerOutboxEventAccountChanged)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		r.syncSchedulerAccountSnapshot(ctx, id)
+	}
+	return nil
+}
+
 func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64) error {
 	_, err := r.sql.ExecContext(ctx, `
 		UPDATE accounts

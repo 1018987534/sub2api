@@ -29,6 +29,11 @@ type IntelligenceHandler struct {
 func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyRepository, groups service.GroupRepository, access *service.APIKeyService, settings *service.SettingService, monitor *service.ChannelMonitorV2Service, gateway *service.OpenAIGatewayService) *IntelligenceHandler {
 	h := &IntelligenceHandler{store: &intelligence.SQLStore{DB: db}, keys: keys, groups: groups, access: access, monitor: monitor}
 	if gateway != nil && groups != nil {
+		h.store.(*intelligence.SQLStore).ProtectionEligible = func(ctx context.Context, c intelligence.Config) (bool, error) {
+			group, err := groups.GetByID(ctx, c.GroupID)
+			return service.IntelligenceProtectionGroupEligible(group), err
+		}
+		h.store.(*intelligence.SQLStore).Recover = gateway.RecoverIntelligenceAccount
 		h.store.(*intelligence.SQLStore).Protect = func(ctx context.Context, c intelligence.Config, accountID int64) (bool, error) {
 			group, err := groups.GetByID(ctx, c.GroupID)
 			if err != nil {
