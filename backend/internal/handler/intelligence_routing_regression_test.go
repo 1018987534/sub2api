@@ -20,7 +20,7 @@ func TestIntelligenceProbeDoesNotBypassRouting(t *testing.T) {
 	h := NewIntelligenceHandler(nil, &config.Config{
 		GatewayRoutingRuntimeToken: "configured-routing-token",
 		Server:                     config.ServerConfig{Port: 8080},
-	}, nil, nil, nil, nil, nil)
+	}, nil, nil, nil, nil, nil, nil)
 	t.Cleanup(h.Stop)
 	probe := h.runner.Probe.(*intelligence.HTTPProbe)
 	probe.Resolve = func(context.Context, intelligence.Config) (string, error) { return "fixture-key", nil }

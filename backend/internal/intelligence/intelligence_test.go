@@ -92,6 +92,7 @@ func TestIntelligenceHTTPProtocolsAndRedaction(t *testing.T) {
 			key := "sk-private-probe-key"
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
+				w.Header().Set("X-Client-Request-ID", "gateway-generated-fixture")
 				require.Equal(t, "POST", r.Method)
 				require.Equal(t, "Bearer "+key, r.Header.Get("Authorization"))
 				var body map[string]any
@@ -125,6 +126,7 @@ func TestIntelligenceHTTPProtocolsAndRedaction(t *testing.T) {
 			c.ReasoningEffort = "high"
 			c.Prompt = "custom prompt"
 			record := p.Run(context.Background(), c)
+			require.Equal(t, "client:gateway-generated-fixture", record.RequestID)
 			require.Equal(t, "normal", record.Status)
 			require.NotContains(t, record.Answer, key)
 			require.Contains(t, record.Answer, "[REDACTED]")

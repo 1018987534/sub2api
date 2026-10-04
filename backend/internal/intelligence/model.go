@@ -31,6 +31,9 @@ type Config struct {
 }
 
 type Record struct {
+	AccountID  int64     `json:"account_id,omitempty"`
+	RequestID  string    `json:"-"`
+	Paused     bool      `json:"paused,omitempty"`
 	ID         int64     `json:"id"`
 	GroupID    int64     `json:"group_id"`
 	CheckedAt  time.Time `json:"checked_at"`

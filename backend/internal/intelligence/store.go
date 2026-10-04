@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
+	"log/slog"
 	"time"
 )
 
@@ -18,7 +19,10 @@ type Store interface {
 	Prune(context.Context) error
 }
 
-type SQLStore struct{ DB *sql.DB }
+type SQLStore struct {
+	DB      *sql.DB
+	Protect func(context.Context, Config, int64) (bool, error)
+}
 
 func (s *SQLStore) Configs(ctx context.Context) ([]Config, error) {
 	rows, err := s.DB.QueryContext(ctx, "SELECT config, version FROM intelligence_check_configs ORDER BY group_id")
@@ -90,6 +94,13 @@ func (s *SQLStore) Claim(ctx context.Context, groupID int64, manual bool) (*Clai
 }
 
 func (s *SQLStore) Finish(ctx context.Context, claim *Claim, r Record) error {
+	// Usage is persisted asynchronously after the completed response. Wait only
+	// for this exact request/key/group, never guess from recent group traffic.
+	if s.Protect != nil && r.RequestID != "" {
+		lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		r.AccountID = s.resolveAccount(lookupCtx, claim.Config, r.RequestID)
+		cancel()
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -106,22 +117,70 @@ func (s *SQLStore) Finish(ctx context.Context, claim *Claim, r Record) error {
 	if n != 1 {
 		return ErrConflict
 	}
+	if r.GroupID != claim.Config.GroupID {
+		return ErrInvalid
+	}
+	if s.Protect != nil && r.AccountID > 0 && r.Status == "degraded" {
+		var previousAccount int64
+		var previousStatus string
+		var previousPaused bool
+		// An unattributed run breaks the streak conservatively. Other accounts'
+		// attributed runs do not change this account's consecutive results.
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(account_id,0),status,paused FROM intelligence_check_runs
+ WHERE group_id=$1 AND (account_id=$2 OR account_id IS NULL) ORDER BY id DESC LIMIT 1`, r.GroupID, r.AccountID).
+			Scan(&previousAccount, &previousStatus, &previousPaused)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil && previousAccount == r.AccountID && previousStatus == "degraded" && !previousPaused {
+			// Serialize protection across overlapping groups as well as controls.
+			if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('intelligence_account_protection'))`); err != nil {
+				return err
+			}
+			r.Paused, err = s.Protect(ctx, claim.Config, r.AccountID)
+			if err != nil {
+				slog.Error("intelligence account protection failed", "group_id", r.GroupID, "account_id", r.AccountID, "error", err)
+			}
+		}
+	}
 	raw, err := json.Marshal(claim.Config)
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO intelligence_check_runs(group_id,checked_at,duration_ms,status,answer,error,config_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7)`, r.GroupID, r.CheckedAt, r.DurationMS, r.Status, r.Answer, r.Error, raw)
+	_, err = tx.ExecContext(ctx, `INSERT INTO intelligence_check_runs(group_id,checked_at,duration_ms,status,answer,error,config_snapshot,account_id,request_id,paused) VALUES($1,$2,$3,$4,$5,$6,$7,NULLIF($8,0),$9,$10)`, r.GroupID, r.CheckedAt, r.DurationMS, r.Status, r.Answer, r.Error, raw, r.AccountID, r.RequestID, r.Paused)
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
+func (s *SQLStore) resolveAccount(ctx context.Context, c Config, requestID string) int64 {
+	for {
+		var id int64
+		err := s.DB.QueryRowContext(ctx, `SELECT account_id FROM usage_logs WHERE request_id=$1 AND api_key_id=$2 AND group_id=$3 ORDER BY id DESC LIMIT 1`, requestID, c.APIKeyID, c.GroupID).Scan(&id)
+		if err == nil {
+			return id
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			slog.Warn("intelligence account attribution unavailable", "group_id", c.GroupID, "error", err)
+			return 0
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			slog.Warn("intelligence account attribution timed out", "group_id", c.GroupID)
+			return 0
+		case <-timer.C:
+		}
+	}
+}
+
 func (s *SQLStore) History(ctx context.Context, groupID int64, since time.Time, beforeID int64, limit int) ([]Record, error) {
 	if limit < 1 || limit > 1000 {
 		limit = 1000
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,group_id,checked_at,duration_ms,status,answer,error,config_snapshot FROM intelligence_check_runs WHERE group_id=$1 AND checked_at>=$2 AND ($3=0 OR id<$3) ORDER BY id DESC LIMIT $4`, groupID, since, beforeID, limit)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,group_id,checked_at,duration_ms,status,answer,error,config_snapshot,COALESCE(account_id,0),paused FROM intelligence_check_runs WHERE group_id=$1 AND checked_at>=$2 AND ($3=0 OR id<$3) ORDER BY id DESC LIMIT $4`, groupID, since, beforeID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +189,7 @@ func (s *SQLStore) History(ctx context.Context, groupID int64, since time.Time, 
 	for rows.Next() {
 		var r Record
 		var raw []byte
-		if err = rows.Scan(&r.ID, &r.GroupID, &r.CheckedAt, &r.DurationMS, &r.Status, &r.Answer, &r.Error, &raw); err != nil {
+		if err = rows.Scan(&r.ID, &r.GroupID, &r.CheckedAt, &r.DurationMS, &r.Status, &r.Answer, &r.Error, &raw, &r.AccountID, &r.Paused); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(raw, &r.Config); err != nil {

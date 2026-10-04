@@ -33,7 +33,7 @@ func (p *HTTPProbe) Run(parent context.Context, c Config) Record {
 	r := Record{GroupID: c.GroupID, CheckedAt: start.UTC(), Status: "error"}
 	ctx, cancel := context.WithTimeout(parent, time.Duration(c.TimeoutSeconds)*time.Second)
 	defer cancel()
-	answer, err := p.request(ctx, c)
+	answer, err := p.request(ctx, c, &r)
 	r.DurationMS = time.Since(start).Milliseconds()
 	if err != nil {
 		r.Error = err.Error()
@@ -47,7 +47,7 @@ func (p *HTTPProbe) Run(parent context.Context, c Config) Record {
 	return r
 }
 
-func (p *HTTPProbe) request(ctx context.Context, c Config) (string, error) {
+func (p *HTTPProbe) request(ctx context.Context, c Config, record *Record) (string, error) {
 	endpoint := p.Endpoint
 	if p.ResolveEndpoint != nil {
 		var err error
@@ -112,6 +112,11 @@ func (p *HTTPProbe) request(ctx context.Context, c Config) (string, error) {
 		return "", errors.New("检测网络错误")
 	}
 	defer res.Body.Close()
+	// This gateway-generated correlation ID identifies the final billed account,
+	// including weighted routing and account failover. Never trust upstream IDs.
+	if id := strings.TrimSpace(res.Header.Get("X-Client-Request-ID")); len(id) > 0 && len(id) <= 128 {
+		record.RequestID = "client:" + id
+	}
 	// Never persist response headers, bearer credentials or raw gateway error bodies.
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return "", fmt.Errorf("检测 HTTP %d", res.StatusCode)

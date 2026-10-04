@@ -144,18 +144,18 @@ func TestTotalLatencyStatsCacheFastAccountNeedsThreeSlowAggregatesToExit(t *test
 		"exit_slow_streak", "0",
 	).Err())
 	for index := 0; index < 19; index++ {
-		member := fmt.Sprintf("%d:seed-%d:22000", nowMS, index)
+		member := fmt.Sprintf("%d:seed-%d:34000", nowMS, index)
 		require.NoError(t, rdb.ZAdd(ctx, samplesKey, redis.Z{Score: float64(nowMS), Member: member}).Err())
 	}
 
 	for index := 1; index <= 2; index++ {
-		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("slow-%d", index), 22_000))
+		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("slow-%d", index), 34_000))
 		stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 		require.NoError(t, err)
 		require.True(t, stats[accountID].ReliableFast)
 		require.Equal(t, index, stats[accountID].SlowStreak)
 	}
-	require.NoError(t, cache.RecordSample(ctx, accountID, "slow-3", 22_000))
+	require.NoError(t, cache.RecordSample(ctx, accountID, "slow-3", 34_000))
 	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
 	require.False(t, stats[accountID].ReliableFast)
@@ -163,7 +163,7 @@ func TestTotalLatencyStatsCacheFastAccountNeedsThreeSlowAggregatesToExit(t *test
 	require.True(t, mr.Exists(statsKey))
 }
 
-func TestTotalLatencyStatsCacheTwentyOneSecondBoundaryDoesNotExitFastPool(t *testing.T) {
+func TestTotalLatencyStatsCacheThirtyThreeSecondBoundaryDoesNotExitFastPool(t *testing.T) {
 	_, rdb, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 	accountID := int64(181)
@@ -177,11 +177,11 @@ func TestTotalLatencyStatsCacheTwentyOneSecondBoundaryDoesNotExitFastPool(t *tes
 		"exit_slow_streak", "0",
 	).Err())
 	for index := 0; index < 19; index++ {
-		member := fmt.Sprintf("%d:seed-%d:21000", nowMS, index)
+		member := fmt.Sprintf("%d:seed-%d:33000", nowMS, index)
 		require.NoError(t, rdb.ZAdd(ctx, samplesKey, redis.Z{Score: float64(nowMS), Member: member}).Err())
 	}
 
-	require.NoError(t, cache.RecordSample(ctx, accountID, "boundary-21s", 21_000))
+	require.NoError(t, cache.RecordSample(ctx, accountID, "boundary-33s", 33_000))
 	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
 	require.True(t, stats[accountID].ReliableFast)
@@ -197,13 +197,13 @@ func TestTotalLatencyStatsCacheRecentMinutePlusSamplesDoNotResetHistory(t *testi
 	require.NoError(t, err)
 	require.True(t, stats[accountID].ReliableFast)
 
-	for index := 0; index < 12; index++ {
+	for index := 0; index < 30; index++ {
 		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("recent-slow-%d", index), 61_000+index))
 	}
 	stats, err = cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
 	require.False(t, stats[accountID].ReliableFast, "ordinary slow aggregates may still move an account to the slow pool")
-	require.Equal(t, int64(34), stats[accountID].SampleCount, "minute-plus samples must not erase the rolling history")
+	require.Equal(t, int64(52), stats[accountID].SampleCount, "minute-plus samples must not erase the rolling history")
 	require.True(t, mr.Exists(fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)))
 	require.False(t, stats[accountID].CircuitBroken)
 }
