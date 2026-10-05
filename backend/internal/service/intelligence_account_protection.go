@@ -13,6 +13,16 @@ import (
 const intelligencePauseUntilKey = "intelligence_pause_until"
 const intelligenceAllowedGroupsKey = "intelligence_allowed_groups"
 const intelligenceRecoveryRequiredKey = "intelligence_recovery_required"
+const intelligenceProtectedGroupsKey = "intelligence_protected_groups"
+
+// Exported for repository-owned account-group mutations. Group membership
+// changes must release any stale intelligence isolation immediately.
+const (
+	IntelligencePauseUntilExtraKey       = intelligencePauseUntilKey
+	IntelligenceAllowedGroupsExtraKey    = intelligenceAllowedGroupsKey
+	IntelligenceRecoveryRequiredExtraKey = intelligenceRecoveryRequiredKey
+	IntelligenceProtectedGroupsExtraKey  = intelligenceProtectedGroupsKey
+)
 
 type IntelligencePoolResetter interface {
 	ResetForIntelligencePause(context.Context, int64, time.Time) error
@@ -64,6 +74,12 @@ func intelligenceAccountBlocked(account *Account, groupID *int64, now time.Time)
 		return false
 	}
 	if groupID != nil {
+		if protected, present := account.Extra[intelligenceProtectedGroupsKey]; present {
+			protectedIDs := intelligenceGroupIDList(protected)
+			if !containsInt64(protectedIDs, *groupID) {
+				return false
+			}
+		}
 		for _, id := range intelligenceAllowedGroups(account) {
 			if id == *groupID {
 				return false
@@ -71,6 +87,51 @@ func intelligenceAccountBlocked(account *Account, groupID *int64, now time.Time)
 		}
 	}
 	return true
+}
+
+func (s *OpenAIGatewayService) intelligenceAccountBlockedForGroup(ctx context.Context, account *Account, groupID *int64, now time.Time) bool {
+	if account == nil || groupID == nil || !intelligenceIsolationActive(account, now) {
+		return false
+	}
+	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && group != nil && group.ID == *groupID {
+		return IntelligenceProtectionGroupEligible(group) && intelligenceAccountBlocked(account, groupID, now)
+	}
+	if s != nil && s.schedulerSnapshot != nil {
+		if group, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, *groupID); err == nil && group != nil {
+			return IntelligenceProtectionGroupEligible(group) && intelligenceAccountBlocked(account, groupID, now)
+		}
+	}
+	for _, group := range account.Groups {
+		if group != nil && group.ID == *groupID {
+			return IntelligenceProtectionGroupEligible(group) && intelligenceAccountBlocked(account, groupID, now)
+		}
+	}
+	for _, membership := range account.AccountGroups {
+		if membership.GroupID == *groupID && membership.Group != nil {
+			return IntelligenceProtectionGroupEligible(membership.Group) && intelligenceAccountBlocked(account, groupID, now)
+		}
+	}
+	return intelligenceAccountBlocked(account, groupID, now)
+}
+
+func intelligenceGroupIDList(value any) []int64 {
+	var result []int64
+	switch values := value.(type) {
+	case []int64:
+		return values
+	case []any:
+		for _, value := range values {
+			switch id := value.(type) {
+			case float64:
+				result = append(result, int64(id))
+			case int64:
+				result = append(result, id)
+			case int:
+				result = append(result, int64(id))
+			}
+		}
+	}
+	return result
 }
 
 // ProtectDegradedIntelligenceAccount runs under the global result lock. The
@@ -115,12 +176,14 @@ func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Co
 	}
 	now := time.Now()
 	allowed := []int64{}
+	protected := []int64{}
 	restricted := 0
 	for i := range groups {
 		candidateGroup := &groups[i]
-		if candidateGroup.Platform != PlatformOpenAI || candidateGroup.Status != StatusActive {
+		if !IntelligenceProtectionGroupEligible(candidateGroup) {
 			continue
 		}
+		protected = append(protected, candidateGroup.ID)
 		alternative, err := s.intelligenceGroupHasAlternative(ctx, candidateGroup, accountID, model, userID)
 		if err != nil {
 			return false, err
@@ -141,7 +204,7 @@ func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Co
 	until := now.Add(20 * time.Minute)
 	active := intelligenceIsolationActive(target, now)
 	if active {
-		if previous, err := time.Parse(time.RFC3339Nano, target.GetExtraString(intelligencePauseUntilKey)); err == nil && previous.After(now) {
+		if previous, err := time.Parse(time.RFC3339Nano, target.GetExtraString(intelligencePauseUntilKey)); err == nil {
 			until = previous
 		}
 	} else if err := resetter.ResetForIntelligencePause(ctx, accountID, until); err != nil {
@@ -153,6 +216,7 @@ func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Co
 		intelligencePauseUntilKey:       until.Format(time.RFC3339Nano),
 		intelligenceAllowedGroupsKey:    allowed,
 		intelligenceRecoveryRequiredKey: len(allowed) > 0,
+		intelligenceProtectedGroupsKey:  protected,
 	})
 	if err == nil && legacyPause {
 		err = s.clearLegacyIntelligencePause(ctx, accountID, legacyReason)
@@ -209,7 +273,7 @@ func (s *OpenAIGatewayService) RecoverIntelligenceAccount(ctx context.Context, a
 	if err := cache.ClearIntelligencePause(ctx, accountID); err != nil {
 		return err
 	}
-	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{intelligencePauseUntilKey: nil, intelligenceAllowedGroupsKey: nil, intelligenceRecoveryRequiredKey: nil}); err != nil {
+	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{intelligencePauseUntilKey: nil, intelligenceAllowedGroupsKey: nil, intelligenceRecoveryRequiredKey: nil, intelligenceProtectedGroupsKey: nil}); err != nil {
 		return err
 	}
 	if legacy {

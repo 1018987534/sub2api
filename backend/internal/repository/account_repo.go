@@ -1953,10 +1953,18 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 	if err != nil {
 		return err
 	}
+	protectionCtx := ctx
+	if tx != nil {
+		protectionCtx = dbent.NewTxContext(ctx, tx)
+	}
+	if err := r.clearIntelligenceProtectionOnGroupChange(protectionCtx, accountID); err != nil {
+		return err
+	}
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+		r.syncSchedulerAccountSnapshot(ctx, accountID)
 	}
 	payload := buildSchedulerGroupPayload([]int64{groupID})
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
@@ -1966,7 +1974,18 @@ func (r *accountRepository) AddToGroup(ctx context.Context, accountID, groupID i
 }
 
 func (r *accountRepository) RemoveFromGroup(ctx context.Context, accountID, groupID int64) error {
-	_, err := r.client.AccountGroup.Delete().
+	tx, err := r.client.Tx(ctx)
+	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+		return err
+	}
+	client := r.client
+	protectionCtx := ctx
+	if tx != nil {
+		defer func() { _ = tx.Rollback() }()
+		client = tx.Client()
+		protectionCtx = dbent.NewTxContext(ctx, tx)
+	}
+	affected, err := client.AccountGroup.Delete().
 		Where(
 			dbaccountgroup.AccountIDEQ(accountID),
 			dbaccountgroup.GroupIDEQ(groupID),
@@ -1974,6 +1993,19 @@ func (r *accountRepository) RemoveFromGroup(ctx context.Context, accountID, grou
 		Exec(ctx)
 	if err != nil {
 		return err
+	}
+	if affected > 0 {
+		if err := r.clearIntelligenceProtectionOnGroupChange(protectionCtx, accountID); err != nil {
+			return err
+		}
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		if affected > 0 {
+			r.syncSchedulerAccountSnapshot(ctx, accountID)
+		}
 	}
 	payload := buildSchedulerGroupPayload([]int64{groupID})
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
@@ -2000,9 +2032,19 @@ func (r *accountRepository) GetGroups(ctx context.Context, accountID int64) ([]s
 }
 
 func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, groupIDs []int64) error {
-	existingGroupIDs, err := r.loadAccountGroupIDs(ctx, accountID)
+	existingBindings, err := r.client.AccountGroup.Query().
+		Where(dbaccountgroup.AccountIDEQ(accountID)).
+		Order(dbent.Asc(dbaccountgroup.FieldPriority), dbent.Asc(dbaccountgroup.FieldGroupID)).All(ctx)
 	if err != nil {
 		return err
+	}
+	existingGroupIDs := make([]int64, 0, len(existingBindings))
+	changed := len(existingBindings) != len(groupIDs)
+	for i, binding := range existingBindings {
+		existingGroupIDs = append(existingGroupIDs, binding.GroupID)
+		if i >= len(groupIDs) || binding.GroupID != groupIDs[i] || binding.Priority != i+1 {
+			changed = true
+		}
 	}
 	// 使用事务保证删除旧绑定与创建新绑定的原子性
 	tx, err := r.client.Tx(ctx)
@@ -2027,8 +2069,24 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	}
 
 	if len(groupIDs) == 0 {
+		if changed {
+			protectionCtx := ctx
+			if tx != nil {
+				protectionCtx = dbent.NewTxContext(ctx, tx)
+			}
+			if err := r.clearIntelligenceProtectionOnGroupChange(protectionCtx, accountID); err != nil {
+				return err
+			}
+		}
 		if tx != nil {
-			return tx.Commit()
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			r.syncSchedulerAccountSnapshot(ctx, accountID)
+		}
+		payload := buildSchedulerGroupPayload(existingGroupIDs)
+		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
+			logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue clear groups failed: account=%d err=%v", accountID, err)
 		}
 		return nil
 	}
@@ -2045,17 +2103,35 @@ func (r *accountRepository) BindGroups(ctx context.Context, accountID int64, gro
 	if _, err := txClient.AccountGroup.CreateBulk(builders...).Save(ctx); err != nil {
 		return err
 	}
-
+	if changed {
+		protectionCtx := ctx
+		if tx != nil {
+			protectionCtx = dbent.NewTxContext(ctx, tx)
+		}
+		if err := r.clearIntelligenceProtectionOnGroupChange(protectionCtx, accountID); err != nil {
+			return err
+		}
+	}
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return err
 		}
+		r.syncSchedulerAccountSnapshot(ctx, accountID)
 	}
 	payload := buildSchedulerGroupPayload(mergeGroupIDs(existingGroupIDs, groupIDs))
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountGroupsChanged, &accountID, nil, payload); err != nil {
 		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue bind groups failed: account=%d err=%v", accountID, err)
 	}
 	return nil
+}
+
+func (r *accountRepository) clearIntelligenceProtectionOnGroupChange(ctx context.Context, accountID int64) error {
+	return r.UpdateExtra(ctx, accountID, map[string]any{
+		service.IntelligencePauseUntilExtraKey:       nil,
+		service.IntelligenceAllowedGroupsExtraKey:    nil,
+		service.IntelligenceRecoveryRequiredExtraKey: false,
+		service.IntelligenceProtectedGroupsExtraKey:  nil,
+	})
 }
 
 func (r *accountRepository) ListSchedulable(ctx context.Context) ([]service.Account, error) {

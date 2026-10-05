@@ -2409,7 +2409,7 @@ func TestOpenAIGatewayService_FirstTokenPriorityReplacesSlowSessionSticky(t *tes
 	fast := Account{ID: 2012, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10, GroupIDs: []int64{groupID}}
 	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_fast_recovery": slow.ID}}
 	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
-		slow.ID: {PredictedMS: 20_000, SampleCount: 5, UpdatedAt: time.Now()},
+		slow.ID: {PredictedMS: 33_001, SampleCount: 5, UpdatedAt: time.Now()},
 		fast.ID: {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: time.Now()},
 	}}
 	repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{
@@ -2537,7 +2537,7 @@ func TestOpenAIGatewayService_TotalDurationPriorityDoesNotLetSlowStickyCrossFast
 	cache := &schedulerTestGatewayCache{sessionBindings: map[string]int64{"openai:session_slow_sticky": slowSticky.ID}}
 	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
 		fast.ID:       {PredictedMS: 5_000, SampleCount: 5, UpdatedAt: now},
-		slowSticky.ID: {PredictedMS: 17_001, SampleCount: 5, UpdatedAt: now},
+		slowSticky.ID: {PredictedMS: 33_001, SampleCount: 5, UpdatedAt: now},
 	}}
 	repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyFirstTokenPriorityEnabled: "true"}}
 	svc := &OpenAIGatewayService{
@@ -2582,7 +2582,7 @@ func TestOpenAIGatewayService_FirstTokenPriorityOnlyRanksAccountsSupportingReque
 		Credentials: map[string]any{"model_mapping": map[string]any{requestedModel: requestedModel}},
 	}
 	stats := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{
-		slowSupported.ID:   {PredictedMS: 20_000, SampleCount: 5, UpdatedAt: now},
+		slowSupported.ID:   {PredictedMS: 33_001, SampleCount: 5, UpdatedAt: now},
 		fastUnsupported.ID: {PredictedMS: 1_000, SampleCount: 5, UpdatedAt: now},
 		mediumSupported.ID: {PredictedMS: 12_000, SampleCount: 5, UpdatedAt: now},
 	}}

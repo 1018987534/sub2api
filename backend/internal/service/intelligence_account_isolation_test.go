@@ -114,3 +114,38 @@ func TestIntelligenceIsolationExpiresWithoutSoleGroupException(t *testing.T) {
 	require.True(t, intelligenceAccountBlocked(account, &groupID, time.Now()))
 	require.False(t, intelligenceAccountBlocked(account, &groupID, time.Now().Add(21*time.Minute)))
 }
+
+func TestIntelligenceProtectionIgnoresOrdinaryGroups(t *testing.T) {
+	openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil))
+	t.Cleanup(func() { openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil)) })
+	protected := Group{ID: 111, Name: "010不降智", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, RateMultiplier: 1}
+	ordinary := Group{ID: 999, Name: "测试", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, RateMultiplier: 1}
+	a, b := cacheRateTestAccount(1), cacheRateTestAccount(2)
+	a.GroupIDs = []int64{protected.ID, ordinary.ID}
+	a.Groups = []*Group{&protected, &ordinary}
+	b.GroupIDs = []int64{protected.ID, ordinary.ID}
+	repo := &sharedIntelligenceRepo{intelligenceProtectionRepo: intelligenceProtectionRepo{schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{*a, *b}}, groups: []Group{protected, ordinary}}, byGroup: map[int64][]int64{protected.ID: {1, 2}, ordinary.ID: {1}}}
+	cache := &intelligenceResetCache{}
+	settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyTotalDurationPriorityEnabled: "true"}}
+	svc := &OpenAIGatewayService{accountRepo: repo, rateLimitService: &RateLimitService{firstTokenLatencyStatsCache: cache, usageRepo: cacheRateProviderStub{stats: map[int64]AccountCacheStats{}}, settingService: &SettingService{settingRepo: settings}}}
+	paused, err := svc.ProtectDegradedIntelligenceAccount(context.Background(), &protected, 1, "gpt-6.1-sol", 0)
+	require.NoError(t, err)
+	require.True(t, paused)
+	account, err := repo.GetByID(context.Background(), 1)
+	require.NoError(t, err)
+	require.Empty(t, intelligenceAllowedGroups(account))
+	require.Equal(t, false, account.Extra[intelligenceRecoveryRequiredKey])
+	require.Equal(t, []int64{protected.ID}, intelligenceGroupIDList(account.Extra[intelligenceProtectedGroupsKey]))
+	require.False(t, svc.intelligenceAccountBlockedForGroup(context.Background(), account, &ordinary.ID, time.Now()))
+	require.True(t, svc.intelligenceAccountBlockedForGroup(context.Background(), account, &protected.ID, time.Now()))
+	expired := time.Now().Add(-time.Minute).Format(time.RFC3339Nano)
+	account.Extra[intelligencePauseUntilKey] = expired
+	account.Extra[intelligenceAllowedGroupsKey] = []int64{ordinary.ID}
+	account.Extra[intelligenceRecoveryRequiredKey] = true
+	paused, err = svc.ProtectDegradedIntelligenceAccount(context.Background(), &protected, account.ID, "gpt-6.1-sol", 0)
+	require.NoError(t, err)
+	require.True(t, paused)
+	require.Equal(t, expired, account.GetExtraString(intelligencePauseUntilKey))
+	require.Equal(t, false, account.Extra[intelligenceRecoveryRequiredKey])
+	require.False(t, svc.intelligenceAccountBlockedForGroup(context.Background(), account, &protected.ID, time.Now()))
+}
