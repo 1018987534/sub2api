@@ -1612,7 +1612,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 }
 
 func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ctx context.Context, account *Account, groupID *int64, platform string, requestedModel string, requireCompact bool, requiredCapability OpenAIEndpointCapability) *Account {
-	if account == nil || intelligenceAccountBlocked(account, groupID, time.Now()) {
+	if account == nil || s.intelligenceAccountBlockedForGroup(ctx, account, groupID, time.Now()) {
 		return nil
 	}
 	platform = NormalizeOpenAICompatiblePlatform(platform)
@@ -1664,7 +1664,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 }
 
 func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(account *Account, groupID *int64) bool {
-	if intelligenceAccountBlocked(account, groupID, time.Now()) {
+	if s.intelligenceAccountBlockedForGroup(context.Background(), account, groupID, time.Now()) {
 		return false
 	}
 	if s != nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {

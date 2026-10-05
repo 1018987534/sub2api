@@ -71,7 +71,7 @@ func TestTotalLatencyThirtyThirtyThreeStaircase(t *testing.T) {
 }
 
 func TestIntelligenceIsolationSchedulerProjection(t *testing.T) {
-	extra := map[string]any{"intelligence_pause_until": "2030-01-01T00:00:00Z", "intelligence_allowed_groups": []int64{111}, "intelligence_recovery_required": true}
+	extra := map[string]any{"intelligence_pause_until": "2030-01-01T00:00:00Z", "intelligence_allowed_groups": []int64{111}, "intelligence_recovery_required": true, "intelligence_protected_groups": []int64{111, 5}}
 	require.Equal(t, extra, filterSchedulerExtra(extra))
 	require.True(t, shouldEnqueueSchedulerOutboxForExtraUpdates(extra))
 }

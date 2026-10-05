@@ -839,11 +839,41 @@ func (r *groupRepository) GetAccountCount(ctx context.Context, groupID int64) (t
 }
 
 func (r *groupRepository) DeleteAccountGroupsByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	res, err := r.sql.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", groupID)
+	rows, err := r.sql.QueryContext(ctx, `WITH removed AS (
+		DELETE FROM account_groups WHERE group_id = $1 RETURNING account_id
+	), released AS (
+		UPDATE accounts SET extra = (COALESCE(extra, '{}'::jsonb)
+			- 'intelligence_pause_until' - 'intelligence_allowed_groups' - 'intelligence_protected_groups')
+			|| '{"intelligence_recovery_required":false}'::jsonb, updated_at = NOW()
+		WHERE id IN (SELECT account_id FROM removed) AND deleted_at IS NULL
+		RETURNING id
+	) SELECT account_id FROM removed`, groupID)
 	if err != nil {
 		return 0, err
 	}
-	affected, _ := res.RowsAffected()
+	accountIDs := make([]int64, 0)
+	for rows.Next() {
+		var accountID int64
+		if err := rows.Scan(&accountID); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		accountIDs = append(accountIDs, accountID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	affected := int64(len(accountIDs))
+	if len(accountIDs) > 0 {
+		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, map[string]any{
+			"account_ids": accountIDs,
+			"group_ids":   []int64{groupID},
+		}); err != nil {
+			logger.LegacyPrintf("repository.group", "[Scheduler] enqueue intelligence account reset failed: group=%d err=%v", groupID, err)
+		}
+	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &groupID, nil); err != nil {
 		logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group account clear failed: group=%d err=%v", groupID, err)
 	}
@@ -946,6 +976,28 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 	}
 
 	// 3. Delete account_groups join rows.
+	resetRows, err := exec.QueryContext(ctx, `UPDATE accounts SET extra = (COALESCE(extra, '{}'::jsonb)
+		- 'intelligence_pause_until' - 'intelligence_allowed_groups' - 'intelligence_protected_groups')
+		|| '{"intelligence_recovery_required":false}'::jsonb, updated_at = NOW()
+		WHERE id IN (SELECT account_id FROM account_groups WHERE group_id = $1) AND deleted_at IS NULL RETURNING id`, id)
+	if err != nil {
+		return nil, err
+	}
+	var affectedAccountIDs []int64
+	for resetRows.Next() {
+		var accountID int64
+		if err := resetRows.Scan(&accountID); err != nil {
+			_ = resetRows.Close()
+			return nil, err
+		}
+		affectedAccountIDs = append(affectedAccountIDs, accountID)
+	}
+	if err := resetRows.Close(); err != nil {
+		return nil, err
+	}
+	if err := resetRows.Err(); err != nil {
+		return nil, err
+	}
 	if _, err := exec.ExecContext(ctx, "DELETE FROM account_groups WHERE group_id = $1", id); err != nil {
 		return nil, err
 	}
@@ -963,6 +1015,14 @@ func (r *groupRepository) deleteCascade(ctx context.Context, id int64, requireEm
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return nil, err
+		}
+	}
+	if len(affectedAccountIDs) > 0 {
+		if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountBulkChanged, nil, nil, map[string]any{
+			"account_ids": affectedAccountIDs,
+			"group_ids":   []int64{id},
+		}); err != nil {
+			logger.LegacyPrintf("repository.group", "[SchedulerOutbox] enqueue group deletion account reset failed: group=%d err=%v", id, err)
 		}
 	}
 	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventGroupChanged, nil, &id, nil); err != nil {

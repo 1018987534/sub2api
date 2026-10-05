@@ -115,12 +115,18 @@ func TestIntelligenceGlobalAccountPostgres(t *testing.T) {
 		require.Equal(t, step.recoveries, recoveries)
 		t.Logf("step=%d group=%d account=%d status=%s total_pauses=%d recoveries=%d", i+1, step.group, step.account, step.status, pauses, recoveries)
 	}
-	_, err = db.ExecContext(ctx, `CREATE TEMP TABLE accounts(id BIGINT,temp_unschedulable_until TIMESTAMPTZ,temp_unschedulable_reason TEXT);
- INSERT INTO accounts VALUES(1,NOW()+INTERVAL '20 minutes','intelligence: legacy'),(2,NOW()+INTERVAL '20 minutes','unrelated');`)
+	_, err = db.ExecContext(ctx, `CREATE TEMP TABLE accounts(id BIGINT,temp_unschedulable_until TIMESTAMPTZ,temp_unschedulable_reason TEXT,extra JSONB);
+ INSERT INTO accounts VALUES(1,NOW()+INTERVAL '20 minutes','intelligence: legacy','{}'),(2,NOW()+INTERVAL '20 minutes','unrelated','{}');`)
 	require.NoError(t, err)
 	before := pauses
 	require.NoError(t, s.ReconcileLegacyProtection(ctx))
 	require.Equal(t, before+1, pauses)
 	t.Log("legacy reconciliation: active intelligence pause reconsidered; unrelated pause untouched")
+	_, err = db.ExecContext(ctx, `UPDATE accounts SET temp_unschedulable_until=NOW()-INTERVAL '1 minute',temp_unschedulable_reason='',extra='{"intelligence_recovery_required":true}' WHERE id=1`)
+	require.NoError(t, err)
+	before = pauses
+	require.NoError(t, s.ReconcileLegacyProtection(ctx))
+	require.Equal(t, before+1, pauses)
+	t.Log("persistent group exception: existing history reused without a probe")
 
 }

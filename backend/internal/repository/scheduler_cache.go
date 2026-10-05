@@ -823,6 +823,11 @@ func (c *schedulerCache) writeAccountIDs(ctx context.Context, accounts []service
 		}
 
 		id := strconv.FormatInt(account.ID, 10)
+		// Membership resets release sample suppression but leave the score
+		// pending for fresh measurements on subsequent real requests.
+		if recovery, present := account.Extra[service.IntelligenceRecoveryRequiredExtraKey].(bool); present && !recovery && account.GetExtraString(service.IntelligencePauseUntilExtraKey) == "" {
+			pipe.HDel(ctx, totalLatencyStatsPrefix+id, "intelligence_pause_until_ms")
+		}
 		pipe.Set(ctx, schedulerAccountKey(id), fullPayload, 0)
 		pipe.Set(ctx, schedulerAccountMetaKey(id), metaPayload, 0)
 		// Keep the hot LastUsedAt side key untouched: a lagging snapshot rebuild
@@ -993,6 +998,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"intelligence_pause_until",
 		"intelligence_allowed_groups",
 		"intelligence_recovery_required",
+		"intelligence_protected_groups",
 		// Anthropic shared-window and Fable-only threshold checks run on this
 		// projection. UpdateExtra refreshes both payloads without a bucket rebuild.
 		"session_window_utilization",

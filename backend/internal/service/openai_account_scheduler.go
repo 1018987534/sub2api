@@ -1964,7 +1964,7 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if account == nil {
 		return false, "account_nil"
 	}
-	if intelligenceAccountBlocked(account, req.GroupID, time.Now()) {
+	if s != nil && s.service != nil && s.service.intelligenceAccountBlockedForGroup(ctx, account, req.GroupID, time.Now()) {
 		return false, "intelligence_isolated"
 	}
 	if source, ok := CompositeRouteSourceFromContext(ctx); ok && source == CompositeRouteSourceAccount {

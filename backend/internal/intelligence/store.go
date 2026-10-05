@@ -228,8 +228,8 @@ func (s *SQLStore) Prune(ctx context.Context) error {
 	}
 }
 
-// ReconcileLegacyProtection converts only still-active pauses written by the
-// previous release, using existing check history. It never generates a probe.
+// ReconcileLegacyProtection recalculates legacy pauses and persistent group
+// exceptions from existing check history. It never generates a probe.
 func (s *SQLStore) ReconcileLegacyProtection(ctx context.Context) error {
 	if s.Protect == nil {
 		return nil
@@ -245,7 +245,8 @@ func (s *SQLStore) ReconcileLegacyProtection(ctx context.Context) error {
 	rows, err := tx.QueryContext(ctx, `SELECT a.id,r.status,r.config_snapshot FROM accounts a
  JOIN LATERAL (SELECT status,config_snapshot FROM intelligence_check_runs
  WHERE account_id=a.id AND protection_eligible ORDER BY id DESC LIMIT 1) r ON TRUE
- WHERE a.temp_unschedulable_until>NOW() AND a.temp_unschedulable_reason LIKE 'intelligence:%'`)
+ WHERE (a.temp_unschedulable_until>NOW() AND a.temp_unschedulable_reason LIKE 'intelligence:%')
+ OR a.extra->'intelligence_recovery_required'='true'::jsonb`)
 	if err != nil {
 		return err
 	}
