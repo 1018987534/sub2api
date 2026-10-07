@@ -14,6 +14,7 @@ const intelligencePauseUntilKey = "intelligence_pause_until"
 const intelligenceAllowedGroupsKey = "intelligence_allowed_groups"
 const intelligenceRecoveryRequiredKey = "intelligence_recovery_required"
 const intelligenceProtectedGroupsKey = "intelligence_protected_groups"
+const intelligenceRecoveredAtKey = "intelligence_recovered_at"
 
 // Exported for repository-owned account-group mutations. Group membership
 // changes must release any stale intelligence isolation immediately.
@@ -63,8 +64,7 @@ func intelligenceIsolationActive(account *Account, now time.Time) bool {
 		return false
 	}
 	until, _ := time.Parse(time.RFC3339Nano, account.GetExtraString(intelligencePauseUntilKey))
-	// A last-account exception supplies ongoing checks. Keep other groups isolated
-	// until a normal result, instead of returning a known degraded account on TTL.
+	// Independent recovery checks release isolation on a normal result.
 	recovery, _ := account.Extra[intelligenceRecoveryRequiredKey].(bool)
 	return until.After(now) || recovery
 }
@@ -215,7 +215,7 @@ func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Co
 	err = s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{
 		intelligencePauseUntilKey:       until.Format(time.RFC3339Nano),
 		intelligenceAllowedGroupsKey:    allowed,
-		intelligenceRecoveryRequiredKey: len(allowed) > 0,
+		intelligenceRecoveryRequiredKey: true,
 		intelligenceProtectedGroupsKey:  protected,
 	})
 	if err == nil && legacyPause {
@@ -273,13 +273,23 @@ func (s *OpenAIGatewayService) RecoverIntelligenceAccount(ctx context.Context, a
 	if err := cache.ClearIntelligencePause(ctx, accountID); err != nil {
 		return err
 	}
-	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{intelligencePauseUntilKey: nil, intelligenceAllowedGroupsKey: nil, intelligenceRecoveryRequiredKey: nil, intelligenceProtectedGroupsKey: nil}); err != nil {
+	if err := s.accountRepo.UpdateExtra(ctx, accountID, map[string]any{intelligencePauseUntilKey: nil, intelligenceAllowedGroupsKey: nil, intelligenceRecoveryRequiredKey: nil, intelligenceProtectedGroupsKey: nil, intelligenceRecoveredAtKey: time.Now().UTC().Format(time.RFC3339Nano)}); err != nil {
 		return err
 	}
 	if legacy {
 		return s.clearLegacyIntelligencePause(ctx, accountID, account.TempUnschedulableReason)
 	}
 	return nil
+}
+
+// Internal recovery resets the account streak without creating a public result.
+func (s *OpenAIGatewayService) IntelligenceRecoveryCutoff(ctx context.Context, accountID int64) (time.Time, error) {
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil || account == nil {
+		return time.Time{}, err
+	}
+	cutoff, _ := time.Parse(time.RFC3339Nano, account.GetExtraString(intelligenceRecoveredAtKey))
+	return cutoff, nil
 }
 
 func (s *OpenAIGatewayService) clearLegacyIntelligencePause(ctx context.Context, id int64, reason string) error {

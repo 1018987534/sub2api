@@ -24,6 +24,7 @@ type SQLStore struct {
 	Protect            func(context.Context, Config, int64) (bool, error)
 	ProtectionEligible func(context.Context, Config) (bool, error)
 	Recover            func(context.Context, int64) error
+	RecoveryCutoff     func(context.Context, int64) (time.Time, error)
 }
 
 func (s *SQLStore) Configs(ctx context.Context) ([]Config, error) {
@@ -136,8 +137,15 @@ func (s *SQLStore) Finish(ctx context.Context, claim *Claim, r Record) error {
 			return err
 		}
 		var previousStatus string
+		var cutoff time.Time
+		if s.RecoveryCutoff != nil {
+			cutoff, err = s.RecoveryCutoff(ctx, r.AccountID)
+			if err != nil {
+				return err
+			}
+		}
 		err = tx.QueryRowContext(ctx, `SELECT status FROM intelligence_check_runs
- WHERE account_id=$1 AND protection_eligible ORDER BY id DESC LIMIT 1`, r.AccountID).Scan(&previousStatus)
+ WHERE account_id=$1 AND protection_eligible AND checked_at >= $2 ORDER BY id DESC LIMIT 1`, r.AccountID, cutoff).Scan(&previousStatus)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}

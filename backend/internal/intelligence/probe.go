@@ -60,33 +60,9 @@ func (p *HTTPProbe) request(ctx context.Context, c Config, record *Record) (stri
 	if err != nil || strings.TrimSpace(key) == "" {
 		return "", errors.New("专用 API Key 不可用、已失效或分组/所有者不匹配")
 	}
-	payload := map[string]any{"model": c.Model}
-	path := "/v1/responses"
-	switch c.Protocol {
-	case "responses":
-		payload["input"] = c.Prompt
-		payload["stream"] = true
-		payload["store"] = false
-		if c.ReasoningEffort != "none" {
-			payload["reasoning"] = map[string]string{"effort": c.ReasoningEffort}
-		}
-	case "chat_completions":
-		path = "/v1/chat/completions"
-		payload["messages"] = []map[string]string{{"role": "user", "content": c.Prompt}}
-		payload["stream"] = false
-		if c.ReasoningEffort != "none" {
-			payload["reasoning_effort"] = c.ReasoningEffort
-		}
-	case "messages":
-		path = "/v1/messages"
-		payload["messages"] = []map[string]string{{"role": "user", "content": c.Prompt}}
-		payload["max_tokens"] = 4096
-	default:
-		return "", ErrInvalid
-	}
-	raw, err := json.Marshal(payload)
+	path, raw, err := ProbeRequest(c)
 	if err != nil {
-		return "", errors.New("无法编码检测请求")
+		return "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+path, bytes.NewReader(raw))
 	if err != nil {
@@ -112,19 +88,59 @@ func (p *HTTPProbe) request(ctx context.Context, c Config, record *Record) (stri
 		return "", errors.New("检测网络错误")
 	}
 	defer res.Body.Close()
-	// This gateway-generated correlation ID identifies the final billed account,
-	// including weighted routing and account failover. Never trust upstream IDs.
 	if id := strings.TrimSpace(res.Header.Get("X-Client-Request-ID")); len(id) > 0 && len(id) <= 128 {
 		record.RequestID = "client:" + id
 	}
-	// Never persist response headers, bearer credentials or raw gateway error bodies.
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return "", fmt.Errorf("检测 HTTP %d", res.StatusCode)
 	}
+	answer, err := ProbeAnswer(res.Body, res.Header.Get("Content-Type"), c.Protocol)
+	if err != nil {
+		return "", errors.New("检测响应不完整、为空或格式无效")
+	}
+	return strings.ReplaceAll(answer, key, "[REDACTED]"), nil
+}
+
+// ProbeRequest shares the saved protocol, model, prompt and effort between
+// public monitor checks and fixed-account internal recovery checks.
+func ProbeRequest(c Config) (string, []byte, error) {
+	payload := map[string]any{"model": c.Model}
+	path := "/v1/responses"
+	switch c.Protocol {
+	case "responses":
+		payload["input"] = c.Prompt
+		payload["stream"] = true
+		payload["store"] = false
+		if c.ReasoningEffort != "none" {
+			payload["reasoning"] = map[string]string{"effort": c.ReasoningEffort}
+		}
+	case "chat_completions":
+		path = "/v1/chat/completions"
+		payload["messages"] = []map[string]string{{"role": "user", "content": c.Prompt}}
+		payload["stream"] = false
+		if c.ReasoningEffort != "none" {
+			payload["reasoning_effort"] = c.ReasoningEffort
+		}
+	case "messages":
+		path = "/v1/messages"
+		payload["messages"] = []map[string]string{{"role": "user", "content": c.Prompt}}
+		payload["max_tokens"] = 4096
+	default:
+		return "", nil, ErrInvalid
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", nil, errors.New("无法编码检测请求")
+	}
+	return path, raw, nil
+}
+
+func ProbeAnswer(body io.Reader, contentType, protocol string) (string, error) {
 	const maxBytes = 2 * 1024 * 1024
-	reader := io.LimitReader(res.Body, maxBytes+1)
+	reader := io.LimitReader(body, maxBytes+1)
 	var answer string
-	if strings.Contains(res.Header.Get("Content-Type"), "text/event-stream") {
+	var err error
+	if strings.Contains(contentType, "text/event-stream") {
 		answer, err = parseSSE(reader, maxBytes)
 	} else {
 		var data []byte
@@ -133,16 +149,12 @@ func (p *HTTPProbe) request(ctx context.Context, c Config, record *Record) (stri
 			return "", errors.New("检测响应过大")
 		}
 		if err == nil {
-			answer, err = parseJSON(data, c.Protocol)
+			answer, err = parseJSON(data, protocol)
 		}
 	}
 	if err != nil {
-		if ctx.Err() != nil {
-			return "", errors.New("检测超时或已取消")
-		}
 		return "", errors.New("检测响应不完整、为空或格式无效")
 	}
-	answer = strings.ReplaceAll(answer, key, "[REDACTED]")
 	if len(answer) > 65536 {
 		return "", errors.New("检测回答超过存储上限")
 	}
