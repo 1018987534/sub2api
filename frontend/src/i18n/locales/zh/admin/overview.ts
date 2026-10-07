@@ -1414,6 +1414,20 @@ export default {
       startRound: '开始新一轮',
       updateProgress: '更新进度',
       progressInput: '手动设置开奖进度',
+      currentPrizeCount: '当前轮次中奖人数',
+      updatePrizeCount: '更新中奖人数',
+      prizeCountUpdated: '本轮中奖人数已更新',
+      prizeCountUpdateFailed: '更新本轮中奖人数失败',
+      prizeCountInvalid: '中奖人数须为 1 到 {max} 的整数',
+      pauseRound: '暂停本轮',
+      resumeRound: '恢复本轮',
+      cancelRound: '作废本轮',
+      pauseRoundConfirm: '暂停后用户将不能参与，恢复后继续本轮。确认暂停？',
+      cancelRoundConfirm: '作废后本轮不会开奖且不能恢复。确认作废？',
+      roundPaused: '本轮已暂停',
+      roundResumed: '本轮已恢复',
+      roundCancelled: '本轮已作废',
+      roundStatusUpdateFailed: '更新轮次状态失败',
       draw: '立即开奖',
       currentRound: '当前轮次',
       rounds: '轮次记录',
@@ -1430,7 +1444,7 @@ export default {
       noParticipants: '本期暂无真实用户参与',
       participantsLoadFailed: '参与用户明细加载失败',
       participantColumns: { userId: '用户 ID', username: '用户名', email: '邮箱', ip: 'IP', joinedAt: '参与时间' },
-      columns: { round: '期数', progress: '开奖进度', real: '真实参与', actors: '群演', manualProgress: '手动补充', status: '状态', actions: '操作' }
+      columns: { round: '期数', progress: '开奖进度', real: '真实参与', actors: '群演', manualProgress: '手动补充', prizes: '礼品数量', status: '状态', actions: '操作' }
     },
 
     // Available Channels (aggregated read-only view)

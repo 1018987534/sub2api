@@ -1415,6 +1415,20 @@ export default {
       startRound: 'Start new round',
       updateProgress: 'Update progress',
       progressInput: 'Set draw progress manually',
+      currentPrizeCount: 'Current round winner count',
+      updatePrizeCount: 'Update winner count',
+      prizeCountUpdated: 'Winner count updated for this round',
+      prizeCountUpdateFailed: 'Failed to update this round winner count',
+      prizeCountInvalid: 'Winner count must be an integer from 1 to {max}',
+      pauseRound: 'Pause round',
+      resumeRound: 'Resume round',
+      cancelRound: 'Void round',
+      pauseRoundConfirm: 'Users cannot join while paused and the round can be resumed. Pause this round?',
+      cancelRoundConfirm: 'A voided round will not be drawn and cannot be resumed. Void this round?',
+      roundPaused: 'Round paused',
+      roundResumed: 'Round resumed',
+      roundCancelled: 'Round voided',
+      roundStatusUpdateFailed: 'Failed to update round status',
       draw: 'Draw now',
       currentRound: 'Current round',
       rounds: 'Round history',
@@ -1431,7 +1445,7 @@ export default {
       noParticipants: 'No real users have joined this round',
       participantsLoadFailed: 'Failed to load participant details',
       participantColumns: { userId: 'User ID', username: 'Username', email: 'Email', ip: 'IP', joinedAt: 'Joined at' },
-      columns: { round: 'Round', progress: 'Draw progress', real: 'Real entries', actors: 'Actors', manualProgress: 'Manual addition', status: 'Status', actions: 'Actions' }
+      columns: { round: 'Round', progress: 'Draw progress', real: 'Real entries', actors: 'Actors', manualProgress: 'Manual addition', prizes: 'Prizes', status: 'Status', actions: 'Actions' }
     },
 
     // Available Channels (aggregated read-only view)

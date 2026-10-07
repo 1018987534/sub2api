@@ -37,3 +37,12 @@ func TestLotteryManualProgressMigration(t *testing.T) {
 	require.Contains(t, sql, "actor_count = 0")
 	require.Contains(t, sql, "next_actor_at = NULL")
 }
+
+func TestLotteryPausedRoundMigration(t *testing.T) {
+	content, err := FS.ReadFile("244_lottery_paused_rounds.sql")
+	require.NoError(t, err)
+	sql := strings.Join(strings.Fields(string(content)), " ")
+	require.Contains(t, sql, "status IN ('open', 'paused', 'drawn', 'cancelled')")
+	require.Contains(t, sql, "status IN ('open', 'paused')")
+	require.Contains(t, sql, "idx_lottery_rounds_one_active")
+}

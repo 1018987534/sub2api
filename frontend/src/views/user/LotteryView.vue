@@ -33,7 +33,7 @@
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div><p class="text-sm font-medium" :class="current.current_round.status === 'drawn' ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-900 dark:text-white'">{{ participationStatus }}</p><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ participationRule }}</p></div>
               <button v-if="!snapshot" type="button" class="btn btn-primary min-w-32" :disabled="!canJoin || showCaptcha" @click="showCaptcha = true"><Icon name="sparkles" size="sm" class="mr-2" />{{ current.joined ? t('lottery.alreadyJoined') : t('lottery.joinNow') }}</button>
-              <router-link v-else to="/login" class="btn btn-primary min-w-32"><Icon name="sparkles" size="sm" class="mr-2" />{{ t('lottery.joinNow') }}</router-link>
+              <router-link v-else-if="current.current_round.status === 'open'" to="/login" class="btn btn-primary min-w-32"><Icon name="sparkles" size="sm" class="mr-2" />{{ t('lottery.joinNow') }}</router-link>
             </div>
           </div>
         </section>
@@ -110,6 +110,7 @@ const participationStatus = computed(() => {
   const round = current.value?.current_round
   if (!round) return ''
   if (round.status === 'drawn') return t('lottery.waitNextRound')
+  if (round.status === 'paused') return t('lottery.statuses.paused')
   if (round.status === 'cancelled') return t('lottery.statuses.cancelled')
   if (current.value?.joined) return t('lottery.joined')
   return t(round.draw_mode === 'manual' ? 'lottery.manualWaiting' : 'lottery.notJoined')
@@ -161,6 +162,8 @@ function statusLabel(status: string): string { return t(`lottery.statuses.${stat
 function statusBadgeClass(status: string): string {
   if (status === 'open') return 'bg-sky-50 text-sky-700 dark:bg-sky-400/10 dark:text-sky-300'
   if (status === 'drawn') return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300'
+  if (status === 'paused') return 'bg-amber-50 text-amber-700 dark:bg-amber-400/10 dark:text-amber-300'
+  if (status === 'cancelled') return 'bg-red-50 text-red-700 dark:bg-red-400/10 dark:text-red-300'
   return 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-400'
 }
 

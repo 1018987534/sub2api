@@ -14,14 +14,16 @@ import (
 )
 
 const (
-	LotteryDrawModeAuto            = "auto"
-	LotteryDrawModeManual          = "manual"
-	LotteryRoundModeAuto           = "auto"
-	LotteryRoundModeManual         = "manual"
-	LotteryRoundStatusOpen         = "open"
-	LotteryRoundStatusDrawn        = "drawn"
-	lotteryAdvisoryLock      int64 = 0x4c4f5454455259
-	lotteryRecentWinnerLimit       = 10000
+	LotteryDrawModeAuto               = "auto"
+	LotteryDrawModeManual             = "manual"
+	LotteryRoundModeAuto              = "auto"
+	LotteryRoundModeManual            = "manual"
+	LotteryRoundStatusOpen            = "open"
+	LotteryRoundStatusPaused          = "paused"
+	LotteryRoundStatusDrawn           = "drawn"
+	LotteryRoundStatusCancelled       = "cancelled"
+	lotteryAdvisoryLock         int64 = 0x4c4f5454455259
+	lotteryRecentWinnerLimit          = 10000
 )
 
 var (
@@ -336,7 +338,7 @@ func (s *LotteryService) StartRound(ctx context.Context, createdBy int64) (Lotte
 
 func (s *LotteryService) insertRoundTx(ctx context.Context, tx *sql.Tx, cfg LotteryConfig, createdBy int64) (LotteryRound, error) {
 	var openID int64
-	err := tx.QueryRowContext(ctx, `SELECT id FROM lottery_rounds WHERE status='open' FOR UPDATE`).Scan(&openID)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM lottery_rounds WHERE status IN ('open','paused') FOR UPDATE`).Scan(&openID)
 	if err == nil {
 		return LotteryRound{}, ErrLotteryRoundAlreadyOpen
 	}
@@ -366,7 +368,7 @@ func (s *LotteryService) insertRoundTx(ctx context.Context, tx *sql.Tx, cfg Lott
 		creator,
 	).Scan(&roundID)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "idx_lottery_rounds_one_open") {
+		if strings.Contains(strings.ToLower(err.Error()), "idx_lottery_rounds_one_active") {
 			return LotteryRound{}, ErrLotteryRoundAlreadyOpen
 		}
 		return LotteryRound{}, err
@@ -383,10 +385,10 @@ func (s *LotteryService) GetCurrent(ctx context.Context, userID int64) (LotteryC
 	if !cfg.Enabled {
 		return out, nil
 	}
-	round, err := scanLotteryRound(s.db.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.status='open'`))
+	round, err := scanLotteryRound(s.db.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.status IN ('open','paused')`))
 	if errors.Is(err, sql.ErrNoRows) {
 		// Keep the latest completed round visible while the next round is pending.
-		round, err = scanLotteryRound(s.db.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.status='drawn' ORDER BY r.round_no DESC LIMIT 1`))
+		round, err = scanLotteryRound(s.db.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.status IN ('drawn','cancelled') ORDER BY r.round_no DESC LIMIT 1`))
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return LotteryCurrent{}, err
@@ -716,6 +718,82 @@ func (s *LotteryService) UpdateProgress(ctx context.Context, roundID int64, part
 	}
 	if updated.DrawMode == LotteryDrawModeAuto && updated.ParticipantCount >= updated.ParticipantThreshold {
 		go s.advanceWithTimeout()
+	}
+	return updated, nil
+}
+
+func (s *LotteryService) UpdatePrizeCount(ctx context.Context, roundID int64, prizeCount int) (LotteryRound, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return LotteryRound{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Serialize prize changes with participation and drawing on the same round.
+	round, err := scanLotteryRound(tx.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.id=$1 FOR UPDATE OF r`, roundID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return LotteryRound{}, ErrLotteryRoundNotFound
+	}
+	if err != nil {
+		return LotteryRound{}, err
+	}
+	if round.Status != LotteryRoundStatusOpen && round.Status != LotteryRoundStatusPaused {
+		return LotteryRound{}, infraerrors.Conflict("LOTTERY_ROUND_CLOSED", "lottery round is already closed")
+	}
+	if prizeCount < 1 || prizeCount > 10000 || prizeCount > round.ParticipantThreshold {
+		return LotteryRound{}, infraerrors.BadRequest("LOTTERY_PRIZE_COUNT_INVALID", "prize count must be between 1 and the participant threshold, and no more than 10000")
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE lottery_rounds SET prize_count=$2,updated_at=NOW() WHERE id=$1`, round.ID, prizeCount); err != nil {
+		return LotteryRound{}, err
+	}
+	updated, err := scanLotteryRound(tx.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.id=$1`, round.ID))
+	if err != nil {
+		return LotteryRound{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return LotteryRound{}, err
+	}
+	return updated, nil
+}
+
+func (s *LotteryService) UpdateRoundStatus(ctx context.Context, roundID int64, status string) (LotteryRound, error) {
+	if status != LotteryRoundStatusOpen && status != LotteryRoundStatusPaused && status != LotteryRoundStatusCancelled {
+		return LotteryRound{}, infraerrors.BadRequest("LOTTERY_STATUS_INVALID", "status must be open, paused, or cancelled")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return LotteryRound{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	// Match the config-then-round lock order used by start and draw.
+	cfg, err := scanLotteryConfig(tx.QueryRowContext(ctx, lotteryConfigSelect+` FOR UPDATE`))
+	if err != nil {
+		return LotteryRound{}, err
+	}
+	round, err := scanLotteryRound(tx.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.id=$1 FOR UPDATE OF r`, roundID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return LotteryRound{}, ErrLotteryRoundNotFound
+	}
+	if err != nil {
+		return LotteryRound{}, err
+	}
+	allowed := round.Status == LotteryRoundStatusOpen && (status == LotteryRoundStatusPaused || status == LotteryRoundStatusCancelled) ||
+		round.Status == LotteryRoundStatusPaused && (status == LotteryRoundStatusOpen || status == LotteryRoundStatusCancelled)
+	if !allowed {
+		return LotteryRound{}, infraerrors.Conflict("LOTTERY_STATUS_TRANSITION_INVALID", "lottery round cannot change to the requested status")
+	}
+	if status == LotteryRoundStatusOpen && !cfg.Enabled {
+		return LotteryRound{}, ErrLotteryDisabled
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE lottery_rounds SET status=$2,updated_at=NOW() WHERE id=$1`, round.ID, status); err != nil {
+		return LotteryRound{}, err
+	}
+	updated, err := scanLotteryRound(tx.QueryRowContext(ctx, `SELECT `+lotteryRoundColumns+` FROM lottery_rounds r WHERE r.id=$1`, round.ID))
+	if err != nil {
+		return LotteryRound{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return LotteryRound{}, err
 	}
 	return updated, nil
 }

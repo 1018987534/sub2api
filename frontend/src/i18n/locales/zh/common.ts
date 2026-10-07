@@ -280,7 +280,7 @@ export default {
     myWinners: '我的中奖记录',
     history: '最近期数',
     columns: { round: '期数', participants: '参与人数', winners: '中奖人数', status: '状态' },
-    statuses: { open: '进行中', drawn: '已开奖', cancelled: '已取消' },
+    statuses: { open: '进行中', paused: '已暂停', drawn: '已开奖', cancelled: '已作废' },
     awarded: '中奖奖励已发放到账户余额',
     notEligible: '暂不满足参与条件',
     reasons: {

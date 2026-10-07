@@ -105,6 +105,16 @@ describe('LotteryView snapshot', () => {
     getRounds.mockResolvedValue({ items: [], total: 0, pages: 0 })
   })
 
+  it.each(['paused', 'cancelled'])('shows %s state and disables participation', async status => {
+    getCurrent.mockResolvedValue({ enabled: true, current_round: { ...round, status }, joined: false,
+      eligibility: { eligible: true }, recent_winners: [], my_recent_winners: [] })
+    getRounds.mockResolvedValue({ items: [{ ...round, status }] })
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain(`lottery.statuses.${status}`)
+    expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeDefined()
+  })
+
   it('loads the public endpoint and frames only the previous round without changing row spacing', async () => {
     const wrapper = mount(LotteryView, { props: { snapshot: true }, global: { stubs } })
     await flushPromises()
