@@ -18,7 +18,7 @@ export interface LotteryConfig {
 export interface LotteryRound {
   id: number
   round_no: number
-  status: 'open' | 'drawn' | 'cancelled' | string
+  status: 'open' | 'paused' | 'drawn' | 'cancelled' | string
   participant_threshold: number
   prize_count: number
   prize_amount: number
@@ -155,6 +155,14 @@ export const lotteryAPI = {
   },
   async drawRound(roundId: number) {
     const { data } = await apiClient.post<LotteryDrawResult>(`/admin/lottery/rounds/${roundId}/draw`)
+    return data
+  },
+  async updateRoundPrizeCount(roundId: number, prizeCount: number) {
+    const { data } = await apiClient.put<LotteryRound>(`/admin/lottery/rounds/${roundId}/prize-count`, { prize_count: prizeCount })
+    return data
+  },
+  async updateRoundStatus(roundId: number, status: 'open' | 'paused' | 'cancelled') {
+    const { data } = await apiClient.put<LotteryRound>(`/admin/lottery/rounds/${roundId}/status`, { status })
     return data
   }
 }

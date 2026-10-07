@@ -280,7 +280,7 @@ export default {
     myWinners: 'My winnings',
     history: 'Recent rounds',
     columns: { round: 'Round', participants: 'Participants', winners: 'Winners', status: 'Status' },
-    statuses: { open: 'Open', drawn: 'Drawn', cancelled: 'Cancelled' },
+    statuses: { open: 'Open', paused: 'Paused', drawn: 'Drawn', cancelled: 'Voided' },
     awarded: 'Reward credited to account balance',
     notEligible: 'You do not meet the requirements yet',
     reasons: {

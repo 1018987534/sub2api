@@ -20,8 +20,8 @@ func TestLotteryCurrentPreservesCompletedRound(t *testing.T) {
 			mock.ExpectQuery("FROM lottery_config WHERE id = 1").WillReturnRows(
 				sqlmock.NewRows([]string{"enabled", "threshold", "prizes", "amount", "draw", "next", "recharge", "minimum", "age", "recent", "updated"}).
 					AddRow(true, 50, 2, 5, "auto", "manual", false, 0, 0, 0, now))
-			mock.ExpectQuery("FROM lottery_rounds r WHERE r.status='open'").WillReturnError(sql.ErrNoRows)
-			mock.ExpectQuery("FROM lottery_rounds r WHERE r.status='drawn' ORDER BY r.round_no DESC LIMIT 1").WillReturnRows(
+			mock.ExpectQuery(`FROM lottery_rounds r WHERE r.status IN \('open','paused'\)`).WillReturnError(sql.ErrNoRows)
+			mock.ExpectQuery(`FROM lottery_rounds r WHERE r.status IN \('drawn','cancelled'\) ORDER BY r.round_no DESC LIMIT 1`).WillReturnRows(
 				sqlmock.NewRows([]string{"id", "number", "status", "threshold", "prizes", "amount", "draw", "next", "recharge", "minimum", "age", "recent", "participants", "manual", "real", "winners", "ips", "started", "drawn", "updated"}).
 					AddRow(10, 10, "drawn", 50, 2, 5, "auto", "manual", false, 0, 0, 0, 50, 0, 50, 2, 50, now, now, now))
 			mock.ExpectQuery("SELECT EXISTS").WithArgs(int64(10), int64(7)).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(joined))
@@ -50,8 +50,8 @@ func TestLotteryCurrentWithoutAnyRound(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	mock.ExpectQuery("FROM lottery_config WHERE id = 1").WillReturnRows(
 		sqlmock.NewRows([]string{"enabled", "threshold", "prizes", "amount", "draw", "next", "recharge", "minimum", "age", "recent", "updated"}).AddRow(true, 50, 2, 5, "auto", "manual", false, 0, 0, 0, time.Now()))
-	mock.ExpectQuery("FROM lottery_rounds r WHERE r.status='open'").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("FROM lottery_rounds r WHERE r.status='drawn' ORDER BY r.round_no DESC LIMIT 1").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(`FROM lottery_rounds r WHERE r.status IN \('open','paused'\)`).WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(`FROM lottery_rounds r WHERE r.status IN \('drawn','cancelled'\) ORDER BY r.round_no DESC LIMIT 1`).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("FROM lottery_winners").WithArgs(lotteryRecentWinnerLimit).WillReturnRows(sqlmock.NewRows([]string{"id", "round_id", "round_no", "email", "amount", "awarded", "joined"}))
 	current, err := NewLotteryService(db, nil, nil).GetCurrent(context.Background(), 0)
 	require.NoError(t, err)

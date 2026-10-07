@@ -29,6 +29,14 @@ type lotteryProgressRequest struct {
 	ParticipantCount int `json:"participant_count"`
 }
 
+type lotteryPrizeCountRequest struct {
+	PrizeCount int `json:"prize_count"`
+}
+
+type lotteryStatusRequest struct {
+	Status string `json:"status"`
+}
+
 func (h *LotteryHandler) Current(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -120,6 +128,44 @@ func (h *LotteryHandler) Rounds(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
+}
+
+func (h *LotteryHandler) AdminUpdatePrizeCount(c *gin.Context) {
+	roundID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || roundID <= 0 {
+		response.BadRequest(c, "Invalid round ID")
+		return
+	}
+	var req lotteryPrizeCountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	round, err := h.service.UpdatePrizeCount(c.Request.Context(), roundID, req.PrizeCount)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, round)
+}
+
+func (h *LotteryHandler) AdminUpdateRoundStatus(c *gin.Context) {
+	roundID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || roundID <= 0 {
+		response.BadRequest(c, "Invalid round ID")
+		return
+	}
+	var req lotteryStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	round, err := h.service.UpdateRoundStatus(c.Request.Context(), roundID, req.Status)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, round)
 }
 
 func (h *LotteryHandler) AdminConfig(c *gin.Context) {
