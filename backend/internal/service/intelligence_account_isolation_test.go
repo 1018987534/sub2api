@@ -134,7 +134,7 @@ func TestIntelligenceProtectionIgnoresOrdinaryGroups(t *testing.T) {
 	account, err := repo.GetByID(context.Background(), 1)
 	require.NoError(t, err)
 	require.Empty(t, intelligenceAllowedGroups(account))
-	require.Equal(t, false, account.Extra[intelligenceRecoveryRequiredKey])
+	require.Equal(t, true, account.Extra[intelligenceRecoveryRequiredKey])
 	require.Equal(t, []int64{protected.ID}, intelligenceGroupIDList(account.Extra[intelligenceProtectedGroupsKey]))
 	require.False(t, svc.intelligenceAccountBlockedForGroup(context.Background(), account, &ordinary.ID, time.Now()))
 	require.True(t, svc.intelligenceAccountBlockedForGroup(context.Background(), account, &protected.ID, time.Now()))
@@ -146,6 +146,6 @@ func TestIntelligenceProtectionIgnoresOrdinaryGroups(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, paused)
 	require.Equal(t, expired, account.GetExtraString(intelligencePauseUntilKey))
-	require.Equal(t, false, account.Extra[intelligenceRecoveryRequiredKey])
-	require.False(t, svc.intelligenceAccountBlockedForGroup(context.Background(), account, &protected.ID, time.Now()))
+	require.Equal(t, true, account.Extra[intelligenceRecoveryRequiredKey])
+	require.True(t, svc.intelligenceAccountBlockedForGroup(context.Background(), account, &protected.ID, time.Now()))
 }

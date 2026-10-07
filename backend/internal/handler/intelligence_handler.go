@@ -18,12 +18,13 @@ import (
 )
 
 type IntelligenceHandler struct {
-	store   intelligence.Store
-	runner  *intelligence.Runner
-	keys    service.APIKeyRepository
-	groups  service.GroupRepository
-	access  channelMonitorV2GroupAuthorizer
-	monitor *service.ChannelMonitorV2Service
+	store    intelligence.Store
+	runner   *intelligence.Runner
+	recovery *intelligence.RecoveryRunner
+	keys     service.APIKeyRepository
+	groups   service.GroupRepository
+	access   channelMonitorV2GroupAuthorizer
+	monitor  *service.ChannelMonitorV2Service
 }
 
 func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyRepository, groups service.GroupRepository, access *service.APIKeyService, settings *service.SettingService, monitor *service.ChannelMonitorV2Service, gateway *service.OpenAIGatewayService) *IntelligenceHandler {
@@ -34,6 +35,7 @@ func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyR
 			return service.IntelligenceProtectionGroupEligible(group), err
 		}
 		h.store.(*intelligence.SQLStore).Recover = gateway.RecoverIntelligenceAccount
+		h.store.(*intelligence.SQLStore).RecoveryCutoff = gateway.IntelligenceRecoveryCutoff
 		h.store.(*intelligence.SQLStore).Protect = func(ctx context.Context, c intelligence.Config, accountID int64) (bool, error) {
 			group, err := groups.GetByID(ctx, c.GroupID)
 			if err != nil {
@@ -55,14 +57,40 @@ func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyR
 	}
 	probe := &intelligence.HTTPProbe{ResolveEndpoint: intelligenceProbeEndpoint(cfg, routing), Resolve: h.credential}
 	h.runner = intelligence.NewRunner(h.store, probe, enabled)
+	if gateway != nil && db != nil {
+		h.recovery = intelligence.NewRecoveryRunner(&intelligence.SQLRecoveryStore{DB: db, Recover: gateway.RecoverIntelligenceAccount}, gateway, func(ctx context.Context) (intelligence.Config, error) {
+			// Recovery is independent of the public monitor switch. Reuse one
+			// enabled OpenAI group's saved test, without routing through its pool.
+			configs, err := h.store.Configs(ctx)
+			if err != nil {
+				return intelligence.Config{}, err
+			}
+			for _, c := range configs {
+				if !c.Enabled || c.Validate() != nil {
+					continue
+				}
+				group, err := groups.GetByID(ctx, c.GroupID)
+				if err == nil && group != nil && group.Platform == service.PlatformOpenAI && group.Status == service.StatusActive {
+					return c, nil
+				}
+			}
+			return intelligence.Config{}, intelligence.ErrInvalid
+		})
+	}
 	if cfg.IsControl() && os.Getenv("INTELLIGENCE_CHECKS_DISABLE_RUNNER") != "1" {
 		h.runner.Start()
+		if h.recovery != nil {
+			h.recovery.Start()
+		}
 	}
 	return h
 }
 func (h *IntelligenceHandler) Stop() {
 	if h != nil && h.runner != nil {
 		h.runner.Stop()
+	}
+	if h != nil && h.recovery != nil {
+		h.recovery.Stop()
 	}
 }
 func (h *IntelligenceHandler) credential(ctx context.Context, c intelligence.Config) (string, error) {
