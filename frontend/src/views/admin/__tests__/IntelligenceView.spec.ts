@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import IntelligenceView from '../IntelligenceView.vue'
-import { getIntelligenceConfigs, getIntelligenceHistory, getIntelligenceKeyOptions, saveIntelligenceConfig, runIntelligenceCheck, type IntelligenceConfig } from '@/api/intelligence'
+import { getIntelligenceConfigs, getIntelligenceHistory, getIntelligenceRecoveryHistory, getIntelligenceKeyOptions, saveIntelligenceConfig, runIntelligenceCheck, type IntelligenceConfig } from '@/api/intelligence'
 import { getAllIncludingInactive } from '@/api/admin/groups'
 import type { AdminGroup } from '@/types'
 
@@ -9,7 +9,7 @@ vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<mai
 vi.mock('vue-router', () => ({ onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/api/admin/groups', () => ({ getAllIncludingInactive: vi.fn() }))
 vi.mock('@/api/intelligence', () => ({
-  getIntelligenceConfigs: vi.fn(), getIntelligenceHistory: vi.fn(), getIntelligenceKeyOptions: vi.fn(), saveIntelligenceConfig: vi.fn(), runIntelligenceCheck: vi.fn()
+  getIntelligenceConfigs: vi.fn(), getIntelligenceHistory: vi.fn(), getIntelligenceRecoveryHistory: vi.fn(), getIntelligenceKeyOptions: vi.fn(), saveIntelligenceConfig: vi.fn(), runIntelligenceCheck: vi.fn()
 }))
 const config: IntelligenceConfig = {
   group_id: 1, version: 2, enabled: false, interval_minutes: 10, timeout_seconds: 30,
@@ -25,6 +25,7 @@ beforeEach(() => {
   ] as AdminGroup[])
   vi.mocked(getIntelligenceConfigs).mockResolvedValue({ items: [{ ...config, expected: [...config.expected] }], defaults: { ...config, group_id: 0, version: 0, api_key_id: 0 } })
   vi.mocked(getIntelligenceHistory).mockResolvedValue({ items: [], has_more: false })
+  vi.mocked(getIntelligenceRecoveryHistory).mockResolvedValue({ items: [], queue: [], has_more: false, server_time: '2026-10-08T01:00:00Z' })
   vi.mocked(getIntelligenceKeyOptions).mockResolvedValue({ items: [
     { id: 12, name: 'Admin probe', group_id: 1, available: true, quota_remaining: -1, expires_at: null },
     { id: 13, name: 'Admin backup', group_id: 1, available: true, quota_remaining: 5, expires_at: '2027-01-01T00:00:00Z' },
@@ -32,6 +33,16 @@ beforeEach(() => {
   ], page: 1, has_more: false })
 })
 describe('intelligence admin', () => {
+  it('opens global recovery records independently of the selected group and preserves unsaved config', async () => {
+    const wrapper = mountView(); await flushPromises()
+    await wrapper.findAll('textarea')[0].setValue('unsaved config')
+    await wrapper.get('[role="tab"][aria-selected="false"]').trigger('click'); await flushPromises()
+    expect(getIntelligenceRecoveryHistory).toHaveBeenCalledWith(0, expect.any(AbortSignal))
+    expect(wrapper.get('[aria-label="恢复检测调度"]').exists()).toBe(true)
+    await wrapper.findAll('[role="tab"]').find(b => b.text() === '分组检测')!.trigger('click')
+    expect((wrapper.findAll('textarea')[0].element as HTMLTextAreaElement).value).toBe('unsaved config')
+    wrapper.unmount()
+  })
   it('saves actual interval and keyword changes while keeping the fixed public caption', async () => {
     const wrapper = mountView(); await flushPromises()
     expect(wrapper.text()).toContain('actual-model · low · 每分钟检测 · 近 60 次 · 仅显示已检测记录')

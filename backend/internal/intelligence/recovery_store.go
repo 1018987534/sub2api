@@ -34,7 +34,7 @@ type RecoveryStore interface {
 	FinishRecovery(context.Context, *RecoveryClaim, Record) error
 }
 
-// No recovery answers or monitor rows are stored here. Leases and retry state
+// No recovery answers or customer monitor rows are stored here. Leases and retry state
 // survive process restarts and fence concurrent control instances.
 type SQLRecoveryStore struct {
 	DB      *sql.DB
@@ -42,6 +42,11 @@ type SQLRecoveryStore struct {
 }
 
 func (s *SQLRecoveryStore) Sync(ctx context.Context) error {
+	if _, err := s.DB.ExecContext(ctx, `UPDATE intelligence_recovery_runs SET status='error',outcome='interrupted',finished_at=NOW()
+ WHERE status='running' AND lease_until<NOW();
+ DELETE FROM intelligence_recovery_runs WHERE started_at<NOW()-INTERVAL '7 days'`); err != nil {
+		return err
+	}
 	_, err := s.DB.ExecContext(ctx, `INSERT INTO intelligence_recovery_queue(account_id,generation)
  SELECT id,extra->>'intelligence_pause_until' FROM accounts
  WHERE deleted_at IS NULL AND platform='openai'
@@ -63,7 +68,12 @@ func (s *SQLRecoveryStore) Sync(ctx context.Context) error {
 
 func (s *SQLRecoveryStore) ClaimRecovery(ctx context.Context, c Config) (*RecoveryClaim, error) {
 	claim := &RecoveryClaim{Config: c, Token: uuid.NewString()}
-	err := s.DB.QueryRowContext(ctx, `UPDATE intelligence_recovery_queue SET lease_token=$1,
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	err = tx.QueryRowContext(ctx, `UPDATE intelligence_recovery_queue SET lease_token=$1,
  lease_until=NOW()+($2::integer * INTERVAL '1 second')
  WHERE account_id=(SELECT q.account_id FROM intelligence_recovery_queue q
  JOIN accounts a ON a.id=q.account_id
@@ -76,7 +86,16 @@ func (s *SQLRecoveryStore) ClaimRecovery(ctx context.Context, c Config) (*Recove
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrConflict
 	}
-	return claim, err
+	if err != nil {
+		return nil, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO intelligence_recovery_runs(lease_token,account_id,account_name,group_id,group_name,model,reasoning_effort,protocol,retry_step,started_at,lease_until)
+ SELECT q.lease_token,q.account_id,a.name,$2,COALESCE((SELECT name FROM groups WHERE id=$2),''),$3,$4,$5,q.retry_step,$6,q.lease_until
+ FROM intelligence_recovery_queue q JOIN accounts a ON a.id=q.account_id WHERE q.lease_token=$1`, claim.Token, c.GroupID, c.Model, c.ReasoningEffort, c.Protocol, claim.StartedAt)
+	if err != nil {
+		return nil, err
+	}
+	return claim, tx.Commit()
 }
 
 func (s *SQLRecoveryStore) FinishRecovery(ctx context.Context, claim *RecoveryClaim, r Record) error {
@@ -101,6 +120,12 @@ func (s *SQLRecoveryStore) FinishRecovery(ctx context.Context, claim *RecoveryCl
  AND a.extra->>'intelligence_pause_until'=q.generation FOR UPDATE OF q`,
 		claim.AccountID, claim.Generation, claim.Token).Scan(&step)
 	if errors.Is(err, sql.ErrNoRows) {
+		if _, err = tx.ExecContext(ctx, `UPDATE intelligence_recovery_runs SET status=$2,outcome='superseded',finished_at=NOW(),duration_ms=$3 WHERE lease_token=$1 AND status='running'`, claim.Token, r.Status, r.DurationMS); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
 		return ErrConflict
 	}
 	if err != nil {
@@ -111,6 +136,13 @@ func (s *SQLRecoveryStore) FinishRecovery(ctx context.Context, claim *RecoveryCl
 			return errors.New("recovery callback unavailable")
 		}
 		if err = s.Recover(ctx, claim.AccountID); err != nil {
+			_, recordErr := tx.ExecContext(ctx, `UPDATE intelligence_recovery_runs SET status=$2,outcome='recovery_failed',finished_at=NOW(),duration_ms=$3 WHERE lease_token=$1`, claim.Token, r.Status, r.DurationMS)
+			if recordErr != nil {
+				return recordErr
+			}
+			if recordErr = tx.Commit(); recordErr != nil {
+				return recordErr
+			}
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM intelligence_recovery_queue WHERE account_id=$1 AND lease_token=$2`, claim.AccountID, claim.Token)
@@ -123,6 +155,14 @@ func (s *SQLRecoveryStore) FinishRecovery(ctx context.Context, claim *RecoveryCl
  last_checked_at=NOW(),last_status=$4 WHERE account_id=$1 AND lease_token=$5`,
 			claim.AccountID, step, int(RecoveryInterval(step)/time.Minute), r.Status, claim.Token, claim.StartedAt)
 	}
+	if err != nil {
+		return err
+	}
+	outcome := "retry"
+	if r.Status == "normal" {
+		outcome = "recovered"
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE intelligence_recovery_runs SET status=$2,outcome=$3,finished_at=NOW(),duration_ms=$4 WHERE lease_token=$1`, claim.Token, r.Status, outcome, r.DurationMS)
 	if err != nil {
 		return err
 	}

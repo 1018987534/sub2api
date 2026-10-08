@@ -17,6 +17,7 @@ export interface IntelligenceConfig {
  updated_by: number
 }
 export interface IntelligenceRecord {
+ account_id?: number
  id: number
  group_id: number
  checked_at: string
@@ -25,6 +26,37 @@ export interface IntelligenceRecord {
  answer?: string
  error?: string
  config?: IntelligenceConfig
+}
+export interface IntelligenceRecoveryRecord {
+ id: number
+ account_id: number
+ account_name: string
+ group_id: number
+ group_name: string
+ model: string
+ reasoning_effort: string
+ protocol: string
+ retry_step: number
+ started_at: string
+ finished_at: string | null
+ duration_ms: number
+ status: 'running' | 'normal' | 'degraded' | 'error'
+ outcome: 'running' | 'recovered' | 'retry' | 'superseded' | 'interrupted' | 'recovery_failed'
+}
+export interface IntelligenceRecoveryQueueEntry {
+ account_id: number
+ account_name: string
+ retry_step: number
+ interval_minutes: number
+ next_run_at: string
+ running: boolean
+ last_checked_at: string | null
+ last_status: 'normal' | 'degraded' | 'error' | null
+}
+export async function getIntelligenceRecoveryHistory(beforeId = 0, signal?: AbortSignal) {
+ return (await apiClient.get<{ items: IntelligenceRecoveryRecord[]; queue: IntelligenceRecoveryQueueEntry[]; has_more: boolean; server_time: string }>(
+  '/admin/intelligence-checks/recovery/history', { params: { before_id: beforeId }, signal }
+ )).data
 }
 export interface IntelligenceMetadata { model: string; reasoning_effort: IntelligenceConfig['reasoning_effort'] }
 export interface IntelligenceStatus { metadata?: Record<string, IntelligenceMetadata>; groups: Record<string, IntelligenceRecord[]>; server_time: string; window_minutes: number; record_limit?: number }
