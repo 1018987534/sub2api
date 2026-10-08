@@ -5,14 +5,19 @@
         <div><h1 class="text-2xl font-semibold text-gray-900 dark:text-white">降智检测</h1><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">按分组配置真实低成本探针；不会伪造检测记录，也不会把检测答案展示给普通用户。</p></div>
 
       </header>
-      <div class="public-preview">
+      <div class="flex gap-5 border-b border-gray-200 pb-3 dark:border-dark-700" role="tablist" aria-label="检测类型">
+        <button type="button" role="tab" :aria-selected="view === 'groups'" :class="view === 'groups' ? 'font-semibold text-emerald-600' : 'text-gray-500'" @click="view = 'groups'">分组检测</button>
+        <button type="button" role="tab" :aria-selected="view === 'recovery'" :class="view === 'recovery' ? 'font-semibold text-emerald-600' : 'text-gray-500'" @click="view = 'recovery'">账号恢复检测</button>
+      </div>
+      <IntelligenceRecoveryPanel v-if="view === 'recovery'" />
+      <div v-show="view === 'groups'" class="public-preview">
         <span class="preview-label">公共监控文案</span>
         <p class="preview-caption" data-testid="public-caption">{{ publicCaption }}</p>
         <p class="preview-note">实际间隔、模型和提示词以本页保存的分组配置为准；“正常/降智”是启发式结果，不代表数学真值或模型 IQ。</p>
       </div>
       <div v-if="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">{{ error }}</div>
       <p v-if="notice" role="status" class="text-sm text-emerald-600">{{ notice }}</p>
-      <div class="grid items-start gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
+      <div v-show="view === 'groups'" class="grid items-start gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
         <aside class="group-sidebar panel">
           <div class="mb-3 flex items-center justify-between"><h2 class="font-medium text-gray-900 dark:text-white">分组</h2><span class="text-xs text-gray-400">{{ groups.length }}</span></div>
           <input v-model="search" class="control mb-3" aria-label="搜索分组" placeholder="搜索分组">
@@ -72,7 +77,7 @@
           <div class="panel history-panel">
             <div class="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 class="font-semibold text-gray-900 dark:text-white">最近 7 天记录</h2><p class="text-xs text-gray-500">答案仅管理员点击详情时可见。</p></div><div class="flex gap-2"><button class="btn-secondary" :disabled="running || saving || dirty || !draft.version || !draft.api_key_id || keySelectionBlocked" @click="run">{{ running ? '已排队…' : '立即检测' }}</button><button class="btn-secondary" :disabled="historyLoading" @click="loadHistory()">刷新</button></div></div>
             <div v-if="!history.length" class="rounded-lg bg-gray-50 px-4 py-8 text-center text-sm text-gray-400 dark:bg-dark-800">暂无已检测记录</div>
-            <div v-else class="space-y-2"><button v-for="record in history" :key="record.id" class="history-row" @click="detail = record"><span><b class="status-badge" :class="statusClass(record.status)">{{ statusLabel(record.status) }}</b><span class="ml-3 text-xs text-gray-500">{{ formatTime(record.checked_at) }}</span></span><span class="text-xs text-gray-500">{{ (record.duration_ms / 1000).toFixed(1) }}s <span class="ml-2 text-gray-400">#{{ record.id }}</span></span></button></div>
+            <div v-else class="space-y-2"><button v-for="record in history" :key="record.id" class="history-row" @click="detail = record"><span><b class="status-badge" :class="statusClass(record.status)">{{ statusLabel(record.status) }}</b><span class="ml-3 text-xs text-gray-500">{{ formatTime(record.checked_at) }}</span><span class="ml-3 text-xs">{{ record.account_id ? '账号 #' + record.account_id : '账号未归属' }}</span></span><span class="text-xs text-gray-500">{{ (record.duration_ms / 1000).toFixed(1) }}s <span class="ml-2 text-gray-400">#{{ record.id }}</span></span></button></div>
             <button v-if="hasMore" class="btn-secondary mt-3" :disabled="historyLoading" @click="loadMore">加载更早记录</button>
           </div>
         </section>
@@ -82,6 +87,7 @@
     <BaseDialog :show="!!detail" title="检测详情" width="wide" @close="detail = null">
       <div v-if="detail" class="space-y-4 text-sm">
         <p>{{ statusLabel(detail.status) }} · {{ formatTime(detail.checked_at) }} · {{ detail.duration_ms }}ms · #{{ detail.id }}</p>
+        <p>{{ detail.account_id ? '被测账号 #' + detail.account_id : '账号未归属' }}</p>
         <section><h3>模型答案（原文）</h3><pre class="mt-2 whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-3 dark:bg-dark-800">{{ detail.answer || detail.error || '无' }}</pre></section>
         <section v-if="detail.config"><h3>实际配置快照</h3><p class="my-2 text-gray-500">{{ detail.config.model }} · {{ detail.config.reasoning_effort }} · {{ detail.config.protocol }} · 每 {{ detail.config.interval_minutes }} 分钟 · 超时 {{ detail.config.timeout_seconds }} 秒</p><p>规则：{{ detail.config.match_mode }} / {{ detail.config.expected.join('、') }}</p><pre class="mt-2 whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-3 dark:bg-dark-800">{{ detail.config.prompt }}</pre></section>
       </div>
@@ -94,12 +100,14 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import IntelligenceRecoveryPanel from './IntelligenceRecoveryPanel.vue'
 import { getIntelligenceConfigs, getIntelligenceHistory, runIntelligenceCheck, saveIntelligenceConfig, type IntelligenceConfig, type IntelligenceRecord, getIntelligenceKeyOptions, type IntelligenceKeyOption } from '@/api/intelligence'
 import { getAllIncludingInactive } from '@/api/admin/groups'
 import type { AdminGroup } from '@/types'
 import { INTELLIGENCE_CAPTION } from '@/features/channel-monitor-v2-cards/constants'
 
 const groups = ref<AdminGroup[]>([])
+const view = ref<'groups' | 'recovery'>('groups')
 const selected = ref<AdminGroup | null>(null)
 const configs = ref<IntelligenceConfig[]>([])
 const defaults = ref<IntelligenceConfig | null>(null)

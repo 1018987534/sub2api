@@ -18,17 +18,20 @@ import (
 )
 
 type IntelligenceHandler struct {
-	store    intelligence.Store
-	runner   *intelligence.Runner
-	recovery *intelligence.RecoveryRunner
-	keys     service.APIKeyRepository
-	groups   service.GroupRepository
-	access   channelMonitorV2GroupAuthorizer
-	monitor  *service.ChannelMonitorV2Service
+	store         intelligence.Store
+	runner        *intelligence.Runner
+	recovery      *intelligence.RecoveryRunner
+	recoveryAdmin intelligence.RecoveryAdminStore
+	keys          service.APIKeyRepository
+	groups        service.GroupRepository
+	access        channelMonitorV2GroupAuthorizer
+	monitor       *service.ChannelMonitorV2Service
 }
 
 func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyRepository, groups service.GroupRepository, access *service.APIKeyService, settings *service.SettingService, monitor *service.ChannelMonitorV2Service, gateway *service.OpenAIGatewayService) *IntelligenceHandler {
 	h := &IntelligenceHandler{store: &intelligence.SQLStore{DB: db}, keys: keys, groups: groups, access: access, monitor: monitor}
+	recoveryStore := &intelligence.SQLRecoveryStore{DB: db}
+	h.recoveryAdmin = recoveryStore
 	if gateway != nil && groups != nil {
 		h.store.(*intelligence.SQLStore).ProtectionEligible = func(ctx context.Context, c intelligence.Config) (bool, error) {
 			group, err := groups.GetByID(ctx, c.GroupID)
@@ -58,7 +61,8 @@ func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyR
 	probe := &intelligence.HTTPProbe{ResolveEndpoint: intelligenceProbeEndpoint(cfg, routing), Resolve: h.credential}
 	h.runner = intelligence.NewRunner(h.store, probe, enabled)
 	if gateway != nil && db != nil {
-		h.recovery = intelligence.NewRecoveryRunner(&intelligence.SQLRecoveryStore{DB: db, Recover: gateway.RecoverIntelligenceAccount}, gateway, func(ctx context.Context) (intelligence.Config, error) {
+		recoveryStore.Recover = gateway.RecoverIntelligenceAccount
+		h.recovery = intelligence.NewRecoveryRunner(recoveryStore, gateway, func(ctx context.Context) (intelligence.Config, error) {
 			// Recovery is independent of the public monitor switch. Reuse one
 			// enabled OpenAI group's saved test, without routing through its pool.
 			configs, err := h.store.Configs(ctx)

@@ -38,8 +38,9 @@ func recoveryTestDB(t *testing.T) *sql.DB {
 		admin.Exec("DROP SCHEMA " + pq.QuoteIdentifier(schema) + " CASCADE")
 		admin.Close()
 	})
-	_, err = db.Exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,platform TEXT DEFAULT 'openai',status TEXT DEFAULT 'active',
+	_, err = db.Exec(`CREATE TABLE accounts(id BIGINT PRIMARY KEY,name TEXT NOT NULL DEFAULT 'fixture-account',platform TEXT DEFAULT 'openai',status TEXT DEFAULT 'active',
  schedulable BOOLEAN DEFAULT true,deleted_at TIMESTAMPTZ,extra JSONB);
+ CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT); INSERT INTO groups VALUES(5,'fixture-group'),(79,'protected-group');
  CREATE TABLE intelligence_check_runs(id BIGSERIAL PRIMARY KEY,status TEXT);
  INSERT INTO accounts(id,extra) VALUES(1,'{"intelligence_pause_until":"2099-01-01T00:00:00Z","intelligence_recovery_required":true}');
  INSERT INTO intelligence_check_runs(status) VALUES('degraded');`)
@@ -50,6 +51,12 @@ func recoveryTestDB(t *testing.T) *sql.DB {
 	require.NoError(t, err)
 	// Actual migration is rerunnable.
 	_, err = db.Exec(string(migration))
+	require.NoError(t, err)
+	historyMigration, err := os.ReadFile("../../migrations/246_intelligence_recovery_history.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(historyMigration))
+	require.NoError(t, err)
+	_, err = db.Exec(string(historyMigration))
 	require.NoError(t, err)
 	return db
 }

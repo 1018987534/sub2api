@@ -78,7 +78,7 @@ func (s *OpenAIGatewayService) RunIntelligenceRecovery(parent context.Context, c
 		r.Status = "normal"
 	}
 	// Deliberately discard the answer and gateway metrics: internal recovery has
-	// no intelligence_check_runs, usage_logs or monitor status representation.
+	// no intelligence_check_runs, usage_logs or customer monitor representation.
 	return r
 }
 
