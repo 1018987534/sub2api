@@ -6,13 +6,14 @@ const isV1 = vi.fn(() => false)
 
 vi.mock('@/utils/featureFlags', () => ({
   isChannelMonitorV1Mode: () => isV1(),
+  isChannelMonitorV2Mode: () => !isV1(),
 }))
 
 vi.mock('../ChannelStatusV1View.vue', () => ({
   default: defineComponent({ name: 'ChannelStatusV1View', setup: () => () => h('div', { 'data-testid': 'v1' }) }),
 }))
-vi.mock('../ChannelStatusV2View.vue', () => ({
-  default: defineComponent({ name: 'ChannelStatusV2View', setup: () => () => h('div', { 'data-testid': 'v2' }) }),
+vi.mock('@/features/channel-monitor-v2-cards/ChannelStatusCardsView.vue', () => ({
+  default: defineComponent({ name: 'ChannelStatusCardsView', setup: () => () => h('div', { 'data-testid': 'v2' }) }),
 }))
 
 import ChannelStatusView from '../ChannelStatusView.vue'
