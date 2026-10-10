@@ -169,6 +169,7 @@ func RegisterUserRoutes(
 		intelligenceChecks := authenticated.Group("/intelligence-checks")
 		intelligenceChecks.Use(panelRateLimiter.Heavy(), channelMonitorModeV2Guard(settingService))
 		intelligenceChecks.GET("/status", h.Intelligence.Status)
+		intelligenceChecks.GET("/:groupID/records/:recordID", h.Intelligence.RecordDetail)
 
 		// V2 passive views require feature on + mode=v2.
 		monitorV2 := authenticated.Group("/channel-monitor-v2")

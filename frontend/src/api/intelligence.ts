@@ -43,6 +43,19 @@ export interface IntelligenceRecoveryRecord {
  status: 'running' | 'normal' | 'degraded' | 'error'
  outcome: 'running' | 'recovered' | 'retry' | 'superseded' | 'interrupted' | 'recovery_failed'
 }
+export interface IntelligenceRecordDetail {
+ id: number
+ group_id: number
+ status: IntelligenceRecord['status']
+ answer: string
+ model: string
+ reasoning_effort: string
+}
+export async function getIntelligenceRecordDetail(groupId: number, recordId: number, signal?: AbortSignal) {
+ return (await apiClient.get<IntelligenceRecordDetail>(
+  '/intelligence-checks/' + groupId + '/records/' + recordId, { signal }
+ )).data
+}
 export interface IntelligenceRecoveryQueueEntry {
  account_id: number
  account_name: string
