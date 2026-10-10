@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"image"
+	"image/png"
 	"mime/multipart"
 	"net/http/httptest"
 	"regexp"
@@ -166,7 +168,9 @@ func TestParseSupportMessageRequestBoundsAndSniffsAttachment(t *testing.T) {
 	require.NoError(t, writer.WriteField("content", "see screenshot"))
 	part, err := writer.CreateFormFile("file", "../screenshot.png")
 	require.NoError(t, err)
-	_, err = part.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0})
+	var screenshot bytes.Buffer
+	require.NoError(t, png.Encode(&screenshot, image.NewNRGBA(image.Rect(0, 0, 2, 2))))
+	_, err = part.Write(screenshot.Bytes())
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
@@ -178,7 +182,7 @@ func TestParseSupportMessageRequestBoundsAndSniffsAttachment(t *testing.T) {
 	require.Equal(t, "see screenshot", in.Content)
 	require.Equal(t, "screenshot.png", upload.Filename)
 	require.Equal(t, "image/png", upload.ContentType)
-	require.Len(t, upload.Data, 12)
+	require.Equal(t, screenshot.Bytes(), upload.Data)
 }
 
 func TestParseSupportMessageRequestAcceptsPlainTextWithCharset(t *testing.T) {

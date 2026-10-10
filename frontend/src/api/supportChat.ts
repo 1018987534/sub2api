@@ -63,6 +63,17 @@ export const supportChatAPI = {
   },
   attachmentUrl: (id: number, admin = false) => `${admin ? '/admin/chat/attachments' : '/chat/attachments'}/${id}`,
   fetchAttachment: async (id: number, admin = false) => (await apiClient.get<Blob>(`${admin ? '/admin/chat/attachments' : '/chat/attachments'}/${id}`, { responseType: 'blob' })).data,
+  downloadAttachment: async (id: number, filename: string, admin = false): Promise<void> => {
+    const blob = await supportChatAPI.fetchAttachment(id, admin)
+    const url = URL.createObjectURL(new Blob([blob], { type: 'application/octet-stream' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 60000)
+  },
   adminRead: async (id: number) => {
     await apiClient.post(`/admin/chat/conversations/${id}/read`)
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('support-chat-read'))
