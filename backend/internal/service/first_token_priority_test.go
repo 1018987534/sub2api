@@ -756,7 +756,7 @@ func TestAccountFirstTokenLatencyMetricsIncludesRollingCacheRate(t *testing.T) {
 	svc := &RateLimitService{
 		firstTokenLatencyStatsCache: cache,
 		usageRepo: accountCacheStatsUsageRepo{stats: map[int64]AccountCacheStats{
-			1: {CacheReadTokens: 75, CacheRateDenominator: 300},
+			1: {CacheReadTokens: 5000, CacheRateDenominator: 20000},
 		}},
 	}
 
@@ -766,8 +766,8 @@ func TestAccountFirstTokenLatencyMetricsIncludesRollingCacheRate(t *testing.T) {
 	require.Len(t, metrics, 1)
 	require.NotNil(t, metrics[0].CacheRate)
 	require.InDelta(t, 0.25, *metrics[0].CacheRate, 1e-9)
-	require.Equal(t, int64(75), metrics[0].CacheReadTokens)
-	require.Equal(t, int64(300), metrics[0].CacheRateDenominator)
+	require.Equal(t, int64(5000), metrics[0].CacheReadTokens)
+	require.Equal(t, int64(20000), metrics[0].CacheRateDenominator)
 	require.Equal(t, 4_000.0, metrics[0].NormalTotalMS)
 	require.Equal(t, 3_500.0, metrics[0].P50MS)
 	require.Equal(t, 9_000.0, metrics[0].P90MS)
@@ -817,7 +817,10 @@ func TestAccountFirstTokenLatencyMetricsKeepsGroupWithoutCalculableCacheRate(t *
 	require.NoError(t, err)
 	require.Len(t, metrics, 1)
 	require.Equal(t, int64(12449), metrics[0].AccountID)
-	require.Nil(t, metrics[0].CacheRate)
+	require.NotNil(t, metrics[0].CacheRate)
+	require.Equal(t, 1.0, *metrics[0].CacheRate)
+	require.Zero(t, metrics[0].CacheReadTokens)
+	require.Zero(t, metrics[0].CacheRateDenominator)
 	require.Equal(t, []AccountFirstTokenLatencyGroup{{GroupID: 79, GroupName: "PRO"}}, metrics[0].Groups)
 }
 

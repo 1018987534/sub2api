@@ -317,7 +317,7 @@ describe('admin DashboardView', () => {
     const cacheRates = wrapper.findAll('[data-testid="first-token-cache-rate"]')
     expect(cacheRates).toHaveLength(6)
     expect(cacheRates.filter((item) => item.text() === '25.0%')).toHaveLength(2)
-    expect(cacheRates.filter((item) => item.text() === '-')).toHaveLength(2)
+    expect(cacheRates.filter((item) => item.text() === '100.0%')).toHaveLength(2)
     expect(cacheRates.filter((item) => item.text() === '0.0%')).toHaveLength(2)
 
     const manualProbeButtons = wrapper.findAll('[data-testid="first-token-manual-probe"]')
