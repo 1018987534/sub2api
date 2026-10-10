@@ -94,9 +94,14 @@ type AccountFirstTokenLatencyGroup struct {
 	IntelligenceExempt  bool   `json:"intelligence_exempt,omitempty"`
 }
 
-// AccountCacheStats is the rolling cache-token aggregate used alongside the
-// account scheduling view. The denominator follows the channel monitor
-// convention: uncached input plus cache creation and cache reads.
+// AccountCacheRateMinContextTokens excludes short, often one-off requests from
+// account cache-rate statistics. Context includes uncached input, cache creation,
+// and cache reads, so a high cache hit rate never makes a long request look short.
+const AccountCacheRateMinContextTokens int64 = 16_384
+
+// AccountCacheStats is the rolling cache-token aggregate for requests meeting
+// AccountCacheRateMinContextTokens. The denominator is uncached input plus cache
+// creation and cache reads. A zero denominator means no qualifying samples.
 type AccountCacheStats struct {
 	CacheReadTokens      int64
 	CacheRateDenominator int64
@@ -229,10 +234,9 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 		if rate, found := openAIFreshUpstreamBillingRate(account, now); found {
 			schedulingRateMultiplier = &rate
 		}
-		var cacheRate *float64
+		cacheRate := 1.0
 		if accountCache.CacheRateDenominator > 0 {
-			rate := float64(accountCache.CacheReadTokens) / float64(accountCache.CacheRateDenominator)
-			cacheRate = &rate
+			cacheRate = float64(accountCache.CacheReadTokens) / float64(accountCache.CacheRateDenominator)
 		}
 		metrics = append(metrics, AccountFirstTokenLatencyMetric{
 			AccountID:                account.ID,
@@ -252,7 +256,7 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 			SlowStreak:               stat.SlowStreak,
 			RecoveryFastStreak:       stat.RecoveryFastStreak,
 			ProbeIntervalSeconds:     int64(firstTokenPriorityProbeInterval(stat, fastestMS).Seconds()),
-			CacheRate:                cacheRate,
+			CacheRate:                &cacheRate,
 			CacheReadTokens:          accountCache.CacheReadTokens,
 			CacheRateDenominator:     accountCache.CacheRateDenominator,
 		})

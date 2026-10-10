@@ -17,8 +17,9 @@ import (
 )
 
 // GetAccountCacheStatsBatch returns cache-token aggregates for the supplied
-// accounts in one query. The denominator matches channel-monitor cache-rate
-// semantics and excludes failed, zero-cost usage-log placeholders.
+// accounts in one query. Only billable requests with sufficiently large input
+// context qualify; short requests and zero-cost usage-log placeholders do not
+// affect either the numerator or denominator.
 func (r *usageLogRepository) GetAccountCacheStatsBatch(ctx context.Context, accountIDs []int64, startTime, endTime time.Time) (map[int64]service.AccountCacheStats, error) {
 	result := make(map[int64]service.AccountCacheStats, len(accountIDs))
 	if len(accountIDs) == 0 {
@@ -26,14 +27,15 @@ func (r *usageLogRepository) GetAccountCacheStatsBatch(ctx context.Context, acco
 	}
 
 	placeholders := make([]string, len(accountIDs))
-	args := make([]any, 0, len(accountIDs)+2)
+	args := make([]any, 0, len(accountIDs)+3)
 	for i, accountID := range accountIDs {
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 		args = append(args, accountID)
 	}
 	startPlaceholder := len(args) + 1
 	endPlaceholder := len(args) + 2
-	args = append(args, startTime, endTime)
+	contextPlaceholder := len(args) + 3
+	args = append(args, startTime, endTime, service.AccountCacheRateMinContextTokens)
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -45,8 +47,9 @@ func (r *usageLogRepository) GetAccountCacheStatsBatch(ctx context.Context, acco
 		  AND created_at >= $%d
 		  AND created_at < $%d
 		  AND actual_cost > 0
+		  AND (input_tokens + cache_creation_tokens + cache_read_tokens) >= $%d
 		GROUP BY account_id
-	`, strings.Join(placeholders, ", "), startPlaceholder, endPlaceholder)
+	`, strings.Join(placeholders, ", "), startPlaceholder, endPlaceholder, contextPlaceholder)
 
 	rows, err := r.sql.QueryContext(ctx, query, args...)
 	if err != nil {

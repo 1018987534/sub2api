@@ -225,6 +225,9 @@
               <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.dashboard.firstTokenLatencyDescription') }}
               </p>
+              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.dashboard.firstTokenCacheRateDescription') }}
+              </p>
             </div>
             <div class="flex w-full items-center gap-2 sm:w-auto">
               <div class="min-w-0 flex-1 sm:w-52 sm:flex-none" data-testid="first-token-group-filter">
@@ -904,7 +907,7 @@ const formatDuration = (ms: number): string => {
 }
 
 const formatCacheRate = (rate: number | null | undefined): string => {
-  if (rate == null || !Number.isFinite(rate)) return '-'
+  if (rate == null || !Number.isFinite(rate)) return '100.0%'
   return `${(rate * 100).toFixed(1)}%`
 }
 

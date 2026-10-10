@@ -81,7 +81,7 @@ export default {
       failedToLoad: '加载仪表盘数据失败',
       firstTokenLatencyTitle: '上游中转正常请求总耗时',
       firstTokenLatencyDescription: '按账号统计真实流式请求总耗时；近 6 小时样本不足时回退近 24 小时，快池优先低倍率账号。',
-      firstTokenCacheRateDescription: '缓存率统计近 24 小时缓存读取 token / 输入 token（输入 + 缓存创建 + 缓存读取），无有效样本显示“-”。',
+      firstTokenCacheRateDescription: '缓存率仅统计近 24 小时输入上下文 ≥ 16,384 Token 的请求：缓存读取 /（未缓存输入 + 缓存创建 + 缓存读取）；无合格样本默认 100%。',
       firstTokenLatencyFailed: '总耗时统计加载失败',
       firstTokenLatencyEmpty: '当前启用的上游中转账号暂无总耗时统计',
       firstTokenAccount: '账号',

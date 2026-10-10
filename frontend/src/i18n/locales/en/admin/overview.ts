@@ -81,7 +81,7 @@ export default {
       failedToLoad: 'Failed to load dashboard statistics',
       firstTokenLatencyTitle: 'Relay Normal Request Duration',
       firstTokenLatencyDescription: 'Tracks completed streaming duration per account. It uses the latest six hours when enough samples exist, falls back to 24 hours otherwise, and prioritizes lower-rate accounts in the fast pool.',
-      firstTokenCacheRateDescription: 'Cache rate covers the last 24 hours: cache-read tokens / (input + cache-creation + cache-read tokens). "-" means there is no valid sample.',
+      firstTokenCacheRateDescription: 'Cache rate uses requests from the last 24 hours with at least 16,384 input context tokens: cache reads / (uncached input + cache creation + cache reads). Defaults to 100% when no samples qualify.',
       firstTokenLatencyFailed: 'Failed to load total-duration statistics',
       firstTokenLatencyEmpty: 'No total-duration data for enabled relay accounts yet',
       firstTokenAccount: 'Account',
