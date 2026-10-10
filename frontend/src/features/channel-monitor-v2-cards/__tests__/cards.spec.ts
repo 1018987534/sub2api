@@ -1,11 +1,16 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import GroupMonitorCard from '../GroupMonitorCard.vue'
 import cardSource from '../GroupMonitorCard.vue?raw'
 import { recentRecords, percent, platformGroups, appendHistory, groupMultiplier } from '../presentation'
 import { INTELLIGENCE_CAPTION } from '../constants'
 import type { IntelligenceRecord } from '@/api/intelligence'
 import type { MonitorMatrixRow } from '@/api/channelMonitorV2'
+import { getIntelligenceRecordDetail } from '@/api/intelligence'
+
+vi.mock('@/api/intelligence', () => ({ getIntelligenceRecordDetail: vi.fn() }))
+enableAutoUnmount(afterEach)
+beforeEach(() => vi.mocked(getIntelligenceRecordDetail).mockReset())
 
 const now = Date.parse('2026-09-25T12:00:00Z')
 const records: IntelligenceRecord[] = Array.from({ length: 6 }, (_, i) => ({
@@ -55,15 +60,55 @@ describe('independent V2 cards', () => {
     expect(percent(0, false)).toBe('—')
     expect(percent(NaN)).toBe('—')
   })
-  it('uses non-clickable probe marks and reveals no detail panel', async () => {
-    const wrapper = mount(GroupMonitorCard, { props: { row, records: records.map(r => ({ ...r, answer: 'private answer' })), now, countdown: 0 }, global: { stubs: { PlatformIcon: true } } })
-    await wrapper.find('.probe-bar').trigger('click')
-    expect(wrapper.find('.probe-bar').element.tagName).toBe('SPAN')
-    expect(wrapper.find('.probe-bar').attributes('title')).toContain('2.4s')
-    expect(wrapper.find('[role="status"]').exists()).toBe(false)
-    expect(wrapper.findAll('button')).toHaveLength(0)
-    expect(wrapper.text()).toContain('21 绿 · 其他黄 · 错误红')
-    expect(wrapper.text()).not.toContain('private answer')
+  it.each(['normal', 'degraded'] as const)('opens the %s answer without request timing', async (status) => {
+    const record = records.find(item => item.status === status)!
+    const detail = { id: record.id, group_id: 1, status, answer: '完整回答：21\n<script>unsafe()</script>', model: 'saved-model', reasoning_effort: 'high', checked_at: record.checked_at, duration_ms: record.duration_ms }
+    vi.mocked(getIntelligenceRecordDetail).mockResolvedValue(detail)
+    const wrapper = mount(GroupMonitorCard, { props: { row, records, now, countdown: 0 }, global: { stubs: { PlatformIcon: true, Teleport: true } } })
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(getIntelligenceRecordDetail).not.toHaveBeenCalled()
+    const mark = wrapper.find('[data-record-id="' + record.id + '"]')
+    expect(mark.element.tagName).toBe('BUTTON')
+    await mark.trigger('click')
+    await flushPromises()
+    expect(getIntelligenceRecordDetail).toHaveBeenCalledWith(1, record.id, expect.any(AbortSignal))
+    const dialog = wrapper.find('[role="dialog"]')
+    expect(dialog.text()).toContain(detail.answer)
+    expect(dialog.text()).toContain('saved-model')
+    expect(dialog.text()).toContain('high')
+    expect(dialog.text()).not.toContain(new Date(record.checked_at).toLocaleString())
+    expect(dialog.text()).not.toContain('2.4s')
+    expect(dialog.findAll('script')).toHaveLength(0)
+    await dialog.find('button[aria-label="Close modal"]').trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  })
+  it('discards a late answer after closing and selecting another record', async () => {
+    let resolve!: (detail: Awaited<ReturnType<typeof getIntelligenceRecordDetail>>) => void
+    vi.mocked(getIntelligenceRecordDetail).mockReturnValueOnce(new Promise(done => { resolve = done }))
+    const wrapper = mount(GroupMonitorCard, { props: { row, records, now, countdown: 0 }, global: { stubs: { PlatformIcon: true, Teleport: true } } })
+    await wrapper.find('[data-record-id="1"]').trigger('click')
+    expect(wrapper.find('[role="status"]').text()).toContain('正在读取回答')
+    await wrapper.find('button[aria-label="Close modal"]').trigger('click')
+    expect(vi.mocked(getIntelligenceRecordDetail).mock.calls[0][2]?.aborted).toBe(true)
+    vi.mocked(getIntelligenceRecordDetail).mockResolvedValueOnce({ id: 2, group_id: 1, status: 'degraded', answer: '第二次回答', model: 'saved-model', reasoning_effort: 'low' })
+    await wrapper.find('[data-record-id="2"]').trigger('click')
+    await flushPromises()
+    resolve({ id: 1, group_id: 1, status: 'normal', answer: '过期回答', model: 'old-model', reasoning_effort: 'low' })
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').text()).toContain('第二次回答')
+    expect(wrapper.find('[role="dialog"]').text()).not.toContain('过期回答')
+  })
+  it('allows retrying a failed answer read and handles an empty answer', async () => {
+    vi.mocked(getIntelligenceRecordDetail).mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mount(GroupMonitorCard, { props: { row, records, now, countdown: 0 }, global: { stubs: { PlatformIcon: true, Teleport: true } } })
+    await wrapper.find('[data-record-id="1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').text()).toContain('回答加载失败')
+    vi.mocked(getIntelligenceRecordDetail).mockResolvedValueOnce({ id: 1, group_id: 1, status: 'normal', answer: '', model: 'saved-model', reasoning_effort: 'low' })
+    await wrapper.find('[role="alert"] button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').text()).toContain('本次检测未返回可展示的回答')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
 })
 

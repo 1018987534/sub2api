@@ -29,7 +29,7 @@
    <p class="intelligence-caption mt-1 text-[10px] leading-[15px] text-gray-500 dark:text-gray-400">{{ intelligenceCaption }}</p>
    <div class="timeline-track probe-track mt-2" aria-label="最近 60 次真实检测记录">
     <div v-for="(slot, index) in probeSlots" :key="index" class="probe-slot">
-     <span v-for="record in slot" :key="record.id" role="img" tabindex="0" class="probe-bar" :class="record.status" :title="recordTitle(record)" :aria-label="recordTitle(record)" />
+     <button v-for="record in slot" :key="record.id" type="button" class="probe-bar" :class="record.status" :data-record-id="record.id" :title="recordTitle(record) + ' · 查看回答'" :aria-label="recordTitle(record) + ' · 查看回答'" @click="openRecord(record)" />
     </div>
    </div><span v-if="!recent.length" class="sr-only">暂无已完成检测</span>
    <div class="mt-1.5 flex justify-between text-[10px] text-gray-500 dark:text-gray-400"><span>{{ INTELLIGENCE_LEGEND }}</span><time v-if="last">{{ new Date(last.checked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</time></div>
@@ -40,19 +40,67 @@
     <div v-if="tooltip" :id="tooltipId" class="timeline-tooltip" role="tooltip" :style="{ left: tooltip.left + 'px', top: tooltip.top + 'px', '--tooltip-x': tooltip.x }">{{ tooltip.text }}</div>
    </Transition>
   </Teleport>
+  <BaseDialog :show="selectedRecord !== null" title="降智检测回答" width="wide" :close-on-click-outside="true" @close="closeRecord">
+   <p v-if="detailLoading" role="status" class="py-8 text-center text-sm text-gray-500">正在读取回答…</p>
+   <div v-else-if="detailError" role="alert" class="space-y-3 py-6 text-center text-sm">
+    <p class="text-red-600 dark:text-red-400">回答加载失败，请重试。</p>
+    <button class="btn btn-secondary" @click="selectedRecord && openRecord(selectedRecord)">重试</button>
+   </div>
+   <div v-else-if="recordDetail" class="space-y-4 text-sm">
+    <dl class="grid grid-cols-2 gap-3">
+     <div><dt>检测结果</dt><dd class="!text-sm !font-medium">{{ statusLabels[recordDetail.status] }}</dd></div>
+     <div><dt>模型</dt><dd class="break-words !text-sm !font-medium">{{ recordDetail.model || '—' }} · {{ recordDetail.reasoning_effort || '—' }}</dd></div>
+    </dl>
+    <section aria-label="完整回答">
+     <h4 class="mb-2 font-semibold">完整回答</h4>
+     <pre v-if="recordDetail.answer" class="max-h-[55vh] overflow-auto whitespace-pre-wrap break-words rounded-xl bg-gray-50 p-4 font-sans text-sm leading-relaxed text-gray-800 dark:bg-dark-900 dark:text-gray-200">{{ recordDetail.answer }}</pre>
+     <p v-else class="rounded-xl bg-gray-50 p-4 text-gray-500 dark:bg-dark-900">本次检测未返回可展示的回答。</p>
+    </section>
+   </div>
+  </BaseDialog>
  </article>
 </template>
 <script setup lang="ts">
 import { computed, ref, watch, onMounted, onUnmounted }  from 'vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { GroupPlatform } from '@/types'
 import type { MonitorMatrixRow, MonitorMatrixBucket } from '@/api/channelMonitorV2'
-import type { IntelligenceRecord, IntelligenceMetadata } from '@/api/intelligence'
+import { getIntelligenceRecordDetail, type IntelligenceRecord, type IntelligenceMetadata, type IntelligenceRecordDetail } from '@/api/intelligence'
 import { INTELLIGENCE_CAPTION, INTELLIGENCE_LEGEND } from './constants'
 import { healthLabels, statusLabels, appendHistory, groupMultiplier, percent, latency, platformName, platformIconClass, platformBadgeClass, passiveColor, barHeight } from './presentation'
 const props = withDefaults(defineProps<{ row: MonitorMatrixRow; records?: IntelligenceRecord[]; probeMetadata?: IntelligenceMetadata; now: number; countdown: number; timelineLength?: number }>(), { timelineLength: 18 })
 const intelligenceCaption = computed(() => `${props.probeMetadata?.model || '—'} · ${props.probeMetadata?.reasoning_effort || '—'} · ${INTELLIGENCE_CAPTION}`)
 const recent = ref<IntelligenceRecord[]>([])
+const selectedRecord = ref<IntelligenceRecord | null>(null)
+const recordDetail = ref<IntelligenceRecordDetail | null>(null)
+const detailLoading = ref(false), detailError = ref(false)
+let detailAbort: AbortController | undefined
+async function openRecord(record: IntelligenceRecord) {
+ detailAbort?.abort()
+ detailAbort = new AbortController()
+ const signal = detailAbort.signal
+ selectedRecord.value = record
+ recordDetail.value = null
+ detailLoading.value = true
+ detailError.value = false
+ try {
+  const detail = await getIntelligenceRecordDetail(record.group_id, record.id, signal)
+  if (!signal.aborted) recordDetail.value = detail
+ } catch {
+  if (!signal.aborted) detailError.value = true
+ } finally {
+  if (!signal.aborted) detailLoading.value = false
+ }
+}
+function closeRecord() {
+ detailAbort?.abort()
+ selectedRecord.value = null
+ recordDetail.value = null
+ detailLoading.value = false
+ detailError.value = false
+}
+onUnmounted(() => detailAbort?.abort())
 watch(() => props.records, records => {
  recent.value = appendHistory(recent.value, (records || []).filter(record => Date.parse(record.checked_at) <= props.now), record => record.id, record => Date.parse(record.checked_at), 60)
 }, { immediate: true, deep: true })
@@ -110,7 +158,7 @@ dt{font-size:10px;line-height:15px;font-weight:600;letter-spacing:.05em;color:#9
 .history-hitbox,.history-visual{display:flex;align-items:flex-end;width:100%;height:100%;min-width:0}
 .history-hitbox{cursor:crosshair;outline-offset:2px;border-radius:4px}.history-visual{transform-origin:center bottom;pointer-events:none;transition:transform .24s cubic-bezier(.22,1,.36,1),opacity .22s ease}
 .history-hitbox[aria-describedby] .history-bar{filter:saturate(1.12) brightness(1.05);box-shadow:0 4px 10px #0f766e3d}
-.probe-bar{cursor:default}
+.probe-bar{cursor:pointer;border:0;padding:0;transition:filter .15s}.probe-bar:hover{filter:brightness(1.15)}
 .timeline-tooltip{position:fixed;z-index:9999;width:max-content;max-width:min(280px,calc(100vw - 32px));transform:translate(var(--tooltip-x),-100%);border:1px solid rgb(255 255 255 / .84);border-radius:9px;background:#0f172aeb;padding:6px 9px;color:#f8fafc;font-size:10px;font-weight:600;line-height:1.35;box-shadow:0 10px 24px #0f172a33;pointer-events:none}
 .timeline-tooltip:after{position:absolute;left:50%;bottom:-4px;width:7px;height:7px;transform:translateX(-50%) rotate(45deg);border-right:1px solid rgb(255 255 255 / .84);border-bottom:1px solid rgb(255 255 255 / .84);background:#0f172aeb;content:''}
 .timeline-tooltip-enter-active,.timeline-tooltip-leave-active{transition:opacity .1s ease,transform .12s cubic-bezier(.22,1,.36,1)}

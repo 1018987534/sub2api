@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -214,6 +215,87 @@ func (h *IntelligenceHandler) History(c *gin.Context) {
 	}
 	response.Success(c, gin.H{"items": rows, "has_more": more})
 }
+func (h *IntelligenceHandler) statusGroupScope(c *gin.Context, userID int64) (map[int64]bool, bool) {
+	groups, err := h.access.GetAvailableGroups(c.Request.Context(), userID)
+	if err != nil {
+		response.InternalError(c, "无法读取可用分组")
+		return nil, false
+	}
+	cfg, err := h.monitor.GetConfig(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "无法读取监控配置")
+		return nil, false
+	}
+	if cfg == nil || !cfg.Enabled {
+		response.Forbidden(c, "V2 monitor is disabled")
+		return nil, false
+	}
+	configured := map[int64]bool{}
+	for _, id := range cfg.GroupIDs {
+		configured[id] = true
+	}
+	platforms := map[string]bool{}
+	for _, p := range cfg.Platforms {
+		if p.Enabled {
+			platforms[p.Platform] = true
+		}
+	}
+	allowed := map[int64]bool{}
+	for _, g := range groups {
+		if platforms[g.Platform] && (len(configured) == 0 || configured[g.ID]) {
+			allowed[g.ID] = true
+		}
+	}
+	return allowed, true
+}
+
+// RecordDetail returns only the requested answer and its saved display metadata.
+// Request timing, credentials, account identity and recovery details stay private.
+func (h *IntelligenceHandler) RecordDetail(c *gin.Context) {
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "unauthorized")
+		return
+	}
+	groupID, ok := intelligenceGroupID(c)
+	if !ok {
+		return
+	}
+	recordID, err := strconv.ParseInt(c.Param("recordID"), 10, 64)
+	if err != nil || recordID <= 0 || recordID == math.MaxInt64 {
+		response.BadRequest(c, "invalid record id")
+		return
+	}
+	allowed, ok := h.statusGroupScope(c, subject.UserID)
+	if !ok {
+		return
+	}
+	if !allowed[groupID] {
+		response.NotFound(c, "检测记录不存在或已过期")
+		return
+	}
+	// History uses an exclusive ID cursor. Read one candidate, then require an
+	// exact match so a removed record can never return its predecessor's answer.
+	records, err := h.store.History(c.Request.Context(), groupID, time.Now().Add(-7*24*time.Hour), recordID+1, 1)
+	if err != nil {
+		response.InternalError(c, "无法读取检测回答")
+		return
+	}
+	if len(records) != 1 || records[0].ID != recordID || records[0].GroupID != groupID {
+		response.NotFound(c, "检测记录不存在或已过期")
+		return
+	}
+	record := records[0]
+	model, effort := "", ""
+	if record.Config != nil {
+		model, effort = record.Config.Model, record.Config.ReasoningEffort
+	}
+	response.Success(c, gin.H{
+		"id": record.ID, "group_id": record.GroupID, "status": record.Status,
+		"answer": record.Answer, "model": model, "reasoning_effort": effort,
+	})
+}
+
 func (h *IntelligenceHandler) Status(c *gin.Context) {
 	subject, ok := middleware.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -234,35 +316,9 @@ func (h *IntelligenceHandler) Status(c *gin.Context) {
 		}
 		ids[id] = true
 	}
-	groups, err := h.access.GetAvailableGroups(c.Request.Context(), subject.UserID)
-	if err != nil {
-		response.InternalError(c, "无法读取可用分组")
+	allowed, ok := h.statusGroupScope(c, subject.UserID)
+	if !ok {
 		return
-	}
-	cfg, err := h.monitor.GetConfig(c.Request.Context())
-	if err != nil {
-		response.InternalError(c, "无法读取监控配置")
-		return
-	}
-	if cfg == nil || !cfg.Enabled {
-		response.Forbidden(c, "V2 monitor is disabled")
-		return
-	}
-	configured := map[int64]bool{}
-	for _, id := range cfg.GroupIDs {
-		configured[id] = true
-	}
-	platforms := map[string]bool{}
-	for _, p := range cfg.Platforms {
-		if p.Enabled {
-			platforms[p.Platform] = true
-		}
-	}
-	allowed := map[int64]bool{}
-	for _, g := range groups {
-		if platforms[g.Platform] && (len(configured) == 0 || configured[g.ID]) {
-			allowed[g.ID] = true
-		}
 	}
 	items, err := h.store.Configs(c.Request.Context())
 	if err != nil {
