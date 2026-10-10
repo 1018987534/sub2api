@@ -2,12 +2,17 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	"github.com/Wei-Shaw/sub2api/internal/middleware"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -27,9 +32,37 @@ type AuthHandler struct {
 	redeemService        *service.RedeemService
 	totpService          *service.TotpService
 	userAttributeService *service.UserAttributeService
+	abuseGuard           *middleware.AuthAbuseGuard
 
 	dingTalkClientInstance *DingTalkClient
 	dingTalkClientMu       sync.Mutex
+}
+
+func (h *AuthHandler) SetAbuseGuard(guard *middleware.AuthAbuseGuard) { h.abuseGuard = guard }
+
+func authAbuseAllowed(c *gin.Context, result middleware.AllowResult, err error) bool {
+	if err != nil {
+		response.Error(c, http.StatusServiceUnavailable, "Authentication protection temporarily unavailable")
+		return false
+	}
+	if !result.Allowed {
+		seconds := (result.RetryAfter + time.Second - 1) / time.Second
+		if seconds < 1 {
+			seconds = 1
+		}
+		c.Header("Retry-After", strconv.FormatInt(int64(seconds), 10))
+		response.Error(c, http.StatusTooManyRequests, "Too many authentication requests; try again later")
+		return false
+	}
+	return true
+}
+
+func (h *AuthHandler) reserveAuthEmail(c *gin.Context, email string) bool {
+	if h.abuseGuard == nil {
+		return true
+	}
+	result, err := h.abuseGuard.ReserveEmail(c.Request.Context(), email, ip.GetSecurityClientIP(c, false))
+	return authAbuseAllowed(c, result, err)
 }
 
 // NewAuthHandler creates a new AuthHandler
@@ -222,6 +255,9 @@ func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
 		return
 	}
 
+	if !h.reserveAuthEmail(c, req.Email) {
+		return
+	}
 	result, err := h.authService.SendVerifyCodeAsync(c.Request.Context(), req.Email, c.GetHeader("Accept-Language"))
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -249,12 +285,29 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	if h.abuseGuard != nil {
+		result, err := h.abuseGuard.CheckLogin(c.Request.Context(), req.Email)
+		if !authAbuseAllowed(c, result, err) {
+			return
+		}
+	}
 	token, user, err := h.authService.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
+		if h.abuseGuard != nil && errors.Is(err, service.ErrInvalidCredentials) {
+			if guardErr := h.abuseGuard.RecordLoginFailure(c.Request.Context(), req.Email); guardErr != nil {
+				response.Error(c, http.StatusServiceUnavailable, "Authentication protection temporarily unavailable")
+				return
+			}
+		}
 		response.ErrorFrom(c, err)
 		return
 	}
 	_ = token // token 由 authService.Login 返回但此处由 respondWithTokenPair 重新生成
+	if h.abuseGuard != nil {
+		if err := h.abuseGuard.ClearLoginFailures(c.Request.Context(), req.Email); err != nil {
+			slog.Warn("failed to clear successful login failure counter")
+		}
+	}
 
 	if err := h.ensureBackendModeAllowsUser(c.Request.Context(), user); err != nil {
 		response.ErrorFrom(c, err)
@@ -623,6 +676,9 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 
 	// Request password reset (async)
 	// Note: This returns success even if email doesn't exist (to prevent enumeration)
+	if !h.reserveAuthEmail(c, req.Email) {
+		return
+	}
 	if err := h.authService.RequestPasswordResetAsync(c.Request.Context(), req.Email, frontendBaseURL, c.GetHeader("Accept-Language")); err != nil {
 		response.ErrorFrom(c, err)
 		return

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -181,9 +182,9 @@ func (h *SupportChatHandler) insertMessage(c *gin.Context, conversationID, sende
 	if upload != nil {
 		return h.insertMessageWithAttachment(c, conversationID, senderID, senderType, in, upload)
 	}
-	if in.Kind == "" {
-		in.Kind = "text"
-	}
+	// The server owns message kinds; user input cannot claim an admin/system or
+	// executable rendering mode. Attachment messages are assigned "file" above.
+	in.Kind = "text"
 	if in.IdempotencyKey == "" {
 		in.IdempotencyKey = fmt.Sprintf("%s-%d-%d", senderType, senderID, time.Now().UnixNano())
 	}
@@ -359,6 +360,9 @@ func detectSupportAttachmentType(filename string, data []byte) (string, bool) {
 		contentType = strings.TrimSpace(mediaType)
 	}
 	_, ok := supportChatAttachmentTypes[contentType]
+	if ok {
+		ok = validateSupportAttachmentContent(contentType, data)
+	}
 	return contentType, ok
 }
 
@@ -409,9 +413,12 @@ func (h *SupportChatHandler) serveAttachment(c *gin.Context, admin bool) {
 		response.Error(c, 500, err.Error())
 		return
 	}
-	c.Header("Content-Type", contentType)
-	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, strings.ReplaceAll(filename, `"`, "")))
-	c.Data(http.StatusOK, contentType, data)
+	// A stored attachment is an untrusted download, including historical files
+	// uploaded before content validation was tightened.
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(filename)}))
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Content-Security-Policy", "sandbox; default-src 'none'")
+	c.Data(http.StatusOK, "application/octet-stream", data)
 }
 func (h *SupportChatHandler) Send(c *gin.Context) {
 	s, ok := subject(c)
