@@ -1094,7 +1094,7 @@ export default {
         healthProtection: 'Automatic node health protection',
         healthProtectionHint: 'When one node has a stale monitoring sample and another healthy node is available, set only that node’s effective share to zero; restore its target share after fresh samples return',
         packetLossProtection: 'Sustained packet loss protection',
-        packetLossProtectionHint: 'Pause new requests when a majority of probe targets fail twice in a row or show at least 40% loss in two consecutive short windows. A healthy alternative is required; existing requests continue.',
+        packetLossProtectionHint: 'Lightweight connectivity checks run every 2 seconds, with immediate confirmation after a connection failure, timeout or server error. Two failures or sustained severe packet loss pause new requests; existing requests continue. If all regular nodes are paused, use healthy zero-weight standbys first, then try randomly selected nodes if no standby is available.',
         packetLossCooldown: 'Packet loss pause (minutes)',
         packetLossCooldownHint: '1–120 minutes, default 5. Changes apply to the next pause. Resume after the deadline and three successful probe rounds; sustained severe loss renews the pause.',
         packetLossCooldownError: 'Packet loss pause must be an integer from 1 to 120',

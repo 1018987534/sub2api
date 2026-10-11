@@ -36,16 +36,21 @@ type gatewayPingResponse struct {
 }
 
 type gatewayPacketLossSignal struct {
-	Fresh     bool
-	Severe    bool
-	Recovered bool
-	Percent   float64
-	SampleAt  time.Time
+	Fresh           bool
+	Severe          bool
+	Recovered       bool
+	Percent         float64
+	SampleAt        time.Time
+	OriginUnhealthy bool
+	OriginHealthy   bool
+	OriginRecovered bool
+	OriginSampleAt  time.Time
 }
 
 type gatewayPacketLossPause struct {
-	Until    time.Time `json:"until"`
-	SampleAt time.Time `json:"sample_at"`
+	Until       time.Time `json:"until"`
+	SampleAt    time.Time `json:"sample_at"`
+	OriginProbe bool      `json:"origin_probe,omitempty"`
 }
 
 func fetchGatewayPacketLossSignal(ctx context.Context, client *http.Client, baseURL, uuid string, now time.Time) gatewayPacketLossSignal {
@@ -145,22 +150,27 @@ func evaluateGatewayPacketLoss(payload gatewayPingResponse, uuid string, now tim
 func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, settings *GatewayRoutingSettings, runtime *GatewayRoutingRuntime, signals map[string]gatewayPacketLossSignal, now time.Time) {
 	s.gatewayRoutingPacketLossMu.Lock()
 	defer s.gatewayRoutingPacketLossMu.Unlock()
+	previous := s.gatewayRoutingProtectedRuntime
+	if previous == nil {
+		previous = currentCachedGatewayRoutingRuntime(s)
+	}
+	defer func() { s.gatewayRoutingProtectedRuntime = cloneGatewayRoutingRuntime(runtime) }()
 	for i, configured := range settings.Nodes {
 		resetGatewayPacketLossRuntime(&runtime.Nodes[i], configured)
 	}
 	base := cloneGatewayRoutingRuntime(runtime)
 	if s.settingRepo == nil {
-		preserveGatewayPacketLossRuntime(settings, runtime, currentCachedGatewayRoutingRuntime(s))
+		preserveGatewayPacketLossRuntime(settings, runtime, previous)
 		return
 	}
 	states := make(map[string]gatewayPacketLossPause)
 	raw, err := s.settingRepo.GetValue(ctx, gatewayPacketLossStateKey)
 	if err != nil && !errors.Is(err, ErrSettingNotFound) {
-		preserveGatewayPacketLossRuntime(settings, runtime, currentCachedGatewayRoutingRuntime(s))
+		preserveGatewayPacketLossRuntime(settings, runtime, previous)
 		return
 	}
 	if raw != "" && json.Unmarshal([]byte(raw), &states) != nil {
-		preserveGatewayPacketLossRuntime(settings, runtime, currentCachedGatewayRoutingRuntime(s))
+		preserveGatewayPacketLossRuntime(settings, runtime, previous)
 		return
 	}
 	stateKey := func(node GatewayRoutingNodeSettings) string {
@@ -173,7 +183,7 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 	for i, configured := range settings.Nodes {
 		signal := signals[configured.ID]
 		until := states[stateKey(configured)].Until
-		if runtime.Nodes[i].EffectiveWeight > 0 && !runtime.Nodes[i].MonitorStale && signal.Fresh && signal.Recovered && !now.Before(until) {
+		if !runtime.Nodes[i].AutoDisabled && !runtime.Nodes[i].MonitorStale && !signal.OriginUnhealthy && !(signal.Fresh && signal.Severe) && ((signal.Fresh && signal.Recovered) || signal.OriginHealthy) && !now.Before(until) {
 			healthyPeer = true
 		}
 	}
@@ -192,17 +202,39 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 				node.PacketLossState = "healthy"
 			}
 		}
+		if !signal.OriginSampleAt.IsZero() && (!signal.Fresh || signal.OriginUnhealthy) {
+			if signal.OriginUnhealthy {
+				// An HTTP connectivity failure has no measured ICMP loss ratio.
+				node.PacketLossPercent = nil
+			}
+			node.PacketLossSampleAt = &signal.OriginSampleAt
+			node.PacketLossState = "observing"
+			if signal.OriginRecovered {
+				node.PacketLossState = "healthy"
+			}
+		}
 		key := stateKey(configured)
 		pause, paused := states[key]
 		until := pause.Until
-		if paused && !now.Before(until) && signal.Fresh && signal.Recovered {
+		recovered := signal.Fresh && signal.Recovered
+		if pause.OriginProbe {
+			recovered = signal.OriginRecovered && !(signal.Fresh && signal.Severe)
+		}
+		if paused && !now.Before(until) && recovered {
 			paused = false
 		}
-		if signal.Fresh && signal.Severe {
+		if (signal.Fresh && signal.Severe) || signal.OriginUnhealthy {
+			sampleAt := signal.SampleAt
+			originProbe := signal.OriginUnhealthy && !(signal.Fresh && signal.Severe)
+			if originProbe {
+				sampleAt = signal.OriginSampleAt
+			}
 			if paused || (healthyPeer && !node.AutoDisabled && !node.MonitorStale) {
-				if !paused || (!now.Before(until) && signal.SampleAt.After(pause.SampleAt)) {
+				if !paused || (!now.Before(until) && sampleAt.After(pause.SampleAt)) {
 					until = now.Add(time.Duration(settings.PacketLossCooldownMinutes) * time.Minute)
-					pause = gatewayPacketLossPause{Until: until, SampleAt: signal.SampleAt}
+					pause = gatewayPacketLossPause{Until: until, SampleAt: sampleAt, OriginProbe: originProbe}
+				} else if !originProbe {
+					pause.OriginProbe = false
 				}
 				paused = true
 			} else {
@@ -226,7 +258,7 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 		if err := s.settingRepo.Set(ctx, gatewayPacketLossStateKey, string(encoded)); err != nil {
 			// Do not advertise a new decision that would be lost on restart.
 			*runtime = *base
-			preserveGatewayPacketLossRuntime(settings, runtime, currentCachedGatewayRoutingRuntime(s))
+			preserveGatewayPacketLossRuntime(settings, runtime, previous)
 		}
 	}
 }

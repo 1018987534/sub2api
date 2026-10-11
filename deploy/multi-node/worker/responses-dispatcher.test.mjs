@@ -169,6 +169,113 @@ test("packet-loss pauses exclude a node from weighted and capacity fallback rout
   assert.equal(originsFor(30, normalizeRuntimeNodes(payload))[0], "https://yt.example");
 });
 
+test("exhausted weighted nodes use healthy zero-weight standbys before paused nodes", () => {
+  const nodes = normalizeRuntimeNodes({nodes: [
+    {id:"primary", origin:"https://primary.example", target_weight:100, effective_weight:0, auto_disabled:true},
+    {id:"standby", origin:"https://standby.example", target_weight:0, effective_weight:0},
+    {id:"stale", origin:"https://stale.example", target_weight:0, effective_weight:0, monitor_stale:true},
+    {id:"bad", origin:"https://bad.example", target_weight:0, effective_weight:0, auto_disabled:true},
+  ]});
+  for (let roll=0; roll<100; roll++) {
+    const origins=originsFor(roll,nodes);
+    assert.equal(origins[0],"https://standby.example");
+    assert.equal(new Set(origins).size,4);
+  }
+});
+
+test("all paused nodes still form a random nonempty emergency routing pool", () => {
+  const nodes = normalizeRuntimeNodes({nodes: [
+    {id:"primary", origin:"https://primary.example", target_weight:100, effective_weight:0, auto_disabled:true},
+    {id:"standby", origin:"https://standby.example", target_weight:0, effective_weight:0, auto_disabled:true},
+  ]});
+  for (let roll=0; roll<100; roll++) {
+    const origins=originsFor(roll,nodes);
+    assert.equal(origins.length,2);
+    assert.equal(origins[0],nodes[roll%2].origin);
+    assert.equal(new Set(origins).size,2);
+  }
+  assert.deepEqual(selectOrigins({}, {getRandomValues(a) {a[0]=0; return a;}}, []), []);
+});
+
+test("emergency standby forwards a POST once without changing its body", async () => {
+  const originalFetch=globalThis.fetch;
+  const calls=[];
+  resetRoutingConfigCache();
+  try {
+    globalThis.fetch=async (input) => {
+      if (typeof input === "string") return Response.json({nodes:[
+        {id:"primary", origin:"https://primary.example", target_weight:100, effective_weight:0, auto_disabled:true},
+        {id:"standby", origin:"https://standby.example", target_weight:0, effective_weight:0},
+      ]});
+      calls.push({url:input.url, body:await input.text()});
+      return new Response("data: [DONE]\n\n",{headers:{"Content-Type":"text/event-stream"}});
+    };
+    const response=await responsesDispatcher.fetch(new Request("https://xiaohondou.com/v1/responses", {
+      method:"POST",body:'{"model":"fixture","input":"hello"}',
+    }),{ROUTING_CONFIG_URL:"https://control.example/runtime"});
+    assert.equal(response.status,200);
+    assert.equal(await response.text(),"data: [DONE]\n\n");
+    assert.deepEqual(calls,[{url:"https://standby.example/v1/responses",body:'{"model":"fixture","input":"hello"}'}]);
+  } finally {
+    globalThis.fetch=originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("default runtime cache observes a pause after one second", async () => {
+  const originalFetch=globalThis.fetch;
+  const originalNow=Date.now;
+  let now=10000, calls=0;
+  resetRoutingConfigCache();
+  try {
+    Date.now=()=>now;
+    globalThis.fetch=async ()=> {
+      calls++;
+      return Response.json({nodes:[{id:"yt",origin:"https://yt.example",target_weight:100,effective_weight:calls===1?100:0,auto_disabled:calls>1}]});
+    };
+    const runtimeEnv={ROUTING_CONFIG_URL:"https://control.example/runtime"};
+    assert.equal((await fetchRoutingNodes(runtimeEnv))[0].effective_weight,100);
+    now+=999;
+    assert.equal((await fetchRoutingNodes(runtimeEnv))[0].effective_weight,100);
+    assert.equal(calls,1);
+    now+=2;
+    assert.equal((await fetchRoutingNodes(runtimeEnv))[0].effective_weight,0);
+    assert.equal(calls,2);
+  } finally {
+    globalThis.fetch=originalFetch;
+    Date.now=originalNow;
+    resetRoutingConfigCache();
+  }
+});
+
+test("exhausted emergency standby admission still tries another configured node", async () => {
+  const originalFetch=globalThis.fetch;
+  const calls=[];
+  resetRoutingConfigCache();
+  try {
+    globalThis.fetch=async (input) => {
+      if (typeof input === "string") return Response.json({nodes:[
+        {id:"primary",origin:"https://primary.example",target_weight:100,effective_weight:0,auto_disabled:true},
+        {id:"standby",origin:"https://standby.example",target_weight:0,effective_weight:0},
+      ]});
+      calls.push(input.url);
+      if (input.url.startsWith("https://standby.example")) {
+        return Response.json({error:"full"},{status:503,headers:{
+          "x-sub2api-ingress-reject":"node_capacity",
+          "X-Sub2API-Edge-Capacity-Nonce":input.headers.get("X-Sub2API-Edge-Capacity-Nonce"),
+        }});
+      }
+      return new Response("data: [DONE]\n\n");
+    };
+    const response=await responsesDispatcher.fetch(new Request("https://xiaohondou.com/v1/responses",{method:"POST",body:"fixture"}),{ROUTING_CONFIG_URL:"https://control.example/runtime"});
+    assert.equal(response.status,200);
+    assert.deepEqual(calls,["https://standby.example/v1/responses","https://primary.example/v1/responses"]);
+  } finally {
+    globalThis.fetch=originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
 test("rejects malformed runtime nodes", () => {
   assert.throws(
     () => normalizeRuntimeNodes({ data: { nodes: [] } }),
