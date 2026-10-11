@@ -22,7 +22,7 @@
           </div></section>
 
           <section class="card p-5 sm:p-6"><h2 class="text-base font-semibold text-gray-900 dark:text-white">{{ t('admin.lottery.eligibility') }}</h2><div class="mt-5 grid gap-5 md:grid-cols-3"><label class="flex items-start gap-3 rounded-xl border border-gray-200 p-4 dark:border-dark-700"><input v-model="form.require_recharge" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" /><span><span class="block text-sm font-medium text-gray-800 dark:text-gray-200">{{ t('admin.lottery.requireRecharge') }}</span><span class="mt-1 block text-xs text-gray-500 dark:text-dark-400">{{ t('lottery.rechargeRequired') }}</span></span></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.minRecharge') }}</span><div class="relative"><input v-model.number="form.min_recharge_amount" type="number" min="0" step="0.01" class="input pr-16" /><span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-gray-400">USD</span></div><span class="hint">{{ t('admin.lottery.minRechargeHint') }}</span></label><label class="space-y-1.5"><span class="label">{{ t('admin.lottery.minAccountAge') }}</span><input v-model.number="form.min_account_age_days" type="number" min="0" max="36500" class="input" /><span class="hint">{{ t('admin.lottery.minRechargeHint') }}</span></label><label class="space-y-1.5 md:col-span-2"><span class="label">{{ t('admin.lottery.recentRecharge') }}</span><input v-model.number="form.recent_recharge_days" type="number" min="0" max="36500" class="input" /><span class="hint">{{ t('admin.lottery.recentRechargeHint') }}</span></label></div></section>
-          <div class="flex justify-end"><button class="btn btn-primary w-full sm:w-auto" type="submit" :disabled="saving"><Icon v-if="saving" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="checkCircle" size="sm" /><span>{{ saving ? t('common.saving') : t('admin.lottery.save') }}</span></button></div>
+          <div class="flex justify-end"><button class="btn btn-primary w-full sm:w-auto" type="submit" :disabled="saving || roundBusy"><Icon v-if="saving" name="refresh" size="sm" class="animate-spin" /><Icon v-else name="checkCircle" size="sm" /><span>{{ saving ? t('common.saving') : t('admin.lottery.save') }}</span></button></div>
         </form>
 
         <section v-if="currentActiveRound" class="flex flex-col gap-4 border-b border-gray-200 py-4 dark:border-dark-700 sm:flex-row sm:items-end sm:justify-between">
@@ -106,22 +106,35 @@ function date(value: string): string { return new Date(value).toLocaleString() }
 function statusLabel(status: string): string { return t(`lottery.statuses.${status}`, status) }
 function openParticipants(round: LotteryRound): void { selectedRound.value = round }
 
+function applyRounds(items: LotteryRound[]): void {
+  rounds.value = items
+  for (const round of items) {
+    progressDrafts[round.id] = round.participant_count
+    prizeCountDrafts[round.id] = round.prize_count
+  }
+}
+
 async function load(): Promise<void> {
   loading.value = true
   try {
     const [config, page] = await Promise.all([lotteryAPI.getAdminConfig(), lotteryAPI.getAdminRounds(1, 50)])
     Object.assign(form, config)
-    rounds.value = page.items
-    for (const round of rounds.value) {
-      progressDrafts[round.id] = round.participant_count
-      prizeCountDrafts[round.id] = round.prize_count
-    }
+    applyRounds(page.items)
   } catch (error) { appStore.showError(extractApiErrorMessage(error, t('admin.lottery.loadFailed'))) }
   finally { loading.value = false }
 }
 async function save(): Promise<void> {
+  if (saving.value || roundBusy.value) return
   saving.value = true
-  try { const updated = await lotteryAPI.updateAdminConfig({ ...form }); Object.assign(form, updated); await appStore.fetchPublicSettings(true); appStore.showSuccess(t('admin.lottery.saved')) }
+  try {
+    const updated = await lotteryAPI.updateAdminConfig({ ...form })
+    Object.assign(form, updated)
+    const page = await lotteryAPI.getAdminRounds(1, 50)
+    applyRounds(page.items)
+    await appStore.fetchPublicSettings(true)
+    window.dispatchEvent(new Event('lottery-availability-changed'))
+    appStore.showSuccess(t('admin.lottery.saved'))
+  }
   catch (error) { appStore.showError(extractApiErrorMessage(error, t('admin.lottery.saveFailed'))) }
   finally { saving.value = false }
 }

@@ -9,6 +9,7 @@ import LotteryView from '../LotteryView.vue'
 const api = vi.hoisted(() => ({
   getAdminConfig: vi.fn(), getAdminRounds: vi.fn(), updateRoundPrizeCount: vi.fn(),
   updateRoundStatus: vi.fn(), showError: vi.fn(), showSuccess: vi.fn(),
+  updateAdminConfig: vi.fn(), fetchPublicSettings: vi.fn(),
 }))
 vi.mock('@/api/lottery', () => ({ default: api }))
 vi.mock('@/stores/app', () => ({ useAppStore: () => api }))
@@ -70,6 +71,8 @@ describe('Admin LotteryView active round actions', () => {
     api.getAdminRounds.mockResolvedValue({ items: [{ ...round }] })
     api.updateRoundPrizeCount.mockResolvedValue({ ...round, prize_count: 6 })
     api.updateRoundStatus.mockImplementation(async (_id, status) => ({ ...round, status }))
+    api.updateAdminConfig.mockResolvedValue({ ...config, require_recharge: true, min_recharge_amount: 5 })
+    api.fetchPublicSettings.mockResolvedValue(undefined)
   })
 
   it('changes this round only, renders the result, and reports API failures', async () => {
@@ -87,6 +90,46 @@ describe('Admin LotteryView active round actions', () => {
     await flushPromises()
     expect(api.showError).toHaveBeenCalled()
     expect(wrapper.findAll('tbody td')[4].text()).toBe('6')
+  })
+
+  it('saves eligibility and immediately refreshes the pruned participants and progress', async () => {
+    api.getAdminRounds.mockResolvedValueOnce({ items: [{ ...round, participant_count: 8, real_participant_count: 3, manual_progress_count: 5 }] })
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    const amount = wrapper.findAll('label').find(label => label.find('.label').exists() && label.find('.label').text() === 'admin.lottery.minRecharge')!
+    await amount.get('input').setValue('5')
+    await wrapper.findAll('input[type="checkbox"]')[1].setValue(true)
+    api.getAdminRounds.mockResolvedValueOnce({ items: [{ ...round, participant_count: 6, real_participant_count: 1, manual_progress_count: 5 }] })
+    const changed = vi.fn()
+    window.addEventListener('lottery-availability-changed', changed)
+    try {
+      await wrapper.get('form').trigger('submit')
+      await flushPromises()
+      expect(api.updateAdminConfig).toHaveBeenCalledWith(expect.objectContaining({ require_recharge: true, min_recharge_amount: 5 }))
+      expect(api.getAdminRounds).toHaveBeenCalledTimes(2)
+      expect(wrapper.get<HTMLInputElement>('input[aria-label="admin.lottery.progressInput"]').element.value).toBe('6')
+      expect(wrapper.findAll('tbody td')[2].text()).toBe('1')
+      expect(wrapper.findAll('tbody td')[3].text()).toBe('5')
+      expect(api.fetchPublicSettings).toHaveBeenCalledWith(true)
+      expect(changed).toHaveBeenCalledTimes(1)
+      expect(api.showSuccess).toHaveBeenCalledWith('admin.lottery.saved')
+    } finally {
+      window.removeEventListener('lottery-availability-changed', changed)
+      wrapper.unmount()
+    }
+  })
+
+  it('keeps the current participants visible when saving eligibility fails', async () => {
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    api.updateAdminConfig.mockRejectedValueOnce(new Error('eligibility transaction failed'))
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.showError).toHaveBeenCalled()
+    expect(api.showSuccess).not.toHaveBeenCalled()
+    expect(api.getAdminRounds).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAll('tbody td')[2].text()).toBe('12')
+    wrapper.unmount()
   })
 
   it('rejects invalid counts before calling the API', async () => {

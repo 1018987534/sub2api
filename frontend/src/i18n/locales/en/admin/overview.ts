@@ -1387,7 +1387,7 @@ export default {
 
     lottery: {
       title: 'Lottery Management',
-      description: 'Configure the lottery switch, draw rules, actor pacing, and eligibility. Changes apply to new rounds.',
+      description: 'Saved eligibility changes apply immediately to open and paused rounds, removing ineligible participants. Round rules apply to new rounds.',
       enabled: 'Enable lottery activity',
       enabledHint: 'When disabled, the user menu is hidden and existing rounds stop accepting entries.',
       rules: 'Round rules',
