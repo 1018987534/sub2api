@@ -2,7 +2,7 @@ const DEFAULT_VMISS_US_01_PERCENT = 10;
 const DEFAULT_YT_US_01_PERCENT = 54;
 const DEFAULT_VMISS_US_02_PERCENT = 10;
 const DEFAULT_DMIT_US_01_PERCENT = 16;
-const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 5;
+const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 1;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
 const MAX_INGRESS_ERROR_BODY_BYTES = 8 * 1024;
 const MAX_CLOUDFLARE_520_BODY_BYTES = 32 * 1024;
@@ -150,6 +150,7 @@ function normalizeRuntimeNodes(payload) {
       effective_weight: weight,
       target_weight: Number.parseInt(node?.target_weight ?? weight, 10),
       auto_disabled: node?.auto_disabled === true,
+      monitor_stale: node?.monitor_stale === true,
       overflow_fallback:
         node?.overflow_fallback === true || String(node?.id ?? "") === overflowNodeID,
     };
@@ -196,7 +197,7 @@ async function fetchRoutingNodes(env, metadata = null) {
         env,
         "ROUTING_CONFIG_TTL_SECONDS",
         DEFAULT_ROUTING_CONFIG_TTL_SECONDS,
-        5,
+        1,
         300,
       );
       routingConfigCache = {
@@ -254,11 +255,34 @@ function weightedNode(nodes, randomSource) {
 
 function selectOrigins(env, randomSource = crypto, runtimeNodes = null) {
   const allNodes = (runtimeNodes ?? staticRoutingNodes(env)).filter((node) => node.origin);
-  const weightedNodes = allNodes.filter((node) => node.effective_weight > 0);
+  const weightedNodes = allNodes.filter((node) => node.effective_weight > 0 && !node.auto_disabled);
   const fallbackNode = allNodes.find(
-    (node) => node.overflow_fallback && !node.auto_disabled,
+    (node) => node.overflow_fallback && !node.auto_disabled && !node.monitor_stale,
   );
-  const selectedNode = weightedNode(weightedNodes, randomSource) ?? fallbackNode;
+  if (weightedNodes.length === 0) {
+    const standbys = allNodes.filter((node) => node.target_weight === 0 && !node.auto_disabled && !node.monitor_stale);
+    // Exhaustion is an explicit availability fallback: healthy zero-weight
+    // standbys first, then every configured origin if none remain usable.
+    const remaining = [...(standbys.length > 0 ? standbys : allNodes)];
+    const origins = [];
+    if (standbys.includes(fallbackNode)) {
+      appendUnique(origins, fallbackNode.origin);
+      remaining.splice(remaining.indexOf(fallbackNode), 1);
+    }
+    while (remaining.length > 0) {
+      const [next] = remaining.splice(randomIndex(randomSource, remaining.length), 1);
+      appendUnique(origins, next.origin);
+    }
+    // If every standby rejects admission before accepting a POST, the existing
+    // safe-ingress retry may still try the other configured origins.
+    const emergency = allNodes.filter((node) => !origins.includes(node.origin));
+    while (emergency.length > 0) {
+      const [next] = emergency.splice(randomIndex(randomSource, emergency.length), 1);
+      appendUnique(origins, next.origin);
+    }
+    return origins;
+  }
+  const selectedNode = weightedNode(weightedNodes, randomSource);
   if (!selectedNode) {
     return [];
   }
@@ -539,7 +563,7 @@ export default {
     const origins = selectOrigins(env, crypto, routingNodes);
     if (origins.length === 0) {
       return Response.json(
-        { error: "No routing node currently has a positive effective weight" },
+        { error: "No routing origin is configured" },
         { status: 503 },
       );
     }

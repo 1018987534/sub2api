@@ -63,13 +63,14 @@ type GatewayRoutingNodeSettings struct {
 // GatewayRoutingRuntime is the read-only configuration consumed by the edge
 // dispatcher and displayed in the administrator settings page.
 type GatewayRoutingRuntime struct {
-	GeneratedAt    time.Time                   `json:"generated_at"`
-	MonitorChecked time.Time                   `json:"monitor_checked_at"`
-	MonitorStale   bool                        `json:"monitor_stale"`
-	MonitorError   string                      `json:"monitor_error,omitempty"`
-	CapacityError  string                      `json:"capacity_error,omitempty"`
-	OverflowNodeID string                      `json:"overflow_node_id"`
-	Nodes          []GatewayRoutingNodeRuntime `json:"nodes"`
+	GeneratedAt       time.Time                   `json:"generated_at"`
+	MonitorChecked    time.Time                   `json:"monitor_checked_at"`
+	MonitorStale      bool                        `json:"monitor_stale"`
+	MonitorError      string                      `json:"monitor_error,omitempty"`
+	CapacityError     string                      `json:"capacity_error,omitempty"`
+	OverflowNodeID    string                      `json:"overflow_node_id"`
+	Nodes             []GatewayRoutingNodeRuntime `json:"nodes"`
+	packetLossSignals map[string]gatewayPacketLossSignal
 }
 
 type GatewayRoutingNodeRuntime struct {
@@ -405,6 +406,7 @@ func (s *SettingService) GetGatewayRoutingRuntime(ctx context.Context) (*Gateway
 	if cached, ok := s.gatewayRoutingRuntimeCache.Load().(*cachedGatewayRoutingRuntime); ok && cached != nil && cached.runtime != nil {
 		if now.UnixNano() < cached.expiresAt {
 			runtime := cloneGatewayRoutingRuntime(cached.runtime)
+			s.applyGatewayPacketLossProtection(ctx, settings, runtime, s.gatewayRoutingProbeSignals(settings, runtime.packetLossSignals, now), now)
 			s.populateGatewayRoutingCapacity(ctx, runtime)
 			return runtime, nil
 		}
@@ -439,6 +441,7 @@ func (s *SettingService) GetGatewayRoutingRuntime(ctx context.Context) (*Gateway
 		return nil, errors.New("gateway routing runtime is unavailable")
 	}
 	cloned := cloneGatewayRoutingRuntime(runtime)
+	s.applyGatewayPacketLossProtection(ctx, settings, cloned, s.gatewayRoutingProbeSignals(settings, cloned.packetLossSignals, time.Now().UTC()), time.Now().UTC())
 	s.populateGatewayRoutingCapacity(ctx, cloned)
 	return cloned, nil
 }
@@ -588,7 +591,8 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 	for i, result := range results {
 		pingSignals[settings.Nodes[result.index].ID] = pingResults[i]
 	}
-	s.applyGatewayPacketLossProtection(ctx, settings, runtime, pingSignals, now)
+	runtime.packetLossSignals = pingSignals
+	s.applyGatewayPacketLossProtection(ctx, settings, runtime, s.gatewayRoutingProbeSignals(settings, pingSignals, now), now)
 	for _, node := range runtime.Nodes {
 		if node.MonitorStale {
 			runtime.MonitorStale = true
@@ -598,8 +602,10 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 	return runtime, nil
 }
 
-func gatewayRoutingNodeCanReceiveRequests(settings *GatewayRoutingSettings, node GatewayRoutingNodeSettings) bool {
-	return node.TargetWeight > 0 || (settings != nil && node.ID == settings.OverflowNodeID)
+func gatewayRoutingNodeCanReceiveRequests(_ *GatewayRoutingSettings, node GatewayRoutingNodeSettings) bool {
+	// A zero target weight is an emergency standby, so its health and quota
+	// must be observed even when it is not the configured capacity fallback.
+	return node.Origin != ""
 }
 
 func (s *SettingService) populateGatewayRoutingCapacity(ctx context.Context, runtime *GatewayRoutingRuntime) {

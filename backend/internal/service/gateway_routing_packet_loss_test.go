@@ -192,7 +192,7 @@ func TestGatewayPacketLossPeerAndExistingProtection(t *testing.T) {
 				signals["yt"] = gatewayPacketLossSignal{}
 			}
 			svc.applyGatewayPacketLossProtection(ctx, settings, r, signals, now)
-			if scenario == "overflow target zero" || scenario == "quota priority" {
+			if scenario == "overflow target zero" || scenario == "quota priority" || scenario == "peer disabled" || scenario == "manual disabled" {
 				require.True(t, r.Nodes[0].AutoDisabled)
 				require.Zero(t, r.Nodes[0].EffectiveWeight)
 				if scenario == "quota priority" {
@@ -203,6 +203,66 @@ func TestGatewayPacketLossPeerAndExistingProtection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGatewayPacketLossOriginProbeCooldown(t *testing.T) {
+	ctx, now := context.Background(), time.Now().UTC()
+	repo := &packetLossFailingRepo{gatewayRoutingRepoStub: newGatewayRoutingRepoStub()}
+	svc := NewSettingService(repo, &config.Config{})
+	settings := packetLossSettings()
+	settings.Nodes[1].TargetWeight = 0
+	signals := map[string]gatewayPacketLossSignal{
+		"yt":   {OriginUnhealthy: true, OriginSampleAt: now},
+		"peer": {OriginHealthy: true, OriginSampleAt: now},
+	}
+	runtime := packetLossRuntime(settings)
+	svc.applyGatewayPacketLossProtection(ctx, settings, runtime, signals, now)
+	require.Zero(t, runtime.Nodes[0].EffectiveWeight, "a healthy zero-weight standby permits early isolation")
+	require.Equal(t, "paused", runtime.Nodes[0].PacketLossState)
+	var states map[string]gatewayPacketLossPause
+	require.NoError(t, json.Unmarshal([]byte(repo.values[gatewayPacketLossStateKey]), &states))
+	require.True(t, states[settings.MonitorURL+"|yt|https://yt.example"].OriginProbe)
+	// Re-reading one failed probe cannot extend the cooldown.
+	until := *runtime.Nodes[0].PacketLossPausedUntil
+	runtime = packetLossRuntime(settings)
+	svc.applyGatewayPacketLossProtection(ctx, settings, runtime, signals, now.Add(time.Second))
+	require.Equal(t, until, *runtime.Nodes[0].PacketLossPausedUntil)
+	// Read failures preserve a fast isolation even when the 30-second monitor
+	// cache was created before the fast probe failed.
+	repo.failRead = true
+	runtime = packetLossRuntime(settings)
+	svc.applyGatewayPacketLossProtection(ctx, settings, runtime, nil, now.Add(2*time.Second))
+	require.Zero(t, runtime.Nodes[0].EffectiveWeight)
+	repo.failRead = false
+	// Restart does not discard the persisted fast pause.
+	svc = NewSettingService(repo, &config.Config{})
+	signals["yt"] = gatewayPacketLossSignal{OriginHealthy: true, OriginSampleAt: until}
+	runtime = packetLossRuntime(settings)
+	svc.applyGatewayPacketLossProtection(ctx, settings, runtime, signals, until)
+	require.Zero(t, runtime.Nodes[0].EffectiveWeight, "one successful round is not recovery")
+	signals["yt"] = gatewayPacketLossSignal{OriginHealthy: true, OriginRecovered: true, OriginSampleAt: until.Add(time.Second)}
+	runtime = packetLossRuntime(settings)
+	svc.applyGatewayPacketLossProtection(ctx, settings, runtime, signals, until.Add(time.Second))
+	require.Equal(t, 70, runtime.Nodes[0].EffectiveWeight)
+	require.Nil(t, runtime.Nodes[0].PacketLossPausedUntil)
+}
+
+func TestGatewayPacketLossICMPPauseCannotRecoverFromOriginProbes(t *testing.T) {
+	ctx, now := context.Background(), time.Now().UTC()
+	svc := NewSettingService(newGatewayRoutingRepoStub(), &config.Config{})
+	settings := packetLossSettings()
+	signals := map[string]gatewayPacketLossSignal{
+		"yt":   {Fresh: true, Severe: true, SampleAt: now},
+		"peer": {Fresh: true, Recovered: true, SampleAt: now},
+	}
+	runtime := packetLossRuntime(settings)
+	svc.applyGatewayPacketLossProtection(ctx, settings, runtime, signals, now)
+	until := *runtime.Nodes[0].PacketLossPausedUntil
+	signals["yt"] = gatewayPacketLossSignal{OriginHealthy: true, OriginRecovered: true, OriginSampleAt: until}
+	runtime = packetLossRuntime(settings)
+	svc.applyGatewayPacketLossProtection(ctx, settings, runtime, signals, until)
+	require.Zero(t, runtime.Nodes[0].EffectiveWeight)
+	require.Equal(t, "awaiting_recovery", runtime.Nodes[0].PacketLossState)
 }
 
 type packetLossFailingRepo struct {
