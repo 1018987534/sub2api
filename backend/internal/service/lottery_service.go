@@ -272,10 +272,61 @@ func (s *LotteryService) UpdateConfig(ctx context.Context, cfg LotteryConfig) (L
 	if err != nil {
 		return LotteryConfig{}, fmt.Errorf("update lottery switch: %w", err)
 	}
+	if err := s.syncActiveRoundEligibilityTx(ctx, tx, cfg); err != nil {
+		return LotteryConfig{}, fmt.Errorf("sync active lottery eligibility: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return LotteryConfig{}, err
 	}
 	return s.GetConfig(ctx)
+}
+
+// The config row is already locked by UpdateConfig. Lock the active round as
+// well so joins and draws cannot race with eligibility changes and removals.
+func (s *LotteryService) syncActiveRoundEligibilityTx(ctx context.Context, tx *sql.Tx, cfg LotteryConfig) error {
+	var roundID int64
+	err := tx.QueryRowContext(ctx, `SELECT id FROM lottery_rounds WHERE status IN ('open','paused') FOR UPDATE`).Scan(&roundID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	now := s.now()
+	_, err = tx.ExecContext(ctx, `
+		WITH eligibility AS (
+			SELECT p.id, u.id AS user_id, u.created_at,
+				COALESCE(SUM(CASE WHEN rc.type IN ('balance','admin_balance') AND rc.value>0 AND rc.used_at IS NOT NULL THEN rc.value ELSE 0 END),0) AS total_recharge,
+				MAX(CASE WHEN rc.type IN ('balance','admin_balance') AND rc.value>0 THEN rc.used_at END) AS last_recharge
+			FROM lottery_participants p
+			LEFT JOIN users u ON u.id=p.user_id AND u.deleted_at IS NULL AND u.status='active'
+			LEFT JOIN redeem_codes rc ON rc.used_by=u.id
+			WHERE p.round_id=$1 AND p.is_actor=FALSE
+			GROUP BY p.id,u.id,u.created_at
+		)
+		DELETE FROM lottery_participants p USING eligibility e
+		WHERE p.id=e.id AND (
+			e.user_id IS NULL
+			OR ($2 AND e.total_recharge<=0)
+			OR ($3>0 AND e.total_recharge+1e-9<$3)
+			OR ($4>0 AND e.created_at>$5)
+			OR ($6>0 AND (e.last_recharge IS NULL OR e.last_recharge<$7))
+		)`, roundID, cfg.RequireRecharge, cfg.MinRechargeAmount,
+		cfg.MinAccountAgeDays, now.AddDate(0, 0, -cfg.MinAccountAgeDays),
+		cfg.RecentRechargeDays, now.AddDate(0, 0, -cfg.RecentRechargeDays))
+	if err != nil {
+		return err
+	}
+	// Historical actor rows are already represented by the manual offset; only
+	// real participants should be counted here, just as in UpdateProgress.
+	_, err = tx.ExecContext(ctx, `
+		UPDATE lottery_rounds SET require_recharge=$2,min_recharge_amount=$3,
+			min_account_age_days=$4,recent_recharge_days=$5,
+			participant_count=manual_progress_count+(SELECT COUNT(*) FROM lottery_participants WHERE round_id=$1 AND is_actor=FALSE),
+			updated_at=NOW()
+		WHERE id=$1`, roundID, cfg.RequireRecharge, cfg.MinRechargeAmount,
+		cfg.MinAccountAgeDays, cfg.RecentRechargeDays)
+	return err
 }
 
 const lotteryRoundColumns = `

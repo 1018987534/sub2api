@@ -1386,7 +1386,7 @@ export default {
 
     lottery: {
       title: '抽奖管理',
-      description: '配置抽奖开关、开奖规则、群演节奏与参与资格。配置只对新轮次生效。',
+      description: '参与资格保存后立即对进行中及暂停的轮次生效，不符合资格的参与者会被移除。轮次规则对新轮次生效。',
       enabled: '开启抽奖活动',
       enabledHint: '关闭后用户菜单隐藏，已有轮次不会再接受参与。',
       rules: '轮次规则',
