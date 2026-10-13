@@ -235,6 +235,7 @@ type AdminBoundAuthIdentityChannel struct {
 type CreateGroupInput struct {
 	Name                      string
 	Description               string
+	I18n                      GroupI18n // 名称与描述的界面语言译文
 	Platform                  string
 	RateMultiplier            float64
 	MinCacheRate              *float64 // minimum cache rate for total-duration scheduling; nil/0 disables
@@ -316,6 +317,7 @@ type CreateGroupInput struct {
 type UpdateGroupInput struct {
 	Name                      string
 	Description               *string
+	I18n                      *GroupI18n // nil 表示不修改；非 nil 整体替换
 	Platform                  string
 	RateMultiplier            *float64 // 使用指针以支持设置为0
 	MinCacheRate              *float64 // 最低缓存率（0 表示不限制）
