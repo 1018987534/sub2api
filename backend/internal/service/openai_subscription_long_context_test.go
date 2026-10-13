@@ -30,7 +30,15 @@ func TestOpenAISubscriptionLongContextExempt(t *testing.T) {
 		{name: "仅响应标签相同", account: oauth, result: &OpenAIForwardResult{Model: "gpt-6-sol", UpstreamResponseModel: "gpt-6.1-sol"}},
 		{name: "其他模型", account: oauth, result: &OpenAIForwardResult{Model: "gpt-6-astra"}},
 		{name: "相似名称", account: oauth, result: &OpenAIForwardResult{Model: "gpt-6.1-sol-preview"}},
-		{name: "API账号", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}},
+		{name: "API账号默认豁免", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}, want: true},
+		{name: "API账号开启豁免", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_gpt61_sol_long_context_exempt": true}}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}, want: true},
+		{name: "API账号关闭豁免", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_gpt61_sol_long_context_exempt": false}}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}},
+		{name: "API账号其他模型", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6-sol"}},
+		{name: "API账号映射到目标", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "custom", UpstreamModel: "gpt-6.1-sol"}, want: true},
+		{name: "API账号映射离开目标", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol", UpstreamModel: "gpt-6-sol"}},
+		{name: "API账号相似名称", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol-preview"}},
+		{name: "订阅不受API开关影响", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_gpt61_sol_long_context_exempt": false}}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}, want: true},
+		{name: "其他平台API账号", account: &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}},
 		{name: "其他平台", account: &Account{Platform: PlatformGrok, Type: AccountTypeOAuth}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}},
 		{name: "订阅访问令牌", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeSetupToken}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}, want: true},
 	} {
@@ -70,6 +78,9 @@ func TestOpenAIGatewayServiceRecordUsage_GPT61SolSubscriptionLongContext(t *test
 							}
 							account := &Account{ID: 3, Platform: PlatformOpenAI, Type: accountType,
 								Extra: map[string]any{openAILongContextBillingEnabledKey: accountEnabled}}
+							if accountType == AccountTypeAPIKey {
+								account.Extra["openai_gpt61_sol_long_context_exempt"] = false
+							}
 							err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 								Result: &OpenAIForwardResult{
 									RequestID: name, Model: "gpt-6.1-sol", ServiceTier: &tier, Duration: time.Second,
@@ -187,7 +198,7 @@ func TestOpenAIGatewayServiceRecordUsage_GPT61SolLongContextBoundary(t *testing.
 						Usage: OpenAIUsage{InputTokens: totalInput, OutputTokens: 1000}},
 					APIKey: openAIRecordUsageAPIKeyWithGroup(svc, 1, true), User: &User{ID: 2},
 					Account: &Account{ID: 3, Platform: PlatformOpenAI, Type: accountType,
-						Extra: map[string]any{openAILongContextBillingEnabledKey: true}},
+						Extra: map[string]any{openAILongContextBillingEnabledKey: true, "openai_gpt61_sol_long_context_exempt": false}},
 				})
 				require.NoError(t, err)
 				wantLong := accountType == AccountTypeAPIKey && totalInput > 272000
@@ -200,6 +211,50 @@ func TestOpenAIGatewayServiceRecordUsage_GPT61SolLongContextBoundary(t *testing.
 				require.InDelta(t, wantInput, usageRepo.lastLog.InputCost, 1e-12)
 				require.InDelta(t, wantOutput, usageRepo.lastLog.OutputCost, 1e-12)
 			})
+		}
+	}
+}
+
+func TestOpenAIGatewayServiceRecordUsage_GPT61SolAPIKeyExemption(t *testing.T) {
+	for _, exempt := range []any{nil, true, false} {
+		for _, catalog := range []bool{false, true} {
+			for _, accountEnabled := range []bool{false, true} {
+				for _, groupEnabled := range []bool{false, true} {
+					name := fmt.Sprintf("exempt=%v/catalog=%t/account=%t/group=%t", exempt, catalog, accountEnabled, groupEnabled)
+					t.Run(name, func(t *testing.T) {
+						usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+						userRepo := &openAIRecordUsageUserRepoStub{}
+						svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
+						if catalog {
+							svc.billingService = NewBillingService(svc.cfg, newStubPricingServiceFromJSON(t, `{
+								"gpt-6.1-sol":{"litellm_provider":"openai","mode":"chat",
+								"input_cost_per_token":2e-6,"output_cost_per_token":10e-6,
+								"cache_read_input_token_cost":0.1e-6,"cache_creation_input_token_cost":2.5e-6,
+								"input_cost_per_token_above_272k_tokens":4e-6,
+								"output_cost_per_token_above_272k_tokens":15e-6}}`))
+						}
+						extra := map[string]any{openAILongContextBillingEnabledKey: accountEnabled}
+						if exempt != nil {
+							extra["openai_gpt61_sol_long_context_exempt"] = exempt
+						}
+						err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+							Result: &OpenAIForwardResult{RequestID: name, Model: "gpt-6.1-sol", Duration: time.Second,
+								Usage: OpenAIUsage{InputTokens: 300000, OutputTokens: 2000, CacheReadInputTokens: 80000, CacheCreationInputTokens: 20000}},
+							APIKey: openAIRecordUsageAPIKeyWithGroup(svc, 1, groupEnabled), User: &User{ID: 2},
+							Account: &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: extra},
+						})
+						require.NoError(t, err)
+						wantLong := exempt == false && (accountEnabled || groupEnabled)
+						wantTotal := 0.478
+						if wantLong {
+							wantTotal = 0.946
+						}
+						require.Equal(t, wantLong, usageRepo.lastLog.LongContextBillingApplied)
+						require.InDelta(t, wantTotal, usageRepo.lastLog.TotalCost, 1e-12)
+						require.InDelta(t, wantTotal*1.1, userRepo.lastAmount, 1e-12)
+					})
+				}
+			}
 		}
 	}
 }

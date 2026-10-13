@@ -308,13 +308,13 @@ function buildOpenAIOAuthParentAccount() {
   } as any
 }
 
-function mountModal(account = buildAccount(), renderGroupSelector = false) {
+function mountModal(account = buildAccount(), renderGroupSelector = false, groups: any[] = []) {
   return mount(EditAccountModal, {
     props: {
       show: true,
       account,
       proxies: [],
-      groups: []
+      groups
     },
     global: {
       stubs: {
@@ -1047,6 +1047,55 @@ describe('EditAccountModal', () => {
     expect(wrapper.find('[data-testid="edit-openai-flatten-namespaces-toggle"]').exists()).toBe(
       false
     )
+  })
+
+  it('defaults the GPT-6.1 Sol API key exemption to enabled and saves an opt-out', async () => {
+    const account = buildAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="openai-gpt61-sol-long-context-exempt-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+
+    await toggle.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_gpt61_sol_long_context_exempt).toBe(false)
+  })
+
+  it('loads a saved GPT-6.1 Sol API key opt-out and can enable it again', async () => {
+    const account = buildAccount()
+    account.extra = { openai_gpt61_sol_long_context_exempt: false }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="openai-gpt61-sol-long-context-exempt-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+
+    await toggle.trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_gpt61_sol_long_context_exempt).toBe(true)
+  })
+
+  it('keeps the GPT-6.1 Sol exemption visible when all selected groups enable long-context pricing', async () => {
+    const account = buildAccount()
+    account.group_ids = [7]
+    const wrapper = mountModal(account, false, [
+      { id: 7, name: 'long context', platform: 'openai', long_context_pricing_enabled: true }
+    ])
+
+    expect(wrapper.find('[data-testid="openai-long-context-billing-toggle"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="openai-gpt61-sol-long-context-exempt-toggle"]').attributes('aria-checked')).toBe('true')
+  })
+
+  it.each(['oauth', 'setup-token'])('does not render or submit the API key exemption for %s', async type => {
+    const account = buildAccount()
+    account.type = type
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+
+    expect(wrapper.find('[data-testid="openai-gpt61-sol-long-context-exempt-toggle"]').exists()).toBe(false)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).not.toHaveProperty('openai_gpt61_sol_long_context_exempt')
   })
 
   it('defaults legacy OpenAI accounts to long-context billing disabled', async () => {
