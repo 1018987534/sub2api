@@ -656,6 +656,8 @@ export default {
         longContextBilling: 'API long-context pricing',
         longContextBillingDesc:
           'Disabled by default. Enable only when this account\'s upstream charges OpenAI API long-context rates above the model threshold.',
+        gpt61SolLongContextExempt: 'GPT-6.1 Sol long-context surcharge exemption',
+        gpt61SolLongContextExemptDesc: 'Enabled by default. Exempts only the GPT-6.1 Sol model long-context surcharge; disabling restores the existing billing policy.',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           'Disabled by default. Enable to allow responses_websockets_v2 capability (still gated by global and account-type switches).',
