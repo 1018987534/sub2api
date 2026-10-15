@@ -55,6 +55,27 @@ describe('RedeemView refresh after redemption', () => {
     vi.restoreAllMocks()
   })
 
+  it('shows lottery awards as credited balance with their round instead of a redeem code', async () => {
+    getHistory.mockResolvedValue({ items: [{
+      id: -53, code: 'LOT-53', type: 'lottery_reward', value: 5,
+      lottery_round_no: 22, used_at: '2026-10-14T20:04:38+08:00',
+    }], total: 1 })
+    const wrapper = mount(RedeemView, {
+      global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, Icon: true } },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('redeem.balanceAddedLottery')
+    expect(wrapper.text()).toContain('+$5.00')
+    expect(wrapper.text()).toContain('lottery.roundLabel')
+    expect(wrapper.text()).toContain('lottery.rewardCredited')
+    expect(wrapper.text()).not.toContain('common.unknown')
+    expect(wrapper.text()).not.toContain('LOT-53...')
+    expect(wrapper.text()).not.toContain('+5 redeem.requests')
+    expect(redeem).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it.each(['balance', 'concurrency', 'subscription'])(
     'keeps a successful %s redemption when profile refresh fails', async (type) => {
       redeem.mockResolvedValue({ type, value: 20, message: 'Code applied' })

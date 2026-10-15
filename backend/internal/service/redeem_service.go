@@ -688,11 +688,18 @@ func (s *RedeemService) GetStats(ctx context.Context) (map[string]any, error) {
 
 // GetUserHistory 获取用户的兑换历史
 func (s *RedeemService) GetUserHistory(ctx context.Context, userID int64, limit int) ([]RedeemCode, error) {
+	if limit <= 0 {
+		limit = 10
+	}
 	codes, err := s.redeemRepo.ListByUser(ctx, userID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get user redeem history: %w", err)
 	}
-	return codes, nil
+	lotteryCodes, _, err := listLotteryBalanceHistory(ctx, s.entClient, userID, 0, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get user lottery history: %w", err)
+	}
+	return mergeBalanceHistoryCodes(codes, lotteryCodes, pagination.PaginationParams{Page: 1, PageSize: limit}), nil
 }
 
 // reduceOrCancelSubscription 缩短订阅天数，剩余天数 <= 0 时取消订阅
@@ -753,5 +760,27 @@ func (s *RedeemService) reduceOrCancelSubscription(ctx context.Context, userID, 
 
 // GetUserHistoryPaginated returns all redemption types for the authenticated user.
 func (s *RedeemService) GetUserHistoryPaginated(ctx context.Context, userID int64, params pagination.PaginationParams) ([]RedeemCode, *pagination.PaginationResult, error) {
-	return s.redeemRepo.ListByUserPaginated(ctx, userID, params, "")
+	params.Page = max(1, params.Page)
+	params.PageSize = params.Limit()
+	needed := params.Offset() + params.Limit()
+	if needed < params.Limit() {
+		return nil, nil, infraerrors.BadRequest("INVALID_PAGE", "Invalid page")
+	}
+	lotteryCodes, lotteryTotal, err := listLotteryBalanceHistory(ctx, s.entClient, userID, 0, needed)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get user lottery history: %w", err)
+	}
+	if lotteryTotal == 0 {
+		return s.redeemRepo.ListByUserPaginated(ctx, userID, params, "")
+	}
+	redeemCodes, redeemTotal, err := listRedeemBalanceHistoryForMerge(ctx, s.redeemRepo, userID, needed)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get user redeem history: %w", err)
+	}
+	codes := mergeBalanceHistoryCodes(redeemCodes, lotteryCodes, params)
+	total := redeemTotal + lotteryTotal
+	return codes, &pagination.PaginationResult{
+		Total: total, Page: params.Page, PageSize: params.PageSize,
+		Pages: int((total + int64(params.PageSize) - 1) / int64(params.PageSize)),
+	}, nil
 }

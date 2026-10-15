@@ -639,29 +639,29 @@ func RedeemCodeFromServiceAdmin(rc *service.RedeemCode) *AdminRedeemCode {
 		return nil
 	}
 	return &AdminRedeemCode{
-		RedeemCode:     redeemCodeFromServiceBase(rc),
-		Notes:          rc.Notes,
-		LotteryRoundNo: rc.LotteryRoundNo,
-		BalanceBefore:  rc.BalanceBefore,
-		BalanceAfter:   rc.BalanceAfter,
+		RedeemCode:    redeemCodeFromServiceBase(rc),
+		Notes:         rc.Notes,
+		BalanceBefore: rc.BalanceBefore,
+		BalanceAfter:  rc.BalanceAfter,
 	}
 }
 
 func redeemCodeFromServiceBase(rc *service.RedeemCode) RedeemCode {
 	out := RedeemCode{
-		ID:           rc.ID,
-		Code:         rc.Code,
-		Type:         rc.Type,
-		Value:        rc.Value,
-		Status:       rc.Status,
-		UsedBy:       rc.UsedBy,
-		UsedAt:       rc.UsedAt,
-		CreatedAt:    rc.CreatedAt,
-		ExpiresAt:    rc.ExpiresAt,
-		GroupID:      rc.GroupID,
-		ValidityDays: rc.ValidityDays,
-		User:         UserFromServiceShallow(rc.User),
-		Group:        GroupFromServiceShallow(rc.Group),
+		ID:             rc.ID,
+		Code:           rc.Code,
+		Type:           rc.Type,
+		Value:          rc.Value,
+		Status:         rc.Status,
+		UsedBy:         rc.UsedBy,
+		UsedAt:         rc.UsedAt,
+		CreatedAt:      rc.CreatedAt,
+		ExpiresAt:      rc.ExpiresAt,
+		LotteryRoundNo: rc.LotteryRoundNo,
+		GroupID:        rc.GroupID,
+		ValidityDays:   rc.ValidityDays,
+		User:           UserFromServiceShallow(rc.User),
+		Group:          GroupFromServiceShallow(rc.Group),
 	}
 	if rc.IsExpired() {
 		out.Status = service.StatusExpired
