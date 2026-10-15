@@ -14,6 +14,7 @@ export interface RedeemHistoryItem {
   status: string
   used_at: string
   created_at: string
+  lottery_round_no?: number
   // Notes from admin for admin_balance/admin_concurrency types
   notes?: string
   // Subscription-specific fields

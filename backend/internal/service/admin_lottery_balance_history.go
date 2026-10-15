@@ -4,15 +4,24 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	dbent "github.com/Wei-Shaw/sub2api/ent"
 )
 
 // Read the ledger written atomically with the award. This includes historical
 // prizes without crediting balances again or counting rewards as recharge.
 func (s *adminServiceImpl) listLotteryBalanceHistory(ctx context.Context, userID int64, offset, limit int) ([]RedeemCode, int64, error) {
-	if s == nil || s.entClient == nil || userID <= 0 || limit <= 0 {
+	if s == nil {
 		return nil, 0, nil
 	}
-	countRows, err := s.entClient.QueryContext(ctx, `SELECT COUNT(*) FROM lottery_balance_ledger WHERE user_id = $1`, userID)
+	return listLotteryBalanceHistory(ctx, s.entClient, userID, offset, limit)
+}
+
+func listLotteryBalanceHistory(ctx context.Context, client *dbent.Client, userID int64, offset, limit int) ([]RedeemCode, int64, error) {
+	if client == nil || userID <= 0 || limit <= 0 {
+		return nil, 0, nil
+	}
+	countRows, err := client.QueryContext(ctx, `SELECT COUNT(*) FROM lottery_balance_ledger WHERE user_id = $1`, userID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -32,7 +41,7 @@ func (s *adminServiceImpl) listLotteryBalanceHistory(ctx context.Context, userID
 		return []RedeemCode{}, 0, nil
 	}
 
-	rows, err := s.entClient.QueryContext(ctx, `
+	rows, err := client.QueryContext(ctx, `
 SELECT l.id, r.round_no, l.amount::double precision,
        l.balance_before::double precision, l.balance_after::double precision, l.created_at
 FROM lottery_balance_ledger l

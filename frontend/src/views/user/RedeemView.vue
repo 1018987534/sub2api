@@ -289,6 +289,9 @@
                   <p class="text-xs text-gray-500 dark:text-dark-400">
                     {{ formatDateTime(item.used_at) }}
                   </p>
+                  <p v-if="item.type === 'lottery_reward' && item.lottery_round_no" class="mt-1 text-xs text-gray-500 dark:text-dark-400">
+                    {{ t('lottery.roundLabel', { round: item.lottery_round_no }) }}
+                  </p>
                 </div>
               </div>
               <div class="text-right">
@@ -309,7 +312,13 @@
                   {{ formatHistoryValue(item) }}
                 </p>
                 <p
-                  v-if="!isAdminAdjustment(item.type)"
+                  v-if="item.type === 'lottery_reward'"
+                  class="text-xs text-gray-400 dark:text-dark-500"
+                >
+                  {{ t('lottery.rewardCredited') }}
+                </p>
+                <p
+                  v-else-if="!isAdminAdjustment(item.type)"
                   class="font-mono text-xs text-gray-400 dark:text-dark-500"
                 >
                   {{ item.code.slice(0, 8) }}...
@@ -413,7 +422,7 @@ const contactInfo = ref('')
 
 // Helper functions for history display
 const isBalanceType = (type: string) => {
-  return type === 'balance' || type === 'admin_balance'
+  return type === 'balance' || type === 'admin_balance' || type === 'lottery_reward'
 }
 
 const isSubscriptionType = (type: string) => {
@@ -425,7 +434,9 @@ const isAdminAdjustment = (type: string) => {
 }
 
 const getHistoryItemTitle = (item: RedeemHistoryItem) => {
-  if (item.type === 'balance') {
+  if (item.type === 'lottery_reward') {
+    return t('redeem.balanceAddedLottery')
+  } else if (item.type === 'balance') {
     return t('redeem.balanceAddedRedeem')
   } else if (item.type === 'admin_balance') {
     return item.value >= 0 ? t('redeem.balanceAddedAdmin') : t('redeem.balanceDeductedAdmin')
