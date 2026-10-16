@@ -21,11 +21,22 @@ beforeEach(() => {
   vi.mocked(getSnapshot).mockResolvedValue({
     config: { refresh_interval_seconds: 60 }, health: { overall: 'healthy' },
     coverage: { coverage_complete: true, data_through: '2026-09-25T12:00:00Z' },
-    metrics: { error_rate: 0, cache_rate: 0.8 }
+    metrics: { has_requests: true, has_cache_tokens: true, error_rate: 0, cache_rate: 0.8 }
   } as MonitorSnapshot)
   vi.mocked(getIntelligenceStatus).mockResolvedValue({ groups: { 1: [] }, metadata: { 1: { model: "dynamic-model", reasoning_effort: "medium" } }, window_minutes: 60, server_time: new Date().toISOString() })
 })
 describe('cards view independent read path', () => {
+  it('shows measured summary rates while its health score has too few samples', async () => {
+    vi.mocked(getSnapshot).mockResolvedValue({
+      config: { refresh_interval_seconds: 60 }, health: { overall: 'unknown' },
+      coverage: { coverage_complete: true, data_through: '2026-10-16T12:00:00Z' },
+      metrics: { has_requests: true, has_cache_tokens: true, error_rate: 0.1, cache_rate: 0.8 }
+    } as MonitorSnapshot)
+    const wrapper = view(); await flushPromises()
+    expect(wrapper.text()).toContain('可用率 90.0% · 缓存率 80.0%')
+    wrapper.unmount()
+  })
+
   it('renders cards and detection status while the snapshot is still pending', async () => {
     let resolve!: (value: MonitorSnapshot) => void
     vi.mocked(getSnapshot).mockReturnValueOnce(new Promise(done => { resolve = done }))
@@ -34,7 +45,7 @@ describe('cards view independent read path', () => {
     expect(wrapper.text()).toContain('dynamic-model medium')
     expect(wrapper.text()).not.toContain('可用率 100%')
     expect(wrapper.get('[aria-label="刷新渠道状态"]').attributes('disabled')).toBeDefined()
-    resolve({ config: { refresh_interval_seconds: 60 }, health: { overall: 'healthy' }, coverage: { coverage_complete: true, data_through: '2026-10-01T00:00:00Z' }, metrics: { error_rate: 0, cache_rate: 0.8 } } as MonitorSnapshot)
+    resolve({ config: { refresh_interval_seconds: 60 }, health: { overall: 'healthy' }, coverage: { coverage_complete: true, data_through: '2026-10-01T00:00:00Z' }, metrics: { has_requests: true, has_cache_tokens: true, error_rate: 0, cache_rate: 0.8 } } as MonitorSnapshot)
     await flushPromises()
     expect(wrapper.text()).toContain('缓存率 80.0%')
     wrapper.unmount()

@@ -5,18 +5,18 @@
    <div class="min-w-0 flex-1"><h3 class="truncate text-base font-semibold text-gray-900 dark:text-gray-100" :title="row.group_name">{{ row.group_name || '分组 #' + row.group_id }}</h3>
     <div class="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] font-medium"><span class="platform-badge rounded-md px-1.5 py-0.5" :class="platformBadgeClass(row.platform)">{{ platformName(row.platform) }}</span><span class="rounded-md bg-primary-50 px-1.5 py-0.5 font-mono text-primary-700 dark:bg-dark-700 dark:text-gray-300">用户倍率 {{ groupMultiplier(row.current_multiplier) }}</span></div>
    </div>
-   <span class="state-pill" :class="row.health.overall">{{ healthLabels[row.health.overall] }}</span>
+   <span class="state-pill" :class="row.health.overall">{{ row.health.overall === 'unknown' && !row.metrics.has_requests ? '暂无请求' : healthLabels[row.health.overall] }}</span>
   </header>
   <dl class="mt-5 grid grid-cols-3 gap-2">
-   <div class="metric"><dt>缓存率</dt><dd>{{ percent(row.metrics.cache_rate, known) }}</dd></div>
-   <div class="metric"><dt>可用率</dt><dd :class="{ 'text-emerald-500': row.health.overall === 'healthy' }">{{ percent(1 - row.metrics.error_rate, known) }}</dd></div>
+   <div class="metric"><dt>缓存率</dt><dd>{{ cachePercent(row.metrics) }}</dd></div>
+   <div class="metric"><dt>可用率</dt><dd :class="{ 'text-emerald-500': row.health.overall === 'healthy' }">{{ availabilityPercent(row.metrics) }}</dd></div>
    <div class="metric"><dt>首 TOKEN</dt><dd>{{ latency(row.metrics) }}</dd></div>
   </dl>
   <div class="passive-section mt-auto border-t border-white/70 pt-3 dark:border-dark-700/60">
-   <div class="mb-2 flex justify-between text-[10px] font-semibold uppercase tracking-widest text-gray-400"><span>近 {{ buckets.length }} 次记录</span><span>{{ countdown }}S 后刷新</span></div>
+   <div class="mb-2 flex justify-between text-[10px] font-semibold uppercase tracking-widest text-gray-400"><span>近 {{ buckets.length }} 个时间区间</span><span>{{ countdown }}S 后刷新</span></div>
    <div class="timeline-track passive-track" :style="{ gridTemplateColumns: `repeat(${timelineLength}, minmax(0, 1fr))` }" aria-label="被动用量历史">
     <div v-for="(bucket, index) in passiveSlots" :key="bucket?.bucket_start || 'empty-' + index" class="history-slot" @mouseenter="bucket && showBucket(bucket, index, $event)" @mouseleave="hideBucket">
-     <span v-if="bucket" class="history-hitbox" role="img" tabindex="0" :aria-label="bucketTitle(bucket)" :aria-describedby="activeIndex === index ? tooltipId : undefined" @focus="showBucket(bucket, index, $event)" @blur="hideBucket" @keydown.esc="hideBucket">
+     <span v-if="bucket?.metrics.has_requests" class="history-hitbox" role="img" tabindex="0" :aria-label="bucketTitle(bucket)" :aria-describedby="activeIndex === index ? tooltipId : undefined" @focus="showBucket(bucket, index, $event)" @blur="hideBucket" @keydown.esc="hideBucket">
       <span class="history-visual" :style="barStyle(index)" aria-hidden="true"><span class="history-bar" :class="passiveColor(bucket)" :style="{ height: barHeight(bucket) + '%' }" /></span>
      </span>
     </div>
@@ -68,7 +68,7 @@ import type { GroupPlatform } from '@/types'
 import type { MonitorMatrixRow, MonitorMatrixBucket } from '@/api/channelMonitorV2'
 import { getIntelligenceRecordDetail, type IntelligenceRecord, type IntelligenceMetadata, type IntelligenceRecordDetail } from '@/api/intelligence'
 import { INTELLIGENCE_CAPTION, INTELLIGENCE_LEGEND } from './constants'
-import { healthLabels, statusLabels, appendHistory, groupMultiplier, percent, latency, platformName, platformIconClass, platformBadgeClass, passiveColor, barHeight } from './presentation'
+import { healthLabels, statusLabels, appendHistory, groupMultiplier, availabilityPercent, cachePercent, latency, platformName, platformIconClass, platformBadgeClass, passiveColor, barHeight } from './presentation'
 const props = withDefaults(defineProps<{ row: MonitorMatrixRow; records?: IntelligenceRecord[]; probeMetadata?: IntelligenceMetadata; now: number; countdown: number; timelineLength?: number }>(), { timelineLength: 18 })
 const intelligenceCaption = computed(() => `${props.probeMetadata?.model || '—'} · ${props.probeMetadata?.reasoning_effort || '—'} · ${INTELLIGENCE_CAPTION}`)
 const recent = ref<IntelligenceRecord[]>([])
@@ -105,7 +105,6 @@ watch(() => props.records, records => {
  recent.value = appendHistory(recent.value, (records || []).filter(record => Date.parse(record.checked_at) <= props.now), record => record.id, record => Date.parse(record.checked_at), 60)
 }, { immediate: true, deep: true })
 const last = computed(() => recent.value.at(-1))
-const known = computed(() => props.row.health.overall !== 'unknown')
 const buckets = computed(() => [...props.row.buckets].sort((a, b) => a.bucket_start.localeCompare(b.bucket_start)))
 const activeIndex = ref<number | null>(null)
 const tooltipId = `monitor-history-${props.row.platform}-${props.row.group_id}`
@@ -136,7 +135,7 @@ const passiveSlots = computed(() => {
 })
 // Newest stays at the right edge; only a new record shifts existing marks left.
 const probeSlots = computed(() => [...Array.from({ length: 60 - recent.value.length }, () => [] as IntelligenceRecord[]), ...recent.value.map(record => [record])])
-const bucketTitle = (b: MonitorMatrixBucket) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(b.bucket_start)) + ' · 可用率 ' + percent(1 - b.metrics.error_rate, b.health.overall !== 'unknown') + ' · 缓存率 ' + percent(b.metrics.cache_rate, b.health.overall !== 'unknown') + ' · 首 Token ' + latency(b.metrics)
+const bucketTitle = (b: MonitorMatrixBucket) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(b.bucket_start)) + ' · 可用率 ' + availabilityPercent(b.metrics) + ' · 缓存率 ' + cachePercent(b.metrics) + ' · 首 Token ' + latency(b.metrics) + (b.health.overall === 'unknown' ? ' · 样本不足' : '')
 const recordTitle = (r: IntelligenceRecord) => new Date(r.checked_at).toLocaleString() + ' · ' + statusLabels[r.status] + ' · ' + (r.duration_ms / 1000).toFixed(1) + 's'
 </script>
 <style scoped>

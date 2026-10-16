@@ -11,6 +11,12 @@ export function recentRecords(records: IntelligenceRecord[], now: number): Intel
 export function percent(value: number | undefined, known = true): string {
  return known && value != null && Number.isFinite(value) ? (value * 100).toFixed(1) + '%' : '—'
 }
+export function availabilityPercent(metrics: MonitorMetric): string {
+ return percent(1 - metrics.error_rate, metrics.has_requests === true)
+}
+export function cachePercent(metrics: MonitorMetric): string {
+ return percent(metrics.cache_rate, metrics.has_cache_tokens === true)
+}
 export function latency(metrics: MonitorMetric): string {
  const ms = metrics.ttft.p50_ms
  return ms != null && Number.isFinite(ms) ? (ms / 1000).toFixed(1) + 's' : '—'
@@ -50,7 +56,7 @@ export function platformIconClass(platform: string): string {
 export function platformBadgeClass(platform: string): string {
  return ({ openai: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300', anthropic: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300', claude: 'bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300', gemini: 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300', grok: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-500/15 dark:text-zinc-300' } as Record<string, string>)[platform] || 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
 }
-export const barHeight = (bucket: MonitorMatrixBucket): number => ({ healthy: 100, warning: 65, critical: 35, unknown: 15 })[bucket.health.overall]
+export const barHeight = (bucket: MonitorMatrixBucket): number => ({ healthy: 100, warning: 65, critical: 35, unknown: bucket.metrics.has_requests ? 100 : 15 })[bucket.health.overall]
 // Match the reference availability palette; insufficient samples remain gray.
 export function passiveColor(bucket: MonitorMatrixBucket): string {
  const availability = (1 - bucket.metrics.error_rate) * 100

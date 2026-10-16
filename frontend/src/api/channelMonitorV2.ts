@@ -34,6 +34,9 @@ export interface LatencyMetric {
 }
 
 export interface MonitorMetric {
+  /** Presence survives public counter redaction; absent metadata establishes no sample. */
+  has_requests?: boolean
+  has_cache_tokens?: boolean
   success_requests: number
   error_requests: number
   request_count: number
