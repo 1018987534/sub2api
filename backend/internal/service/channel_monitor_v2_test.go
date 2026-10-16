@@ -571,6 +571,8 @@ func TestRedactChannelMonitorV2MetricKeepsRates(t *testing.T) {
 	upstream := int64(3)
 	m.UpstreamAffectedRequests = &upstream
 	redactChannelMonitorV2Metric(&m, false)
+	require.True(t, m.HasRequests)
+	require.True(t, m.HasCacheTokens)
 	require.Zero(t, m.RequestCount)
 	require.Zero(t, m.ErrorRequests)
 	require.Zero(t, m.TokenCount)
@@ -584,9 +586,34 @@ func TestRedactChannelMonitorV2MetricKeepsRates(t *testing.T) {
 	require.Equal(t, int64(100), *m.TTFT.P50Ms)
 
 	redactChannelMonitorV2Metric(&m, true)
+	require.True(t, m.HasRequests, "presence survives repeated public redaction")
+	require.True(t, m.HasCacheTokens)
 	require.Zero(t, m.RPM)
 	require.Zero(t, m.TPM)
 	require.InDelta(t, 0.1, m.ErrorRate, 0.0001)
+}
+
+func TestRedactChannelMonitorV2MetricDistinguishesEmptyAndUncachedRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		metric     ChannelMonitorV2Metric
+		requests   bool
+		cacheInput bool
+	}{
+		{name: "empty"},
+		{name: "all errors without tokens", metric: ChannelMonitorV2Metric{RequestCount: 2, ErrorRequests: 2, ErrorRate: 1}, requests: true},
+		{name: "input without cache hits", metric: ChannelMonitorV2Metric{RequestCount: 1, CacheRateDenominator: 200}, requests: true, cacheInput: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := ChannelMonitorV2HealthFor(tc.metric)
+			redactChannelMonitorV2Metric(&tc.metric, true)
+			require.Equal(t, tc.requests, tc.metric.HasRequests)
+			require.Equal(t, tc.cacheInput, tc.metric.HasCacheTokens)
+			require.Zero(t, tc.metric.RequestCount)
+			require.Zero(t, tc.metric.CacheRateDenominator)
+			require.Equal(t, "unknown", before.Overall, "small samples still use the official health threshold")
+		})
+	}
 }
 
 func TestChannelMonitorV2HealthTTFTAtTargetIsHealthy(t *testing.T) {

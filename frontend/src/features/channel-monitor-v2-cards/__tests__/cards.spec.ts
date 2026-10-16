@@ -21,6 +21,7 @@ const row: MonitorMatrixRow = {
   platform: 'openai', group_id: 1, group_name: '测试分组', current_multiplier: 0.5,
   health: { overall: 'healthy', error_rate: 'healthy', ttft: 'healthy', minimum_sample: 5 },
   metrics: {
+    has_requests: true, has_cache_tokens: true,
     success_requests: 1, error_requests: 0, request_count: 1, token_count: 0, rpm: 0, tpm: 0,
     error_rate: 0.02, cache_rate: 0.853, cache_rate_numerator: 0, cache_rate_denominator: 0,
     ttft: { sample_count: 0, p50_ms: 2100, p95_ms: null, avg_ms: null },
@@ -29,6 +30,35 @@ const row: MonitorMatrixRow = {
   buckets: []
 }
 describe('independent V2 cards', () => {
+  it('shows public small-sample rates and full neutral buckets without claiming healthy', () => {
+    const health = { ...row.health, overall: 'unknown' as const, minimum_sample: 50 }
+    const metrics = { ...row.metrics, request_count: 0, success_requests: 0, cache_rate_denominator: 0 }
+    const bucket = { bucket_start: new Date(now).toISOString(), health, metrics }
+    const wrapper = mount(GroupMonitorCard, { props: { row: { ...row, health, metrics, buckets: [bucket] }, now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
+    expect(wrapper.findAll('.metric dd').map(node => node.text())).toEqual(['85.3%', '98.0%', '2.1s'])
+    expect(wrapper.find('.state-pill').text()).toBe('样本不足')
+    expect(wrapper.find('.history-bar').classes()).toContain('bg-gray-300')
+    expect(wrapper.find('.history-bar').attributes('style')).toContain('100%')
+    expect(wrapper.find('.history-hitbox').attributes('aria-label')).toContain('可用率 98.0% · 缓存率 85.3% · 首 Token 2.1s · 样本不足')
+    expect(wrapper.text()).toContain('近 1 个时间区间')
+  })
+  it('keeps a genuine zero cache-hit rate visible for requests with input tokens', () => {
+    const wrapper = mount(GroupMonitorCard, { props: { row: { ...row, metrics: { ...row.metrics, cache_rate: 0 }, health: { ...row.health, overall: 'unknown' } }, now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
+    expect(wrapper.findAll('.metric dd')[0].text()).toBe('0.0%')
+  })
+  it('does not invent availability, cache rate, or bars for empty traffic', () => {
+    const metrics = { ...row.metrics, has_requests: false, has_cache_tokens: false, error_rate: 0, cache_rate: 0 }
+    const health = { ...row.health, overall: 'unknown' as const }
+    const wrapper = mount(GroupMonitorCard, { props: { row: { ...row, metrics, health, buckets: [{ bucket_start: new Date(now).toISOString(), metrics, health }] }, now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
+    expect(wrapper.findAll('.metric dd').slice(0, 2).map(node => node.text())).toEqual(['—', '—'])
+    expect(wrapper.find('.state-pill').text()).toBe('暂无请求')
+    expect(wrapper.findAll('.history-bar')).toHaveLength(0)
+  })
+  it('shows failed-request availability while leaving an absent cache denominator blank', () => {
+    const metrics = { ...row.metrics, has_requests: true, has_cache_tokens: false, error_rate: 1, cache_rate: 0 }
+    const wrapper = mount(GroupMonitorCard, { props: { row: { ...row, metrics, health: { ...row.health, overall: 'unknown' } }, now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
+    expect(wrapper.findAll('.metric dd').slice(0, 2).map(node => node.text())).toEqual(['—', '0.0%'])
+  })
   it('preserves the requested display copy without inventing minute samples', () => {
     expect(INTELLIGENCE_CAPTION).toBe('每分钟检测 · 近 60 次 · 仅显示已检测记录')
     const wrapper = mount(GroupMonitorCard, { props: { row, records, now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })

@@ -3,7 +3,7 @@
   <div class="space-y-5 pb-12">
    <section class="glass-card overflow-hidden p-0">
     <header class="flex items-center justify-between gap-4 px-5 py-4 sm:px-6"><div><h1 class="text-xl font-bold">渠道状态</h1><p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{{ snapshot ? '更新至 ' + new Date(snapshot.coverage.data_through).toLocaleString() : '正在读取监控数据' }}</p></div><button class="btn btn-secondary" :disabled="loading || !enabled" aria-label="刷新渠道状态" @click="load">{{ loading ? '刷新中…' : '刷新' }}</button></header>
-    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-5 py-3 text-xs dark:border-dark-600"><div class="flex flex-wrap items-center gap-2"><button v-for="period in periods" :key="period" class="rounded-lg px-3 py-1.5 font-semibold" :class="range === period ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300' : 'text-gray-500'" :aria-pressed="range === period" @click="range = period">{{ period }}</button><span class="border-l border-gray-300 pl-3 text-gray-500 dark:border-dark-600">V2 被动用量 · 缓存率与可用率</span></div><span v-if="snapshot" class="text-gray-500 dark:text-gray-400">可用率 {{ percent(1 - snapshot.metrics.error_rate, snapshot.health.overall !== 'unknown') }} · 缓存率 {{ percent(snapshot.metrics.cache_rate, snapshot.health.overall !== 'unknown') }}</span></div>
+    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 px-5 py-3 text-xs dark:border-dark-600"><div class="flex flex-wrap items-center gap-2"><button v-for="period in periods" :key="period" class="rounded-lg px-3 py-1.5 font-semibold" :class="range === period ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300' : 'text-gray-500'" :aria-pressed="range === period" @click="range = period">{{ period }}</button><span class="border-l border-gray-300 pl-3 text-gray-500 dark:border-dark-600">V2 被动用量 · 缓存率与可用率</span></div><span v-if="snapshot" class="text-gray-500 dark:text-gray-400">可用率 {{ availabilityPercent(snapshot.metrics) }} · 缓存率 {{ cachePercent(snapshot.metrics) }}</span></div>
    </section>
    <p v-if="!enabled" class="card p-6">请先在系统配置中启用渠道监控 V2。</p>
    <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-300">{{ error }}；已保留上次成功数据，请刷新重试。</p>
@@ -23,7 +23,7 @@ import { getMatrix, getSnapshot, type MonitorRange, type MonitorMatrixRow, type 
 import { getIntelligenceStatus, type IntelligenceRecord, type IntelligenceMetadata } from '@/api/intelligence'
 import { isChannelMonitorV2Mode } from '@/utils/featureFlags'
 import GroupMonitorCard from './GroupMonitorCard.vue'
-import { percent, platformGroups, platformName, platformIconClass } from './presentation'
+import { availabilityPercent, cachePercent, platformGroups, platformName, platformIconClass } from './presentation'
 const periods: MonitorRange[] = ['90m', '24h', '7d', '30d']
 const range = ref<MonitorRange>('90m')
 const timelineLength = computed(() => ({ '90m': 18, '24h': 24, '7d': 14, '30d': 30 })[range.value])
