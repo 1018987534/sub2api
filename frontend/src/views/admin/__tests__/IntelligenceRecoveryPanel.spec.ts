@@ -12,7 +12,7 @@ beforeEach(() => { vi.resetAllMocks(); vi.mocked(getIntelligenceRecoveryHistory)
 describe('account recovery admin history', () => {
  it('shows account identity, result, recovery action, source and next scheduled test', async () => {
   const wrapper = mount(IntelligenceRecoveryPanel); await flushPromises()
-  for (const text of ['paused-account', '#12459', '已恢复待采集', '013不降智', 'probe-model', 'queued-account', '等待重试', '8 分钟']) expect(wrapper.text()).toContain(text)
+  for (const text of ['paused-account', '#12459', '已恢复调度', '013不降智', 'probe-model', 'queued-account', '等待重试', '8 分钟']) expect(wrapper.text()).toContain(text)
   expect(wrapper.findAll('table')).toHaveLength(2); wrapper.unmount()
  })
  it('pages history and explicitly refreshes the first page', async () => {

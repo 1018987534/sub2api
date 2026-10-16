@@ -6,41 +6,57 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestIntelligencePoolReset(t *testing.T) {
-	mr, rdb, cache := newTotalLatencyTestCache(t)
+func TestIntelligencePoolPausePreservesState(t *testing.T) {
+	_, rdb, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 	recordTotalLatencySamples(t, cache, 7, "fast", repeatedDurations(24, 8000))
 	stats, err := cache.GetStatsBatch(ctx, []int64{7})
 	require.NoError(t, err)
 	require.True(t, stats[7].ReliableFast)
+	before := stats[7]
+	statsKey := totalLatencyStatsPrefix + "7"
+	require.NoError(t, rdb.HSet(ctx, statsKey, "unrelated", "keep").Err())
+	beforeHash := rdb.HGetAll(ctx, statsKey).Val()
+	beforeTTL := rdb.TTL(ctx, statsKey).Val()
+	beforeSamples := rdb.ZRangeWithScores(ctx, totalLatencySamplesPrefix+"7", 0, -1).Val()
 	require.NoError(t, cache.RequestManualProbe(ctx, 7, time.Hour))
+	claimed, err := cache.TryClaimProbe(ctx, 7, time.Minute)
+	require.NoError(t, err)
+	require.True(t, claimed)
 	until := time.Now().Add(20 * time.Minute)
 	require.NoError(t, cache.ResetForIntelligencePause(ctx, 7, until))
 	for i := 0; i < 2; i++ {
 		stats, err = cache.GetStatsBatch(ctx, []int64{7})
 		require.NoError(t, err)
-		require.Zero(t, stats[7].SampleCount)
-		require.Zero(t, stats[7].PredictedMS)
-		require.True(t, stats[7].CircuitBroken)
-		require.False(t, stats[7].ReliableFast)
+		t.Logf("paused: samples=%d duration=%.0f fast=%v circuit=%v", stats[7].SampleCount, stats[7].PredictedMS, stats[7].ReliableFast, stats[7].CircuitBroken)
+		assert.Equal(t, before, stats[7])
 		require.NoError(t, cache.RecordSample(ctx, 7, "late-in-flight", 8000))
 	}
-	require.False(t, mr.Exists(totalLatencySamplesPrefix+"7"))
+	pausedHash := rdb.HGetAll(ctx, statsKey).Val()
+	delete(pausedHash, "intelligence_pause_until_ms")
+	assert.Equal(t, beforeHash, pausedHash)
+	assert.Equal(t, beforeTTL, rdb.TTL(ctx, statsKey).Val())
+	assert.Equal(t, beforeSamples, rdb.ZRangeWithScores(ctx, totalLatencySamplesPrefix+"7", 0, -1).Val())
+	assert.True(t, rdb.Exists(ctx, totalLatencyProbePrefix+"7").Val() == 1)
 	ids, err := cache.PendingManualProbeAccountIDs(ctx)
 	require.NoError(t, err)
-	require.Empty(t, ids)
-	// Move Redis's clock across the pause boundary without waiting 20 minutes.
-	mr.SetTime(until.Add(time.Second))
-	require.NoError(t, cache.RecordSample(ctx, 7, "new-after-cooldown", 8000))
+	assert.Equal(t, []int64{7}, ids)
+	require.NoError(t, cache.ClearIntelligencePause(ctx, 7))
 	stats, err = cache.GetStatsBatch(ctx, []int64{7})
 	require.NoError(t, err)
-	require.Equal(t, int64(1), stats[7].SampleCount)
-	require.False(t, stats[7].ReliableFast)
-	require.Equal(t, int64(1), rdb.ZCard(ctx, totalLatencySamplesPrefix+"7").Val())
-	t.Log("fast -> pending; late sample ignored; +20m -> one fresh sample, still pending")
+	t.Logf("recovered: samples=%d duration=%.0f fast=%v circuit=%v", stats[7].SampleCount, stats[7].PredictedMS, stats[7].ReliableFast, stats[7].CircuitBroken)
+	assert.Equal(t, before, stats[7])
+	assert.Equal(t, beforeHash, rdb.HGetAll(ctx, statsKey).Val())
+	require.NoError(t, cache.RecordSample(ctx, 7, "new-after-recovery", 8000))
+	stats, err = cache.GetStatsBatch(ctx, []int64{7})
+	require.NoError(t, err)
+	assert.Equal(t, int64(25), stats[7].SampleCount)
+	assert.True(t, stats[7].ReliableFast)
+	t.Logf("next request: samples=%d duration=%.0f fast=%v", stats[7].SampleCount, stats[7].PredictedMS, stats[7].ReliableFast)
 }
 
 func TestTotalLatencyThirtyThirtyThreeStaircase(t *testing.T) {

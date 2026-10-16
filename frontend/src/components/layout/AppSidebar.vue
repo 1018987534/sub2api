@@ -80,7 +80,7 @@
             <router-link
               v-else
               :to="item.path"
-              class="sidebar-link mb-1"
+              class="sidebar-link relative mb-1"
               :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
               :title="sidebarCollapsed ? item.label : undefined"
               :id="
@@ -98,7 +98,8 @@
               <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
               <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
-              <span v-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
+              <span v-if="hasLotteryWon(item.path)" class="inline-flex h-5 min-w-5 flex-shrink-0 items-center justify-center rounded-md bg-amber-100 px-1 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300" :class="sidebarCollapsed ? 'absolute right-1 top-1' : 'ml-auto'" role="status" :aria-label="t('nav.lotteryWon')" :title="t('nav.lotteryWon')">{{ t('nav.lotteryPrizeBadge') }}</span>
+              <span v-else-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
             </router-link>
           </template>
         </div>
@@ -115,7 +116,7 @@
             v-for="item in personalNavItems"
             :key="item.path"
             :to="item.path"
-            class="sidebar-link mb-1"
+            class="sidebar-link relative mb-1"
             :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
             :title="sidebarCollapsed ? item.label : undefined"
             :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
@@ -125,7 +126,8 @@
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
             <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
-            <span v-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
+            <span v-if="hasLotteryWon(item.path)" class="inline-flex h-5 min-w-5 flex-shrink-0 items-center justify-center rounded-md bg-amber-100 px-1 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300" :class="sidebarCollapsed ? 'absolute right-1 top-1' : 'ml-auto'" role="status" :aria-label="t('nav.lotteryWon')" :title="t('nav.lotteryWon')">{{ t('nav.lotteryPrizeBadge') }}</span>
+            <span v-else-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
           </router-link>
         </div>
       </template>
@@ -137,7 +139,7 @@
             v-for="item in userNavItems"
             :key="item.path"
             :to="item.path"
-            class="sidebar-link mb-1"
+            class="sidebar-link relative mb-1"
             :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
             :title="sidebarCollapsed ? item.label : undefined"
             :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
@@ -147,7 +149,8 @@
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
             <span v-if="hasSupportUnread(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.supportUnread')" />
-            <span v-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
+            <span v-if="hasLotteryWon(item.path)" class="inline-flex h-5 min-w-5 flex-shrink-0 items-center justify-center rounded-md bg-amber-100 px-1 text-xs font-bold text-amber-700 ring-1 ring-inset ring-amber-500/30 dark:bg-amber-500/15 dark:text-amber-300" :class="sidebarCollapsed ? 'absolute right-1 top-1' : 'ml-auto'" role="status" :aria-label="t('nav.lotteryWon')" :title="t('nav.lotteryWon')">{{ t('nav.lotteryPrizeBadge') }}</span>
+            <span v-else-if="hasLotteryAvailable(item.path)" class="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-red-500" role="status" :aria-label="t('nav.lotteryAvailable')" />
           </router-link>
         </div>
       </template>
@@ -262,6 +265,7 @@ const lastKnownSidebarScrollTop = ref(appStore.sidebarScrollTop)
 const isDark = ref(document.documentElement.classList.contains('dark'))
 const supportUnreadCount = ref(0)
 const lotteryAvailable = ref(false)
+const lotteryWon = ref(false)
 let supportUnreadTimer: ReturnType<typeof setInterval> | undefined
 let supportUnreadRequest: Promise<void> | null = null
 let lotteryAvailabilityTimer: ReturnType<typeof setInterval> | undefined
@@ -304,6 +308,7 @@ async function refreshLotteryAvailability() {
   if (!sidebarPollingActive) return
   if (!authStore.isAuthenticated) {
     lotteryAvailable.value = false
+    lotteryWon.value = false
     return
   }
   if (lotteryAvailabilityRequest) return lotteryAvailabilityRequest
@@ -314,6 +319,7 @@ async function refreshLotteryAvailability() {
       if (appStore.cachedPublicSettings?.lottery_enabled !== current.enabled) {
         await appStore.fetchPublicSettings(true)
       }
+      lotteryWon.value = current.enabled && current.my_recent_winners?.length > 0
       lotteryAvailable.value = Boolean(
         current.enabled &&
         current.current_round?.status === 'open' &&
@@ -331,6 +337,10 @@ async function refreshLotteryAvailability() {
 
 function hasLotteryAvailable(path: string): boolean {
   return lotteryAvailable.value && path === '/lottery'
+}
+
+function hasLotteryWon(path: string): boolean {
+  return lotteryWon.value && path === '/lottery'
 }
 
 function handleLotteryAvailabilityChanged() {

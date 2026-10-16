@@ -190,33 +190,24 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	return 1
 `)
 
-var totalLatencyIntelligenceResetScript = redis.NewScript(`
- redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
- redis.call('ZREM', KEYS[5], ARGV[1])
- local now = redis.call('TIME')
- local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
- redis.call('HSET', KEYS[1], 'sample_count', '0', 'window_hours', '0',
-   'is_fast', '0', 'enter_fast_streak', '0', 'exit_slow_streak', '0',
-   'circuit_broken', '1', 'score_version', '5', 'updated_at_ms', tostring(now_ms),
-   'intelligence_pause_until_ms', ARGV[2])
- redis.call('EXPIRE', KEYS[1], 93600)
+var totalLatencyIntelligencePauseScript = redis.NewScript(`
+ local existed = redis.call('EXISTS', KEYS[1])
+ redis.call('HSET', KEYS[1], 'intelligence_pause_until_ms', ARGV[1])
+ if existed == 0 then redis.call('EXPIRE', KEYS[1], 93600) end
  return 1
 `)
 
+// Retain the cache interface while pausing without resetting any pool data,
+// sample windows, timestamps, probe leases or queued manual probes.
 func (c *firstTokenLatencyStatsCache) ResetForIntelligencePause(ctx context.Context, accountID int64, until time.Time) error {
 	if accountID <= 0 || !until.After(time.Now()) {
 		return fmt.Errorf("invalid intelligence pause")
 	}
 	id := strconv.FormatInt(accountID, 10)
-	return totalLatencyIntelligenceResetScript.Run(ctx, c.rdb, []string{
-		totalLatencyStatsPrefix + id, totalLatencySamplesPrefix + id,
-		totalLatencyProbePrefix + id, totalLatencyManualProbePrefix + id,
-		totalLatencyManualProbeQueueKey,
-	}, id, until.UnixMilli()).Err()
+	return totalLatencyIntelligencePauseScript.Run(ctx, c.rdb, []string{totalLatencyStatsPrefix + id}, until.UnixMilli()).Err()
 }
 
-// Clear only intelligence sample suppression; retain the pending score so
-// recovery collects fresh data instead of restoring a stale fast-pool score.
+// Clear only the pause marker so recovery resumes the preserved pool state.
 func (c *firstTokenLatencyStatsCache) ClearIntelligencePause(ctx context.Context, accountID int64) error {
 	return c.rdb.HDel(ctx, totalLatencyStatsPrefix+strconv.FormatInt(accountID, 10), "intelligence_pause_until_ms").Err()
 }

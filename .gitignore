@@ -143,6 +143,7 @@ docs/*
 !docs/COMPOSITE_GROUPS.md
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
+!docs/INTELLIGENCE_PAUSE_LOTTERY_BADGE_CN.md
 !docs/codex-credits.md
 !docs/legal/
 !docs/legal/*.md

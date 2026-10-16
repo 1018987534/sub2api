@@ -90,7 +90,10 @@ func TestIntelligenceSharedAccountIsolationAndRecovery(t *testing.T) {
 	metrics, err := svc.rateLimitService.AccountFirstTokenLatencyMetrics(ctx, []Account{*account})
 	require.NoError(t, err)
 	require.Len(t, metrics, 1)
-	require.False(t, metrics[0].HasPrediction)
+	require.True(t, metrics[0].HasPrediction)
+	require.Equal(t, float64(1000), metrics[0].NormalTotalMS)
+	require.Equal(t, int64(30), metrics[0].SampleCount)
+	require.True(t, metrics[0].IsFastPool)
 	for _, g := range metrics[0].Groups {
 		require.Equal(t, g.GroupID != 111, g.IntelligenceBlocked)
 		require.Equal(t, g.GroupID == 111, g.IntelligenceExempt)

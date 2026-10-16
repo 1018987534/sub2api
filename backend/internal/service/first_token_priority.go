@@ -172,8 +172,8 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 	accountIDs := make([]int64, 0, len(accounts))
 	for _, account := range accounts {
 		visible := account
-		// Keep intelligence-paused accounts visible as pending collection in the
-		// admin pool view. This copy is for display only, never for scheduling.
+		// Keep intelligence-paused accounts and their existing metrics visible in
+		// the admin pool view. This copy is for display only, never for scheduling.
 		if strings.HasPrefix(account.TempUnschedulableReason, "intelligence:") {
 			visible.TempUnschedulableUntil = nil
 		}
@@ -226,9 +226,6 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 			continue
 		}
 		stat := input.stat
-		if intelligenceIsolationActive(account, now) {
-			stat = FirstTokenLatencyStats{CircuitBroken: true, UpdatedAt: stat.UpdatedAt}
-		}
 		hasPrediction := stat.PredictedMS > 0
 		var schedulingRateMultiplier *float64
 		if rate, found := openAIFreshUpstreamBillingRate(account, now); found {
