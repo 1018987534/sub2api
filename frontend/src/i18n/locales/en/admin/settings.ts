@@ -463,7 +463,7 @@ export default {
         accountSchedulingThresholdsRangeHint: 'Integer 1–100 (percent). OpenAI/Anthropic/Grok only.',
         priorityModeTitle: 'OpenAI Scheduling Priority',
         firstTokenPriorityTitle: 'Total-Duration Pools',
-        firstTokenPriorityDescription: 'Enter the fast pool after three totals at or below 30 seconds; leave after three above 33 seconds. Keep the current pool between 30 and 33 seconds. Count checks from non-degraded groups globally per account. Two consecutive degraded results pause scheduling for 20 minutes and reset samples. Groups with no alternative may keep using the account; other groups remain isolated until a normal check immediately clears the restriction.',
+        firstTokenPriorityDescription: 'Enter the fast pool after three totals at or below 30 seconds; leave after three above 33 seconds. Keep the current pool between 30 and 33 seconds. Count checks from non-degraded groups globally per account. Two consecutive degraded results pause scheduling for 20 minutes while preserving durations, samples and pool state. Groups with no alternative may keep using the account; other groups remain isolated until a normal check immediately clears the restriction and resumes the existing pool state.',
         lowRateModeDescription: 'Prioritize billing rate and automatically use sticky weighting within the same rate tier.'
       },
       upstreamBillingProbe: {

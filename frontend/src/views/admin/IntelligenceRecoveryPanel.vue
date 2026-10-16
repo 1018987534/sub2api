@@ -57,7 +57,7 @@ async function load(before = 0) {
 }
 function formatTime(value: string) { return new Date(value).toLocaleString() }
 function statusLabel(status: string) { return ({ running: '检测中', normal: '正常', degraded: '答案异常', error: '错误' } as Record<string, string>)[status] || status }
-function outcomeLabel(outcome: string) { return ({ running: '执行中', recovered: '已恢复待采集', retry: '继续重试', superseded: '隔离状态已变更', interrupted: '检测中断', recovery_failed: '恢复操作失败' } as Record<string, string>)[outcome] || outcome }
+function outcomeLabel(outcome: string) { return ({ running: '执行中', recovered: '已恢复调度', retry: '继续重试', superseded: '隔离状态已变更', interrupted: '检测中断', recovery_failed: '恢复操作失败' } as Record<string, string>)[outcome] || outcome }
 onMounted(() => {
   void load()
   timer = setInterval(() => { if (!loading.value && !expanded) void load() }, 15000)

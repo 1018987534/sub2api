@@ -180,6 +180,8 @@ export default {
     lottery: 'Lottery',
     lotteryManagement: 'Lottery Management',
     lotteryAvailable: 'A lottery is available to join',
+    lotteryPrizeBadge: 'Win',
+    lotteryWon: 'You won a prize. View your winnings',
     profile: 'Profile',
     support: 'Support',
     supportInbox: 'Support Inbox',

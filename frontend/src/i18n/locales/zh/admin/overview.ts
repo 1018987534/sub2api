@@ -94,7 +94,7 @@ export default {
       firstTokenFastPool: '快池',
       firstTokenSlowPool: '慢池',
       firstTokenPausedCount: '降智暂停 {count}',
-      firstTokenIntelligenceBlocked: '降智暂停 · 待采集',
+      firstTokenIntelligenceBlocked: '降智暂停',
       firstTokenIntelligenceExempt: '唯一账号保留 · 待恢复',
       firstTokenCircuitBrokenPool: '慢池 · 熔断待采集',
       firstTokenSlowPoolRecovering: '慢池 · 待确认 {current}/{total}',

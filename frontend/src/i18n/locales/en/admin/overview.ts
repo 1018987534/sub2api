@@ -94,7 +94,7 @@ export default {
       firstTokenFastPool: 'Fast',
       firstTokenSlowPool: 'Slow',
       firstTokenPausedCount: 'Intelligence paused {count}',
-      firstTokenIntelligenceBlocked: 'Degraded · paused, pending sample',
+      firstTokenIntelligenceBlocked: 'Degraded · scheduling paused',
       firstTokenIntelligenceExempt: 'Sole account retained · awaiting recovery',
       firstTokenCircuitBrokenPool: 'Slow · circuit broken, pending sample',
       firstTokenSlowPoolRecovering: 'Slow · confirming {current}/{total}',

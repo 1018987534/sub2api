@@ -180,6 +180,8 @@ export default {
     lottery: '抽奖活动',
     lotteryManagement: '抽奖管理',
     lotteryAvailable: '有可参与的抽奖',
+    lotteryPrizeBadge: '奖',
+    lotteryWon: '您已中奖，查看中奖记录',
     profile: '个人资料',
     support: '在线客服',
     supportInbox: '客服收件箱',

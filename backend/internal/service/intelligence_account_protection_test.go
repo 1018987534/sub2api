@@ -117,7 +117,7 @@ func TestIntelligenceAccountProtection(t *testing.T) {
 				require.NoError(t, err)
 				require.False(t, paused)
 				require.Equal(t, int64(1), repo.pausedID)
-				t.Log("two accounts: first paused=20m pending=true; remaining account: unchanged")
+				t.Log("two accounts: first scheduling paused=20m; remaining account: unchanged")
 			} else {
 				require.False(t, paused)
 				require.Zero(t, repo.pausedID)
@@ -128,18 +128,51 @@ func TestIntelligenceAccountProtection(t *testing.T) {
 	}
 }
 
-func TestIntelligencePausedAccountRemainsVisiblePending(t *testing.T) {
-	until := time.Now().Add(20 * time.Minute)
-	account := cacheRateTestAccount(1)
-	account.TempUnschedulableUntil = &until
-	account.TempUnschedulableReason = "intelligence: consecutive degraded"
-	cache := &staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{1: {CircuitBroken: true, UpdatedAt: time.Now()}}}
-	svc := &RateLimitService{firstTokenLatencyStatsCache: cache}
-	metrics, err := svc.AccountFirstTokenLatencyMetrics(context.Background(), []Account{*account})
-	require.NoError(t, err)
-	require.Len(t, metrics, 1)
-	require.False(t, metrics[0].IsFastPool)
-	require.False(t, metrics[0].HasPrediction)
-	require.True(t, metrics[0].CircuitBroken)
-	require.False(t, account.IsSchedulable())
+func TestIntelligencePausedAccountPreservesMetricsThroughRecovery(t *testing.T) {
+	for _, fast := range []bool{false, true} {
+		t.Run(map[bool]string{false: "slow", true: "fast"}[fast], func(t *testing.T) {
+			openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil))
+			t.Cleanup(func() { openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil)) })
+			group := Group{ID: 7, Name: "013不降智", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, RateMultiplier: 1}
+			a, b := cacheRateTestAccount(1), cacheRateTestAccount(2)
+			a.GroupIDs = []int64{7}
+			a.Groups = []*Group{&group}
+			a.Extra = map[string]any{"unrelated": "keep"}
+			repo := &intelligenceProtectionRepo{schedulerTestOpenAIAccountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{*a, *b}}, groups: []Group{group}}
+			cache := &intelligenceResetCache{staticFirstTokenLatencyStatsCache: staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{1: {
+				PredictedMS: 8000, P50MS: 7500, P90MS: 10000, SampleCount: 24, WindowHours: 6,
+				UpdatedAt: time.Now(), ReliableFast: fast, FastConfirmationTracked: true,
+			}}}}
+			settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyTotalDurationPriorityEnabled: "true"}}
+			rateLimit := &RateLimitService{firstTokenLatencyStatsCache: cache, usageRepo: cacheRateProviderStub{stats: map[int64]AccountCacheStats{}}, settingService: &SettingService{settingRepo: settings}}
+			svc := &OpenAIGatewayService{accountRepo: repo, rateLimitService: rateLimit}
+			ctx := context.Background()
+			metric := func() AccountFirstTokenLatencyMetric {
+				metrics, err := rateLimit.AccountFirstTokenLatencyMetrics(ctx, []Account{repo.accounts[0]})
+				require.NoError(t, err)
+				require.Len(t, metrics, 1)
+				return metrics[0]
+			}
+			before := metric()
+			paused, err := svc.ProtectDegradedIntelligenceAccount(ctx, &group, 1, "gpt-6.1-sol", 0)
+			require.NoError(t, err)
+			require.True(t, paused)
+			during := metric()
+			require.True(t, during.Groups[0].IntelligenceBlocked)
+			t.Logf("paused: samples=%d duration=%.0f fast=%v blocked=%v", during.SampleCount, during.NormalTotalMS, during.IsFastPool, during.Groups[0].IntelligenceBlocked)
+			require.True(t, svc.intelligenceAccountBlockedForGroup(ctx, &repo.accounts[0], &group.ID, time.Now()))
+			require.NoError(t, svc.RecoverIntelligenceAccount(ctx, 1))
+			after := metric()
+			t.Logf("recovered: samples=%d duration=%.0f fast=%v blocked=%v", after.SampleCount, after.NormalTotalMS, after.IsFastPool, after.Groups[0].IntelligenceBlocked)
+			require.False(t, svc.intelligenceAccountBlockedForGroup(ctx, &repo.accounts[0], &group.ID, time.Now()))
+			during.Groups[0].IntelligenceBlocked = false
+			require.Equal(t, before, during)
+			require.Equal(t, before, after)
+			require.Equal(t, "keep", repo.accounts[0].Extra["unrelated"])
+			require.Equal(t, a.Name, repo.accounts[0].Name)
+			require.Equal(t, a.Credentials, repo.accounts[0].Credentials)
+			require.Equal(t, a.GroupIDs, repo.accounts[0].GroupIDs)
+			require.Equal(t, a.RateMultiplier, repo.accounts[0].RateMultiplier)
+		})
+	}
 }
