@@ -23,7 +23,13 @@ remote_py() {
 installed_py() {
   local host=$1 command_text; shift
   printf -v command_text '%q ' python3 /run/bwg-dmit-migration/remote.py "$@"
-  remote "$host" "$command_text"
+  # Only import actions consume stdin. An SSH export must not drain the
+  # remaining commands when the caller itself is supplied through stdin.
+  case "$1" in
+    stage|restore|globals-import|redis-import|monitor-import|komari-import|schema-normalize)
+      remote "$host" "$command_text" ;;
+    *) remote "$host" "$command_text" < /dev/null ;;
+  esac
 }
 install_helper() {
   remote "$1" 'umask 077; mkdir -p /run/bwg-dmit-migration; cat > /run/bwg-dmit-migration/remote.py' < "$SCRIPT_DIR/remote.py"

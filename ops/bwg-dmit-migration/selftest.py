@@ -4,6 +4,8 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -133,6 +135,13 @@ class MigrationChecks(unittest.TestCase):
         m.set_stage_timezone(config,'Asia/Shanghai');m.set_stage_timezone(config,'Asia/Shanghai')
         self.assertEqual(config['services']['postgres']['command'].count('timezone=Asia/Shanghai'),1)
         self.assertEqual(config['services']['postgres']['environment']['TZ'],'Asia/Shanghai')
+
+    def test_ssh_export_preserves_calling_script_and_import_keeps_payload(self):
+        script='. '+shlex.quote(str(ROOT/'common.sh'))+'\nremote() { cat; }\ninstalled_py fixture writes-state\necho AFTER\nprintf PAYLOAD | installed_py fixture globals-import\n'
+        with tempfile.TemporaryDirectory() as d:
+            p=subprocess.run(['bash','-s'],input=script,text=True,capture_output=True,env=dict(os.environ,MIGRATION_EVIDENCE_DIR=d))
+        self.assertEqual(p.returncode,0,p.stderr)
+        self.assertEqual(p.stdout,'AFTER\nPAYLOAD')
 
 
 if __name__=='__main__':unittest.main(verbosity=2)
