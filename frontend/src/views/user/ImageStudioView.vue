@@ -65,12 +65,9 @@
 
             <div>
               <label class="input-label">{{ t('imageStudio.model') }}</label>
-              <div class="flex min-h-10 flex-col items-start justify-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-600 dark:bg-dark-900 sm:h-10 sm:flex-row sm:items-center sm:py-0">
-                <span class="text-sm font-medium text-gray-800 dark:text-gray-100">GPT Image 2</span>
-                <span class="rounded-md bg-emerald-100 px-2 py-1 font-mono text-[11px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
-                  {{ IMAGE_STUDIO_MODEL }}
-                </span>
-              </div>
+              <select id="image-studio-model" v-model="form.model" class="input font-mono text-sm" :disabled="modelLoading || imageModels.length === 0" data-test="image-model-select">
+                <option v-for="model in imageModels" :key="model" :value="model">{{ model }}</option>
+              </select>
             </div>
 
             <div v-if="form.mode === 'edit'" class="space-y-3">
@@ -136,8 +133,8 @@
                 <label class="input-label">{{ t('imageStudio.count') }}</label>
                 <div class="flex h-10 overflow-hidden rounded-lg border border-gray-300 dark:border-dark-600">
                   <button type="button" class="w-10 text-lg text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-300 dark:hover:bg-dark-700" :disabled="form.count <= 1" :title="t('imageStudio.decrease')" @click="form.count--">-</button>
-                  <div class="flex min-w-0 flex-1 items-center justify-center border-x border-gray-300 text-sm font-medium text-gray-900 dark:border-dark-600 dark:text-white">{{ form.count }}</div>
-                  <button type="button" class="w-10 text-lg text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-300 dark:hover:bg-dark-700" :disabled="form.count >= 4" :title="t('imageStudio.increase')" @click="form.count++">+</button>
+                  <div class="flex min-w-0 flex-1 items-center justify-center border-x border-gray-300 text-sm font-medium text-gray-900 dark:border-dark-600 dark:text-white" data-test="count-value">{{ form.count }}</div>
+                  <button type="button" class="w-10 text-lg text-gray-600 hover:bg-gray-100 disabled:opacity-40 dark:text-gray-300 dark:hover:bg-dark-700" :disabled="form.count >= 4" :title="t('imageStudio.increase')" data-test="count-increase" @click="form.count++">+</button>
                 </div>
               </div>
             </div>
@@ -145,19 +142,19 @@
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-2">
               <div>
                 <label class="input-label" for="image-studio-quality">{{ t('imageStudio.quality') }}</label>
-                <select id="image-studio-quality" v-model="form.quality" class="input px-2 text-sm">
+                <select id="image-studio-quality" v-model="form.quality" class="input px-2 text-sm" data-test="quality-select">
                   <option v-for="option in qualityOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                 </select>
               </div>
               <div>
                 <label class="input-label" for="image-studio-background">{{ t('imageStudio.background') }}</label>
-                <select id="image-studio-background" v-model="form.background" class="input px-2 text-sm">
+                <select id="image-studio-background" v-model="form.background" class="input px-2 text-sm" data-test="background-select">
                   <option v-for="option in backgroundOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                 </select>
               </div>
               <div>
                 <label class="input-label" for="image-studio-format">{{ t('imageStudio.format') }}</label>
-                <select id="image-studio-format" v-model="form.outputFormat" class="input px-2 text-sm">
+                <select id="image-studio-format" v-model="form.outputFormat" class="input px-2 text-sm" data-test="format-select">
                   <option value="png">PNG</option>
                   <option value="jpeg">JPEG</option>
                   <option value="webp">WebP</option>
@@ -167,7 +164,7 @@
 
             <div v-if="form.mode === 'edit'">
               <label class="input-label" for="image-studio-fidelity">{{ t('imageStudio.inputFidelity') }}</label>
-              <select id="image-studio-fidelity" v-model="form.inputFidelity" class="input">
+              <select id="image-studio-fidelity" v-model="form.inputFidelity" class="input" data-test="fidelity-select">
                 <option value="high">{{ t('imageStudio.fidelityHigh') }}</option>
                 <option value="low">{{ t('imageStudio.fidelityLow') }}</option>
               </select>
@@ -341,6 +338,7 @@ interface StudioJob {
   localID: string
   taskID?: string
   keyID: number
+  model: string
   mode: ImageStudioMode
   prompt: string
   size: string
@@ -378,6 +376,7 @@ interface ImageStudioPreset {
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const POLL_INTERVAL_MS = 3000
+const IMAGE_STUDIO_SETTINGS_STORAGE_KEY = 'image-studio-settings:user:'
 const DEFAULT_IMAGE_STUDIO_PRESET: ImageStudioPreset = { orientation: 'square', resolution: '2K' }
 const IMAGE_STUDIO_SIZE_PRESETS: Record<ImageStudioResolution, Record<ImageStudioOrientation, string>> = {
   '1K': { square: '1024x1024', landscape: '1024x688', portrait: '688x1024' },
@@ -393,6 +392,7 @@ function createDefaultForm() {
   return {
     mode: 'generate' as ImageStudioMode,
     apiKeyId: 0,
+    model: IMAGE_STUDIO_MODEL,
     prompt: '',
     orientation: DEFAULT_IMAGE_STUDIO_PRESET.orientation,
     resolution: DEFAULT_IMAGE_STUDIO_PRESET.resolution,
@@ -407,6 +407,7 @@ function createDefaultForm() {
 const form = reactive(createDefaultForm())
 
 const imageKeys = ref<ApiKey[]>([])
+const imageModels = ref<string[]>([])
 const loadingKeys = ref(false)
 const submitting = ref(false)
 const modelLoading = ref(false)
@@ -470,7 +471,7 @@ const backgroundOptions = computed(() => [
 
 const modelStatusText = computed(() => {
   if (modelLoading.value) return t('imageStudio.checkingModel')
-  if (modelSupported.value === true) return t('imageStudio.modelReady')
+  if (modelSupported.value === true) return t('imageStudio.modelReady', { count: imageModels.value.length })
   if (modelSupported.value === false) return modelError.value || t('imageStudio.modelUnavailable')
   return t('imageStudio.selectKeyFirst')
 })
@@ -479,11 +480,70 @@ function isImageStudioKey(key: ApiKey): boolean {
   return key.status === 'active' &&
     key.group?.status === 'active' &&
     key.group.platform === 'openai' &&
-    key.group.allow_image_generation === true
+    key.group.allow_image_generation === true &&
+    key.group.name?.includes('生图') === true
+}
+
+function isImageStudioModel(model: string): boolean {
+  const normalized = model.trim().toLowerCase()
+  return normalized.startsWith('gpt-image-')
 }
 
 function currentUserID(): number {
   return authStore.user?.id || 0
+}
+
+function readUserSettings(userID: number) {
+  if (typeof window === 'undefined' || userID <= 0) return
+  try {
+    const saved = window.localStorage.getItem(`${IMAGE_STUDIO_SETTINGS_STORAGE_KEY}${userID}`)
+    if (!saved) return
+    const value = JSON.parse(saved) as Record<string, unknown>
+    const defaults = createDefaultForm()
+    const mode = value.mode === 'edit' ? 'edit' : 'generate'
+    const orientation = (['square', 'landscape', 'portrait'] as const).includes(value.orientation as ImageStudioOrientation)
+      ? value.orientation as ImageStudioOrientation
+      : defaults.orientation
+    const resolution = (resolutionOptions as readonly string[]).includes(String(value.resolution))
+      ? value.resolution as ImageStudioResolution
+      : defaults.resolution
+    const outputFormat = (['png', 'jpeg', 'webp'] as const).includes(value.outputFormat as 'png' | 'jpeg' | 'webp')
+      ? value.outputFormat as string
+      : defaults.outputFormat
+    const background = (['auto', 'opaque', 'transparent'] as const).includes(value.background as 'auto' | 'opaque' | 'transparent')
+      ? value.background as string
+      : defaults.background
+    const quality = (['auto', 'low', 'medium', 'high'] as const).includes(value.quality as 'auto' | 'low' | 'medium' | 'high')
+      ? value.quality as string
+      : defaults.quality
+    const inputFidelity = value.inputFidelity === 'low' ? 'low' : 'high'
+
+    Object.assign(form, {
+      ...defaults,
+      mode,
+      apiKeyId: Number.isInteger(value.apiKeyId) && Number(value.apiKeyId) > 0 ? Number(value.apiKeyId) : 0,
+      model: typeof value.model === 'string' ? value.model : defaults.model,
+      prompt: typeof value.prompt === 'string' ? value.prompt.slice(0, 32000) : '',
+      orientation,
+      resolution,
+      count: Number.isInteger(value.count) ? Math.min(4, Math.max(1, Number(value.count))) : defaults.count,
+      quality,
+      background,
+      outputFormat,
+      inputFidelity,
+    })
+  } catch {
+    // Ignore unavailable storage or invalid user-local preferences.
+  }
+}
+
+function persistUserSettings(userID: number) {
+  if (typeof window === 'undefined' || userID <= 0) return
+  try {
+    window.localStorage.setItem(`${IMAGE_STUDIO_SETTINGS_STORAGE_KEY}${userID}`, JSON.stringify({ ...form }))
+  } catch {
+    // Ignore storage quota or privacy-mode failures.
+  }
 }
 
 function resolveImageStudioSize(preset: ImageStudioPreset): string {
@@ -536,6 +596,7 @@ function resetImageStudioSession() {
   maskImage.value = null
   preview.value = null
   imageKeys.value = []
+  imageModels.value = []
   jobs.value = []
   Object.assign(form, createDefaultForm())
 
@@ -557,6 +618,7 @@ function synchronizeImageStudioOwner() {
   if (loadedOwnerUserID === userID || loadingOwnerUserID === userID) return
 
   resetImageStudioSession()
+  readUserSettings(userID)
   void loadKeysForUser(userID, sessionRevision)
 }
 
@@ -613,6 +675,7 @@ function clearSessionOutputs() {
 
 async function validateSelectedKey() {
   modelRequestController?.abort()
+  imageModels.value = []
   modelSupported.value = null
   modelError.value = ''
   if (!selectedKey.value) return
@@ -623,8 +686,15 @@ async function validateSelectedKey() {
   try {
     const models = await imageStudioAPI.listModels(selectedKey.value.key, controller.signal)
     if (controller.signal.aborted) return
-    modelSupported.value = models.includes(IMAGE_STUDIO_MODEL)
-    if (!modelSupported.value) modelError.value = t('imageStudio.keyDoesNotSupportModel')
+    imageModels.value = Array.from(new Set(models.filter(isImageStudioModel)))
+    modelSupported.value = imageModels.value.length > 0
+    if (modelSupported.value) {
+      if (!imageModels.value.includes(form.model)) {
+        form.model = imageModels.value.includes(IMAGE_STUDIO_MODEL) ? IMAGE_STUDIO_MODEL : imageModels.value[0]
+      }
+    } else {
+      modelError.value = t('imageStudio.keyDoesNotSupportModel')
+    }
   } catch (error) {
     if (controller.signal.aborted) return
     modelSupported.value = false
@@ -679,7 +749,7 @@ function clearMaskImage() {
 function buildRequestBody(size: string): ImageStudioGenerationPayload | FormData {
   if (form.mode === 'generate') {
     return {
-      model: IMAGE_STUDIO_MODEL,
+      model: form.model,
       prompt: form.prompt.trim(),
       size,
       quality: form.quality,
@@ -691,7 +761,7 @@ function buildRequestBody(size: string): ImageStudioGenerationPayload | FormData
   }
 
   const body = new FormData()
-  body.append('model', IMAGE_STUDIO_MODEL)
+  body.append('model', form.model)
   body.append('prompt', form.prompt.trim())
   body.append('size', size)
   body.append('quality', form.quality)
@@ -717,6 +787,7 @@ async function submitGeneration() {
   const job = reactive<StudioJob>({
     localID: `studio_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     keyID: key.id,
+    model: form.model,
     mode: form.mode,
     prompt: form.prompt.trim(),
     size,
@@ -853,6 +924,7 @@ function downloadOutput(output: ImageStudioOutput, job: StudioJob, index: number
 
 function reuseJob(job: StudioJob) {
   form.prompt = job.prompt
+  form.model = job.model
   const preset = inferImageStudioPreset(job.size)
   form.orientation = preset.orientation
   form.resolution = preset.resolution
@@ -895,6 +967,11 @@ watch(() => form.apiKeyId, () => {
 watch(() => form.outputFormat, (format) => {
   if (format !== 'png' && form.background === 'transparent') form.background = 'auto'
 })
+
+watch(form, () => {
+  const userID = currentUserID()
+  if (loadedOwnerUserID === userID && userID > 0) persistUserSettings(userID)
+}, { deep: true })
 
 watch(() => form.background, (background) => {
   if (background === 'transparent' && form.outputFormat === 'jpeg') form.outputFormat = 'png'

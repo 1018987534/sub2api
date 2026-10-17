@@ -66,7 +66,7 @@ vi.mock('vue-i18n', async () => {
 function makeGroup(overrides: Partial<Group> = {}): Group {
   return {
     id: 12,
-    name: 'Image Group',
+    name: '生图 Image Group',
     description: null,
     platform: 'openai',
     rate_multiplier: 1,
@@ -153,13 +153,15 @@ describe('ImageStudioView', () => {
   beforeEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+    localStorage.clear()
     useAuthStore().user = { id: 1 } as User
 
     const imageKey = makeKey(1, makeGroup())
     const textKey = makeKey(2, makeGroup({ id: 22, name: 'Text Group', allow_image_generation: false }))
+    const mislabeledKey = makeKey(4, makeGroup({ id: 44, name: 'General Group', allow_image_generation: true }))
     const geminiKey = makeKey(3, makeGroup({ id: 33, name: 'Gemini Group', platform: 'gemini' }))
-    mocks.listKeys.mockResolvedValue({ items: [textKey, geminiKey, imageKey], total: 3, page: 1, page_size: 100, pages: 1 })
-    mocks.listModels.mockResolvedValue([IMAGE_STUDIO_MODEL])
+    mocks.listKeys.mockResolvedValue({ items: [textKey, geminiKey, imageKey, mislabeledKey], total: 4, page: 1, page_size: 100, pages: 1 })
+    mocks.listModels.mockResolvedValue([IMAGE_STUDIO_MODEL, 'gpt-image-2.5', 'gpt-5.4'])
     mocks.listTasks.mockResolvedValue([])
     mocks.deleteTask.mockResolvedValue(undefined)
     mocks.submitTask.mockResolvedValue({ id: 'imgtask_1', task_id: 'imgtask_1', status: 'processing' })
@@ -170,24 +172,29 @@ describe('ImageStudioView', () => {
     })
   })
 
-  it('only lists active OpenAI keys whose group allows image generation', async () => {
+  it('only lists image-enabled OpenAI keys from groups whose name contains 生图', async () => {
     const wrapper = mount(ImageStudioView, { global: globalOptions })
     await flushPromises()
 
     const options = wrapper.find('[data-test="api-key-select"]').findAll('option').map((option) => option.text())
-    expect(options).toContain('key-1 · Image Group')
+    expect(options).toContain('key-1 · 生图 Image Group')
     expect(options.join(' ')).not.toContain('Text Group')
     expect(options.join(' ')).not.toContain('Gemini Group')
+    expect(options.join(' ')).not.toContain('General Group')
     expect(mocks.listModels).toHaveBeenCalledWith('sk-key-1', expect.any(AbortSignal))
+    expect(wrapper.find('[data-test="image-model-select"]').findAll('option').map((option) => option.text())).toEqual([
+      'gpt-image-2', 'gpt-image-2.5',
+    ])
 
     wrapper.unmount()
   })
 
-  it('submits the fixed image model and renders the polled result', async () => {
+  it('submits the selected image model and renders the polled result', async () => {
     vi.useFakeTimers()
     const wrapper = mount(ImageStudioView, { global: globalOptions })
     await flushPromises()
 
+    await wrapper.find('[data-test="image-model-select"]').setValue('gpt-image-2.5')
     await wrapper.find('[data-test="prompt-input"]').setValue('A lighthouse in a storm')
     await wrapper.find('[data-test="generate-button"]').trigger('click')
     await flushPromises()
@@ -195,7 +202,7 @@ describe('ImageStudioView', () => {
     expect(mocks.submitTask).toHaveBeenCalledWith(
       'sk-key-1',
       'generate',
-      expect.objectContaining({ model: IMAGE_STUDIO_MODEL, prompt: 'A lighthouse in a storm', size: '2048x2048' }),
+      expect.objectContaining({ model: 'gpt-image-2.5', prompt: 'A lighthouse in a storm', size: '2048x2048' }),
       expect.any(AbortSignal),
     )
     expect(wrapper.get('[data-test="resolution-select"]').element).toHaveProperty('value', '2K')
@@ -211,6 +218,51 @@ describe('ImageStudioView', () => {
 
     wrapper.unmount()
     vi.useRealTimers()
+  })
+
+  it('submits the selected image model when editing an image', async () => {
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    const createObjectURL = vi.fn().mockReturnValue('blob:studio-source')
+    const revokeObjectURL = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
+    mocks.submitTask.mockResolvedValue({
+      id: 'imgtask_edit',
+      task_id: 'imgtask_edit',
+      status: 'completed',
+      result: { data: [{ b64_json: 'aW1hZ2U=', output_format: 'png' }] },
+    })
+    const wrapper = mount(ImageStudioView, { global: globalOptions })
+    await flushPromises()
+    await wrapper.find('[data-test="image-model-select"]').setValue('gpt-image-2.5')
+    await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    await wrapper.find('[data-test="prompt-input"]').setValue('Edit the source')
+
+    const sourceInput = wrapper.get('[data-test="source-image-input"]')
+    Object.defineProperty(sourceInput.element, 'files', {
+      value: [new File(['source'], 'source.png', { type: 'image/png' })],
+    })
+    await sourceInput.trigger('change')
+    await wrapper.find('[data-test="generate-button"]').trigger('click')
+    await flushPromises()
+
+    const [key, mode, payload] = mocks.submitTask.mock.calls[0] as [string, string, FormData]
+    expect([key, mode]).toEqual(['sk-key-1', 'edit'])
+    expect(payload.get('model')).toBe('gpt-image-2.5')
+    expect(payload.get('image')).toBeInstanceOf(File)
+
+    wrapper.unmount()
+    if (originalCreateObjectURL) {
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreateObjectURL })
+    } else {
+      Reflect.deleteProperty(URL, 'createObjectURL')
+    }
+    if (originalRevokeObjectURL) {
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevokeObjectURL })
+    } else {
+      Reflect.deleteProperty(URL, 'revokeObjectURL')
+    }
   })
 
   it('maps every resolution and orientation to an upstream-valid pixel size', async () => {
@@ -295,7 +347,7 @@ describe('ImageStudioView', () => {
   it('clears current-session images before loading a different user session', async () => {
     const authStore = useAuthStore()
     const oldKey = makeKey(1, makeGroup(), 1)
-    const newKey = makeKey(8, makeGroup({ id: 18, name: 'New Image Group' }), 8)
+    const newKey = makeKey(8, makeGroup({ id: 18, name: 'New 生图 Group' }), 8)
     type KeyListResponse = { items: ApiKey[]; total: number; page: number; page_size: number; pages: number }
     let resolveNewKeys!: (value: KeyListResponse) => void
     const newKeys = new Promise<KeyListResponse>((resolve) => { resolveNewKeys = resolve })
@@ -322,8 +374,62 @@ describe('ImageStudioView', () => {
 
     resolveNewKeys({ items: [newKey], total: 1, page: 1, page_size: 100, pages: 1 })
     await flushPromises()
-    expect(wrapper.find('[data-test="api-key-select"]').text()).toContain('key-8 · New Image Group')
+    expect(wrapper.find('[data-test="api-key-select"]').text()).toContain('key-8 · New 生图 Group')
     expect(mocks.listTasks).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('restores the complete form per user when returning to the studio', async () => {
+    localStorage.clear()
+    const authStore = useAuthStore()
+    const userOneKey = makeKey(1, makeGroup(), 1)
+    const userTwoKey = makeKey(8, makeGroup({ id: 18, name: '用户二生图' }), 8)
+    mocks.listKeys.mockImplementation(() => {
+      const userID = authStore.user?.id
+      const key = userID === 8 ? userTwoKey : userOneKey
+      return Promise.resolve({ items: [key], total: 1, page: 1, page_size: 100, pages: 1 })
+    })
+    mocks.listModels.mockImplementation((key: string) => Promise.resolve(
+      key === 'sk-key-8' ? [IMAGE_STUDIO_MODEL] : [IMAGE_STUDIO_MODEL, 'gpt-image-2.5'],
+    ))
+
+    const wrapper = mount(ImageStudioView, { global: globalOptions })
+    await flushPromises()
+    await wrapper.find('[data-test="image-model-select"]').setValue('gpt-image-2.5')
+    await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    await wrapper.find('[data-test="prompt-input"]').setValue('Remember my image prompt')
+    await wrapper.find('[data-test="aspect-ratio-select"]').setValue('portrait')
+    await wrapper.find('[data-test="resolution-select"]').setValue('1K')
+    await wrapper.find('[data-test="count-increase"]').trigger('click')
+    await wrapper.find('[data-test="quality-select"]').setValue('high')
+    await wrapper.find('[data-test="background-select"]').setValue('opaque')
+    await wrapper.find('[data-test="format-select"]').setValue('webp')
+    await wrapper.find('[data-test="fidelity-select"]').setValue('low')
+    await flushPromises()
+
+    authStore.user = { id: 8 } as User
+    await flushPromises()
+    expect(wrapper.find('[data-test="prompt-input"]').element).toHaveProperty('value', '')
+    expect(wrapper.find('[data-test="image-model-select"]').element).toHaveProperty('value', IMAGE_STUDIO_MODEL)
+    expect(wrapper.find('[data-test="resolution-select"]').element).toHaveProperty('value', '2K')
+
+    authStore.user = { id: 1 } as User
+    await flushPromises()
+    expect(wrapper.find('[data-test="api-key-select"]').element).toHaveProperty('value', '1')
+    expect(wrapper.find('[data-test="image-model-select"]').element).toHaveProperty('value', 'gpt-image-2.5')
+    expect(wrapper.findAll('[role="tab"]')[1].attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[data-test="prompt-input"]').element).toHaveProperty('value', 'Remember my image prompt')
+    expect(wrapper.find('[data-test="aspect-ratio-select"]').element).toHaveProperty('value', 'portrait')
+    expect(wrapper.find('[data-test="resolution-select"]').element).toHaveProperty('value', '1K')
+    expect(wrapper.get('[data-test="count-increase"]').element).toHaveProperty('disabled', false)
+    expect(wrapper.find('[data-test="quality-select"]').element).toHaveProperty('value', 'high')
+    expect(wrapper.find('[data-test="background-select"]').element).toHaveProperty('value', 'opaque')
+    expect(wrapper.find('[data-test="format-select"]').element).toHaveProperty('value', 'webp')
+    expect(wrapper.find('[data-test="fidelity-select"]').element).toHaveProperty('value', 'low')
+    expect(wrapper.get('[data-test="count-value"]').text()).toBe('2')
+    expect(localStorage.getItem('image-studio-settings:user:1')).toContain('Remember my image prompt')
+    expect(JSON.parse(localStorage.getItem('image-studio-settings:user:8') || '{}')).toMatchObject({ prompt: '' })
 
     wrapper.unmount()
   })
