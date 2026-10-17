@@ -43,9 +43,29 @@ db_stream() {
     installed_py "$target_host" restore "$target_container"
 }
 db_compare() {
+  local source_raw target_raw source_canonical='' target_canonical=''
   installed_py "$1" manifest "$2" > "$EVIDENCE_DIR/$5-source.json"
   installed_py "$3" manifest "$4" > "$EVIDENCE_DIR/$5-target.json"
-  diff -u "$EVIDENCE_DIR/$5-source.json" "$EVIDENCE_DIR/$5-target.json" > "$EVIDENCE_DIR/$5.diff" || die "full database manifest differs: $EVIDENCE_DIR/$5.diff"
+  source_raw=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["schema_sha256"])' "$EVIDENCE_DIR/$5-source.json")
+  target_raw=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["schema_sha256"])' "$EVIDENCE_DIR/$5-target.json")
+  if [[ "$source_raw" != "$target_raw" ]]; then
+    source_canonical=$(installed_py "$1" schema-export "$2" | installed_py "$DMIT_SSH" schema-normalize "$TARGET_STAGE_PG_CONTAINER")
+    target_canonical=$(installed_py "$3" schema-export "$4" | installed_py "$DMIT_SSH" schema-normalize "$TARGET_STAGE_PG_CONTAINER")
+    [[ "$source_canonical" == "$target_canonical" ]] || die 'complete canonical schemas differ; constraints/owners/ACL are not equivalent'
+    say 'raw schema formatting differs; both complete schemas reparse identically in isolated DMIT scratch databases'
+  fi
+  python3 - "$EVIDENCE_DIR/$5-source.json" "$EVIDENCE_DIR/$5-target.json" "$source_canonical" "$target_canonical" "$EVIDENCE_DIR/$5" <<'PY'
+import json,sys,difflib
+source=json.load(open(sys.argv[1]));target=json.load(open(sys.argv[2]))
+if source['schema_sha256']!=target['schema_sha256']:
+    if not sys.argv[3] or sys.argv[3]!=sys.argv[4]:raise SystemExit('canonical schema proof missing or different')
+    proof={'source_raw':source['schema_sha256'],'target_raw':target['schema_sha256'],'source_canonical':sys.argv[3],'target_canonical':sys.argv[4]}
+    open(sys.argv[5]+'-schema-proof.json','w').write(json.dumps(proof,indent=2)+'\n')
+    source['schema_sha256']=sys.argv[3];target['schema_sha256']=sys.argv[4]
+delta=''.join(difflib.unified_diff(json.dumps(source,sort_keys=True,indent=2).splitlines(True),json.dumps(target,sort_keys=True,indent=2).splitlines(True)))
+open(sys.argv[5]+'.diff','w').write(delta)
+if delta:raise SystemExit('full database manifest differs: '+sys.argv[5]+'.diff')
+PY
   say "$5: all tables, row hashes, sequences, schema, roles and large objects match"
 }
 load_run() {

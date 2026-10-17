@@ -89,11 +89,15 @@ PY
       install_helper "$host"
       installed_py "$host" snapshot "$RUN_ID"
     done
-    remote "$BWG_SSH" 'docker inspect sub2api-postgres sub2api-redis komari' |
+    installed_py "$BWG_SSH" source-services |
       installed_py "$DMIT_SSH" stage "$RUN_ID"
     for container in sub2api-postgres sub2api-redis komari; do
       image_id=$(remote "$BWG_SSH" "docker inspect '$container' --format '{{.Image}}'")
-      remote "$BWG_SSH" "docker image save '$image_id'" | remote "$DMIT_SSH" 'docker image load --quiet'
+      if remote "$DMIT_SSH" "docker image inspect '$image_id' >/dev/null 2>&1"; then
+        say "$container: exact source image already present"
+      else
+        remote "$BWG_SSH" "docker image save '$image_id'" | remote "$DMIT_SSH" 'docker image load --quiet'
+      fi
     done
     installed_py "$DMIT_SSH" stage-start
     say 'stage prepared; production apps and BWG data untouched'

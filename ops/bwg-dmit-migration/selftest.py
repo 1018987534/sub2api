@@ -123,5 +123,16 @@ class MigrationChecks(unittest.TestCase):
             self.assertEqual(record['stderr'],'fixture-private-diagnostic')
             self.assertEqual((Path(d)/'last-error.json').stat().st_mode & 0o777,0o600)
 
+    def test_schema_reparse_never_creates_database_on_source(self):
+        with patch.object(m,'sql') as sql:
+            with self.assertRaisesRegex(RuntimeError,'isolated DMIT'):m.schema_normalize('sub2api-postgres')
+            sql.assert_not_called()
+
+    def test_timezone_is_preserved_without_duplicating_command_options(self):
+        config={'services':{'postgres':{'command':['postgres','-c','shared_buffers=128MB'],'environment':{}}}}
+        m.set_stage_timezone(config,'Asia/Shanghai');m.set_stage_timezone(config,'Asia/Shanghai')
+        self.assertEqual(config['services']['postgres']['command'].count('timezone=Asia/Shanghai'),1)
+        self.assertEqual(config['services']['postgres']['environment']['TZ'],'Asia/Shanghai')
+
 
 if __name__=='__main__':unittest.main(verbosity=2)

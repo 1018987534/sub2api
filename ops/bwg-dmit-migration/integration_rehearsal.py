@@ -70,6 +70,24 @@ SELECT lo_from_bytea(0,decode('012345','hex'));
                     if results[0][k]!=results[1][k]:print('MISMATCH',k,repr(results[0][k]),repr(results[1][k]))
                 raise RuntimeError('full fixture manifest mismatch')
             print('PostgreSQL: all schemas/rows/balances/sequences/roles/ACL/extensions/large objects MATCH')
+            legacy="CREATE TABLE public.schema_probe(code varchar, at timestamptz DEFAULT '1970-01-01 08:00:00+08'::timestamptz, CHECK (code::text = ANY ((ARRAY['a'::varchar,'b'::varchar])::text[])));"
+            canonical="CREATE TABLE public.schema_probe(code varchar, at timestamptz DEFAULT '1970-01-01 00:00:00+00'::timestamptz, CHECK (code::text = ANY (ARRAY[('a'::varchar)::text,('b'::varchar)::text])));"
+            def normalized(raw):
+                with tempfile.TemporaryFile() as stream:
+                    stream.write(raw.encode());stream.seek(0);out=io.StringIO()
+                    with patch('sys.stdin',SimpleNamespace(buffer=stream)),contextlib.redirect_stdout(out):m.schema_normalize(m.PG)
+                    return out.getvalue().strip()
+            if normalized(legacy)!=normalized(canonical):raise RuntimeError('equivalent old array cast / timezone schema does not normalize')
+            if normalized(legacy)==normalized(legacy.replace("'b'","'c'")):raise RuntimeError('changed CHECK constraint escaped schema verification')
+            print('Schema reparse: equivalent legacy casts/UTC MATCH; changed CHECK constraint REJECTED')
+            # Optional real production DDL, private files only, never business rows.
+            import os
+            if os.environ.get('MIGRATION_SCHEMA_PROBE_DIR'):
+                fixture=Path(os.environ['MIGRATION_SCHEMA_PROBE_DIR'])
+                source_hash=normalized((fixture/'private-schema-source.sql').read_text())
+                target_hash=normalized((fixture/'private-schema-target.sql').read_text())
+                if source_hash!=target_hash:raise RuntimeError('real source/target full schema reparse differs')
+                print('Real production source/target DDL in isolated local PostgreSQL: complete canonical schema MATCH '+source_hash)
             rs=prefix+'-redis-source'
             m.SOURCE_REDIS=rs
             for name in (rs,m.REDIS):

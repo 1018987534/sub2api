@@ -171,6 +171,7 @@ def snapshot(run_id):
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
     if (STATE / 'run-id').exists():
         current_run(run_id)
+        drift_guard(run_id)
         print('snapshot=reused')
         return
     c = inspect('sub2api')
@@ -238,16 +239,39 @@ def escaped(obj):
     return obj
 
 
+def source_services():
+    require(env(inspect('sub2api'))['INSTANCE_ID'] == 'bwg-us-01', 'source services must be inspected on BWG')
+    services = [inspect(n) for n in ('sub2api-postgres', 'sub2api-redis', 'komari')]
+    pg = services[0]; user = env(pg)['POSTGRES_USER']
+    pg['_migration_timezone'] = text(['docker', 'exec', 'sub2api-postgres', 'psql', '-X', '-q', '-At', '-U', user, '-d', 'sub2api', '-c', 'SHOW timezone'])
+    print(json.dumps(services))
+
+
+def set_stage_timezone(config, timezone):
+    require(re.fullmatch(r'[A-Za-z0-9_+./-]+', timezone), 'unexpected source PostgreSQL timezone')
+    pg = config['services']['postgres']; command = pg['command']
+    command = [value for value in command]
+    for i, value in enumerate(command):
+        if value.startswith('timezone='): command[i] = 'timezone=' + timezone; break
+    else: command += ['-c', 'timezone=' + timezone]
+    pg['command'] = command; pg['environment']['TZ'] = timezone
+
+
 def stage(run_id):
     current_run(run_id)
+    source = {c['Name'].lstrip('/'): c for c in json.load(sys.stdin)}
+    timezone = source['sub2api-postgres']['_migration_timezone']
     if DATA.exists():
         require((STATE / 'source-services.json').exists() and (DATA / 'compose.json').exists(), 'target data root not owned by this prepared run')
         require(not (STATE / 'target-writes-possible').exists(), 'target may have accepted writes; refusing to restage')
-        # Consume the SSH input even when reusing a prepared target.
-        json.load(sys.stdin)
-        print('stage-config=reused')
+        old = read('source-services.json')
+        require(all(source[n]['Image'] == old[n]['Image'] for n in source), 'source data image changed after stage; review compatibility before reusing restored data')
+        config = json.loads((DATA / 'compose.json').read_text())
+        set_stage_timezone(config, timezone)
+        write(DATA / 'compose.json', json.dumps(config, indent=2))
+        save('source-services.json', source)
+        print('stage-config=reused; source PostgreSQL timezone=' + timezone)
         return
-    source = {c['Name'].lstrip('/'): c for c in json.load(sys.stdin)}
     app_env = env(inspect('sub2api'))
     require(app_env['DATABASE_DBNAME'] == 'sub2api', 'unexpected database name')
     require(int(text(['df', '-B1', '--output=avail', '/']).splitlines()[-1]) > 16 * 1024**3, 'less than 16 GiB free before stage')
@@ -272,7 +296,8 @@ def stage(run_id):
         service['pull_policy'] = 'never'
         service['security_opt'] = ['no-new-privileges:true']
         service['logging'] = {'driver': 'json-file', 'options': {'max-size': '10m', 'max-file': '2'}}
-    write(DATA / 'compose.json', json.dumps(escaped({'services': services}), indent=2))
+    config = {'services': services}; set_stage_timezone(config, timezone)
+    write(DATA / 'compose.json', json.dumps(escaped(config), indent=2))
     save('source-services.json', source)
     print('stage-config=ready; image IDs pinned to source; ports=loopback')
 
@@ -293,6 +318,8 @@ def db_command(action, container):
         args = ['docker', 'exec', container, 'pg_dumpall', '-U', user, '--globals-only']
     elif action == 'dump':
         args = ['docker', 'exec', container, 'pg_dump', '-U', user, '-d', 'sub2api', '-Fc', '--create']
+    elif action == 'schema-export':
+        args = ['docker', 'exec', '-e', 'PGOPTIONS=-c timezone=UTC', container, 'pg_dump', '-U', user, '-d', 'sub2api', '--schema-only']
     elif action == 'restore':
         args = ['docker', 'exec', '-i', container, 'pg_restore', '-U', user, '-d', 'postgres', '--create', '--exit-on-error']
     else:
@@ -328,6 +355,29 @@ def db_reset(container):
     sql(container, 'DROP DATABASE IF EXISTS sub2api WITH (FORCE)', 'postgres')
 
 
+def schema_text(container, database='sub2api'):
+    user = env(inspect(container))['POSTGRES_USER']
+    schema = text(['docker', 'exec', '-e', 'PGOPTIONS=-c timezone=UTC', container, 'pg_dump', '-U', user, '-d', database, '--schema-only'])
+    return '\n'.join(line for line in schema.splitlines() if not line.startswith(('\\restrict ', '\\unrestrict ')))
+
+
+def schema_normalize(container):
+    require(container == PG, 'schema normalization is restricted to the isolated DMIT PostgreSQL container')
+    raw = sys.stdin.buffer.read()
+    database = 'bwg_dmit_schema_' + str(os.getpid()) + '_' + str(time.time_ns())
+    sql(container, 'CREATE DATABASE ' + identifier(database) + ' TEMPLATE template0', 'postgres')
+    try:
+        # Older PostgreSQL catalogs can deparse varchar-array casts differently
+        # after restore. Reparse BOTH complete schemas on the same server and
+        # in UTC, retaining every constraint, index, policy, owner and ACL.
+        if re.search(rb'^CREATE SCHEMA public;', raw, re.M):
+            sql(container, 'DROP SCHEMA public', database)
+        run(pgargs(container, database), raw)
+        print(hashlib.sha256(schema_text(container, database).encode()).hexdigest())
+    finally:
+        sql(container, 'DROP DATABASE ' + identifier(database) + ' WITH (FORCE)', 'postgres')
+
+
 def manifest(container, only_table=None):
     # Hash every row independent of physical order; bounded client memory.
     tables = json.loads(sql(container, "SELECT coalesce(json_agg(x ORDER BY n,c),'[]') FROM (SELECT n.nspname n,c.relname c FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','m') AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema') x"))
@@ -355,9 +405,7 @@ def manifest(container, only_table=None):
     output['database_attributes'] = sql(container, "SELECT pg_encoding_to_char(encoding),datcollate,datctype,datlocprovider,datlocale,coalesce(datacl::text,'') FROM pg_database WHERE datname=current_database()")
     output['roles'] = sql(container, "SELECT rolname,rolsuper,rolinherit,rolcreaterole,rolcreatedb,rolcanlogin,rolreplication,rolconnlimit,rolvaliduntil,rolbypassrls,md5(coalesce(rolpassword,'')) FROM pg_authid WHERE rolname !~ '^pg_' AND rolname <> 'migration_bootstrap' ORDER BY 1")
     output['large_objects'] = sql(container, "SELECT count(*),coalesce(md5(string_agg(loid::text||':'||pageno::text||':'||md5(data::text),'' ORDER BY loid,pageno)),'') FROM pg_largeobject")
-    user = env(inspect(container))['POSTGRES_USER']
-    schema = text(['docker', 'exec', container, 'pg_dump', '-U', user, '-d', 'sub2api', '--schema-only'])
-    schema = '\n'.join(line for line in schema.splitlines() if not line.startswith(('\\restrict ', '\\unrestrict ')))
+    schema = schema_text(container)
     output['schema_sha256'] = hashlib.sha256(schema.encode()).hexdigest()
     print(json.dumps(output, sort_keys=True, indent=2))
 
@@ -900,12 +948,14 @@ def main():
     elif action == 'mark': mark(*args)
     elif action == 'stopped': stopped(*args)
     elif action == 'stage': stage(*args)
+    elif action == 'source-services': source_services()
     elif action == 'stage-start':
         run(stage_compose('up', '-d', 'postgres', 'redis')); wait_health([PG, REDIS]); print('stage=healthy')
     elif action == 'seed-guard':
         current_run(*args); require(not (STATE / 'target-writes-possible').exists(), 'DMIT has accepted writes'); wait_health([PG])
         (STATE / 'seeded').unlink(missing_ok=True)
-    elif action in ('dump', 'restore', 'globals-export'): db_command(action, *args)
+    elif action in ('dump', 'restore', 'globals-export', 'schema-export'): db_command(action, *args)
+    elif action == 'schema-normalize': schema_normalize(*args)
     elif action == 'globals-import': globals_import(*args)
     elif action == 'db-reset': db_reset(*args)
     elif action == 'manifest': manifest(*args)
