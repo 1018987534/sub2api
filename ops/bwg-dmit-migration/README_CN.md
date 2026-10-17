@@ -28,10 +28,9 @@ S=ops/bwg-dmit-migration/bwg_to_dmit.sh
 
 ```bash
 "$S" prepare --execute
-# 等价于 preflight + stage + seed；中断后也可以分别重试未完成阶段：
-"$S" stage --execute
-"$S" seed --execute
 ```
+
+若中断，可单独重试尚未完成的 `"$S" stage --execute` 或 `"$S" seed --execute`；无需重跑已完成的全量恢复。
 
 `stage` 固定源端 PostgreSQL/Redis/Komari 的实际镜像，流式传到 DMIT；创建 DMIT 独立数据目录和仅监听 `127.0.0.1:15432/16379` 的目标 PG/Redis。现有应用仍读写 BWG。`seed` 完整迁入角色、权限和 `sub2api` 全库，演练恢复并生成目标清单，不保留 dump 文件。源库在线变化，因此精确一致校验安排在维护窗口内。
 
