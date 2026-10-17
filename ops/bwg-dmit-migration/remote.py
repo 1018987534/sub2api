@@ -29,11 +29,23 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
+def command_failed(operation, result):
+    message = '%s failed (exit %d)' % (operation, result.returncode)
+    if STATE.is_dir():
+        # SQL/Docker errors may contain credentials or row values. Retain them
+        # only in root-private runtime state; never send raw diagnostics to logs.
+        save('last-error.json', {'operation': operation, 'exit_code': result.returncode,
+                                'stdout': (result.stdout or b'').decode(errors='replace'),
+                                'stderr': (result.stderr or b'').decode(errors='replace')})
+        message += '; private diagnostics: ' + str(STATE / 'last-error.json')
+    raise RuntimeError(message)
+
+
 def run(args, data=None, check=True):
     p = subprocess.run(args, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if check and p.returncode:
         # Commands may contain secrets. Neither argv nor raw Docker/SQL errors are logged.
-        raise RuntimeError('%s failed (exit %d); inspect private remote state' % (args[0], p.returncode))
+        command_failed(args[0], p)
     return p
 
 
@@ -288,7 +300,7 @@ def db_command(action, container):
     p = subprocess.run(args, stdin=sys.stdin.buffer if action == 'restore' else subprocess.DEVNULL,
                        stdout=sys.stdout.buffer if action != 'restore' else subprocess.DEVNULL,
                        stderr=subprocess.PIPE)
-    require(p.returncode == 0, action + ' failed (exit %d)' % p.returncode)
+    if p.returncode: command_failed(action, p)
 
 
 def globals_import(container):
@@ -332,7 +344,9 @@ def manifest(container, only_table=None):
         for chunk in iter(lambda: p.stdout.read(1024 * 1024), b''):
             digest.update(chunk)
             rows += chunk.count(b'\n')
-        require(p.wait() == 0, 'table digest failed: ' + relation)
+        exit_code = p.wait()
+        if exit_code:
+            command_failed('table digest ' + relation, subprocess.CompletedProcess([], exit_code, b'', p.stderr.read()))
         output['tables'].append(dict(schema=table['n'], name=table['c'], rows=rows, sha256=digest.hexdigest()))
     sequences = json.loads(sql(container, "SELECT coalesce(json_agg(x ORDER BY n,c),'[]') FROM (SELECT n.nspname n,c.relname c FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind='S' AND n.nspname !~ '^pg_') x"))
     output['sequences'] = [{**s, 'state': sql(container, 'SELECT last_value,is_called FROM ' + identifier(s['n']) + '.' + identifier(s['c']))} for s in sequences]

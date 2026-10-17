@@ -113,5 +113,15 @@ class MigrationChecks(unittest.TestCase):
             m.globals_import('sub2api-postgres')
             self.assertNotIn('migration_bootstrap',run.call_args.args[1].decode())
 
+    def test_failure_retains_private_diagnostics_without_printing_secret(self):
+        error=subprocess.CompletedProcess([],42,b'',b'fixture-private-diagnostic')
+        with tempfile.TemporaryDirectory() as d,patch.object(m,'STATE',Path(d)):
+            with self.assertRaisesRegex(RuntimeError,'exit 42') as raised:m.command_failed('fixture-operation',error)
+            self.assertNotIn('fixture-private-diagnostic',str(raised.exception))
+            record=json.loads((Path(d)/'last-error.json').read_text())
+            self.assertEqual(record['exit_code'],42)
+            self.assertEqual(record['stderr'],'fixture-private-diagnostic')
+            self.assertEqual((Path(d)/'last-error.json').stat().st_mode & 0o777,0o600)
+
 
 if __name__=='__main__':unittest.main(verbosity=2)
