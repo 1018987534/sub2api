@@ -7,21 +7,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import LotteryView from '../LotteryView.vue'
 
-const { getAnnouncement, getCurrent, getRounds, showError, showSuccess } = vi.hoisted(() => ({
+const { getAnnouncement, getCurrent, getRounds, markRead, auth, showError, showSuccess } = vi.hoisted(() => ({
   getAnnouncement: vi.fn(),
   getCurrent: vi.fn(),
   getRounds: vi.fn(),
+  markRead: vi.fn(),
+  auth: { user: { id: 7 } },
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
 
 vi.mock('@/api/lottery', () => ({
-  default: { getAnnouncement, getCurrent, getRounds },
+  default: { getAnnouncement, getCurrent, getRounds, markRead },
 }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ showError, showSuccess }),
 }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => auth }))
 
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
@@ -208,5 +211,75 @@ describe('LotteryView participation and displayed counts', () => {
     expect(wrapper.find('button.btn-primary').text()).toContain('lottery.alreadyJoined')
     expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).not.toContain('lottery.noRound')
+  })
+})
+
+describe('LotteryView marks reminders read on viewing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    auth.user = { id: 7 }
+    markRead.mockResolvedValue(undefined)
+    getRounds.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getCurrent.mockResolvedValue({ enabled: true, current_round: round, joined: false, eligibility: { eligible: true }, recent_winners: [], my_recent_winners: [], current_round_unread: true, unread_winner_id: 0 })
+  })
+
+  it('acknowledges the round without participating and notifies the sidebar', async () => {
+    const listener = vi.fn()
+    window.addEventListener('lottery-availability-changed', listener)
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    expect(markRead).toHaveBeenCalledOnce()
+    expect(markRead).toHaveBeenCalledWith(round.id, 0)
+    expect(listener).toHaveBeenCalledOnce()
+    expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeUndefined()
+    window.removeEventListener('lottery-availability-changed', listener)
+    wrapper.unmount()
+  })
+
+  it('acknowledges only the latest prize returned by the viewed response', async () => {
+    getCurrent.mockResolvedValue({ enabled: true, current_round: round, joined: true, eligibility: { eligible: true }, recent_winners: [], my_recent_winners: [winner(9)], current_round_unread: false, unread_winner_id: 9 })
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    expect(markRead).toHaveBeenCalledOnce()
+    expect(markRead).toHaveBeenCalledWith(round.id, 9)
+    expect(wrapper.find('[data-testid="my-winners-section"]').text()).toContain('lottery.rewardCredited')
+    wrapper.unmount()
+  })
+
+  it('does not write read state for the public snapshot', async () => {
+    getAnnouncement.mockResolvedValue({ enabled: true, current_round: round, recent_winners: [] })
+    const wrapper = mount(LotteryView, { props: { snapshot: true }, global: { stubs } })
+    await flushPromises()
+    expect(markRead).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps reminders unread when saving the acknowledgement fails', async () => {
+    markRead.mockRejectedValue(new Error('offline'))
+    const listener = vi.fn()
+    window.addEventListener('lottery-availability-changed', listener)
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    expect(showError).toHaveBeenCalledOnce()
+    expect(listener).not.toHaveBeenCalled()
+    window.removeEventListener('lottery-availability-changed', listener)
+    wrapper.unmount()
+  })
+
+  it('ignores a previous account response and a page closed before loading', async () => {
+    let resolve!: (value: object) => void
+    getCurrent.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    auth.user = { id: 571 }
+    resolve({ enabled: true, current_round: round, current_round_unread: true, unread_winner_id: 9 })
+    await flushPromises()
+    expect(markRead).not.toHaveBeenCalled()
+    wrapper.unmount()
+    getCurrent.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const closed = mount(LotteryView, { global: { stubs } })
+    closed.unmount()
+    resolve({ enabled: true, current_round: round, current_round_unread: true, unread_winner_id: 9 })
+    await flushPromises()
+    expect(markRead).not.toHaveBeenCalled()
   })
 })

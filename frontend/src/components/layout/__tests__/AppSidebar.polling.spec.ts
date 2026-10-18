@@ -15,7 +15,7 @@ vi.mock('@/composables/useBatchImageAccess', () => ({ useBatchImageAccess: () =>
 vi.mock('@/utils/featureFlags', () => ({ FeatureFlags: {}, makeSidebarFlag: () => () => false }))
 vi.mock('@/utils/siteBillingMode', () => ({ resolveSiteBillingMode: () => 'recharge_only' }))
 vi.mock('@/stores', () => ({
-  useAuthStore: () => ({ isAdmin: true, isAuthenticated: true, isSimpleMode: false }),
+  useAuthStore: () => ({ isAdmin: true, isAuthenticated: true, isSimpleMode: false, user: { id: 7 } }),
   useAppStore: () => ({
     sidebarCollapsed: false, mobileOpen: false, sidebarScrollTop: 0,
     siteName: 'Test', siteLogo: '', siteVersion: '', publicSettingsLoaded: true,

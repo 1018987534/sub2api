@@ -270,6 +270,7 @@ let supportUnreadTimer: ReturnType<typeof setInterval> | undefined
 let supportUnreadRequest: Promise<void> | null = null
 let lotteryAvailabilityTimer: ReturnType<typeof setInterval> | undefined
 let lotteryAvailabilityRequest: Promise<void> | null = null
+let lotteryRequestGeneration = 0
 let sidebarPollingActive = false
 
 const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
@@ -306,22 +307,25 @@ function handleSupportChatRead() {
 
 async function refreshLotteryAvailability() {
   if (!sidebarPollingActive) return
-  if (!authStore.isAuthenticated) {
+  if (!authStore.isAuthenticated || !authStore.user?.id) {
     lotteryAvailable.value = false
     lotteryWon.value = false
     return
   }
   if (lotteryAvailabilityRequest) return lotteryAvailabilityRequest
+  const generation = lotteryRequestGeneration
   lotteryAvailabilityRequest = (async () => {
     try {
       const current = await lotteryAPI.getCurrent()
-      if (!sidebarPollingActive) return
+      if (!sidebarPollingActive || generation !== lotteryRequestGeneration) return
       if (appStore.cachedPublicSettings?.lottery_enabled !== current.enabled) {
         await appStore.fetchPublicSettings(true)
       }
-      lotteryWon.value = current.enabled && current.my_recent_winners?.length > 0
+      if (!sidebarPollingActive || generation !== lotteryRequestGeneration) return
+      lotteryWon.value = current.enabled && current.unread_winner_id > 0
       lotteryAvailable.value = Boolean(
         current.enabled &&
+        current.current_round_unread &&
         current.current_round?.status === 'open' &&
         !current.joined &&
         current.eligibility.eligible
@@ -329,7 +333,7 @@ async function refreshLotteryAvailability() {
     } catch {
       // Lottery availability is advisory and must not interrupt navigation.
     } finally {
-      lotteryAvailabilityRequest = null
+      if (generation === lotteryRequestGeneration) lotteryAvailabilityRequest = null
     }
   })()
   return lotteryAvailabilityRequest
@@ -344,12 +348,18 @@ function hasLotteryWon(path: string): boolean {
 }
 
 function handleLotteryAvailabilityChanged() {
+  lotteryRequestGeneration++
+  lotteryAvailabilityRequest = null
   void refreshLotteryAvailability()
 }
 
 watch(
-  [isAdmin, () => authStore.isAuthenticated],
+  [isAdmin, () => authStore.isAuthenticated, () => authStore.user?.id],
   () => {
+    lotteryRequestGeneration++
+    lotteryAvailabilityRequest = null
+    lotteryWon.value = false
+    lotteryAvailable.value = false
     void refreshSupportUnread()
     void refreshLotteryAvailability()
   },
@@ -1144,6 +1154,8 @@ function startSidebarPolling() {
 
 function stopSidebarPolling() {
   sidebarPollingActive = false
+  lotteryRequestGeneration++
+  lotteryAvailabilityRequest = null
   if (supportUnreadTimer) clearInterval(supportUnreadTimer)
   if (lotteryAvailabilityTimer) clearInterval(lotteryAvailabilityTimer)
   supportUnreadTimer = undefined

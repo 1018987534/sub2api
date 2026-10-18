@@ -85,18 +85,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import LotterySliderCaptcha from '@/components/lottery/LotterySliderCaptcha.vue'
 import lotteryAPI, { type LotteryCurrent, type LotteryRound, type LotteryWinner } from '@/api/lottery'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { extractApiErrorMessage } from '@/utils/apiError'
 
 const props = defineProps<{ snapshot?: boolean }>()
 const { t, locale } = useI18n()
 const appStore = useAppStore()
+const authStore = useAuthStore()
+let loadGeneration = 0
 const snapshot = computed(() => props.snapshot === true)
 const loading = ref(true)
 const refreshing = ref(false)
@@ -182,6 +185,8 @@ watch(() => current.value?.recent_winners.length ?? 0, () => {
 async function load(): Promise<void> {
   if (refreshing.value) return
   refreshing.value = true
+  const generation = ++loadGeneration
+  const userID = authStore.user?.id
   try {
     if (snapshot.value) {
       const announcement = await lotteryAPI.getAnnouncement()
@@ -191,13 +196,23 @@ async function load(): Promise<void> {
         joined: false,
         eligibility: { eligible: true, total_recharge: 0 },
         recent_winners: announcement.recent_winners,
-        my_recent_winners: []
+        my_recent_winners: [],
+        unread_winner_id: 0,
+        current_round_unread: false,
       }
       rounds.value = []
     } else {
       const [currentResult, roundsResult] = await Promise.all([lotteryAPI.getCurrent(), lotteryAPI.getRounds(1, 8)])
+      if (generation !== loadGeneration || userID !== authStore.user?.id) return
       current.value = currentResult
       rounds.value = roundsResult.items
+      loading.value = false
+      await nextTick()
+      if (generation !== loadGeneration || userID !== authStore.user?.id) return
+      if (currentResult.current_round_unread || currentResult.unread_winner_id > 0) {
+        await lotteryAPI.markRead(currentResult.current_round?.id ?? 0, currentResult.unread_winner_id)
+        if (userID === authStore.user?.id) window.dispatchEvent(new Event('lottery-availability-changed'))
+      }
     }
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, t('lottery.loadFailed')))
@@ -212,6 +227,7 @@ async function handleJoined(): Promise<void> {
 }
 
 onMounted(load)
+onBeforeUnmount(() => { loadGeneration++ })
 </script>
 
 <style scoped>

@@ -60,6 +60,8 @@ export interface LotteryCurrent {
   eligibility: LotteryEligibility
   recent_winners: LotteryWinner[]
   my_recent_winners: LotteryWinner[]
+  unread_winner_id: number
+  current_round_unread: boolean
 }
 
 export interface LotteryAnnouncement {
@@ -116,6 +118,9 @@ export const lotteryAPI = {
   async getCurrent() {
     const { data } = await apiClient.get<LotteryCurrent>('/lottery/current')
     return data
+  },
+  async markRead(roundID: number, throughWinnerID: number): Promise<void> {
+    await apiClient.post('/lottery/read', { round_id: roundID, through_winner_id: throughWinnerID })
   },
   async getCaptcha() {
     const { data } = await apiClient.get<LotteryCaptchaChallenge>('/lottery/captcha')
