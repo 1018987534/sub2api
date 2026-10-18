@@ -38,7 +38,7 @@ func TestLotteryLifecycleRealPostgres(t *testing.T) {
 		CREATE TABLE redeem_codes (used_by BIGINT,type TEXT,value NUMERIC,used_at TIMESTAMPTZ);
 		INSERT INTO users (id,email) SELECT n,'fixture-'||n||'@example.test' FROM generate_series(1,7) n;`)
 	require.NoError(t, err)
-	for _, file := range []string{"233_lottery.sql", "234_lottery_manual_progress.sql", "244_lottery_paused_rounds.sql", "244_lottery_paused_rounds.sql"} {
+	for _, file := range []string{"233_lottery.sql", "234_lottery_manual_progress.sql", "244_lottery_paused_rounds.sql", "244_lottery_paused_rounds.sql", "247_lottery_read_state.sql"} {
 		content, err := migrations.FS.ReadFile(file)
 		require.NoError(t, err)
 		tx, err := db.BeginTx(ctx, nil)

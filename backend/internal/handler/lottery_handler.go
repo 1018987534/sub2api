@@ -25,6 +25,11 @@ type lotteryJoinRequest struct {
 	CaptchaY  int    `json:"captcha_y"`
 }
 
+type lotteryReadRequest struct {
+	RoundID         int64 `json:"round_id" binding:"gte=0"`
+	ThroughWinnerID int64 `json:"through_winner_id" binding:"gte=0"`
+}
+
 type lotteryProgressRequest struct {
 	ParticipantCount int `json:"participant_count"`
 }
@@ -49,6 +54,24 @@ func (h *LotteryHandler) Current(c *gin.Context) {
 		return
 	}
 	response.Success(c, current)
+}
+
+func (h *LotteryHandler) MarkRead(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	var req lotteryReadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	if err := h.service.MarkRead(c.Request.Context(), subject.UserID, req.RoundID, req.ThroughWinnerID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"success": true})
 }
 
 // Announcement serves the unauthenticated, redacted payload used by the QQ
