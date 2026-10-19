@@ -43,7 +43,7 @@ func newLotteryEligibilityFixture(t *testing.T) (*LotteryService, LotteryConfig,
 		CREATE TABLE redeem_codes (used_by BIGINT,type TEXT,value NUMERIC,used_at TIMESTAMPTZ);
 		INSERT INTO users (id,email) SELECT n,'eligibility-'||n||'@example.test' FROM generate_series(1,9) n;`)
 	require.NoError(t, err)
-	for _, name := range []string{"233_lottery.sql", "234_lottery_manual_progress.sql", "244_lottery_paused_rounds.sql"} {
+	for _, name := range []string{"233_lottery.sql", "234_lottery_manual_progress.sql", "244_lottery_paused_rounds.sql", "247_lottery_read_state.sql"} {
 		content, err := migrations.FS.ReadFile(name)
 		require.NoError(t, err)
 		_, err = db.ExecContext(ctx, string(content))

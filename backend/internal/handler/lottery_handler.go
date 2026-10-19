@@ -11,18 +11,23 @@ import (
 )
 
 type LotteryHandler struct {
-	service        *service.LotteryService
-	captchaService *service.LotteryCaptchaService
+	service     *service.LotteryService
+	authService *service.AuthService
 }
 
-func NewLotteryHandler(lotteryService *service.LotteryService, captchaService *service.LotteryCaptchaService) *LotteryHandler {
-	return &LotteryHandler{service: lotteryService, captchaService: captchaService}
+func NewLotteryHandler(lotteryService *service.LotteryService, authService *service.AuthService) *LotteryHandler {
+	return &LotteryHandler{service: lotteryService, authService: authService}
 }
 
 type lotteryJoinRequest struct {
-	CaptchaID string `json:"captcha_id"`
-	CaptchaX  int    `json:"captcha_x"`
-	CaptchaY  int    `json:"captcha_y"`
+	TurnstileToken        string `json:"turnstile_token"`
+	TencentCaptchaTicket  string `json:"tencent_captcha_ticket"`
+	TencentCaptchaRandstr string `json:"tencent_captcha_randstr"`
+}
+
+type lotteryReadRequest struct {
+	RoundID         int64 `json:"round_id" binding:"gte=0"`
+	ThroughWinnerID int64 `json:"through_winner_id" binding:"gte=0"`
 }
 
 type lotteryProgressRequest struct {
@@ -51,6 +56,24 @@ func (h *LotteryHandler) Current(c *gin.Context) {
 	response.Success(c, current)
 }
 
+func (h *LotteryHandler) MarkRead(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	var req lotteryReadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request body")
+		return
+	}
+	if err := h.service.MarkRead(c.Request.Context(), subject.UserID, req.RoundID, req.ThroughWinnerID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"success": true})
+}
+
 // Announcement serves the unauthenticated, redacted payload used by the QQ
 // bot. It intentionally has no user-specific eligibility or participation data.
 func (h *LotteryHandler) Announcement(c *gin.Context) {
@@ -73,9 +96,8 @@ func (h *LotteryHandler) Join(c *gin.Context) {
 		response.BadRequest(c, "Invalid request body")
 		return
 	}
-	if err := h.captchaService.VerifyAndConsume(
-		c.Request.Context(), subject.UserID, ip.GetClientIP(c), req.CaptchaID, req.CaptchaX, req.CaptchaY,
-	); err != nil {
+	proof := captchaProof(req.TurnstileToken, req.TencentCaptchaTicket, req.TencentCaptchaRandstr)
+	if err := h.authService.VerifyCaptcha(c.Request.Context(), proof, ip.GetClientIP(c)); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -85,20 +107,6 @@ func (h *LotteryHandler) Join(c *gin.Context) {
 		return
 	}
 	response.Success(c, result)
-}
-
-func (h *LotteryHandler) Captcha(c *gin.Context) {
-	subject, ok := middleware2.GetAuthSubjectFromContext(c)
-	if !ok {
-		response.Unauthorized(c, "User not authenticated")
-		return
-	}
-	challenge, err := h.captchaService.Generate(c.Request.Context(), subject.UserID, ip.GetClientIP(c))
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, challenge)
 }
 
 func (h *LotteryHandler) AdminUpdateProgress(c *gin.Context) {

@@ -28,6 +28,7 @@ func TestLotteryCurrentPreservesCompletedRound(t *testing.T) {
 			columns := []string{"id", "round_id", "round_no", "email", "amount", "awarded", "joined"}
 			mock.ExpectQuery("FROM lottery_winners.*ORDER BY").WithArgs(lotteryRecentWinnerLimit).WillReturnRows(sqlmock.NewRows(columns).AddRow(1, 10, 10, "winner@example.com", 5, now, now))
 			mock.ExpectQuery("FROM lottery_winners.*WHERE w.user_id").WithArgs(int64(7), 20).WillReturnRows(sqlmock.NewRows(columns).AddRow(1, 10, 10, "winner@example.com", 5, now, now))
+			mock.ExpectQuery("SELECT COALESCE\\(MAX\\(id\\),0\\)").WithArgs(int64(7)).WillReturnRows(sqlmock.NewRows([]string{"latest_winner", "read_round", "read_winner"}).AddRow(1, 0, 0))
 
 			current, err := NewLotteryService(db, nil, nil).GetCurrent(context.Background(), 7)
 			require.NoError(t, err)
@@ -39,6 +40,8 @@ func TestLotteryCurrentPreservesCompletedRound(t *testing.T) {
 			require.False(t, current.Eligibility.Eligible)
 			require.Len(t, current.RecentWinners, 1)
 			require.Len(t, current.MyRecentWinners, 1)
+			require.Equal(t, int64(1), current.UnreadWinnerID)
+			require.True(t, current.CurrentRoundUnread)
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
 	}

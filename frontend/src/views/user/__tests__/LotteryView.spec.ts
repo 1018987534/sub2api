@@ -1,23 +1,33 @@
-import { readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { defineComponent, h } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import LotteryView from '../LotteryView.vue'
 
-const { getAnnouncement, getCurrent, getRounds, showError, showSuccess } = vi.hoisted(() => ({
+const { getAnnouncement, getCurrent, getRounds, markRead, auth, getPublicSettings, join, verifyAction, resetCaptcha, showError, showSuccess } = vi.hoisted(() => ({
   getAnnouncement: vi.fn(),
   getCurrent: vi.fn(),
   getRounds: vi.fn(),
+  markRead: vi.fn(),
+  auth: { user: { id: 7 } },
+  getPublicSettings: vi.fn(),
+  join: vi.fn(),
+  verifyAction: vi.fn(),
+  resetCaptcha: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
 
 vi.mock('@/api/lottery', () => ({
-  default: { getAnnouncement, getCurrent, getRounds },
+  default: { getAnnouncement, getCurrent, getRounds, markRead, join },
 }))
+
+vi.mock('@/api/auth', () => ({ getPublicSettings }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => auth }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ showError, showSuccess }),
@@ -28,10 +38,20 @@ vi.mock('vue-i18n', async (importOriginal) => {
   return { ...actual, useI18n: () => ({ t: (key: string) => key, locale: { value: 'zh-CN' } }) }
 })
 
+const CaptchaStub = defineComponent({
+  name: 'CaptchaChallenge',
+  props: ['turnstileEnabled', 'turnstileSiteKey', 'tencentEnabled', 'tencentAppId', 'tencentRegion', 'aliyunEnabled', 'aliyunSceneId', 'aliyunPrefix', 'aliyunRegion'],
+  emits: ['verify', 'expire', 'error'],
+  setup(_, { expose }) {
+    expose({ verifyAction, reset: resetCaptcha })
+    return () => h('div', { 'data-testid': 'login-captcha' })
+  },
+})
+
 const stubs = {
   AppLayout: { template: '<div><slot /></div>' },
   Icon: true,
-  LotterySliderCaptcha: true,
+  CaptchaChallenge: CaptchaStub,
   'router-link': true,
 }
 
@@ -67,26 +87,165 @@ const recentWinners = [
   ...Array.from({ length: 6 }, (_, index) => winner(index + 5, 1)),
 ]
 
-describe('LotteryView slider verification', () => {
-  const viewPath = resolve(dirname(fileURLToPath(import.meta.url)), '../LotteryView.vue')
-  const viewSource = readFileSync(viewPath, 'utf8')
-  const sliderPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/lottery/LotterySliderCaptcha.vue')
-  const sliderSource = readFileSync(sliderPath, 'utf8')
+beforeEach(() => {
+  vi.clearAllMocks()
+  auth.user = { id: 7 }
+  markRead.mockReset().mockResolvedValue(undefined)
+  getPublicSettings.mockReset().mockResolvedValue({ turnstile_enabled: false, turnstile_site_key: '' })
+  verifyAction.mockReset().mockResolvedValue({ token: 'fixture-ticket', randstr: 'fixture-randstr' })
+  join.mockReset().mockResolvedValue({ round_id: 3, round_no: 3, participant_count: 5 })
+  getCurrent.mockResolvedValue({ enabled: true, current_round: round, joined: false, eligibility: { eligible: true, total_recharge: 0 }, recent_winners: recentWinners, my_recent_winners: [] })
+  getRounds.mockResolvedValue({ items: [], total: 0, pages: 0 })
+})
 
-  it('requires a fresh self-hosted slider proof before joining', () => {
-    expect(viewSource).toContain('<LotterySliderCaptcha')
-    expect(sliderSource).toContain('await lotteryAPI.getCaptcha()')
-    expect(sliderSource).toContain('captcha_id: challenge.value.id')
-    expect(sliderSource).toContain('captcha_x: point.x')
-    expect(sliderSource).toContain('captcha_y: point.y')
-    expect(viewSource).toContain("window.dispatchEvent(new Event('lottery-availability-changed'))")
+describe('LotteryView login captcha', () => {
+  function mountView() { return mount(LotteryView, { global: { stubs } }) }
+
+  it('uses the login Tencent configuration and proof', async () => {
+    getPublicSettings.mockResolvedValue({ turnstile_enabled: false, tencent_captcha_enabled: true, tencent_captcha_app_id: 'fixture-app', tencent_captcha_region: 'intl' })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.getComponent(CaptchaStub).props()).toMatchObject({ tencentEnabled: true, tencentAppId: 'fixture-app', tencentRegion: 'intl' })
+    const event = vi.spyOn(window, 'dispatchEvent')
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(verifyAction).toHaveBeenCalledOnce()
+    expect(join).toHaveBeenCalledWith({ tencent_captcha_ticket: 'fixture-ticket', tencent_captcha_randstr: 'fixture-randstr' })
+    expect(showSuccess).toHaveBeenCalledWith('lottery.joinSuccess')
+    expect(resetCaptcha).toHaveBeenCalledOnce()
+    expect(event.mock.calls.some(([value]) => value.type === 'lottery-availability-changed')).toBe(true)
+    event.mockRestore()
+    wrapper.unmount()
   })
 
-  it('does not depend on Tencent or Aliyun captcha settings', () => {
-    expect(viewSource).not.toContain('CaptchaChallenge')
-    expect(viewSource).not.toContain('tencentCaptchaEnabled')
-    expect(viewSource).not.toContain('aliyunCaptchaEnabled')
-    expect(sliderSource).toContain("from 'go-captcha-vue'")
+  it('uses the login Aliyun scene and passes its token in turnstile_token', async () => {
+    getPublicSettings.mockResolvedValue({ turnstile_enabled: false, aliyun_captcha_enabled: true, aliyun_captcha_scene_id: 'fixture-scene', aliyun_captcha_prefix: 'fixture-prefix', aliyun_captcha_region: 'sgp' })
+    verifyAction.mockResolvedValue({ token: 'fixture-aliyun-param', randstr: '' })
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.getComponent(CaptchaStub).props()).toMatchObject({ aliyunEnabled: true, aliyunSceneId: 'fixture-scene', aliyunPrefix: 'fixture-prefix', aliyunRegion: 'sgp' })
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(join).toHaveBeenCalledWith({ turnstile_token: 'fixture-aliyun-param' })
+    expect(resetCaptcha).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
+  it('requires the login Turnstile proof and resets it after submitting', async () => {
+    getPublicSettings.mockResolvedValue({ turnstile_enabled: true, turnstile_site_key: 'fixture-site-key' })
+    const wrapper = mountView()
+    await flushPromises()
+    const button = wrapper.get('button.btn-primary')
+    const captcha = wrapper.getComponent(CaptchaStub)
+    expect(captcha.props()).toMatchObject({ turnstileEnabled: true, turnstileSiteKey: 'fixture-site-key' })
+    expect(button.attributes('disabled')).toBeDefined()
+    await button.trigger('click')
+    expect(join).not.toHaveBeenCalled()
+    captcha.vm.$emit('verify', 'fixture-turnstile-token')
+    await wrapper.vm.$nextTick()
+    await button.trigger('click')
+    await flushPromises()
+    expect(join).toHaveBeenCalledWith({ turnstile_token: 'fixture-turnstile-token' })
+    expect(verifyAction).not.toHaveBeenCalled()
+    expect(resetCaptcha).toHaveBeenCalledOnce()
+    expect(button.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it.each(['expire', 'error'])('invalidates the proof on %s without submitting', async event => {
+    getPublicSettings.mockResolvedValue({ turnstile_enabled: true, turnstile_site_key: 'fixture-site-key' })
+    const wrapper = mountView()
+    await flushPromises()
+    const captcha = wrapper.getComponent(CaptchaStub)
+    captcha.vm.$emit('verify', 'fixture-token')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeUndefined()
+    captcha.vm.$emit(event)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeDefined()
+    expect(showError).toHaveBeenCalledWith(event === 'expire' ? 'auth.turnstileExpired' : 'auth.turnstileFailed')
+    expect(join).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('does not submit when login verification is cancelled', async () => {
+    getPublicSettings.mockResolvedValue({ turnstile_enabled: false, tencent_captcha_enabled: true, tencent_captcha_app_id: 'fixture-app' })
+    verifyAction.mockResolvedValue(null)
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(join).not.toHaveBeenCalled()
+    expect(showSuccess).not.toHaveBeenCalled()
+    expect(wrapper.get('button.btn-primary').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('obtains a fresh proof after a failed API request', async () => {
+    getPublicSettings.mockResolvedValue({ turnstile_enabled: false, tencent_captcha_enabled: true, tencent_captcha_app_id: 'fixture-app' })
+    join.mockRejectedValueOnce(new Error('fixture failure')).mockResolvedValueOnce({ round_id: 3 })
+    verifyAction.mockResolvedValueOnce({ token: 'fixture-ticket-1', randstr: 'rand-1' }).mockResolvedValueOnce({ token: 'fixture-ticket-2', randstr: 'rand-2' })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(resetCaptcha).toHaveBeenCalledOnce()
+    expect(showError).toHaveBeenCalled()
+    expect(showSuccess).not.toHaveBeenCalled()
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(verifyAction).toHaveBeenCalledTimes(2)
+    expect(join).toHaveBeenNthCalledWith(2, { tencent_captcha_ticket: 'fixture-ticket-2', tencent_captcha_randstr: 'rand-2' })
+    wrapper.unmount()
+  })
+
+  it('prevents duplicate entry while verification is pending', async () => {
+    getPublicSettings.mockResolvedValue({ turnstile_enabled: false, tencent_captcha_enabled: true, tencent_captcha_app_id: 'fixture-app' })
+    let finish!: (proof: { token: string; randstr: string }) => void
+    verifyAction.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    const button = wrapper.get('button.btn-primary')
+    await button.trigger('click')
+    await button.trigger('click')
+    expect(verifyAction).toHaveBeenCalledOnce()
+    expect(join).not.toHaveBeenCalled()
+    finish({ token: 'fixture-ticket', randstr: 'fixture-randstr' })
+    await flushPromises()
+    expect(join).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
+  it('does not permit entry if public settings fail to load', async () => {
+    getPublicSettings.mockRejectedValue(new Error('fixture unavailable'))
+    const wrapper = mountView()
+    await flushPromises()
+    expect(join).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalled()
+    expect(wrapper.find('button.btn-primary').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('matches login when disabled and never loads verification for snapshots', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('button.btn-primary').trigger('click')
+    await flushPromises()
+    expect(join).toHaveBeenCalledWith({})
+    expect(wrapper.findComponent(CaptchaStub).exists()).toBe(false)
+    wrapper.unmount()
+    getPublicSettings.mockClear()
+    getAnnouncement.mockResolvedValue({ enabled: true, current_round: round, recent_winners: [] })
+    const snapshot = mount(LotteryView, { props: { snapshot: true }, global: { stubs } })
+    await flushPromises()
+    expect(getPublicSettings).not.toHaveBeenCalled()
+    expect(snapshot.findComponent(CaptchaStub).exists()).toBe(false)
+    snapshot.unmount()
+  })
+
+  it('removes the standalone slider component', () => {
+    const slider = resolve(dirname(fileURLToPath(import.meta.url)), '../../../components/lottery/LotterySliderCaptcha.vue')
+    expect(existsSync(slider)).toBe(false)
   })
 })
 
@@ -208,5 +367,75 @@ describe('LotteryView participation and displayed counts', () => {
     expect(wrapper.find('button.btn-primary').text()).toContain('lottery.alreadyJoined')
     expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).not.toContain('lottery.noRound')
+  })
+})
+
+describe('LotteryView marks reminders read on viewing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    auth.user = { id: 7 }
+    markRead.mockResolvedValue(undefined)
+    getRounds.mockResolvedValue({ items: [], total: 0, pages: 0 })
+    getCurrent.mockResolvedValue({ enabled: true, current_round: round, joined: false, eligibility: { eligible: true }, recent_winners: [], my_recent_winners: [], current_round_unread: true, unread_winner_id: 0 })
+  })
+
+  it('acknowledges the round without participating and notifies the sidebar', async () => {
+    const listener = vi.fn()
+    window.addEventListener('lottery-availability-changed', listener)
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    expect(markRead).toHaveBeenCalledOnce()
+    expect(markRead).toHaveBeenCalledWith(round.id, 0)
+    expect(listener).toHaveBeenCalledOnce()
+    expect(wrapper.find('button.btn-primary').attributes('disabled')).toBeUndefined()
+    window.removeEventListener('lottery-availability-changed', listener)
+    wrapper.unmount()
+  })
+
+  it('acknowledges only the latest prize returned by the viewed response', async () => {
+    getCurrent.mockResolvedValue({ enabled: true, current_round: round, joined: true, eligibility: { eligible: true }, recent_winners: [], my_recent_winners: [winner(9)], current_round_unread: false, unread_winner_id: 9 })
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    expect(markRead).toHaveBeenCalledOnce()
+    expect(markRead).toHaveBeenCalledWith(round.id, 9)
+    expect(wrapper.find('[data-testid="my-winners-section"]').text()).toContain('lottery.rewardCredited')
+    wrapper.unmount()
+  })
+
+  it('does not write read state for the public snapshot', async () => {
+    getAnnouncement.mockResolvedValue({ enabled: true, current_round: round, recent_winners: [] })
+    const wrapper = mount(LotteryView, { props: { snapshot: true }, global: { stubs } })
+    await flushPromises()
+    expect(markRead).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps reminders unread when saving the acknowledgement fails', async () => {
+    markRead.mockRejectedValue(new Error('offline'))
+    const listener = vi.fn()
+    window.addEventListener('lottery-availability-changed', listener)
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    await flushPromises()
+    expect(showError).toHaveBeenCalledOnce()
+    expect(listener).not.toHaveBeenCalled()
+    window.removeEventListener('lottery-availability-changed', listener)
+    wrapper.unmount()
+  })
+
+  it('ignores a previous account response and a page closed before loading', async () => {
+    let resolve!: (value: object) => void
+    getCurrent.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const wrapper = mount(LotteryView, { global: { stubs } })
+    auth.user = { id: 571 }
+    resolve({ enabled: true, current_round: round, current_round_unread: true, unread_winner_id: 9 })
+    await flushPromises()
+    expect(markRead).not.toHaveBeenCalled()
+    wrapper.unmount()
+    getCurrent.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const closed = mount(LotteryView, { global: { stubs } })
+    closed.unmount()
+    resolve({ enabled: true, current_round: round, current_round_unread: true, unread_winner_id: 9 })
+    await flushPromises()
+    expect(markRead).not.toHaveBeenCalled()
   })
 })

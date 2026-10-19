@@ -4,7 +4,7 @@ import AppSidebar from '../AppSidebar.vue'
 
 const state = vi.hoisted(() => ({
   lottery: vi.fn(),
-  auth: { isAdmin: true, isAuthenticated: true, isSimpleMode: false },
+  auth: { isAdmin: true, isAuthenticated: true, isSimpleMode: false, user: { id: 7 } },
   app: {
     sidebarCollapsed: false, mobileOpen: false, sidebarScrollTop: 0,
     siteName: 'Test', siteLogo: '', siteVersion: '', publicSettingsLoaded: true,
@@ -22,18 +22,24 @@ vi.mock('vue-router', () => ({ useRoute: () => ({ path: '/monitor' }), useRouter
 vi.mock('@/composables/useBatchImageAccess', () => ({ useBatchImageAccess: () => ({ canUseBatchImage: { value: false }, refreshBatchImageAccess: vi.fn() }) }))
 vi.mock('@/utils/featureFlags', () => ({ FeatureFlags: {}, makeSidebarFlag: () => () => true }))
 vi.mock('@/utils/siteBillingMode', () => ({ resolveSiteBillingMode: () => 'recharge_only' }))
-vi.mock('@/stores', () => ({
+vi.mock('@/stores', async () => {
+  const { reactive } = await import('vue')
+  state.auth = reactive(state.auth)
+  return {
   useAuthStore: () => state.auth,
   useAppStore: () => state.app,
   useAdminSettingsStore: () => ({ customMenuItems: [], fetch: vi.fn(), opsMonitoringEnabled: false, paymentEnabled: false }),
   useOnboardingStore: () => ({ isCurrentStep: () => false }),
-}))
+  }
+})
 
 const winner = { id: 9, round_no: 22, prize_amount: 5 }
 const current = (won: boolean, joined = true) => ({
   enabled: true, current_round: { status: 'drawn' }, joined,
   eligibility: { eligible: false }, recent_winners: [winner],
   my_recent_winners: won ? [winner] : [],
+  unread_winner_id: won ? winner.id : 0,
+  current_round_unread: true,
 })
 let wrapper: VueWrapper | undefined
 function render() {
@@ -47,6 +53,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   state.auth.isAdmin = true
   state.auth.isAuthenticated = true
+  state.auth.user = { id: 7 }
   state.app.sidebarCollapsed = false
   state.lottery.mockResolvedValue(current(false))
 })
@@ -95,5 +102,65 @@ describe('AppSidebar lottery winner badge', () => {
     window.dispatchEvent(new Event('lottery-availability-changed'))
     await flushPromises()
     expect(view.find('a[href="/lottery"] [role="status"]').exists()).toBe(false)
+  })
+
+  it('shows only unread winnings, keeps read prizes hidden after remount, and alerts on a new win', async () => {
+    const visible = () => wrapper!.find('a[href="/lottery"] [aria-label="您已中奖，查看中奖记录"]').exists()
+    const observed: Record<string, boolean> = {}
+    render()
+    await flushPromises()
+    observed.nonWinner = visible()
+    state.lottery.mockResolvedValue(current(true))
+    window.dispatchEvent(new Event('lottery-availability-changed'))
+    await flushPromises()
+    observed.unreadWin = visible()
+    state.lottery.mockResolvedValue({ ...current(true), unread_winner_id: 0 })
+    window.dispatchEvent(new Event('lottery-availability-changed'))
+    await flushPromises()
+    observed.readWin = visible()
+    wrapper!.unmount()
+    render()
+    await flushPromises()
+    observed.readAfterRemount = visible()
+    state.lottery.mockResolvedValue({ ...current(true), unread_winner_id: 10 })
+    await vi.advanceTimersByTimeAsync(15_000)
+    observed.newWin = visible()
+    console.info(`badge-transitions=${JSON.stringify(observed)}`)
+    expect(observed).toEqual({ nonWinner: false, unreadWin: true, readWin: false, readAfterRemount: false, newWin: true })
+  })
+
+  it('clears the previous account prize immediately and ignores its late response', async () => {
+    let resolvePrevious!: (value: ReturnType<typeof current>) => void
+    state.lottery.mockImplementationOnce(() => new Promise(resolve => { resolvePrevious = resolve }))
+    const view = render()
+    state.auth.user = { id: 571 }
+    state.lottery.mockResolvedValue(current(false))
+    await flushPromises()
+    resolvePrevious(current(true))
+    await flushPromises()
+    console.info(`account-switch: nonWinnerPrize=${view.find('a[href="/lottery"] [role="status"]').exists()}`)
+    expect(view.find('a[href="/lottery"] [role="status"]').exists()).toBe(false)
+  })
+
+  it('clears the participation dot on read without joining and shows it for the next unread round', async () => {
+    const available = { ...current(false, false), current_round: { id: 22, status: 'open' }, eligibility: { eligible: true } }
+    state.lottery.mockResolvedValue(available)
+    render()
+    await flushPromises()
+    const visible = () => wrapper!.find('a[href="/lottery"] [aria-label="nav.lotteryAvailable"]').exists()
+    const observed: Record<string, boolean> = { unreadRound: visible() }
+    state.lottery.mockResolvedValue({ ...available, current_round_unread: false })
+    window.dispatchEvent(new Event('lottery-availability-changed'))
+    await flushPromises()
+    observed.readWithoutJoining = visible()
+    wrapper!.unmount()
+    render()
+    await flushPromises()
+    observed.readAfterRemount = visible()
+    state.lottery.mockResolvedValue({ ...available, current_round: { id: 23, status: 'open' } })
+    await vi.advanceTimersByTimeAsync(15_000)
+    observed.nextRound = visible()
+    console.info(`dot-transitions=${JSON.stringify(observed)}`)
+    expect(observed).toEqual({ unreadRound: true, readWithoutJoining: false, readAfterRemount: false, nextRound: true })
   })
 })

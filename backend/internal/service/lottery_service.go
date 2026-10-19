@@ -110,12 +110,14 @@ type LotteryEligibility struct {
 }
 
 type LotteryCurrent struct {
-	Enabled         bool                `json:"enabled"`
-	CurrentRound    *LotteryPublicRound `json:"current_round,omitempty"`
-	Joined          bool                `json:"joined"`
-	Eligibility     LotteryEligibility  `json:"eligibility"`
-	RecentWinners   []LotteryWinner     `json:"recent_winners"`
-	MyRecentWinners []LotteryWinner     `json:"my_recent_winners"`
+	Enabled            bool                `json:"enabled"`
+	CurrentRound       *LotteryPublicRound `json:"current_round,omitempty"`
+	Joined             bool                `json:"joined"`
+	Eligibility        LotteryEligibility  `json:"eligibility"`
+	RecentWinners      []LotteryWinner     `json:"recent_winners"`
+	MyRecentWinners    []LotteryWinner     `json:"my_recent_winners"`
+	UnreadWinnerID     int64               `json:"unread_winner_id"`
+	CurrentRoundUnread bool                `json:"current_round_unread"`
 }
 
 // LotteryAnnouncement is the intentionally small public payload consumed by
@@ -473,8 +475,36 @@ func (s *LotteryService) GetCurrent(ctx context.Context, userID int64) (LotteryC
 		if err != nil {
 			return LotteryCurrent{}, err
 		}
+		var latestWinnerID, lastReadRoundID, lastReadWinnerID int64
+		if err := s.db.QueryRowContext(ctx, `
+			SELECT COALESCE(MAX(id),0),
+			       COALESCE((SELECT last_read_round_id FROM lottery_read_state WHERE user_id=$1),0),
+			       COALESCE((SELECT last_read_winner_id FROM lottery_read_state WHERE user_id=$1),0)
+			FROM lottery_winners WHERE user_id=$1`, userID).Scan(&latestWinnerID, &lastReadRoundID, &lastReadWinnerID); err != nil {
+			return LotteryCurrent{}, err
+		}
+		if latestWinnerID > lastReadWinnerID {
+			out.UnreadWinnerID = latestWinnerID
+		}
+		out.CurrentRoundUnread = out.CurrentRound != nil && out.CurrentRound.ID > lastReadRoundID
 	}
 	return out, nil
+}
+
+// MarkRead acknowledges the observed round and the owner's latest observed
+// prize. Monotonic cursors keep concurrent page loads from reviving reminders.
+func (s *LotteryService) MarkRead(ctx context.Context, userID, roundID, throughWinnerID int64) error {
+	if userID <= 0 || roundID < 0 || throughWinnerID < 0 || (roundID == 0 && throughWinnerID == 0) {
+		return infraerrors.BadRequest("LOTTERY_READ_INVALID", "a positive round or winner ID is required")
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO lottery_read_state (user_id,last_read_round_id,last_read_winner_id,updated_at)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (user_id) DO UPDATE SET
+			last_read_round_id=GREATEST(lottery_read_state.last_read_round_id,EXCLUDED.last_read_round_id),
+			last_read_winner_id=GREATEST(lottery_read_state.last_read_winner_id,EXCLUDED.last_read_winner_id),
+			updated_at=EXCLUDED.updated_at`, userID, roundID, throughWinnerID, s.now())
+	return err
 }
 
 // GetAnnouncement returns the public lottery state used by the QQ notifier.
