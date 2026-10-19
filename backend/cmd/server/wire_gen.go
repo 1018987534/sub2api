@@ -329,12 +329,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	batchImageHandler := handler.ProvideBatchImageHandler(batchImagePublicService, batchImageDownloadService, batchImageCleanupService, openAIGatewayHandler)
 	supportChatHandler := handler.NewSupportChatHandler(db, redisClient)
 	lotteryService := service.NewLotteryService(db, apiKeyAuthCacheInvalidator, billingCacheService)
-	lotteryCaptchaStore := repository.NewLotteryCaptchaStore(redisClient)
-	lotteryCaptchaService, err := service.NewLotteryCaptchaService(lotteryCaptchaStore)
-	if err != nil {
-		return nil, err
-	}
-	lotteryHandler := handler.NewLotteryHandler(lotteryService, lotteryCaptchaService)
+	lotteryHandler := handler.NewLotteryHandler(lotteryService, authService)
 	idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, configConfig)
 	openAIQuotaAutoResetService := service.ProvideOpenAIQuotaAutoResetService(accountRepository, openAIQuotaService, rateLimitService, idempotencyCoordinator, auditLogService, settingService, leaderLockCache)
 	handlers := handler.ProvideHandlers(authHandler, userHandler, apiKeyHandler, usageHandler, redeemHandler, subscriptionHandler, announcementHandler, channelMonitorUserHandler, channelMonitorV2Handler, intelligenceHandler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, passkeyHandler, handlerPaymentHandler, paymentWebhookHandler, availableChannelHandler, modelPlazaHandler, asyncImageHandler, batchImageHandler, supportChatHandler, lotteryHandler, idempotencyCoordinator, idempotencyCleanupService, openAIQuotaAutoResetService)

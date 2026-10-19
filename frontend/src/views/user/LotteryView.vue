@@ -2,7 +2,7 @@
   <AppLayout class="lottery-page" :data-lottery-snapshot-ready="snapshot && !loading && !!current ? 'true' : undefined">
     <div class="mx-auto max-w-5xl space-y-6">
       <div data-lottery-capture-region="true" class="grid items-start gap-4 lg:grid-cols-[1.5fr_1fr]">
-        <section class="card overflow-hidden lg:h-[26rem]">
+        <section class="card overflow-hidden" :class="snapshot ? 'lg:h-[26rem]' : 'lg:min-h-[26rem]'">
           <div class="border-b border-gray-100 px-6 py-5 dark:border-dark-700">
             <div class="flex items-start justify-between gap-4">
               <div>
@@ -32,7 +32,25 @@
             </div>
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div><p class="text-sm font-medium" :class="current.current_round.status === 'drawn' ? 'text-emerald-700 dark:text-emerald-300' : 'text-gray-900 dark:text-white'">{{ participationStatus }}</p><p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ participationRule }}</p></div>
-              <button v-if="!snapshot" type="button" class="btn btn-primary min-w-32" :disabled="!canJoin || showCaptcha" @click="showCaptcha = true"><Icon name="sparkles" size="sm" class="mr-2" />{{ current.joined ? t('lottery.alreadyJoined') : t('lottery.joinNow') }}</button>
+              <div v-if="!snapshot" class="space-y-3">
+                <CaptchaChallenge
+                  v-if="canJoin && captchaEnabled"
+                  ref="captchaRef"
+                  :turnstile-enabled="turnstileEnabled"
+                  :turnstile-site-key="publicSettings?.turnstile_site_key || ''"
+                  :tencent-enabled="tencentCaptchaEnabled"
+                  :tencent-app-id="publicSettings?.tencent_captcha_app_id || ''"
+                  :tencent-region="publicSettings?.tencent_captcha_region || 'cn'"
+                  :aliyun-enabled="aliyunCaptchaEnabled"
+                  :aliyun-scene-id="publicSettings?.aliyun_captcha_scene_id || ''"
+                  :aliyun-prefix="publicSettings?.aliyun_captcha_prefix || ''"
+                  :aliyun-region="publicSettings?.aliyun_captcha_region || 'cn'"
+                  @verify="onCaptchaVerify"
+                  @expire="onCaptchaExpire"
+                  @error="onCaptchaError"
+                />
+                <button type="button" class="btn btn-primary min-w-32" :disabled="!canJoin || joining || !publicSettings || (turnstileEnabled && !captchaToken)" @click="join"><Icon :name="joining ? 'refresh' : 'sparkles'" size="sm" class="mr-2" :class="{ 'animate-spin': joining }" />{{ current.joined ? t('lottery.alreadyJoined') : joining ? t('lottery.joining') : t('lottery.joinNow') }}</button>
+              </div>
               <router-link v-else-if="current.current_round.status === 'open'" to="/login" class="btn btn-primary min-w-32"><Icon name="sparkles" size="sm" class="mr-2" />{{ t('lottery.joinNow') }}</router-link>
             </div>
           </div>
@@ -80,7 +98,6 @@
         </div>
       </section>
     </div>
-    <LotterySliderCaptcha v-if="!snapshot" :show="showCaptcha" @close="showCaptcha = false" @joined="handleJoined" />
   </AppLayout>
 </template>
 
@@ -89,8 +106,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
-import LotterySliderCaptcha from '@/components/lottery/LotterySliderCaptcha.vue'
-import lotteryAPI, { type LotteryCurrent, type LotteryRound, type LotteryWinner } from '@/api/lottery'
+import CaptchaChallenge from '@/components/CaptchaChallenge.vue'
+import { getPublicSettings } from '@/api/auth'
+import type { PublicSettings } from '@/types'
+import lotteryAPI, { type LotteryCaptchaProof, type LotteryCurrent, type LotteryRound, type LotteryWinner } from '@/api/lottery'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { extractApiErrorMessage } from '@/utils/apiError'
@@ -103,7 +122,20 @@ let loadGeneration = 0
 const snapshot = computed(() => props.snapshot === true)
 const loading = ref(true)
 const refreshing = ref(false)
-const showCaptcha = ref(false)
+const joining = ref(false)
+const captchaRef = ref<InstanceType<typeof CaptchaChallenge> | null>(null)
+const captchaToken = ref('')
+const publicSettings = ref<PublicSettings | null>(null)
+const turnstileEnabled = computed(() => publicSettings.value?.turnstile_enabled === true)
+const tencentCaptchaEnabled = computed(() => publicSettings.value?.tencent_captcha_enabled === true)
+const aliyunCaptchaEnabled = computed(() => publicSettings.value?.aliyun_captcha_enabled === true)
+const actionCaptchaEnabled = computed(() =>
+  (tencentCaptchaEnabled.value && Boolean(publicSettings.value?.tencent_captcha_app_id)) ||
+  (aliyunCaptchaEnabled.value && Boolean(publicSettings.value?.aliyun_captcha_scene_id) && Boolean(publicSettings.value?.aliyun_captcha_prefix))
+)
+const captchaEnabled = computed(() =>
+  (turnstileEnabled.value && Boolean(publicSettings.value?.turnstile_site_key)) || actionCaptchaEnabled.value
+)
 const current = ref<LotteryCurrent | null>(null)
 const rounds = ref<LotteryRound[]>([])
 const recentWinnersVisibleCount = ref(10)
@@ -202,10 +234,13 @@ async function load(): Promise<void> {
       }
       rounds.value = []
     } else {
-      const [currentResult, roundsResult] = await Promise.all([lotteryAPI.getCurrent(), lotteryAPI.getRounds(1, 8)])
+      const [currentResult, roundsResult, settings] = await Promise.all([
+        lotteryAPI.getCurrent(), lotteryAPI.getRounds(1, 8), getPublicSettings()
+      ])
       if (generation !== loadGeneration || userID !== authStore.user?.id) return
       current.value = currentResult
       rounds.value = roundsResult.items
+      publicSettings.value = settings
       loading.value = false
       await nextTick()
       if (generation !== loadGeneration || userID !== authStore.user?.id) return
@@ -219,11 +254,49 @@ async function load(): Promise<void> {
   } finally { loading.value = false; refreshing.value = false }
 }
 
-async function handleJoined(): Promise<void> {
-  showCaptcha.value = false
-  appStore.showSuccess(t('lottery.joinSuccess'))
-  await load()
-  window.dispatchEvent(new Event('lottery-availability-changed'))
+function onCaptchaVerify(token: string): void {
+  captchaToken.value = token
+}
+
+function onCaptchaExpire(): void {
+  captchaToken.value = ''
+  appStore.showError(t('auth.turnstileExpired'))
+}
+
+function onCaptchaError(): void {
+  captchaToken.value = ''
+  appStore.showError(t('auth.turnstileFailed'))
+}
+
+async function join(): Promise<void> {
+  if (snapshot.value || !canJoin.value || joining.value || !publicSettings.value) return
+  if (turnstileEnabled.value && !captchaToken.value) {
+    appStore.showError(t('auth.completeVerification'))
+    return
+  }
+  joining.value = true
+  try {
+    let proof: LotteryCaptchaProof = {}
+    if (actionCaptchaEnabled.value) {
+      const result = await captchaRef.value?.verifyAction()
+      if (!result) return
+      proof = tencentCaptchaEnabled.value
+        ? { tencent_captcha_ticket: result.token, tencent_captcha_randstr: result.randstr }
+        : { turnstile_token: result.token }
+    } else if (turnstileEnabled.value) {
+      proof = { turnstile_token: captchaToken.value }
+    }
+    await lotteryAPI.join(proof)
+    appStore.showSuccess(t('lottery.joinSuccess'))
+    await load()
+    window.dispatchEvent(new Event('lottery-availability-changed'))
+  } catch (error) {
+    appStore.showError(extractApiErrorMessage(error, t('lottery.joinFailed')))
+  } finally {
+    captchaRef.value?.reset()
+    captchaToken.value = ''
+    joining.value = false
+  }
 }
 
 onMounted(load)

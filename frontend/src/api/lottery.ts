@@ -93,21 +93,11 @@ export interface LotteryParticipant {
   joined_at: string
 }
 
-export interface LotteryCaptchaChallenge {
-  id: string
-  image: string
-  thumb: string
-  thumb_x: number
-  thumb_y: number
-  thumb_width: number
-  thumb_height: number
-  expires_in: number
-}
-
+// Lottery entry uses the same proof fields and provider as login.
 export interface LotteryCaptchaProof {
-  captcha_id: string
-  captcha_x: number
-  captcha_y: number
+  turnstile_token?: string
+  tencent_captcha_ticket?: string
+  tencent_captcha_randstr?: string
 }
 
 export const lotteryAPI = {
@@ -121,10 +111,6 @@ export const lotteryAPI = {
   },
   async markRead(roundID: number, throughWinnerID: number): Promise<void> {
     await apiClient.post('/lottery/read', { round_id: roundID, through_winner_id: throughWinnerID })
-  },
-  async getCaptcha() {
-    const { data } = await apiClient.get<LotteryCaptchaChallenge>('/lottery/captcha')
-    return data
   },
   async join(proof: LotteryCaptchaProof) {
     const { data } = await apiClient.post<LotteryJoinResult>('/lottery/join', proof)
