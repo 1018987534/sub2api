@@ -1163,6 +1163,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 			plan.selectionOrder,
 			s.service.rateLimitService.firstTokenLatencyStatsCache,
 			s.service.openAIOAuthSchedulingRateMultiplier(ctx),
+			s.service.rateLimitService,
 		)
 	}
 	return plan
@@ -1174,6 +1175,7 @@ func applyOpenAIFirstTokenPriorityOrder(
 	selectionOrder []openAIAccountCandidateScore,
 	cache FirstTokenLatencyStatsCache,
 	oauthSchedulingRateMultiplier *float64,
+	cacheStatsService *RateLimitService,
 ) []openAIAccountCandidateScore {
 	if len(selectionOrder) <= 1 {
 		return selectionOrder
@@ -1221,6 +1223,7 @@ func applyOpenAIFirstTokenPriorityOrder(
 			allowProbe,
 			false, // Manual probes are claimed only after selectManualProbe acquires a slot.
 			&req,
+			cacheStatsService,
 		)
 		sort.SliceStable(selectionOrder[start:end], func(i, j int) bool {
 			return ranks[selectionOrder[start+i].account.ID] < ranks[selectionOrder[start+j].account.ID]
