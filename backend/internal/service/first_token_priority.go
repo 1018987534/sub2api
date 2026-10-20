@@ -376,8 +376,8 @@ func (s *SettingService) FirstTokenPriorityEnabled(ctx context.Context) bool {
 }
 
 // firstTokenPriorityOrder returns every candidate. The fast pool retains the
-// caller's low-rate order, refined by cache rate above 80% when all candidates
-// are fast. The slow pool uses normal total duration. When an adaptive probe is due,
+// caller's low-rate order, refined by cache rate above 80% within that pool.
+// The slow pool uses normal total duration. When an adaptive probe is due,
 // a shared lease promotes exactly one account across all gateway instances.
 func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache) []int64 {
 	return firstTokenPriorityOrderWithProbe(ctx, candidates, cache, true)
@@ -436,8 +436,17 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 		}
 	}
 	baseline := firstTokenPriorityOrderWithStats(priorityAccountIDs, stats, now, false)
-	if allPriorityAccountsFast && cacheStatsService != nil {
-		orderFastPoolByCacheRate(ctx, baseline, cacheStatsService)
+	if cacheStatsService != nil {
+		// The baseline puts confirmed fast accounts first. A slow, stale or
+		// unmeasured fallback must not disable cache priority within that pool.
+		fastPoolEnd := 0
+		for _, accountID := range baseline {
+			if !firstTokenPriorityStatsFast(stats[accountID], now) {
+				break
+			}
+			fastPoolEnd++
+		}
+		orderFastPoolByCacheRate(ctx, baseline[:fastPoolEnd], cacheStatsService)
 	}
 	ordered := append(baseline, fallbackAccountIDs...)
 	if allowManualProbe {
@@ -470,7 +479,7 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 }
 
 // orderFastPoolByCacheRate refines the caller's upstream-rate order only when
-// all priority candidates are fast. Unknown/failed statistics have no priority;
+// the supplied candidates belong to the fast pool. Unknown/failed statistics have no priority;
 // equal cache rates and measured rates at or below 80% retain the caller order.
 func orderFastPoolByCacheRate(ctx context.Context, accountIDs []int64, cacheStatsService *RateLimitService) {
 	if len(accountIDs) <= 1 {

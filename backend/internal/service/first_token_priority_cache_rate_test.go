@@ -12,11 +12,13 @@ import (
 
 func TestFirstTokenPriorityAllFastCacheRateOrder(t *testing.T) {
 	tests := []struct {
-		name        string
-		stats       map[int64]AccountCacheStats
-		providerErr error
-		slowID      int64
-		want        []int64
+		name         string
+		stats        map[int64]AccountCacheStats
+		providerErr  error
+		slowID       int64
+		staleID      int64
+		unmeasuredID int64
+		want         []int64
 	}{
 		{
 			name: "higher cache above eighty beats cheaper upstream rate",
@@ -78,10 +80,40 @@ func TestFirstTokenPriorityAllFastCacheRateOrder(t *testing.T) {
 			want:        []int64{1, 2, 3},
 		},
 		{
-			name: "mixed fast and slow pools retain existing order",
+			name: "mixed pools rank fast accounts by cache and retain slow fallback",
 			stats: map[int64]AccountCacheStats{
 				1: {CacheReadTokens: 50, CacheRateDenominator: 100},
 				2: {CacheReadTokens: 95, CacheRateDenominator: 100},
+				3: {CacheReadTokens: 99, CacheRateDenominator: 100},
+			},
+			slowID: 3,
+			want:   []int64{2, 1, 3},
+		},
+		{
+			name: "stale candidate does not disable fast pool cache priority",
+			stats: map[int64]AccountCacheStats{
+				1: {CacheReadTokens: 50, CacheRateDenominator: 100},
+				2: {CacheReadTokens: 95, CacheRateDenominator: 100},
+				3: {CacheReadTokens: 99, CacheRateDenominator: 100},
+			},
+			staleID: 3,
+			want:    []int64{2, 1, 3},
+		},
+		{
+			name: "unmeasured candidate cannot outrank confirmed fast accounts",
+			stats: map[int64]AccountCacheStats{
+				1: {CacheReadTokens: 50, CacheRateDenominator: 100},
+				2: {CacheReadTokens: 95, CacheRateDenominator: 100},
+				3: {CacheReadTokens: 99, CacheRateDenominator: 100},
+			},
+			unmeasuredID: 3,
+			want:         []int64{2, 1, 3},
+		},
+		{
+			name: "mixed pools below eighty still rank fast accounts by upstream rate",
+			stats: map[int64]AccountCacheStats{
+				1: {CacheReadTokens: 50, CacheRateDenominator: 100},
+				2: {CacheReadTokens: 80, CacheRateDenominator: 100},
 				3: {CacheReadTokens: 99, CacheRateDenominator: 100},
 			},
 			slowID: 3,
@@ -102,6 +134,12 @@ func TestFirstTokenPriorityAllFastCacheRateOrder(t *testing.T) {
 					duration = 35000
 				}
 				latency[account.ID] = FirstTokenLatencyStats{PredictedMS: duration, SampleCount: 20, UpdatedAt: now}
+				if account.ID == tt.staleID {
+					latency[account.ID] = FirstTokenLatencyStats{PredictedMS: duration, SampleCount: 20, UpdatedAt: now.Add(-7 * time.Hour)}
+				}
+				if account.ID == tt.unmeasuredID {
+					latency[account.ID] = FirstTokenLatencyStats{SampleCount: 8, UpdatedAt: now, FastConfirmationTracked: true}
+				}
 			}
 			cache := &staticFirstTokenLatencyStatsCache{stats: latency}
 			service := &RateLimitService{usageRepo: cacheRateProviderStub{stats: tt.stats, err: tt.providerErr}}
@@ -153,4 +191,59 @@ func TestFastPoolCacheRateSchedulingChoosesHighestCache(t *testing.T) {
 	}
 	require.Equal(t, int64(3), selection.Account.ID)
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+}
+
+func TestFastPoolCacheNewRequestChoosesHighestCacheWithFallback(t *testing.T) {
+	for _, fallback := range []string{"slow", "stale", "insufficient", "missing"} {
+		t.Run(fallback, func(t *testing.T) {
+			resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			defer resetOpenAIAdvancedSchedulerSettingCacheForTest()
+			now := time.Now()
+			groupID := int64(48201)
+			accounts := make([]Account, 0, 3)
+			latency := make(map[int64]FirstTokenLatencyStats)
+			cacheStats := make(map[int64]AccountCacheStats)
+			for i, rate := range []float64{0.05, 0.15, 0.10} {
+				account := upstreamCostTestAccount(int64(i+1), UpstreamBillingProbeStatusOK, rate, now.Add(-time.Minute), 30*time.Minute)
+				account.Status, account.Schedulable = StatusActive, true
+				account.Concurrency, account.GroupIDs = 100, []int64{groupID}
+				accounts = append(accounts, *account)
+				latency[account.ID] = FirstTokenLatencyStats{PredictedMS: 5000, SampleCount: 20, UpdatedAt: now, ReliableFast: true, FastConfirmationTracked: true}
+				cacheStats[account.ID] = AccountCacheStats{CacheReadTokens: []int64{50, 95, 99}[i], CacheRateDenominator: 100}
+			}
+			switch fallback {
+			case "slow":
+				latency[3] = FirstTokenLatencyStats{PredictedMS: 35000, SampleCount: 20, UpdatedAt: now, FastConfirmationTracked: true}
+			case "stale":
+				stat := latency[3]
+				stat.UpdatedAt = now.Add(-7 * time.Hour)
+				latency[3] = stat
+			case "insufficient":
+				latency[3] = FirstTokenLatencyStats{SampleCount: 8, UpdatedAt: now, FastConfirmationTracked: true}
+			case "missing":
+				delete(latency, 3)
+			}
+			repo := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyFirstTokenPriorityEnabled: "true"}}
+			svc := &OpenAIGatewayService{
+				accountRepo: schedulerTestOpenAIAccountRepo{accounts: accounts},
+				cache:       &schedulerTestGatewayCache{},
+				cfg:         &config.Config{},
+				rateLimitService: &RateLimitService{
+					settingService:              NewSettingService(repo, &config.Config{}),
+					firstTokenLatencyStatsCache: &staticFirstTokenLatencyStatsCache{stats: latency},
+					usageRepo:                   cacheRateProviderStub{stats: cacheStats},
+				},
+				concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+			}
+			selection, decision, err := svc.SelectAccountWithScheduler(context.Background(), &groupID, "", "", "gpt-6.1-sol", nil, OpenAIUpstreamTransportAny, false)
+			require.NoError(t, err)
+			require.NotNil(t, selection)
+			if selection.ReleaseFunc != nil {
+				defer selection.ReleaseFunc()
+			}
+			require.Equal(t, int64(2), selection.Account.ID)
+			require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+			require.False(t, decision.StickySessionHit)
+		})
+	}
 }

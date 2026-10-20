@@ -526,6 +526,19 @@ func (s *defaultOpenAIAccountScheduler) Select(
 				decision.StickySessionHit = true
 			}
 		}
+		if req.FirstTokenPriority && req.StickyAccountID <= 0 && req.StickyPreviousAccountID <= 0 && previousResponseID == "" {
+			var cacheRate any
+			if s.service != nil && s.service.rateLimitService != nil {
+				entry := s.service.rateLimitService.loadAccountCacheStatsCached(ctx, []int64{selection.Account.ID})[selection.Account.ID]
+				if entry.available && entry.stats.CacheRateDenominator > 0 {
+					cacheRate = float64(entry.stats.CacheReadTokens) / float64(entry.stats.CacheRateDenominator)
+				}
+			}
+			slog.Info("total_duration_new_request_selected",
+				"group_id", derefGroupID(req.GroupID), "model", req.RequestedModel,
+				"account_id", selection.Account.ID, "candidate_count", candidateCount,
+				"cache_rate", cacheRate, "layer", decision.Layer)
+		}
 	}
 	return selection, decision, nil
 }
