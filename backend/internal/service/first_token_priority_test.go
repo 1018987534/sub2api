@@ -374,7 +374,7 @@ func TestFirstTokenProbeOnlyReordersFreshScheduling(t *testing.T) {
 	applyOpenAIFirstTokenPriorityOrder(context.Background(), OpenAIAccountScheduleRequest{
 		FirstTokenProbeEligible: true,
 		StickyAccountID:         sticky.ID,
-	}, ordered, cache, floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier))
+	}, ordered, cache, floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier), nil)
 	require.Equal(t, []int64{sticky.ID, probe.ID}, candidateAccountIDs(ordered))
 	require.Empty(t, cache.claimedIDs, "existing sticky scheduling must not claim a dynamic probe")
 
@@ -382,7 +382,7 @@ func TestFirstTokenProbeOnlyReordersFreshScheduling(t *testing.T) {
 	ordered = []openAIAccountCandidateScore{{account: sticky}, {account: probe}}
 	applyOpenAIFirstTokenPriorityOrder(context.Background(), OpenAIAccountScheduleRequest{
 		FirstTokenProbeEligible: true,
-	}, ordered, cache, floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier))
+	}, ordered, cache, floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier), nil)
 	require.Equal(t, []int64{probe.ID, sticky.ID}, candidateAccountIDs(ordered))
 	require.Equal(t, []int64{probe.ID}, cache.claimedIDs)
 }
@@ -406,7 +406,7 @@ func TestFirstTokenManualProbeWaitsForFreshScheduling(t *testing.T) {
 	applyOpenAIFirstTokenPriorityOrder(context.Background(), OpenAIAccountScheduleRequest{
 		FirstTokenProbeEligible: true,
 		StickyAccountID:         sticky.ID,
-	}, ordered, cache, floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier))
+	}, ordered, cache, floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier), nil)
 	require.Equal(t, []int64{sticky.ID, probe.ID}, candidateAccountIDs(ordered))
 	require.Equal(t, probe.ID, cache.manualProbeID, "sticky scheduling must leave the manual probe queued")
 	require.Empty(t, cache.claimedIDs)
@@ -662,6 +662,7 @@ func TestOpenAIFirstTokenPriorityFallsBackToLowRateWhenAllAccountsAreFast(t *tes
 		order,
 		cache,
 		floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier),
+		nil,
 	)
 
 	require.Equal(t, []int64{cheap.ID, expensive.ID}, []int64{got[0].account.ID, got[1].account.ID})
@@ -683,6 +684,7 @@ func TestOpenAIFirstTokenPriorityAlwaysUsesLowRateInsideFastPool(t *testing.T) {
 		order,
 		cache,
 		floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier),
+		nil,
 	)
 
 	require.Equal(t, []int64{cheap.ID, expensive.ID}, candidateAccountIDs(got))
@@ -710,6 +712,7 @@ func TestOpenAIFirstTokenPriorityUsesLowRateWithinFastPool(t *testing.T) {
 		order,
 		cache,
 		floatPtr(defaultOpenAIOAuthSchedulingRateMultiplier),
+		nil,
 	)
 
 	require.Equal(t, []int64{cheapFast.ID, expensiveFast.ID, cheapSlow.ID}, []int64{

@@ -376,7 +376,8 @@ func (s *SettingService) FirstTokenPriorityEnabled(ctx context.Context) bool {
 }
 
 // firstTokenPriorityOrder returns every candidate. The fast pool retains the
-// caller's low-rate order and the slow pool uses normal total duration. When an adaptive probe is due,
+// caller's low-rate order, refined by cache rate above 80% when all candidates
+// are fast. The slow pool uses normal total duration. When an adaptive probe is due,
 // a shared lease promotes exactly one account across all gateway instances.
 func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache) []int64 {
 	return firstTokenPriorityOrderWithProbe(ctx, candidates, cache, true)
@@ -393,7 +394,7 @@ func firstTokenPriorityOrderWithProbeOptions(
 	allowProbe bool,
 	allowManualProbe bool,
 ) []int64 {
-	return firstTokenPriorityOrderWithProbeOptionsForRequest(ctx, candidates, cache, allowProbe, allowManualProbe, nil)
+	return firstTokenPriorityOrderWithProbeOptionsForRequest(ctx, candidates, cache, allowProbe, allowManualProbe, nil, nil)
 }
 
 func firstTokenPriorityOrderWithProbeOptionsForRequest(
@@ -403,6 +404,7 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 	allowProbe bool,
 	allowManualProbe bool,
 	req *OpenAIAccountScheduleRequest,
+	cacheStatsService *RateLimitService,
 ) []int64 {
 	accountIDs := make([]int64, 0, len(candidates))
 	priorityAccountIDs := make([]int64, 0, len(candidates))
@@ -434,6 +436,9 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 		}
 	}
 	baseline := firstTokenPriorityOrderWithStats(priorityAccountIDs, stats, now, false)
+	if allPriorityAccountsFast && cacheStatsService != nil {
+		orderFastPoolByCacheRate(ctx, baseline, cacheStatsService)
+	}
 	ordered := append(baseline, fallbackAccountIDs...)
 	if allowManualProbe {
 		if manualCache, ok := cache.(FirstTokenManualProbeCache); ok {
@@ -462,6 +467,30 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 		}
 	}
 	return ordered
+}
+
+// orderFastPoolByCacheRate refines the caller's upstream-rate order only when
+// all priority candidates are fast. Unknown/failed statistics have no priority;
+// equal cache rates and measured rates at or below 80% retain the caller order.
+func orderFastPoolByCacheRate(ctx context.Context, accountIDs []int64, cacheStatsService *RateLimitService) {
+	if len(accountIDs) <= 1 {
+		return
+	}
+	stats := cacheStatsService.loadAccountCacheStatsCached(ctx, accountIDs)
+	rates := make(map[int64]float64, len(accountIDs))
+	for _, accountID := range accountIDs {
+		entry := stats[accountID]
+		if !entry.available || entry.stats.CacheRateDenominator <= 0 {
+			continue
+		}
+		rate := float64(entry.stats.CacheReadTokens) / float64(entry.stats.CacheRateDenominator)
+		if rate > 0.8 {
+			rates[accountID] = rate
+		}
+	}
+	sort.SliceStable(accountIDs, func(i, j int) bool {
+		return rates[accountIDs[i]] > rates[accountIDs[j]]
+	})
 }
 
 func promoteFirstTokenAccount(accountIDs []int64, accountID int64) []int64 {
@@ -757,8 +786,9 @@ func firstTokenPriorityRanksWithProbeOptions(
 	cache FirstTokenLatencyStatsCache,
 	allowProbe bool,
 	allowManualProbe bool,
+	cacheStatsService *RateLimitService,
 ) map[int64]int {
-	ordered := firstTokenPriorityOrderWithProbeOptions(ctx, candidates, cache, allowProbe, allowManualProbe)
+	ordered := firstTokenPriorityOrderWithProbeOptionsForRequest(ctx, candidates, cache, allowProbe, allowManualProbe, nil, cacheStatsService)
 	ranks := make(map[int64]int, len(ordered))
 	for rank, accountID := range ordered {
 		ranks[accountID] = rank
@@ -773,8 +803,9 @@ func firstTokenPriorityRanksWithProbeOptionsForRequest(
 	allowProbe bool,
 	allowManualProbe bool,
 	req *OpenAIAccountScheduleRequest,
+	cacheStatsService *RateLimitService,
 ) map[int64]int {
-	ordered := firstTokenPriorityOrderWithProbeOptionsForRequest(ctx, candidates, cache, allowProbe, allowManualProbe, req)
+	ordered := firstTokenPriorityOrderWithProbeOptionsForRequest(ctx, candidates, cache, allowProbe, allowManualProbe, req, cacheStatsService)
 	ranks := make(map[int64]int, len(ordered))
 	for rank, accountID := range ordered {
 		ranks[accountID] = rank

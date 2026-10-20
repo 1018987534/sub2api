@@ -775,6 +775,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				s.rateLimitService.firstTokenLatencyStatsCache,
 				allowProbe,
 				allowProbe,
+				s.rateLimitService,
 			)
 			sort.SliceStable(baseline, func(i, j int) bool {
 				return ranks[baseline[i].account.ID] < ranks[baseline[j].account.ID]
