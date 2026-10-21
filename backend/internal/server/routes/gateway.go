@@ -185,6 +185,15 @@ func RegisterGatewayRoutes(
 	gateway.Use(clientRequestID)
 	gateway.Use(opsErrorLogger)
 	gateway.Use(endpointNorm)
+	gateway.Use(func(c *gin.Context) {
+		// Previously imported CC Switch scripts can append /v1/usage to a
+		// base URL already ending in /v1. Normalize this exact read-only alias
+		// before authentication so exhausted/expired keys can still read usage.
+		if c.Request.Method == http.MethodGet && c.Request.URL.Path == "/v1/v1/usage" {
+			c.Request.URL.Path = "/v1/usage"
+		}
+		c.Next()
+	})
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
 	gateway.Use(groupModelAllowlist)
@@ -211,6 +220,7 @@ func RegisterGatewayRoutes(
 		// Single-model discovery never selects the Codex client_version manifest.
 		gateway.GET("/models/:model", h.Gateway.Models)
 		gateway.GET("/usage", h.Gateway.Usage)
+		gateway.GET("/v1/usage", h.Gateway.Usage)
 		gateway.POST("/live", h.OpenAIGateway.Live)
 		gateway.GET("/live/:call_id", h.OpenAIGateway.LiveSideband)
 		// OpenAI Responses API: auto-route based on group platform
