@@ -880,7 +880,6 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     items.push({ path: '/dashboard', label: t('nav.dashboard'), icon: DashboardIcon })
   }
   items.push(
-    { path: '/beginner', label: t('nav.beginnerGuide'), icon: OrderListIcon },
     { path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon },
     { path: '/batch-image', label: t('nav.batchImage'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagBatchImageAccess },
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
@@ -891,7 +890,6 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
-    { path: '/qq-activity', label: t('nav.qqActivity'), icon: UsersIcon },
     { path: '/lottery', label: t('nav.lottery'), icon: GiftIcon, hideInSimpleMode: true, featureFlag: flagLottery },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     { path: '/support', label: t('nav.support'), icon: CustomerSupportIcon },

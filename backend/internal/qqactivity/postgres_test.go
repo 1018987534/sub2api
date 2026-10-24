@@ -71,8 +71,9 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	}
 	inviter := addUser("12345678", "12345678@qq.com", "", true)
 	oldInvitee := addUser("23456789", "23456789@qq.com", "", true)
+	baselineMember := addUser("24456789", "24456789@qq.com", "", true)
 	addUser("77777777", "other@example.com", "", false)
-	groups := []GroupSnapshot{{GroupID: "87654321", BotQQ: "99999999", ExpectedCount: 4, Members: []MemberSnapshot{{QQ: "99999999", Robot: true}, {QQ: "12345678"}, {QQ: "23456789"}, {QQ: "88888888"}}}}
+	groups := []GroupSnapshot{{GroupID: "87654321", BotQQ: "99999999", ExpectedCount: 4, Members: []MemberSnapshot{{QQ: "99999999", Robot: true}, {QQ: "12345678"}, {QQ: "24456789"}, {QQ: "88888888"}}}}
 	if err = store.Initialize(ctx, groups, true); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestPostgresActivityScenarios(t *testing.T) {
 			t.Fatalf("number got=%v want=%v SQL=%s", got, want, query)
 		}
 	}
-	requireNumber(`SELECT COUNT(*) FROM qq_activity_baseline_users`, 3)
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_baseline_users`, 4)
 	requireNumber(`SELECT COUNT(*) FROM qq_activity_members`, 4)
 	requireNumber(`SELECT COUNT(*) FROM qq_activity_bindings`, 2)
 	requireNumber(`SELECT COUNT(*) FROM qq_activity_rewards`, 0)
@@ -109,13 +110,22 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	// Ensure subsequent integer-second join times are strictly after T0.
 	exec(`UPDATE qq_activity_config SET started_at=started_at-INTERVAL '2 seconds'`)
 	process("inviter-low", "12345678", "command", "绑定", &l7, "")
+	process("baseline-member-left", "24456789", "leave", "", &l21, "")
+	process("baseline-member-rejoined", "24456789", "join", "", &l21, "12345678")
+	requireNumber(`SELECT balance FROM users WHERE id=$1`, 0, baselineMember)
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_rewards`, 0)
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_invitations WHERE invitee_qq='24456789'`, 0)
+	if err = store.VerifyInvitation(ctx, "test-admin", "24456789", "12345678", "87654321", "fixture rejoin cannot become a new invitation"); err == nil {
+		t.Fatal("manual review created an invitation for a baseline group member")
+	}
+	t.Log("baseline group member leaves/rejoins: newcomer=0 invitation=0; manual review cannot override")
 	process("old-invitee-join", "23456789", "join", "", &l21, "12345678")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 0, oldInvitee)
 	requireNumber(`SELECT aff_quota FROM user_affiliates WHERE user_id=$1`, 2, inviter)
 	process("old-invitee-join", "23456789", "join", "", &l21, "12345678")
 	process("old-invitee-rejoin", "23456789", "join", "", &l21, "12345678")
 	requireNumber(`SELECT COUNT(*) FROM qq_activity_rewards`, 1)
-	t.Log("existing invitee 21 + inviter 7: newcomer=0 invitation=2; duplicate/rejoin no second payout")
+	t.Log("existing website user first joins + inviter 7: newcomer=0 invitation=2; duplicate/rejoin no second payout")
 
 	// A genuinely new account and post-launch join receive the independent awards.
 	newcomer := addUser("34567890", "34567890@qq.com", "", true)
@@ -124,11 +134,24 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	requireNumber(`SELECT aff_quota FROM user_affiliates WHERE user_id=$1`, 4, inviter)
 	process("repeat-bind", "34567890", "command", "绑定", &l16, "")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, newcomer)
+	exec(`INSERT INTO qq_activity_groups(group_id,bot_qq) VALUES('76543210','99999999')`)
+	if err = store.Process(ctx, Event{ID: "cross-group-rejoin", GroupID: "76543210", QQ: "34567890", Kind: "join", Time: time.Now().Unix(), Level: &l21, MemberConfirmed: true, InviterQQ: "33445566", EvidenceType: "direct_invite_pinned", EvidenceKey: "fixture-other-group"}); err != nil {
+		t.Fatal(err)
+	}
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_rewards WHERE subject_user_id=$1`, 2, newcomer)
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_invitations WHERE invitee_qq='34567890' AND inviter_qq='12345678' AND group_id='87654321'`, 1)
+	t.Log("same QQ joins another activity group with another inviter: no extra rewards; first attribution retained")
 
 	low := addUser("45678901", "45678901@qq.com", "", true)
 	process("low-join", "45678901", "join", "", &l15, "12345678")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 0, low)
 	requireNumber(`SELECT COUNT(*) FROM qq_activity_bindings WHERE user_id=$1`, 1, low)
+	process("low-left", "45678901", "leave", "", &l15, "")
+	process("low-rejoined-other-inviter", "45678901", "join", "", &l15, "33445566")
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_invitations WHERE invitee_qq='45678901' AND inviter_qq='12345678'`, 1)
+	if err = store.VerifyInvitation(ctx, "test-admin", "45678901", "33445566", "87654321", "fixture cannot change first inviter before qualification"); err == nil {
+		t.Fatal("manual review replaced an unqualified first inviter")
+	}
 	process("low-upgraded", "45678901", "command", "绑定", &l21, "")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, low)
 	t.Log("level 15 binds without rewards; level 21 recheck grants exactly once")
@@ -235,14 +258,16 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	}
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, switched)
 
-	// Exact event replay under concurrency still produces one reward per subject.
+	// Distinct event IDs arriving concurrently still pay once per subject.
 	concurrent := addUser("11223344", "11223344@qq.com", "", true)
 	e := Event{ID: "concurrent", GroupID: "87654321", QQ: "11223344", Kind: "join", Time: time.Now().Unix(), Level: &l21, MemberConfirmed: true, InviterQQ: "12345678", EvidenceType: "direct_invite_pinned", EvidenceKey: "fixture-concurrent"}
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); errs <- store.Process(ctx, e) }()
+		duplicate := e
+		duplicate.ID = fmt.Sprintf("concurrent-%d", i)
+		go func(event Event) { defer wg.Done(); errs <- store.Process(ctx, event) }(duplicate)
 	}
 	wg.Wait()
 	close(errs)
@@ -253,6 +278,9 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	}
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, concurrent)
 	requireNumber(`SELECT COUNT(*) FROM qq_activity_rewards WHERE subject_user_id=$1`, 2, concurrent)
+	process("concurrent-0", "11223344", "join", "", &l21, "12345678")
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_rewards WHERE subject_user_id=$1`, 2, concurrent)
+	t.Log("8 distinct concurrent join events plus exact replay: newcomer=2 invitation=2 total once")
 
 	// A real direct invitation may qualify before the inviter has a website account.
 	waiting := addUser("22334455", "22334455@qq.com", "", true)
@@ -267,6 +295,8 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	noEvidence := addUser("44556677", "44556677@qq.com", "", true)
 	process("unproven-join", "44556677", "join", "", &l21, "")
 	requireNumber(`SELECT COUNT(*) FROM qq_activity_rewards WHERE subject_user_id=$1 AND kind='invitation'`, 0, noEvidence)
+	process("unproven-rejoin-other-inviter", "44556677", "join", "", &l21, "33445566")
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_invitations WHERE invitee_qq='44556677' AND inviter_qq=''`, 1)
 	if err = store.VerifyInvitation(ctx, "test-admin", "44556677", "12345678", "87654321", "fixture verified actual invitation record 20261024"); err != nil {
 		t.Fatal(err)
 	}
