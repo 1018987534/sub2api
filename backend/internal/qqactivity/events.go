@@ -52,6 +52,12 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 		if !e.MemberConfirmed {
 			return nil
 		}
+		// Membership history is permanent across leaves and activity groups.
+		// Only a first observed join can establish an invitation opportunity.
+		var knownMember bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_activity_members WHERE qq=$1)`, e.QQ).Scan(&knownMember); err != nil {
+			return err
+		}
 		joined := time.Unix(e.Time, 0)
 		legacy := c.StartedAt == nil || !joined.After(*c.StartedAt)
 		// A message is not a join event. Unknown members discovered by polling or
@@ -68,14 +74,14 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 		if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_members SET qq_level=$1,level_checked_at=NOW(),level_attempts=CASE WHEN $1::integer IS NULL THEN level_attempts+1 ELSE 0 END,next_level_retry_at=CASE WHEN $1::integer IS NOT NULL THEN NULL WHEN level_attempts=0 THEN NOW()+INTERVAL '1 minute' WHEN level_attempts=1 THEN NOW()+INTERVAL '5 minutes' WHEN level_attempts=2 THEN NOW()+INTERVAL '15 minutes' ELSE NULL END WHERE group_id=$2 AND qq=$3`, e.Level, e.GroupID, e.QQ); err != nil {
 			return err
 		}
-		if e.Kind == "join" && WithinCampaign(c, joined) {
+		if e.Kind == "join" && !knownMember && WithinCampaign(c, joined) {
 			trusted := e.EvidenceType == "direct_invite_pinned" && ValidQQ(e.InviterQQ) && e.InviterQQ != e.QQ && e.EvidenceKey != ""
 			inviter, source, key := "", "", ""
 			if trusted {
 				inviter, source, key = e.InviterQQ, e.EvidenceType, e.EvidenceKey
 			}
-			// Rejoins cannot replace already qualified or paid attribution.
-			_, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_invitations(invitee_qq,inviter_qq,group_id,evidence_type,evidence_key,joined_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(invitee_qq) DO UPDATE SET inviter_qq=CASE WHEN qq_activity_invitations.qualified_at IS NULL AND EXCLUDED.inviter_qq<>'' THEN EXCLUDED.inviter_qq ELSE qq_activity_invitations.inviter_qq END,evidence_type=CASE WHEN qq_activity_invitations.qualified_at IS NULL AND EXCLUDED.inviter_qq<>'' THEN EXCLUDED.evidence_type ELSE qq_activity_invitations.evidence_type END,evidence_key=CASE WHEN qq_activity_invitations.qualified_at IS NULL AND EXCLUDED.inviter_qq<>'' THEN EXCLUDED.evidence_key ELSE qq_activity_invitations.evidence_key END,updated_at=NOW()`, e.QQ, inviter, e.GroupID, source, key, joined)
+			// Later joins cannot replace even an unqualified first attribution.
+			_, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_invitations(invitee_qq,inviter_qq,group_id,evidence_type,evidence_key,joined_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(invitee_qq) DO NOTHING`, e.QQ, inviter, e.GroupID, source, key, joined)
 			if err != nil {
 				return err
 			}

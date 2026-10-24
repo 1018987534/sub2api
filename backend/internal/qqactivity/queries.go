@@ -243,8 +243,8 @@ func (s *Store) VerifyInvitation(ctx context.Context, actor, invitee, inviter, g
 		if err != nil {
 			return err
 		}
-		// Manual confirmation cannot manufacture a join, bypass the invitee's
-		// level, replace a paid invite or backdate qualification past the end.
+		// Manual review may establish missing evidence for the first join only.
+		// It cannot turn a historical member or a rejoin into a new opportunity.
 		var joined time.Time
 		var inGroup bool
 		if err = tx.QueryRowContext(ctx, `SELECT first_joined_at,in_group FROM qq_activity_members WHERE group_id=$1 AND qq=$2`, group, invitee).Scan(&joined, &inGroup); err != nil {
@@ -253,6 +253,23 @@ func (s *Store) VerifyInvitation(ctx context.Context, actor, invitee, inviter, g
 		if !inGroup {
 			return errors.New("请先核对受邀成员的当前入群状态。")
 		}
+		_, legacy, robot, _, firstJoined, err := memberState(ctx, tx, invitee)
+		if err != nil {
+			return err
+		}
+		if legacy || robot || c.StartedAt == nil || !firstJoined.After(*c.StartedAt) {
+			return errors.New("该成员当前不符合邀请奖励核验条件。")
+		}
+		var firstGroup, firstInviter string
+		if err = tx.QueryRowContext(ctx, `SELECT group_id,inviter_qq FROM qq_activity_invitations WHERE invitee_qq=$1`, invitee).Scan(&firstGroup, &firstInviter); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errors.New("未找到首次入群邀请记录，不能从重复入群创建邀请奖励。")
+			}
+			return err
+		}
+		if firstGroup != group || (firstInviter != "" && firstInviter != inviter) {
+			return errors.New("该成员已有首次入群记录，不能更换邀请归属。")
+		}
 		var paid bool
 		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_activity_rewards WHERE kind='invitation' AND subject_qq=$1)`, invitee).Scan(&paid); err != nil {
 			return err
@@ -260,15 +277,10 @@ func (s *Store) VerifyInvitation(ctx context.Context, actor, invitee, inviter, g
 		if paid {
 			return errors.New("该成员的邀请奖励已经确认，不能更换邀请归属。")
 		}
-		// For historical joins, evidence records manual review; qualification
-		// still happens now, during an active or paused campaign.
 		if !WithinCampaign(c, time.Now()) {
 			return errors.New("当前不能新增本期邀请奖励资格。")
 		}
-		if c.StartedAt != nil && joined.Before(*c.StartedAt) {
-			joined = *c.StartedAt
-		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_invitations(invitee_qq,inviter_qq,group_id,evidence_type,evidence_key,joined_at) VALUES($1,$2,$3,'admin_verified',$4,$5) ON CONFLICT(invitee_qq) DO UPDATE SET inviter_qq=EXCLUDED.inviter_qq,group_id=EXCLUDED.group_id,evidence_type='admin_verified',evidence_key=EXCLUDED.evidence_key,joined_at=EXCLUDED.joined_at,updated_at=NOW()`, invitee, inviter, group, Hash(evidence), joined); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_invitations SET inviter_qq=$1,evidence_type='admin_verified',evidence_key=$2,updated_at=NOW() WHERE invitee_qq=$3`, inviter, Hash(evidence), invitee); err != nil {
 			return err
 		}
 		if err = audit(ctx, tx, actor, "verify_invitation", invitee, map[string]any{"inviter": inviter, "evidence": MaskText(evidence)}); err != nil {

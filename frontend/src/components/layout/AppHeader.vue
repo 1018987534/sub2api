@@ -21,20 +21,10 @@
         </div>
       </div>
 
-      <!-- Right: Announcements + Beginner Guide + Docs + Language + Subscriptions + Balance + User Dropdown -->
+      <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
       <div class="flex min-w-0 items-center gap-1 sm:gap-3">
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
-
-        <router-link
-          to="/beginner"
-          data-testid="beginner-guide-entry"
-          :aria-label="t('nav.beginnerGuide')"
-          class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white sm:px-2.5 sm:text-sm"
-        >
-          <Icon name="book" size="sm" class="hidden sm:block" />
-          <span>{{ t('nav.beginnerGuide') }}</span>
-        </router-link>
 
         <!-- Docs Link -->
         <a
