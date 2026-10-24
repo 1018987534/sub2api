@@ -1602,7 +1602,7 @@ func (r *userRepository) DisableTotp(ctx context.Context, userID int64) error {
 func translateUserPersistenceError(err error, notFound, conflict *infraerrors.ApplicationError) error {
 	var pgErr *pq.Error
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.Constraint == "qq_activity_identity_owner_unique" {
-		return infraerrors.Conflict("QQ_IDENTITY_EXISTS", "该 QQ 邮箱已被其他账号使用，请使用本人尚未关联的 QQ 邮箱。").WithCause(err)
+		return infraerrors.Conflict("QQ_IDENTITY_EXISTS", "该 QQ 号或 QQ 邮箱已被其他账号使用，请使用本人尚未关联的 QQ。").WithCause(err)
 	}
 	return translatePersistenceError(err, notFound, conflict)
 }

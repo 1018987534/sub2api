@@ -16,7 +16,7 @@ func TestQQIdentityConflictTranslation(t *testing.T) {
 	if !errors.As(translated, &app) || app.Code != 409 || app.Reason != "QQ_IDENTITY_EXISTS" {
 		t.Fatalf("QQ ownership conflict not exposed as a specific 409: %v", translated)
 	}
-	if app.Message != "该 QQ 邮箱已被其他账号使用，请使用本人尚未关联的 QQ 邮箱。" {
+	if app.Message != "该 QQ 号或 QQ 邮箱已被其他账号使用，请使用本人尚未关联的 QQ。" {
 		t.Fatal("unexpected conflict copy")
 	}
 	ordinary := &pq.Error{Code: "23505", Constraint: "users_email_key"}

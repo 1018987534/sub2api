@@ -125,11 +125,7 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 		if err = s.reconcile(ctx, tx, e.QQ, c); err != nil {
 			return err
 		}
-		quiet := e.QQ
-		if e.Kind == "level" {
-			quiet = ""
-		}
-		changed, err = s.settle(ctx, tx, c, quiet)
+		changed, err = s.settle(ctx, tx, c)
 		if err != nil {
 			return err
 		}
@@ -172,21 +168,21 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 }
 
 func renderBinding(s Summary, already bool) string {
-	prefix := "绑定成功！已关联官网账号："
+	id := "B02"
 	if already {
-		prefix = "你已经绑定官网账号："
+		id = "B08"
 	}
 	if !s.Bound {
 		return "尚未绑定。请在活动群发送「绑定」开始办理。"
 	}
-	return prefix + s.Account + "。" + s.WelcomeText
+	return Prompt(id, map[string]string{"account_mask": s.Account})
 }
 func renderSummary(s Summary) string {
 	status := "尚未绑定"
 	if s.Bound {
 		status = "已绑定"
 	}
-	text := fmt.Sprintf("绑定状态：%s\n官网账号：%s\n体验额度：%s\n邀请奖励已到账：$%.2f\n邀请奖励待发放：$%.2f\n待绑定领取：$%.2f\n详情：%s/qq-activity", status, s.Account, s.WelcomeText, s.InvitationPaid, s.InvitationPending, s.PendingInviterBinding, SiteURL)
+	text := fmt.Sprintf("绑定状态：%s\n官网账号：%s\n详情：%s/qq-activity", status, s.Account, SiteURL)
 	if !s.Bound {
 		text += "\n发送「绑定」开始办理。"
 	}
@@ -203,7 +199,7 @@ func (s *Store) Tick(ctx context.Context) error {
 		if err = s.autoBindMembers(ctx, tx, c); err != nil {
 			return err
 		}
-		changed, err = s.settle(ctx, tx, c, "")
+		changed, err = s.settle(ctx, tx, c)
 		return err
 	})
 	if err == nil {

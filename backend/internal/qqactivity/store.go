@@ -210,7 +210,7 @@ func findCandidate(ctx context.Context, q queryer, qq string) (*Candidate, strin
 		return nil, "", err
 	}
 	if len(candidates) == 0 {
-		candidates, err = read(`SELECT id,email,status FROM users WHERE deleted_at IS NULL AND lower(btrim(username))=$1 ORDER BY id LIMIT 3`, "username")
+		candidates, err = read(`SELECT id,email,status FROM users WHERE deleted_at IS NULL AND lower(btrim(username)) IN ($1,split_part($1,'@',1)) ORDER BY id LIMIT 3`, "username")
 		if err != nil {
 			return nil, "", err
 		}
@@ -255,7 +255,8 @@ func bind(ctx context.Context, tx *sql.Tx, qq string, userID int64, source strin
 	if status != "active" {
 		return errors.New("账号当前无法绑定，请联系管理员。")
 	}
-	if strings.ToLower(strings.TrimSpace(email)) != qq+"@qq.com" && strings.ToLower(strings.TrimSpace(username)) != qq+"@qq.com" {
+	profileQQ := strings.ToLower(strings.TrimSpace(username))
+	if strings.ToLower(strings.TrimSpace(email)) != qq+"@qq.com" && profileQQ != qq+"@qq.com" && profileQQ != qq {
 		return errors.New("账号信息已变更，请稍后重试。")
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_bindings(qq,user_id,source) VALUES($1,$2,$3) ON CONFLICT(qq) DO NOTHING`, qq, userID, source)
@@ -280,7 +281,7 @@ func (s *Store) autoBindMembers(ctx context.Context, tx *sql.Tx, c Config) error
 	if c.InitializedAt == nil || !c.AutoProcessJoin {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON(m.qq) m.group_id,m.qq FROM qq_activity_members m WHERE m.in_group AND NOT m.is_robot AND NOT EXISTS(SELECT 1 FROM qq_activity_bindings b WHERE b.qq=m.qq) AND EXISTS(SELECT 1 FROM users u WHERE u.deleted_at IS NULL AND u.status='active' AND (lower(btrim(u.email))=m.qq||'@qq.com' OR lower(btrim(u.username))=m.qq||'@qq.com')) ORDER BY m.qq,m.last_seen_at DESC LIMIT 200`)
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON(m.qq) m.group_id,m.qq FROM qq_activity_members m WHERE m.in_group AND NOT m.is_robot AND NOT EXISTS(SELECT 1 FROM qq_activity_bindings b WHERE b.qq=m.qq) AND EXISTS(SELECT 1 FROM users u WHERE u.deleted_at IS NULL AND u.status='active' AND (lower(btrim(u.email))=m.qq||'@qq.com' OR lower(btrim(u.username)) IN (m.qq,m.qq||'@qq.com'))) ORDER BY m.qq,m.last_seen_at DESC LIMIT 200`)
 	if err != nil {
 		return err
 	}

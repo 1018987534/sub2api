@@ -10,7 +10,7 @@ vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<mai
 const config = () => ({ status: 'active', started_at: '2026-10-24T10:00:00Z', initialized_at: '2026-10-24T10:00:00Z', ended_at: null, newcomer_enabled: true, invitation_enabled: true, auto_process_join: true, group_messages_enabled: true })
 const report = () => ({ config: config(), baseline_users: 100, members_count: 163, bindings_count: 20, newcomer_paid: 2, invitation_paid: 4, pending_amount: 2, unsent_messages: 0, members: [{ group_id: '87654321', qq: '12345678', in_group: true, robot: false, legacy: true, match_state: 'bound', account: '12****78@qq.com', level: 7, bound: true }], invitations: [] })
 const options = { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } }
-beforeEach(() => { vi.clearAllMocks(); mocks.route.query = {}; mocks.admin.mockResolvedValue(report()); mocks.control.mockResolvedValue({ success: true }); mocks.current.mockResolvedValue({ config: config(), bound: true, account: '12****78@qq.com', qq: '12345678', welcome_status: 'not_eligible', welcome_text: '当前暂不符合本次 $2 体验额度领取条件。', invitation_paid: 2, invitation_pending: 0, pending_inviter_binding: 0, rewards: [] }) })
+beforeEach(() => { vi.clearAllMocks(); mocks.route.query = {}; mocks.admin.mockResolvedValue(report()); mocks.control.mockResolvedValue({ success: true }); mocks.current.mockResolvedValue({ config: config(), bound: true, account: '12****78@qq.com', qq: '12345678', welcome_status: 'not_eligible', welcome_text: '当前暂不符合体验额度领取条件。', invitation_paid: 2, invitation_pending: 0, pending_inviter_binding: 0, rewards: [] }) })
 
 describe('QQ activity administration', () => {
   it('closes and reopens through the persisted API without resetting the campaign', async () => {
@@ -56,7 +56,7 @@ describe('QQ activity administration', () => {
 describe('QQ activity user page', () => {
   it('shows the common ineligible copy without explaining an existing-user classification', async () => {
     const wrapper = mount(UserQQActivity, options); await flushPromises()
-    expect(wrapper.text()).toContain('当前暂不符合本次 $2 体验额度领取条件。')
+    expect(wrapper.text()).toContain('当前暂不符合体验额度领取条件。')
     expect(wrapper.text()).not.toContain('活动前已有用户'); expect(wrapper.text()).not.toContain('12345678@qq.com')
     wrapper.unmount()
   })
@@ -72,7 +72,8 @@ describe('QQ activity user page', () => {
     const wrapper = mount(UserQQActivity, options); await flushPromises()
     expect(wrapper.text()).toContain('保存后会自动匹配')
     expect(wrapper.text()).toContain('无需邮箱验证或确认码')
-    expect(wrapper.text()).toContain('同一 QQ 只能关联一个官网账号')
+    expect(wrapper.text()).toContain('QQ 号或完整数字 QQ 邮箱')
+    expect(wrapper.text()).toContain('两种格式视为同一 QQ，只能关联一个官网账号')
     wrapper.unmount()
   })
 })

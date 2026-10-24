@@ -104,7 +104,7 @@ func (s *Store) reconcile(ctx context.Context, tx *sql.Tx, qq string, c Config) 
 
 // settle pays only previously qualified rows. An inviter may bind after the end
 // date and receive them; paused campaigns retain rows without crediting wallets.
-func (s *Store) settle(ctx context.Context, tx *sql.Tx, c Config, quietQQ string) ([]int64, error) {
+func (s *Store) settle(ctx context.Context, tx *sql.Tx, c Config) ([]int64, error) {
 	if _, err := tx.ExecContext(ctx, `UPDATE qq_activity_rewards r SET recipient_user_id=b.user_id FROM qq_activity_bindings b WHERE r.recipient_qq=b.qq AND b.status='active' AND r.status='pending' AND r.recipient_user_id IS NULL`); err != nil {
 		return nil, err
 	}
@@ -165,7 +165,9 @@ func (s *Store) settle(ctx context.Context, tx *sql.Tx, c Config, quietQQ string
 		if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_rewards SET status='paid',recipient_user_id=$1,paid_at=NOW(),balance_before=$2,balance_after=$3 WHERE id=$4`, p.userID, before, after, p.id); err != nil {
 			return nil, err
 		}
-		if p.kind == "invitation" || p.qq != quietQQ {
+		// Payment notices belong to this newly paid reward, never to a binding
+		// summary. Repeated commands cannot replay a historical reward notice.
+		{
 			var group string
 			e := tx.QueryRowContext(ctx, `SELECT group_id FROM qq_activity_members WHERE qq=$1 AND in_group AND NOT is_robot ORDER BY last_seen_at DESC LIMIT 1`, p.qq).Scan(&group)
 			if e != nil && !errors.Is(e, sql.ErrNoRows) {
