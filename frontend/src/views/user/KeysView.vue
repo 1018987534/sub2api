@@ -49,6 +49,7 @@
 
       <template #actions>
         <div class="flex justify-end gap-3">
+          <router-link to="/beginner" class="btn btn-secondary">{{ t('nav.beginnerGuide') }}</router-link>
           <button
             @click="loadApiKeys"
             :disabled="loading"
