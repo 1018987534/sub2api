@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { apiClient } from '@/api/client'
 import { detectClientArchitecture, detectClientPlatform, OFFICIAL_DOWNLOADS, parseClientManifest, resolveClientDownload, type ClientArchitecture, type ClientManifest, type ClientPlatform } from '@/utils/clientDownloads'
 
 withDefaults(defineProps<{ siteName?: string; inheritTheme?: boolean }>(), { siteName: '小红豆', inheritTheme: false })
@@ -8,6 +9,8 @@ const architecture = ref<ClientArchitecture>('x64')
 const detected = ref<ClientPlatform>('other')
 const manifest = ref<ClientManifest | null>(null)
 const imagePreview = ref<{ src: string; alt: string } | null>(null)
+const downloadBusy = ref(false)
+const downloadError = ref('')
 const abort = new AbortController()
 const ccDownload = computed(() => resolveClientDownload('ccswitch', platform.value, architecture.value, manifest.value))
 const chatDownload = computed(() => resolveClientDownload('chatgpt', platform.value, architecture.value, manifest.value))
@@ -18,6 +21,25 @@ const faqs = [
   ['在本站充值，会变成 ChatGPT Plus 吗？', '本站额度用于中转 API，和 ChatGPT 账号的 Plus / Pro 订阅分别管理。请进入客户端的 Codex，并使用刚导入的供应商配置。'],
 ]
 function closePreview(event: KeyboardEvent) { if (event.key === 'Escape') imagePreview.value = null }
+async function startDownload(event: MouseEvent, download: ReturnType<typeof resolveClientDownload>) {
+  if (!download.mirrored) return
+  event.preventDefault()
+  if (downloadBusy.value) return
+  if (!localStorage.getItem('auth_token')) {
+    window.location.assign('/login?redirect=%2Fbeginner')
+    return
+  }
+  downloadBusy.value = true
+  downloadError.value = ''
+  try {
+    const { data } = await apiClient.post<{ url: string }>('/client-downloads/tickets', { id: download.id })
+    if (data.url !== 'https://downloads.xiaohondou.com/downloads/clients/fetch') throw new Error('invalid download URL')
+    window.location.assign(data.url)
+  } catch (error) {
+    const message = (error as { message?: string }).message
+    downloadError.value = message && !message.includes('URL') ? message : '本站下载暂不可用，请稍后再试，或使用下方官方下载。'
+  } finally { downloadBusy.value = false }
+}
 onMounted(async () => {
   detected.value = detectClientPlatform(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)
   platform.value = detected.value
@@ -41,9 +63,11 @@ onBeforeUnmount(() => { abort.abort(); document.removeEventListener('keydown', c
       <h2>第一步：下载并安装软件</h2>
       <div class="guide-os"><span>{{ detected === 'other' ? '选择你的电脑系统：' : `已识别：${detected === 'macos' ? 'Mac' : 'Windows'}` }}</span><div role="group" aria-label="选择电脑系统"><button :aria-pressed="platform === 'macos'" @click="platform = 'macos'">Mac</button><button :aria-pressed="platform === 'windows'" @click="platform = 'windows'">Windows</button></div><select v-if="platform === 'windows'" v-model="architecture" aria-label="Windows 处理器"><option value="x64">Intel / AMD</option><option value="arm64">ARM</option></select></div>
       <div class="guide-downloads">
-        <div class="guide-download"><div><strong>CC Switch</strong><span>管理中转配置，先安装并打开一次。</span></div><a :href="ccDownload.url" class="guide-button" target="_blank" rel="noopener noreferrer" data-testid="ccswitch-download">{{ ccDownload.label }} ↓</a><small>{{ ccDownload.mirrored ? `${manifest?.ccswitch_version} · 本站下载` : '官方发布页：Mac 选 .dmg，Windows 选 .msi' }}</small></div>
-        <div class="guide-download"><div><strong>ChatGPT 桌面客户端</strong><span>新版包含 Codex，后面用它连接中转站。</span></div><a :href="chatDownload.url" class="guide-button" target="_blank" rel="noopener noreferrer" data-testid="chatgpt-download">{{ chatDownload.label }} ↓</a><small>{{ chatDownload.mirrored ? `本站下载 · ${platform === 'windows' ? '完整 MSIX 安装包' : 'DMG 安装包'}` : '官方渠道下载' }}<a v-if="platform === 'windows'" :href="OFFICIAL_DOWNLOADS.chatgptWindows" target="_blank" rel="noopener noreferrer">微软商店安装 ↗</a></small></div>
+        <div class="guide-download"><div><strong>CC Switch</strong><span>管理中转配置，先安装并打开一次。</span></div><a :href="ccDownload.url" class="guide-button" :aria-disabled="downloadBusy" :target="ccDownload.mirrored ? undefined : '_blank'" rel="noopener noreferrer" data-testid="ccswitch-download" @click="startDownload($event, ccDownload)">{{ downloadBusy ? '正在准备下载…' : ccDownload.label + ' ↓' }}</a><small>{{ ccDownload.mirrored ? `${manifest?.ccswitch_version} · 本站下载` : '官方发布页：Mac 选 .dmg，Windows 选 .msi' }}<a :href="OFFICIAL_DOWNLOADS.ccswitch" target="_blank" rel="noopener noreferrer">官方下载 ↗</a></small></div>
+        <div class="guide-download"><div><strong>ChatGPT 桌面客户端</strong><span>新版包含 Codex，后面用它连接中转站。</span></div><a :href="chatDownload.url" class="guide-button" :aria-disabled="downloadBusy" :target="chatDownload.mirrored ? undefined : '_blank'" rel="noopener noreferrer" data-testid="chatgpt-download" @click="startDownload($event, chatDownload)">{{ downloadBusy ? '正在准备下载…' : chatDownload.label + ' ↓' }}</a><small>{{ chatDownload.mirrored ? `本站下载 · ${platform === 'windows' ? '完整 MSIX 安装包' : 'DMG 安装包'}` : '官方渠道下载' }}<a :href="OFFICIAL_DOWNLOADS.chatgpt" target="_blank" rel="noopener noreferrer">官方下载 ↗</a><a v-if="platform === 'windows'" :href="OFFICIAL_DOWNLOADS.chatgptWindows" target="_blank" rel="noopener noreferrer">微软商店安装 ↗</a></small></div>
       </div>
+      <p v-if="downloadError" role="alert" class="guide-note">{{ downloadError }}</p>
+      <p v-if="ccDownload.mirrored || chatDownload.mirrored" class="guide-note">本站下载需先登录，并设有下载次数和流量保护。遇到限制可选择「官方下载」；下载中断后请重新点击下载。</p>
       <p v-if="platform === 'macos'" class="guide-note"><strong>Mac：</strong>打开 .dmg，把图标拖进「应用程序」。新版 ChatGPT Mac 客户端适用于 Apple 芯片；Intel 用户可用 <a href="https://learn.chatgpt.com/docs/codex/cli" target="_blank" rel="noopener noreferrer">Codex CLI</a>，CC Switch 的 Mac 安装包通用。</p>
       <p v-else-if="platform === 'windows'" class="guide-note"><strong>Windows：</strong>CC Switch 双击 .msi 安装；ChatGPT 可用微软商店，或双击完整 .msix 安装包。ARM 电脑在上方选 ARM。</p>
       <p v-else class="guide-note">请在电脑上选择 Mac 或 Windows 下载。手机可以先看这篇教程。</p>
