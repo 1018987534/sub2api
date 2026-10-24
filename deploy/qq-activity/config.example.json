@@ -1,0 +1,12 @@
+{
+  "napcat_http_url": "http://127.0.0.1:33000",
+  "napcat_ws_url": "ws://127.0.0.1:33001",
+  "napcat_token_file": "/etc/qq-activity/napcat.token",
+  "bridge_url": "http://127.0.0.1:8080/api/v1/qq-activity/bridge",
+  "bridge_token_file": "/etc/qq-activity/bridge.token",
+  "state_dir": "/var/lib/qq-activity",
+  "group_ids": ["12345678"],
+  "robot_qqs": [],
+  "napcat_source_version": "v4.18.41",
+  "initialize_and_activate": false
+}

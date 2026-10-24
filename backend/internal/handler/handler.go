@@ -71,6 +71,7 @@ type Handlers struct {
 	BatchImage       *BatchImageHandler
 	SupportChat      *SupportChatHandler
 	Lottery          *LotteryHandler
+	QQActivity       *QQActivityHandler
 }
 
 // BuildInfo contains build-time information

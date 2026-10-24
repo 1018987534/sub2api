@@ -179,6 +179,8 @@ export default {
     affiliateRebateRecords: 'Rebate Records',
     affiliateTransferRecords: 'Transfer Records',
     lottery: 'Lottery',
+    qqActivity: 'QQ Group Activity',
+    qqActivityManagement: 'QQ Activity Management',
     lotteryManagement: 'Lottery Management',
     lotteryAvailable: 'A lottery is available to join',
     lotteryPrizeBadge: 'Win',

@@ -179,6 +179,8 @@ export default {
     affiliateRebateRecords: '返利记录',
     affiliateTransferRecords: '提取记录',
     lottery: '抽奖活动',
+    qqActivity: 'QQ 群活动',
+    qqActivityManagement: 'QQ 活动管理',
     lotteryManagement: '抽奖管理',
     lotteryAvailable: '有可参与的抽奖',
     lotteryPrizeBadge: '奖',

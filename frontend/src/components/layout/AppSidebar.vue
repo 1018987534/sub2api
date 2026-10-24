@@ -891,6 +891,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
+    { path: '/qq-activity', label: t('nav.qqActivity'), icon: UsersIcon },
     { path: '/lottery', label: t('nav.lottery'), icon: GiftIcon, hideInSimpleMode: true, featureFlag: flagLottery },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     { path: '/support', label: t('nav.support'), icon: CustomerSupportIcon },
@@ -958,6 +959,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
     { path: '/admin/support', label: t('nav.supportInbox'), icon: CustomerSupportIcon },
+    { path: '/admin/qq-activity', label: t('nav.qqActivityManagement'), icon: UsersIcon },
     { path: '/admin/lottery', label: t('nav.lotteryManagement'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     {

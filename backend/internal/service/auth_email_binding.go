@@ -246,6 +246,9 @@ func (s *AuthService) updateBoundEmailIdentityWithClient(
 		}
 		return ErrServiceUnavailable
 	}
+	if err := recordVerifiedEmailOwnershipWithClient(ctx, client, currentUser.ID, email, "email_bind_code"); err != nil {
+		return ErrServiceUnavailable
+	}
 
 	if applyFirstBindDefaults {
 		if err := s.ApplyProviderDefaultSettingsOnFirstBind(ctx, currentUser.ID, "email"); err != nil {
@@ -359,4 +362,46 @@ func normalizeBoundEmailAuthIdentitySubject(email string) string {
 		return ""
 	}
 	return normalized
+}
+
+// Called only after an actual successful email-code check. Login backfills and
+// administrative email edits deliberately never enter this path.
+func (s *AuthService) recordVerifiedEmailOwnership(ctx context.Context, user *User, proof string) {
+	if s == nil || s.entClient == nil || user == nil {
+		return
+	}
+	client := s.entClient
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		client = tx.Client()
+	}
+	if err := recordVerifiedEmailOwnershipWithClient(ctx, client, user.ID, user.Email, proof); err != nil {
+		// Account creation has already succeeded. Without proof, QQ binding falls
+		// back to explicit website/QQ confirmation rather than trusting the email.
+		logger.LegacyPrintf("service.auth", "[Auth] Failed to record email ownership: user_id=%d err=%v", user.ID, err)
+	}
+}
+
+func recordVerifiedEmailOwnershipWithClient(ctx context.Context, client *dbent.Client, userID int64, email, proof string) error {
+	subject := normalizeBoundEmailAuthIdentitySubject(email)
+	if client == nil || userID <= 0 || subject == "" {
+		return ErrServiceUnavailable
+	}
+	identity, err := client.AuthIdentity.Query().Where(
+		authidentity.UserIDEQ(userID), authidentity.ProviderTypeEQ("email"),
+		authidentity.ProviderKeyEQ("email"), authidentity.ProviderSubjectEQ(subject),
+	).Only(ctx)
+	if err != nil {
+		return err
+	}
+	metadata := make(map[string]any, len(identity.Metadata)+3)
+	for key, value := range identity.Metadata {
+		metadata[key] = value
+	}
+	if prior, ok := metadata["backfill_source"]; ok {
+		metadata["prior_backfill_source"] = prior
+		delete(metadata, "backfill_source")
+	}
+	metadata["email_ownership_verified"] = true
+	metadata["email_ownership_proof"] = proof
+	return client.AuthIdentity.UpdateOne(identity).SetVerifiedAt(time.Now().UTC()).SetMetadata(metadata).Exec(ctx)
 }

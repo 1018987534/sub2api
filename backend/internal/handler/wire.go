@@ -207,6 +207,7 @@ func ProvideHandlers(
 	batchImageHandler *BatchImageHandler,
 	supportChatHandler *SupportChatHandler,
 	lotteryHandler *LotteryHandler,
+	qqActivityHandler *QQActivityHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 	_ *service.OpenAIQuotaAutoResetService,
@@ -236,6 +237,7 @@ func ProvideHandlers(
 		BatchImage:       batchImageHandler,
 		SupportChat:      supportChatHandler,
 		Lottery:          lotteryHandler,
+		QQActivity:       qqActivityHandler,
 	}
 }
 
@@ -254,6 +256,7 @@ var ProviderSet = wire.NewSet(
 	NewIntelligenceHandler,
 	NewSupportChatHandler,
 	NewLotteryHandler,
+	NewQQActivityHandler,
 	ProvideGatewayHandler,
 	ProvideOpenAIGatewayHandler,
 	NewTotpHandler,
