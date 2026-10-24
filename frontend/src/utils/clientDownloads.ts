@@ -53,7 +53,7 @@ export function resolveClientDownload(client: 'ccswitch' | 'chatgpt', platform: 
   if (platform === 'other') return { url: OFFICIAL_DOWNLOADS[client], mirrored: false, label: '查看官方下载选项' }
   const id = `${client}-${platform === 'macos' ? 'macos' : `windows-${architecture}`}` as DownloadId
   const file = manifest?.files[id]
-  if (file) return { url: file.url, mirrored: true, label: platform === 'macos' ? '下载 Mac 安装包' : `下载 Windows ${architecture === 'arm64' ? 'ARM' : ''} 安装包` }
+  if (file) return { url: '#download', id, mirrored: true, label: platform === 'macos' ? '下载 Mac 安装包' : `下载 Windows ${architecture === 'arm64' ? 'ARM' : ''} 安装包` }
   if (client === 'chatgpt') return {
     url: platform === 'macos' ? OFFICIAL_DOWNLOADS.chatgptMac : OFFICIAL_DOWNLOADS.chatgptWindows,
     mirrored: false,

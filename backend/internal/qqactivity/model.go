@@ -12,8 +12,8 @@ import (
 )
 
 const SiteURL = "https://xiaohondou.com"
-const NotEligible = "当前暂不符合本次 $2 体验额度领取条件。"
-const InvitationNotEligible = "当前暂不符合本次 $2 邀请奖励领取条件。"
+const NotEligible = "当前暂不符合体验额度领取条件。"
+const InvitationNotEligible = "当前暂不符合邀请奖励领取条件。"
 const advisoryLock int64 = 0x51514143544956
 
 var ErrUnavailable = errors.New("活动暂时不可用，请稍后重试。")

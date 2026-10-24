@@ -25,7 +25,7 @@ describe('beginner desktop downloads', () => {
 
   it('only uses a real file in the published manifest, otherwise keeping the official fallback', () => {
     const manifest = parseClientManifest(payload)
-    expect(resolveClientDownload('ccswitch', 'macos', 'x64', manifest)).toMatchObject({ url: file.url, mirrored: true })
+    expect(resolveClientDownload('ccswitch', 'macos', 'x64', manifest)).toMatchObject({ url: '#download', id: 'ccswitch-macos', mirrored: true })
     expect(resolveClientDownload('ccswitch', 'windows', 'arm64', manifest)).toMatchObject({ url: OFFICIAL_DOWNLOADS.ccswitch, mirrored: false })
     expect(resolveClientDownload('chatgpt', 'windows', 'arm64', manifest)).toMatchObject({ url: OFFICIAL_DOWNLOADS.chatgptWindows, mirrored: false })
     expect(resolveClientDownload('ccswitch', 'other', 'x64', manifest).label).toBe('查看官方下载选项')

@@ -189,7 +189,7 @@ func (s *Store) Control(ctx context.Context, actor, status string) error {
 		if err != nil {
 			return err
 		}
-		changed, err = s.settle(ctx, tx, c, "")
+		changed, err = s.settle(ctx, tx, c)
 		return err
 	})
 	if err == nil {
@@ -224,7 +224,7 @@ func (s *Store) UpdateSettings(ctx context.Context, actor string, update Setting
 		if err != nil {
 			return err
 		}
-		changed, err = s.settle(ctx, tx, c, "")
+		changed, err = s.settle(ctx, tx, c)
 		return err
 	})
 	if err == nil {
@@ -289,7 +289,7 @@ func (s *Store) VerifyInvitation(ctx context.Context, actor, invitee, inviter, g
 		if err = s.reconcile(ctx, tx, invitee, c); err != nil {
 			return err
 		}
-		changed, err = s.settle(ctx, tx, c, "")
+		changed, err = s.settle(ctx, tx, c)
 		return err
 	})
 	if err == nil {

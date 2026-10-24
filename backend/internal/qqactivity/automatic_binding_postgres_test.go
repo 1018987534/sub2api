@@ -67,7 +67,7 @@ func autoBindingFixture(t *testing.T) (*sql.DB, *Store) {
 			t.Fatal(err)
 		}
 	}
-	for _, file := range []string{"248_qq_activity.sql", "249_qq_activity_identity_owners.sql"} {
+	for _, file := range []string{"248_qq_activity.sql", "249_qq_activity_identity_owners.sql", "250_qq_activity_numeric_username.sql"} {
 		data, e := migrations.FS.ReadFile(file)
 		if os.IsNotExist(e) {
 			continue
