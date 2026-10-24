@@ -92,12 +92,6 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 		}
 		reply := ""
 		if (e.Kind == "join" && c.AutoProcessJoin) || (e.Kind == "command" && e.Command == "绑定") {
-			if e.Code != "" {
-				reply, err = confirmClaim(ctx, tx, e.GroupID, e.QQ, e.Code)
-				if err != nil {
-					return err
-				}
-			}
 			if reply == "" && !beforeBound {
 				var nowBound bool
 				if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_activity_bindings WHERE qq=$1)`, e.QQ).Scan(&nowBound); err != nil {
@@ -112,13 +106,8 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 						return err
 					}
 					switch state {
-					case "verified":
-						if err = bind(ctx, tx, e.QQ, candidate.ID, "verified_email"); err != nil {
-							return err
-						}
-					case "confirmation_required":
-						reply, err = createClaim(ctx, tx, e.GroupID, e.QQ, candidate)
-						if err != nil {
+					case "matched":
+						if err = bind(ctx, tx, e.QQ, candidate.ID, "matched_"+candidate.Source); err != nil {
 							return err
 						}
 					case "unmatched":
@@ -209,6 +198,9 @@ func (s *Store) Tick(ctx context.Context) error {
 	err := s.transaction(ctx, func(tx *sql.Tx) error {
 		c, err := readConfig(ctx, tx)
 		if err != nil {
+			return err
+		}
+		if err = s.autoBindMembers(ctx, tx, c); err != nil {
 			return err
 		}
 		changed, err = s.settle(ctx, tx, c, "")
