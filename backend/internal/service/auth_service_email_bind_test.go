@@ -175,6 +175,53 @@ func TestAuthServiceBindEmailIdentity_UpdatesEmailAndAppliesFirstBindDefaults(t 
 	require.Equal(t, 1, countProviderGrantRecords(t, client, user.ID, "email", "first_bind"))
 }
 
+func TestAuthServiceRegistrationEmailOwnershipRequiresActualCode(t *testing.T) {
+	for _, verified := range []bool{false, true} {
+		t.Run(fmt.Sprint(verified), func(t *testing.T) {
+			cache := &emailBindCacheStub{data: &service.VerificationCodeData{
+				Code: "123456", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(10 * time.Minute),
+			}}
+			settings := map[string]string{service.SettingKeyRegistrationEnabled: "true"}
+			if verified {
+				settings[service.SettingKeyEmailVerifyEnabled] = "true"
+			}
+			svc, _, client := newAuthServiceForEmailBind(t, settings, cache, nil)
+			_, user, err := svc.RegisterWithVerification(context.Background(), "12345678@qq.com", "password", "123456", "", "", "")
+			require.NoError(t, err)
+			identity, err := client.AuthIdentity.Query().Where(authidentity.UserIDEQ(user.ID), authidentity.ProviderTypeEQ("email")).Only(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, verified, identity.Metadata["email_ownership_verified"] == true)
+		})
+	}
+}
+
+func TestAuthServiceVerifiedEmailBindUpgradesHistoricalProof(t *testing.T) {
+	cache := &emailBindCacheStub{data: &service.VerificationCodeData{
+		Code: "123456", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(10 * time.Minute),
+	}}
+	svc, _, client := newAuthServiceForEmailBind(t, nil, cache, nil)
+	ctx := context.Background()
+	password, err := svc.HashPassword("password")
+	require.NoError(t, err)
+	user, err := client.User.Create().SetEmail("12345678@qq.com").SetPasswordHash(password).SetRole(service.RoleUser).SetStatus(service.StatusActive).Save(ctx)
+	require.NoError(t, err)
+	identity, err := client.AuthIdentity.Create().SetUserID(user.ID).SetProviderType("email").SetProviderKey("email").SetProviderSubject(user.Email).
+		SetVerifiedAt(time.Now()).SetMetadata(map[string]any{"backfill_source": "users.email", "source": "migration_109"}).Save(ctx)
+	require.NoError(t, err)
+	_, err = svc.BindEmailIdentity(ctx, user.ID, user.Email, "wrong", "password")
+	require.Error(t, err)
+	identity, err = client.AuthIdentity.Get(ctx, identity.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, true, identity.Metadata["email_ownership_verified"])
+	_, err = svc.BindEmailIdentity(ctx, user.ID, user.Email, "123456", "password")
+	require.NoError(t, err)
+	identity, err = client.AuthIdentity.Get(ctx, identity.ID)
+	require.NoError(t, err)
+	require.Equal(t, true, identity.Metadata["email_ownership_verified"])
+	require.Equal(t, "users.email", identity.Metadata["prior_backfill_source"])
+	require.NotContains(t, identity.Metadata, "backfill_source")
+}
+
 func TestAuthServiceBindEmailIdentity_RejectsExistingEmailOnAnotherUser(t *testing.T) {
 	cache := &emailBindCacheStub{
 		data: &service.VerificationCodeData{

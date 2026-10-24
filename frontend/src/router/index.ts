@@ -289,6 +289,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/qq-activity',
+    name: 'QQActivity',
+    component: () => import('@/views/user/QQActivityView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: false, title: 'QQ 群活动', titleKey: 'nav.qqActivity' }
+  },
+  {
     path: '/lottery',
     name: 'Lottery',
     component: () => import('@/views/user/LotteryView.vue'),
@@ -625,6 +631,12 @@ const routes: RouteRecordRaw[] = [
     name: 'AdminSupportChat',
     component: () => import('@/views/admin/SupportChatView.vue'),
     meta: { requiresAuth: true, requiresAdmin: true, title: 'Support Inbox', titleKey: 'supportChat.inbox' }
+  },
+  {
+    path: '/admin/qq-activity',
+    name: 'AdminQQActivity',
+    component: () => import('@/views/admin/QQActivityView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'QQ 活动管理', titleKey: 'nav.qqActivityManagement' }
   },
   {
     path: '/admin/lottery',

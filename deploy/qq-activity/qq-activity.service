@@ -1,0 +1,25 @@
+[Unit]
+Description=QQ activity NapCat bridge
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=qq-activity
+Group=qq-activity
+ExecStart=/opt/qq-activity/qq-activity-bot --config /etc/qq-activity/config.json
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/qq-activity
+MemoryMax=96M
+TasksMax=64
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
