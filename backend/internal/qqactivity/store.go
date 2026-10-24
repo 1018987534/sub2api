@@ -139,7 +139,7 @@ func (s *Store) Initialize(ctx context.Context, groups []GroupSnapshot, activate
 		if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_config SET initialized_at=COALESCE(initialized_at,$1),status=CASE WHEN $2 THEN 'active' ELSE 'preparing' END,started_at=CASE WHEN $2 THEN $1 ELSE NULL END,updated_at=NOW() WHERE id=1`, now, activate); err != nil {
 			return err
 		}
-		// Match every recorded member; ambiguous or unverified candidates remain explicit.
+		// Match recorded members silently; initialization never issues rewards.
 		rows, err := tx.QueryContext(ctx, `SELECT group_id,qq,is_robot FROM qq_activity_members ORDER BY group_id,qq`)
 		if err != nil {
 			return err
@@ -173,8 +173,8 @@ func (s *Store) Initialize(ctx context.Context, groups []GroupSnapshot, activate
 			if err = saveCandidate(ctx, tx, m.group, m.qq, candidate, state); err != nil {
 				return err
 			}
-			if candidate != nil && state == "verified" {
-				if err = bind(ctx, tx, m.qq, candidate.ID, "verified_email"); err != nil {
+			if candidate != nil && state == "matched" {
+				if err = bind(ctx, tx, m.qq, candidate.ID, "matched_"+candidate.Source); err != nil {
 					return err
 				}
 			}
@@ -185,8 +185,9 @@ func (s *Store) Initialize(ctx context.Context, groups []GroupSnapshot, activate
 
 func findCandidate(ctx context.Context, q queryer, qq string) (*Candidate, string, error) {
 	email := qq + "@qq.com"
-	// A historical verified_at alone is NOT ownership proof: migration 109 backfilled it.
-	query := `SELECT u.id,u.email,u.status,EXISTS(SELECT 1 FROM auth_identities a WHERE a.user_id=u.id AND a.provider_type='email' AND lower(btrim(a.provider_subject))=$1 AND a.verified_at IS NOT NULL AND a.metadata->>'email_ownership_verified'='true' AND NOT (a.metadata ? 'backfill_source')) FROM users u WHERE u.deleted_at IS NULL AND lower(btrim(u.email))=$1 ORDER BY u.id LIMIT 3`
+	// Registration email takes precedence. A profile QQ alias is used only when
+	// no account registered with this QQ email exists; neither path needs a code.
+	query := `SELECT id,email,status FROM users WHERE deleted_at IS NULL AND lower(btrim(email))=$1 ORDER BY id LIMIT 3`
 	read := func(query, source string) ([]Candidate, error) {
 		rows, err := q.QueryContext(ctx, query, email)
 		if err != nil {
@@ -197,7 +198,7 @@ func findCandidate(ctx context.Context, q queryer, qq string) (*Candidate, strin
 		for rows.Next() {
 			var c Candidate
 			c.Source = source
-			if err := rows.Scan(&c.ID, &c.Email, &c.Status, &c.Verified); err != nil {
+			if err := rows.Scan(&c.ID, &c.Email, &c.Status); err != nil {
 				return nil, err
 			}
 			result = append(result, c)
@@ -209,7 +210,7 @@ func findCandidate(ctx context.Context, q queryer, qq string) (*Candidate, strin
 		return nil, "", err
 	}
 	if len(candidates) == 0 {
-		candidates, err = read(`SELECT id,email,status,FALSE FROM users WHERE deleted_at IS NULL AND lower(btrim(username))=$1 ORDER BY id LIMIT 3`, "username")
+		candidates, err = read(`SELECT id,email,status FROM users WHERE deleted_at IS NULL AND lower(btrim(username))=$1 ORDER BY id LIMIT 3`, "username")
 		if err != nil {
 			return nil, "", err
 		}
@@ -232,10 +233,7 @@ func findCandidate(ctx context.Context, q queryer, qq string) (*Candidate, strin
 	if err == nil && other != qq {
 		return &c, "conflict", nil
 	}
-	if c.Source == "email" && c.Verified {
-		return &c, "verified", nil
-	}
-	return &c, "confirmation_required", nil
+	return &c, "matched", nil
 }
 func saveCandidate(ctx context.Context, tx *sql.Tx, group, qq string, c *Candidate, state string) error {
 	var id any
@@ -249,13 +247,16 @@ func saveCandidate(ctx context.Context, tx *sql.Tx, group, qq string, c *Candida
 }
 func bind(ctx context.Context, tx *sql.Tx, qq string, userID int64, source string) error {
 	var id int64
-	var status string
-	err := tx.QueryRowContext(ctx, `SELECT id,status FROM users WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, userID).Scan(&id, &status)
+	var status, email, username string
+	err := tx.QueryRowContext(ctx, `SELECT id,status,email,COALESCE(username,'') FROM users WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, userID).Scan(&id, &status, &email, &username)
 	if err != nil {
 		return err
 	}
 	if status != "active" {
 		return errors.New("账号当前无法绑定，请联系管理员。")
+	}
+	if strings.ToLower(strings.TrimSpace(email)) != qq+"@qq.com" && strings.ToLower(strings.TrimSpace(username)) != qq+"@qq.com" {
+		return errors.New("账号信息已变更，请稍后重试。")
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_bindings(qq,user_id,source) VALUES($1,$2,$3) ON CONFLICT(qq) DO NOTHING`, qq, userID, source)
 	if err != nil {
@@ -269,8 +270,57 @@ func bind(ctx context.Context, tx *sql.Tx, qq string, userID int64, source strin
 	if boundID != userID {
 		return errors.New("当前 QQ 已有关联账号，请联系管理员。")
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE qq_activity_members SET candidate_user_id=$1,match_state='bound' WHERE qq=$2`, userID, qq)
+	_, err = tx.ExecContext(ctx, `UPDATE qq_activity_members SET candidate_user_id=$1,match_state='bound',next_level_retry_at=CASE WHEN qq_level IS NULL AND next_level_retry_at IS NULL AND level_attempts<4 THEN NOW() ELSE next_level_retry_at END WHERE qq=$2`, userID, qq)
 	return err
+}
+
+// autoBindMembers also catches website registrations and profile updates made
+// after the member joined. It preserves membership history and stays silent.
+func (s *Store) autoBindMembers(ctx context.Context, tx *sql.Tx, c Config) error {
+	if c.InitializedAt == nil || !c.AutoProcessJoin {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON(m.qq) m.group_id,m.qq FROM qq_activity_members m WHERE m.in_group AND NOT m.is_robot AND NOT EXISTS(SELECT 1 FROM qq_activity_bindings b WHERE b.qq=m.qq) AND EXISTS(SELECT 1 FROM users u WHERE u.deleted_at IS NULL AND u.status='active' AND (lower(btrim(u.email))=m.qq||'@qq.com' OR lower(btrim(u.username))=m.qq||'@qq.com')) ORDER BY m.qq,m.last_seen_at DESC LIMIT 200`)
+	if err != nil {
+		return err
+	}
+	type member struct{ group, qq string }
+	var members []member
+	for rows.Next() {
+		var m member
+		if err = rows.Scan(&m.group, &m.qq); err != nil {
+			rows.Close()
+			return err
+		}
+		members = append(members, m)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, m := range members {
+		candidate, state, err := findCandidate(ctx, tx, m.qq)
+		if err != nil {
+			return err
+		}
+		if err = saveCandidate(ctx, tx, m.group, m.qq, candidate, state); err != nil {
+			return err
+		}
+		if candidate == nil || state != "matched" {
+			continue
+		}
+		if err = bind(ctx, tx, m.qq, candidate.ID, "matched_"+candidate.Source); err != nil {
+			return err
+		}
+		if err = audit(ctx, tx, "system", "auto_bind", fmt.Sprint(candidate.ID), map[string]string{"source": candidate.Source}); err != nil {
+			return err
+		}
+		if err = s.reconcile(ctx, tx, m.qq, c); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func audit(ctx context.Context, tx *sql.Tx, actor, action, subject string, detail any) error {
 	data, err := json.Marshal(detail)

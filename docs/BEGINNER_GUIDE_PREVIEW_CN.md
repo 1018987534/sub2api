@@ -62,3 +62,5 @@ python3 deploy/client-downloads/sync_client_downloads.py --ccswitch-only --root 
 停止更新：`systemctl disable --now sub2api-client-mirror.timer`，保留已发布安装包。将保留的 `releases/<release-id>/manifest.json` 复制为临时文件，再原子替换根目录 manifest，可回到此前文件列表。应用界面回退使用项目已有版本发布回退流程。
 
 本轮提供独立 `DIFF_FILE.patch`、`VERIFICATION.txt`、`ROLLBACK.sh` 及基线。回滚脚本仅恢复这一变更的文件，并要求目标副本匹配已记录的修改后哈希；在独立副本中演练后验证原始哈希一致。原项目 checkout 保持原始字节。
+
+教程三张 SVG 操作示意图由 `frontend/public/tutorial/beginner/` 发布到 `/tutorial/beginner/`，缩略图与点击放大使用相同地址。避免与图片 API 保留的 `/images/` 前缀冲突。

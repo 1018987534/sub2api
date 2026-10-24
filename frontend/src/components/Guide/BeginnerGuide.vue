@@ -47,20 +47,20 @@ onBeforeUnmount(() => { abort.abort(); document.removeEventListener('keydown', c
       <p v-if="platform === 'macos'" class="guide-note"><strong>Mac：</strong>打开 .dmg，把图标拖进「应用程序」。新版 ChatGPT Mac 客户端适用于 Apple 芯片；Intel 用户可用 <a href="https://learn.chatgpt.com/docs/codex/cli" target="_blank" rel="noopener noreferrer">Codex CLI</a>，CC Switch 的 Mac 安装包通用。</p>
       <p v-else-if="platform === 'windows'" class="guide-note"><strong>Windows：</strong>CC Switch 双击 .msi 安装；ChatGPT 可用微软商店，或双击完整 .msix 安装包。ARM 电脑在上方选 ARM。</p>
       <p v-else class="guide-note">请在电脑上选择 Mac 或 Windows 下载。手机可以先看这篇教程。</p>
-      <figure><button class="guide-picture" @click="imagePreview = { src: '/images/beginner/install.svg', alt: 'Mac 拖到应用程序，Windows 按安装向导安装' }"><img src="/images/beginner/install.svg" alt="Mac 拖到应用程序，Windows 按安装向导安装" loading="lazy"></button><figcaption>按你的电脑系统安装。图片可点击放大。</figcaption></figure>
+      <figure><button class="guide-picture" @click="imagePreview = { src: '/tutorial/beginner/install.svg', alt: 'Mac 拖到应用程序，Windows 按安装向导安装' }"><img src="/tutorial/beginner/install.svg" alt="Mac 拖到应用程序，Windows 按安装向导安装" loading="lazy"></button><figcaption>按你的电脑系统安装。图片可点击放大。</figcaption></figure>
     </section>
 
     <section id="import" class="guide-step">
       <h2>第二步：在本站一键导入 CC Switch</h2>
       <ol><li>登录{{ siteName }}，确认账户有可用额度。</li><li>打开 <a href="/keys">API 密钥</a>，点「创建密钥」，选择支持 <strong>OpenAI / Codex</strong> 的分组。已有密钥可直接用。</li><li>点这一行右侧的 <strong>「导入到 CC Switch」</strong>，允许浏览器打开应用，再确认导入。</li></ol>
-      <figure><button class="guide-picture" @click="imagePreview = { src: '/images/beginner/import.svg', alt: '在 API 密钥页面，点击创建密钥和导入到 CC Switch' }"><img src="/images/beginner/import.svg" alt="在 API 密钥页面，点击创建密钥和导入到 CC Switch" loading="lazy"></button><figcaption>先选对密钥，再点右边的导入按钮。密钥已隐藏。</figcaption></figure>
+      <figure><button class="guide-picture" @click="imagePreview = { src: '/tutorial/beginner/import.svg', alt: '在 API 密钥页面，点击创建密钥和导入到 CC Switch' }"><img src="/tutorial/beginner/import.svg" alt="在 API 密钥页面，点击创建密钥和导入到 CC Switch" loading="lazy"></button><figcaption>先选对密钥，再点右边的导入按钮。密钥已隐藏。</figcaption></figure>
       <p class="guide-note">Claude、Gemini 分组要配对应工具；这篇以 Codex 为例。不确定选哪个分组，先看 <a href="/available-channels">可用渠道</a>。</p>
     </section>
 
     <section id="start" class="guide-step">
       <h2>第三步：启用配置，开始使用</h2>
       <ol><li>打开 CC Switch → <strong>Codex</strong>，将 <strong>「{{ siteName }}」</strong>设为当前使用的供应商。</li><li>完全退出并重开 ChatGPT / Codex。Mac 用 <kbd>⌘ Q</kbd> 退出；Windows 检查托盘里是否仍在运行。</li><li>进入客户端的 <strong>Codex</strong>，按提示完成首次设置，新建对话，选择分组支持的模型，发一句「你好」测试。</li></ol>
-      <figure><button class="guide-picture" @click="imagePreview = { src: '/images/beginner/start.svg', alt: 'CC Switch 中启用小红豆，再到客户端的 Codex 新建对话' }"><img src="/images/beginner/start.svg" alt="CC Switch 中启用小红豆，再到客户端的 Codex 新建对话" loading="lazy"></button><figcaption>选中本站配置 → 重开客户端 → 进入 Codex 使用。</figcaption></figure>
+      <figure><button class="guide-picture" @click="imagePreview = { src: '/tutorial/beginner/start.svg', alt: 'CC Switch 中启用小红豆，再到客户端的 Codex 新建对话' }"><img src="/tutorial/beginner/start.svg" alt="CC Switch 中启用小红豆，再到客户端的 Codex 新建对话" loading="lazy"></button><figcaption>选中本站配置 → 重开客户端 → 进入 Codex 使用。</figcaption></figure>
       <p class="guide-note"><strong>确认是否成功：</strong>收到回复后，回本站 <a href="/usage">使用记录</a>，核对刚才的时间、模型和费用。普通 ChatGPT 聊天区的账号与额度单独管理。</p>
     </section>
 

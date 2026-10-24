@@ -84,11 +84,10 @@ type Outbox struct {
 	Text    string `json:"text"`
 }
 type Candidate struct {
-	ID       int64
-	Email    string
-	Status   string
-	Source   string
-	Verified bool
+	ID     int64
+	Email  string
+	Status string
+	Source string
 }
 
 func ValidQQ(value string) bool { return qqPattern.MatchString(value) }

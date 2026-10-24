@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -57,6 +56,11 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	}
 	exec(string(migration))
 	exec(string(migration)) // additive and idempotent
+	identityMigration, err := migrations.FS.ReadFile("249_qq_activity_identity_owners.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(string(identityMigration))
 	store := NewStore(db, nil)
 	addUser := func(qq, email, username string, verified bool) int64 {
 		t.Helper()
@@ -162,74 +166,18 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	process("unknown-retry", "56789012", "level", "", &l21, "")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, unknown)
 
-	// Username fallback and migration backfill do not prove ownership.
+	// QQ email and profile fallback both bind without verification or a code.
 	fallback := addUser("67890123", "fallback@example.com", "67890123@qq.com", false)
 	process("fallback-join", "67890123", "join", "", &l21, "")
-	requireNumber(`SELECT COUNT(*) FROM qq_activity_bindings WHERE user_id=$1`, 0, fallback)
-	var message string
-	if err = db.QueryRow(`SELECT text FROM qq_activity_outbox WHERE dedup_key='event:fallback-join'`).Scan(&message); err != nil {
-		t.Fatal(err)
-	}
-	matched := regexp.MustCompile(`claim=([a-f0-9]{48})`).FindStringSubmatch(message)
-	if len(matched) != 2 {
-		t.Fatalf("missing claim URL in output: %s", message)
-	}
-	token := matched[1]
-	if _, err = store.Claim(ctx, inviter, token, true); err == nil {
-		t.Fatal("another logged-in account stole candidate")
-	}
-	view, err := store.Claim(ctx, fallback, token, true)
-	if err != nil || len(view.Code) != 6 {
-		t.Fatal("valid claim code not issued", err)
-	}
-	if strings.Contains(view.Account, "fallback@example.com") {
-		t.Fatal("unmasked account")
-	}
-	event := Event{ID: "confirm-fallback", GroupID: "87654321", QQ: "67890123", Kind: "command", Command: "绑定", Code: view.Code, Time: time.Now().Unix(), Level: &l21, MemberConfirmed: true}
-	if err = store.Process(ctx, event); err != nil {
-		t.Fatal(err)
-	}
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_bindings WHERE user_id=$1`, 1, fallback)
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, fallback)
-	if err = store.Process(ctx, event); err != nil {
-		t.Fatal(err)
-	}
+	process("repeat-fallback", "67890123", "command", "绑定", &l21, "")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, fallback)
-	t.Log("username fallback requires same website account + same QQ code; duplicate confirms are idempotent")
-
-	blocked := addUser("78901234", "78901234@qq.com", "", false)
-	exec(`INSERT INTO auth_identities VALUES($1,'email','78901234@qq.com',NOW(),'{"backfill_source":"users.email","email_ownership_verified":true}')`, blocked)
-	process("backfill-join", "78901234", "join", "", &l21, "")
-	requireNumber(`SELECT COUNT(*) FROM qq_activity_bindings WHERE user_id=$1`, 0, blocked)
-	var wrongMessage string
-	if err = db.QueryRow(`SELECT text FROM qq_activity_outbox WHERE dedup_key='event:backfill-join'`).Scan(&wrongMessage); err != nil {
-		t.Fatal(err)
-	}
-	wrongToken := regexp.MustCompile(`claim=([a-f0-9]{48})`).FindStringSubmatch(wrongMessage)[1]
-	wrongClaim, err := store.Claim(ctx, blocked, wrongToken, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrongCode := "000000"
-	if wrongClaim.Code == wrongCode {
-		wrongCode = "000001"
-	}
-	for i := 0; i < 5; i++ {
-		e := Event{ID: fmt.Sprintf("wrong-%d", i), GroupID: "87654321", QQ: "78901234", Kind: "command", Command: "绑定", Code: "abcdef", Time: time.Now().Unix(), Level: &l21, MemberConfirmed: true}
-		if err = store.Process(ctx, e); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Malformed input is rejected before checking a code; actual six-digit wrong
-	// attempts exhaust the session, not an unlimited brute-force loop.
-	for i := 0; i < 5; i++ {
-		e := Event{ID: fmt.Sprintf("wrongnumeric-%d", i), GroupID: "87654321", QQ: "78901234", Kind: "command", Command: "绑定", Code: wrongCode, Time: time.Now().Unix(), Level: &l21, MemberConfirmed: true}
-		if err = store.Process(ctx, e); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err = store.Claim(ctx, blocked, wrongToken, true); err == nil {
-		t.Fatal("exhausted code session reused")
-	}
+	unverified := addUser("78901234", "78901234@qq.com", "", false)
+	process("unverified-join", "78901234", "join", "", &l21, "")
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_bindings WHERE user_id=$1`, 1, unverified)
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_claims`, 0)
+	t.Log("unverified QQ email and profile username bind directly; repeat binding cannot duplicate awards")
 
 	if err = store.Control(ctx, "test-admin", "paused"); err != nil {
 		t.Fatal(err)

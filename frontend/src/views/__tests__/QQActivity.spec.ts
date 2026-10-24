@@ -60,13 +60,19 @@ describe('QQ activity user page', () => {
     expect(wrapper.text()).not.toContain('活动前已有用户'); expect(wrapper.text()).not.toContain('12345678@qq.com')
     wrapper.unmount()
   })
-  it('requires explicit account confirmation before generating a code', async () => {
-    mocks.route.query = { claim: 'test-token' }
-    mocks.claim.mockResolvedValueOnce({ account: '12****78@qq.com', qq_email: '12****78@qq.com', consumed: false, expires_at: '2026-10-24T11:00:00Z' }).mockResolvedValueOnce({ account: '12****78@qq.com', qq_email: '12****78@qq.com', consumed: false, code: '123456', expires_at: '2026-10-24T11:00:00Z' })
+  it('uses automatic binding without generating a code for a legacy claim URL', async () => {
+    mocks.route.query = { claim: 'old-link' }
     const wrapper = mount(UserQQActivity, options); await flushPromises()
-    expect(mocks.claim).toHaveBeenCalledWith('test-token'); expect(wrapper.text()).not.toContain('绑定 123456')
-    await wrapper.findAll('button').find(b => b.text().includes('生成绑定码'))!.trigger('click'); await flushPromises()
-    expect(mocks.claim).toHaveBeenLastCalledWith('test-token', true); expect(wrapper.text()).toContain('绑定 123456')
+    expect(mocks.claim).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('生成绑定码')
+    wrapper.unmount()
+  })
+  it('explains automatic matching after a profile update without a verification step', async () => {
+    mocks.current.mockResolvedValue({ config: config(), bound: false, account: '—', welcome_text: '尚未绑定。', invitation_paid: 0, invitation_pending: 0, pending_inviter_binding: 0, rewards: [] })
+    const wrapper = mount(UserQQActivity, options); await flushPromises()
+    expect(wrapper.text()).toContain('保存后会自动匹配')
+    expect(wrapper.text()).toContain('无需邮箱验证或确认码')
+    expect(wrapper.text()).toContain('同一 QQ 只能关联一个官网账号')
     wrapper.unmount()
   })
 })

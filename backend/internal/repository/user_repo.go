@@ -20,6 +20,7 @@ import (
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
@@ -156,7 +157,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetRestrictPublicGroups(userIn.RestrictPublicGroups).
 		Save(txCtx)
 	if err != nil {
-		return translatePersistenceError(err, nil, service.ErrEmailExists)
+		return translateUserPersistenceError(err, nil, service.ErrEmailExists)
 	}
 
 	if err := r.syncUserAllowedGroupsWithClient(txCtx, txClient, created.ID, userIn.AllowedGroups); err != nil {
@@ -343,7 +344,7 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 	updated, err := updateOp.Save(txCtx)
 	if err != nil {
-		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
+		return translateUserPersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
 	}
 
 	if fields.AllowedGroups {
@@ -1246,7 +1247,7 @@ func (r *userRepository) UpdateEmailWithAliasGuard(
 		SetEmail(email).
 		SetPasswordHash(passwordHash).
 		Save(ctx); err != nil {
-		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
+		return translateUserPersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
 	}
 	return nil
 }
@@ -1596,4 +1597,12 @@ func (r *userRepository) DisableTotp(ctx context.Context, userID int64) error {
 		return translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
 	return nil
+}
+
+func translateUserPersistenceError(err error, notFound, conflict *infraerrors.ApplicationError) error {
+	var pgErr *pq.Error
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.Constraint == "qq_activity_identity_owner_unique" {
+		return infraerrors.Conflict("QQ_IDENTITY_EXISTS", "该 QQ 邮箱已被其他账号使用，请使用本人尚未关联的 QQ 邮箱。").WithCause(err)
+	}
+	return translatePersistenceError(err, notFound, conflict)
 }
