@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync desktop installers after boot and every 7 days
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=7d
+RandomizedDelaySec=5min
+Unit=sub2api-client-mirror.service
+
+[Install]
+WantedBy=timers.target

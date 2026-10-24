@@ -168,6 +168,7 @@ export default {
     dashboard: 'Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',
+    beginnerGuide: 'Beginner Guide',
     imageStudio: 'AI Images',
     batchImage: 'Batch Images',
     usage: 'Usage',

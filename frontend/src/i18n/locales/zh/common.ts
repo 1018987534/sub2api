@@ -168,6 +168,7 @@ export default {
     dashboard: '仪表盘',
     announcements: '公告',
     apiKeys: 'API 密钥',
+    beginnerGuide: '小白教程',
     imageStudio: 'AI 生图',
     batchImage: '批量生图',
     usage: '使用记录',

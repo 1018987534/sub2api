@@ -29,6 +29,15 @@
           <span class="min-w-0 truncate text-base font-semibold">{{ siteName }}</span>
         </div>
         <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
+          <router-link
+            to="/beginner"
+            data-testid="beginner-guide-entry"
+            :aria-label="t('nav.beginnerGuide')"
+            class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          >
+            <Icon name="book" size="sm" class="hidden sm:block" />
+            <span>{{ t('nav.beginnerGuide') }}</span>
+          </router-link>
           <LocaleSwitcher />
           <a
             v-if="docUrl"
@@ -59,6 +68,7 @@
           </button>
           <router-link
             :to="isAuthenticated ? dashboardPath : '/login'"
+            data-testid="home-auth-entry"
             class="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-200"
           >
             {{ isAuthenticated ? t('home.dashboard') : t('home.login') }}
@@ -116,7 +126,7 @@
 
     <!-- Header -->
     <header class="relative z-20 px-6 py-4">
-      <nav class="mx-auto flex max-w-6xl items-center justify-between">
+      <nav class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
         <!-- Logo -->
         <div class="flex items-center">
           <div class="h-10 w-10 overflow-hidden rounded-xl shadow-md">
@@ -125,7 +135,16 @@
         </div>
 
         <!-- Nav Actions -->
-        <div class="flex items-center gap-3">
+        <div class="flex max-w-full flex-wrap items-center justify-end gap-2 sm:gap-3">
+          <router-link
+            to="/beginner"
+            data-testid="beginner-guide-entry"
+            :aria-label="t('nav.beginnerGuide')"
+            class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          >
+            <Icon name="book" size="sm" class="hidden sm:block" />
+            <span>{{ t('nav.beginnerGuide') }}</span>
+          </router-link>
           <!-- Language Switcher -->
           <LocaleSwitcher />
 

@@ -56,7 +56,7 @@ function mountHome(settings: Record<string, unknown> = {}) {
 }
 
 function compactDestination(wrapper: ReturnType<typeof mountHome>) {
-  return wrapper.get('[data-testid="compact-home"]').findComponent(RouterLinkStub).props('to')
+  return wrapper.get('[data-testid="compact-home"]').findComponent('[data-testid="home-auth-entry"]').props('to')
 }
 
 function modelPlazaDestination(wrapper: ReturnType<typeof mountHome>) {

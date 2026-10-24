@@ -1,0 +1,19 @@
+[Unit]
+Description=Mirror official CC Switch and ChatGPT desktop installers
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=sub2api-mirror
+Group=sub2api-mirror
+ExecStart=/usr/bin/python3 /opt/sub2api-client-mirror/sync_client_downloads.py --root /srv/sub2api-downloads/clients
+TimeoutStartSec=2h
+UMask=0022
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/sub2api-downloads/clients
+RestrictSUIDSGID=true
