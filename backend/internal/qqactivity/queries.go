@@ -75,7 +75,7 @@ func (s *Store) UserSummary(ctx context.Context, userID int64) (Summary, error) 
 	var qq string
 	err = s.db.QueryRowContext(ctx, `SELECT qq FROM qq_activity_bindings WHERE user_id=$1`, userID).Scan(&qq)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Summary{Config: c, Account: "—", WelcomeStatus: "not_bound", WelcomeText: "系统会自动匹配活动群成员；也可在群内发送「绑定」立即重试。", Rewards: []Reward{}}, nil
+		return Summary{Config: c, Account: "—", WelcomeStatus: "not_bound", WelcomeText: "注册 QQ 邮箱会自动匹配；其他邮箱或主动解绑后，请从右上角 QQ 绑定入口验证本人 QQ 邮箱。", Rewards: []Reward{}}, nil
 	}
 	if err != nil {
 		return Summary{}, err

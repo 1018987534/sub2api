@@ -110,7 +110,7 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 						if err = bind(ctx, tx, e.QQ, candidate.ID, "matched_"+candidate.Source); err != nil {
 							return err
 						}
-					case "unmatched":
+					case "unmatched", "needs_verification":
 						reply = Prompt("M01", map[string]string{"qq_email_mask": MaskEmail(e.QQ + "@qq.com"), "site_url": SiteURL})
 					case "ambiguous":
 						reply = Prompt("M04", map[string]string{"case_no": Hash(e.GroupID + ":" + e.QQ)[:12]})
@@ -142,10 +142,10 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 			case "邀请奖励":
 				reply = fmt.Sprintf("邀请奖励已到账：$%.2f\n已确认待发放：$%.2f\n待绑定领取：$%.2f\n详情：%s/qq-activity\n邀请余额转入使用余额，请按官网「邀请奖励」页面提示操作。", summary.InvitationPaid, summary.InvitationPending, summary.PendingInviterBinding, SiteURL)
 				if !summary.Bound {
-					reply += "\n发送「绑定」后可领取已确认的邀请奖励，邀请人本人不限等级。"
+					reply += "\n请登录官网，从右上角 QQ 绑定入口完成绑定，系统随后发放已确认的邀请奖励，邀请人本人不限等级。"
 				}
 			case "解绑", "更换绑定":
-				reply = "如需解绑或更换关联账号，请联系管理员。已领取记录和资格记录会保留。"
+				reply = "请登录官网，在右上角 QQ 绑定入口自行取消绑定。解绑会保留历史和领奖记录，重新绑定不会重复发放奖励。"
 			case "绑定":
 				if reply == "" {
 					reply = renderBinding(summary, beforeBound)
@@ -173,7 +173,7 @@ func renderBinding(s Summary, already bool) string {
 		id = "B08"
 	}
 	if !s.Bound {
-		return "尚未绑定。请在活动群发送「绑定」开始办理。"
+		return "尚未绑定。请登录官网，从右上角 QQ 绑定入口验证本人 QQ 邮箱。"
 	}
 	return Prompt(id, map[string]string{"account_mask": s.Account})
 }
@@ -184,7 +184,7 @@ func renderSummary(s Summary) string {
 	}
 	text := fmt.Sprintf("绑定状态：%s\n官网账号：%s\n详情：%s/qq-activity", status, s.Account, SiteURL)
 	if !s.Bound {
-		text += "\n发送「绑定」开始办理。"
+		text += "\n请登录官网，从右上角 QQ 绑定入口验证本人 QQ 邮箱。"
 	}
 	return text
 }

@@ -152,6 +152,40 @@ func TestPasskeyLoginAuditUsesCanonicalLoginActionAndOmitsCredentialBody(t *test
 	require.Contains(t, auditBodyOmittedRoutes, route)
 }
 
+func TestQQBindingAuditOmitsMailboxAndProofWithoutChangingRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, route := range []string{"/api/v1/qq-activity/binding/send-code", "/api/v1/qq-activity/binding/verify"} {
+		t.Run(route, func(t *testing.T) {
+			repository := &auditCaptureRepository{}
+			auditService := service.NewAuditLogService(repository, nil)
+			auditService.Start()
+			router := gin.New()
+			router.Use(func(c *gin.Context) {
+				c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+				c.Next()
+			})
+			router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+			router.POST(route, func(c *gin.Context) {
+				var body map[string]string
+				require.NoError(t, c.ShouldBindJSON(&body))
+				require.Equal(t, "12345678@qq.com", body["email"])
+				require.Equal(t, "123456", body["code"])
+				c.JSON(http.StatusOK, gin.H{"ok": true})
+			})
+			request := httptest.NewRequest(http.MethodPost, route, bytes.NewBufferString(`{"email":"12345678@qq.com","code":"123456","challenge":"audit-canary"}`))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			auditService.Stop()
+			repository.mu.Lock()
+			defer repository.mu.Unlock()
+			require.Len(t, repository.logs, 1)
+			require.Equal(t, "<credential-bearing body omitted>", repository.logs[0].RequestBody)
+		})
+	}
+}
+
 // Ollama 会话保存的请求体整体就是浏览器 Cookie 明文，键级脱敏清单曾漏掉裸键
 // "session"，必须走整体不入库路径，防止会话凭证长期留存在 audit_logs。
 func TestOllamaCloudUsageSessionRouteOmitsAuditBody(t *testing.T) {

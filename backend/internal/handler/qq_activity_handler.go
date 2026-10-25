@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,11 +21,12 @@ import (
 )
 
 type QQActivityHandler struct {
-	store     *qqactivity.Store
-	tokenFile string
+	store        *qqactivity.Store
+	tokenFile    string
+	emailService *service.EmailService
 }
 
-func NewQQActivityHandler(db *sql.DB, authCache service.APIKeyAuthCacheInvalidator, billingCache *service.BillingCacheService, cfg *config.Config) *QQActivityHandler {
+func NewQQActivityHandler(db *sql.DB, authCache service.APIKeyAuthCacheInvalidator, billingCache *service.BillingCacheService, cfg *config.Config, emailService *service.EmailService) *QQActivityHandler {
 	store := qqactivity.NewStore(db, func(ctx context.Context, id int64) {
 		if authCache != nil {
 			authCache.InvalidateAuthCacheByUserID(ctx, id)
@@ -32,7 +35,96 @@ func NewQQActivityHandler(db *sql.DB, authCache service.APIKeyAuthCacheInvalidat
 			_ = billingCache.InvalidateUserBalance(ctx, id)
 		}
 	})
-	return &QQActivityHandler{store: store, tokenFile: filepath.Join(cfg.Pricing.DataDir, "qq-activity-bridge.token")}
+	return &QQActivityHandler{store: store, tokenFile: filepath.Join(cfg.Pricing.DataDir, "qq-activity-bridge.token"), emailService: emailService}
+}
+
+func (h *QQActivityHandler) Binding(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "请先登录。")
+		return
+	}
+	result, err := h.store.BindingStatus(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.Error(c, 503, "绑定状态暂时不可用，请稍后重试。")
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *QQActivityHandler) SendBindingCode(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "请先登录。")
+		return
+	}
+	var req struct {
+		Email string `json:"email" binding:"required,max=80"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		response.BadRequest(c, qqactivity.ErrBindingEmail.Error())
+		return
+	}
+	if h.emailService == nil {
+		response.Error(c, 503, "邮件发送暂时不可用，请稍后重试。")
+		return
+	}
+	result, err := h.store.SendBindingCode(c.Request.Context(), subject.UserID, req.Email, middleware2.SecurityClientIP(c), func(ctx context.Context, email, code string) error {
+		return h.emailService.SendEmail(ctx, email, "[小红豆] QQ 绑定验证码", fmt.Sprintf("<p>你正在为当前登录的小红豆账号绑定 QQ 邮箱。</p><p>验证码：<strong>%s</strong></p><p>10 分钟内有效。请回到官网右上角「绑定 QQ」填写，不要把验证码发到 QQ 群或交给他人。若非本人操作，请忽略本邮件。</p>", code))
+	})
+	if err != nil {
+		bindingError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *QQActivityHandler) VerifyBindingEmail(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "请先登录。")
+		return
+	}
+	var req struct {
+		Email     string `json:"email" binding:"required,max=80"`
+		Challenge string `json:"challenge" binding:"required,len=48"`
+		Code      string `json:"code" binding:"required,max=32"`
+	}
+	if c.ShouldBindJSON(&req) != nil {
+		response.BadRequest(c, qqactivity.ErrBindingCode.Error())
+		return
+	}
+	result, err := h.store.VerifyBindingEmail(c.Request.Context(), subject.UserID, req.Email, req.Challenge, req.Code)
+	if err != nil {
+		bindingError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func bindingError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, qqactivity.ErrBindingRate):
+		c.Header("Retry-After", "60")
+		response.Error(c, 429, err.Error())
+	case errors.Is(err, qqactivity.ErrBindingEmail), errors.Is(err, qqactivity.ErrBindingCode), errors.Is(err, qqactivity.ErrBindingConflict), errors.Is(err, qqactivity.ErrBindingAlready):
+		response.BadRequest(c, err.Error())
+	default:
+		response.Error(c, 503, "QQ 绑定暂时不可用，请稍后重试。")
+	}
+}
+
+func (h *QQActivityHandler) Unbind(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "请先登录。")
+		return
+	}
+	if err := h.store.Unbind(c.Request.Context(), subject.UserID); err != nil {
+		bindingError(c, err)
+		return
+	}
+	response.Success(c, qqactivity.BindingStatus{})
 }
 func (h *QQActivityHandler) Current(c *gin.Context) {
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)

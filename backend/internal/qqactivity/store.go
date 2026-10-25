@@ -185,8 +185,8 @@ func (s *Store) Initialize(ctx context.Context, groups []GroupSnapshot, activate
 
 func findCandidate(ctx context.Context, q queryer, qq string) (*Candidate, string, error) {
 	email := qq + "@qq.com"
-	// Registration email takes precedence. A profile QQ alias is used only when
-	// no account registered with this QQ email exists; neither path needs a code.
+	// Only the registration email can establish a new automatic binding.
+	// Historical bindings are retained; profile usernames are display names.
 	query := `SELECT id,email,status FROM users WHERE deleted_at IS NULL AND lower(btrim(email))=$1 ORDER BY id LIMIT 3`
 	read := func(query, source string) ([]Candidate, error) {
 		rows, err := q.QueryContext(ctx, query, email)
@@ -210,12 +210,6 @@ func findCandidate(ctx context.Context, q queryer, qq string) (*Candidate, strin
 		return nil, "", err
 	}
 	if len(candidates) == 0 {
-		candidates, err = read(`SELECT id,email,status FROM users WHERE deleted_at IS NULL AND lower(btrim(username)) IN ($1,split_part($1,'@',1)) ORDER BY id LIMIT 3`, "username")
-		if err != nil {
-			return nil, "", err
-		}
-	}
-	if len(candidates) == 0 {
 		return nil, "unmatched", nil
 	}
 	if len(candidates) > 1 {
@@ -233,6 +227,17 @@ func findCandidate(ctx context.Context, q queryer, qq string) (*Candidate, strin
 	if err == nil && other != qq {
 		return &c, "conflict", nil
 	}
+	if err == nil {
+		return &c, "matched", nil
+	}
+	var optedOut bool
+	err = q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_activity_binding_history WHERE user_id=$1 AND unbound_at IS NOT NULL)`, c.ID).Scan(&optedOut)
+	if err != nil {
+		return nil, "", err
+	}
+	if optedOut {
+		return &c, "needs_verification", nil
+	}
 	return &c, "matched", nil
 }
 func saveCandidate(ctx context.Context, tx *sql.Tx, group, qq string, c *Candidate, state string) error {
@@ -247,16 +252,15 @@ func saveCandidate(ctx context.Context, tx *sql.Tx, group, qq string, c *Candida
 }
 func bind(ctx context.Context, tx *sql.Tx, qq string, userID int64, source string) error {
 	var id int64
-	var status, email, username string
-	err := tx.QueryRowContext(ctx, `SELECT id,status,email,COALESCE(username,'') FROM users WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, userID).Scan(&id, &status, &email, &username)
+	var status, email string
+	err := tx.QueryRowContext(ctx, `SELECT id,status,email FROM users WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, userID).Scan(&id, &status, &email)
 	if err != nil {
 		return err
 	}
 	if status != "active" {
 		return errors.New("账号当前无法绑定，请联系管理员。")
 	}
-	profileQQ := strings.ToLower(strings.TrimSpace(username))
-	if strings.ToLower(strings.TrimSpace(email)) != qq+"@qq.com" && profileQQ != qq+"@qq.com" && profileQQ != qq {
+	if source != "verified_email" && strings.ToLower(strings.TrimSpace(email)) != qq+"@qq.com" {
 		return errors.New("账号信息已变更，请稍后重试。")
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_bindings(qq,user_id,source) VALUES($1,$2,$3) ON CONFLICT(qq) DO NOTHING`, qq, userID, source)
@@ -275,13 +279,13 @@ func bind(ctx context.Context, tx *sql.Tx, qq string, userID int64, source strin
 	return err
 }
 
-// autoBindMembers also catches website registrations and profile updates made
+// autoBindMembers also catches website registrations made
 // after the member joined. It preserves membership history and stays silent.
 func (s *Store) autoBindMembers(ctx context.Context, tx *sql.Tx, c Config) error {
 	if c.InitializedAt == nil || !c.AutoProcessJoin {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON(m.qq) m.group_id,m.qq FROM qq_activity_members m WHERE m.in_group AND NOT m.is_robot AND NOT EXISTS(SELECT 1 FROM qq_activity_bindings b WHERE b.qq=m.qq) AND EXISTS(SELECT 1 FROM users u WHERE u.deleted_at IS NULL AND u.status='active' AND (lower(btrim(u.email))=m.qq||'@qq.com' OR lower(btrim(u.username)) IN (m.qq,m.qq||'@qq.com'))) ORDER BY m.qq,m.last_seen_at DESC LIMIT 200`)
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON(m.qq) m.group_id,m.qq FROM qq_activity_members m WHERE m.in_group AND NOT m.is_robot AND NOT EXISTS(SELECT 1 FROM qq_activity_bindings b WHERE b.qq=m.qq) AND EXISTS(SELECT 1 FROM users u WHERE u.deleted_at IS NULL AND u.status='active' AND lower(btrim(u.email))=m.qq||'@qq.com' AND NOT EXISTS(SELECT 1 FROM qq_activity_binding_history h WHERE h.user_id=u.id AND h.unbound_at IS NOT NULL)) ORDER BY m.qq,m.last_seen_at DESC LIMIT 200`)
 	if err != nil {
 		return err
 	}

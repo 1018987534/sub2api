@@ -5,16 +5,16 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/Wei-Shaw/sub2api/migrations"
-	"github.com/lib/pq"
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
 
-func autoBindingFixture(t *testing.T) (*sql.DB, *Store) {
+func autoBindingFixture(t *testing.T) (*sql.DB, *Store) { return autoBindingFixtureAt(t, true) }
+
+func autoBindingFixtureAt(t *testing.T, mail bool) (*sql.DB, *Store) {
 	t.Helper()
 	file := os.Getenv("QQ_ACTIVITY_TEST_DSN_FILE")
 	if file == "" {
@@ -67,11 +67,12 @@ func autoBindingFixture(t *testing.T) (*sql.DB, *Store) {
 			t.Fatal(err)
 		}
 	}
-	for _, file := range []string{"248_qq_activity.sql", "249_qq_activity_identity_owners.sql", "250_qq_activity_numeric_username.sql"} {
+	files := []string{"248_qq_activity.sql", "249_qq_activity_identity_owners.sql", "250_qq_activity_numeric_username.sql"}
+	if mail {
+		files = append(files, "251_qq_activity_email_binding.sql")
+	}
+	for _, file := range files {
 		data, e := migrations.FS.ReadFile(file)
-		if os.IsNotExist(e) {
-			continue
-		}
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -112,102 +113,54 @@ func autoInitialize(t *testing.T, s *Store, qqs ...string) {
 }
 func TestPostgresAutomaticBindingAndIdentityUniqueness(t *testing.T) {
 	ctx := context.Background()
-	t.Run("initialization_without_email_or_confirmation_code", func(t *testing.T) {
-		db, s := autoBindingFixture(t)
-		autoAdd(t, db, "12345001@qq.com", "")
-		autoAdd(t, db, "fallback@example.test", "12345002@qq.com")
-		autoInitialize(t, s, "12345001", "12345002")
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings", 2)
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_claims", 0)
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_rewards", 0)
-	})
-	t.Run("profile_update_and_registration_bind_without_group_command", func(t *testing.T) {
-		db, s := autoBindingFixture(t)
-		id := autoAdd(t, db, "profile@example.test", "")
-		autoInitialize(t, s, "12345003", "12345004")
-		autoAdd(t, db, "12345003@qq.com", "")
-		if _, e := db.Exec("UPDATE users SET username=' 12345004@QQ.COM ' WHERE id=$1", id); e != nil {
-			t.Fatal(e)
-		}
-		if e := s.Tick(ctx); e != nil {
-			t.Fatal(e)
-		}
-		if e := s.Tick(ctx); e != nil {
-			t.Fatal(e)
-		}
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings", 2)
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_claims", 0)
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_rewards", 0)
-	})
-	t.Run("plain_bind_command_needs_no_qq_mail_verification", func(t *testing.T) {
-		db, s := autoBindingFixture(t)
-		autoInitialize(t, s)
-		autoAdd(t, db, "unverified@example.test", "12345005@qq.com")
-		level := 7
-		if e := s.Process(ctx, Event{ID: "plain-bind", GroupID: "87654321", QQ: "12345005", Kind: "command", Command: "绑定", Time: time.Now().Unix(), MemberConfirmed: true, Level: &level}); e != nil {
-			t.Fatal(e)
-		}
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings", 1)
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_claims", 0)
-	})
-	t.Run("email_username_and_binding_share_unique_qq", func(t *testing.T) {
-		db, s := autoBindingFixture(t)
-		owner := autoAdd(t, db, "12345006@qq.com", "")
-		other := autoAdd(t, db, "other@example.test", "")
-		_, e := db.Exec("UPDATE users SET username=' 12345006@QQ.COM ' WHERE id=$1", other)
-		t.Logf("rename_to_registered_qq_rejected=%t", e != nil)
-		if pqe, ok := e.(*pq.Error); !ok || pqe.Code != "23505" {
-			t.Errorf("expected unique rejection, got %v", e)
-		}
-		autoAdd(t, db, "alias@example.test", "12345007@qq.com")
-		_, e = db.Exec("INSERT INTO users(email) VALUES('12345007@qq.com')")
-		t.Logf("register_username_qq_rejected=%t", e != nil)
-		if pqe, ok := e.(*pq.Error); !ok || pqe.Code != "23505" {
-			t.Errorf("expected cross-field unique rejection, got %v", e)
-		}
-		_, e = db.Exec("UPDATE users SET username=' 12345006@QQ.COM ' WHERE id=$1", owner)
-		if e != nil {
-			t.Fatal("same account can retain own QQ alias", e)
-		}
-		autoInitialize(t, s, "12345006")
-		if _, e = db.Exec("UPDATE users SET email='changed@example.test',username='' WHERE id=$1", owner); e != nil {
-			t.Fatal(e)
-		}
-		_, e = db.Exec("UPDATE users SET username='12345006@qq.com' WHERE id=$1", other)
-		t.Logf("bound_qq_reuse_rejected=%t", e != nil)
-		if e == nil {
-			t.Error("bound QQ identity reused")
-		}
-	})
-	t.Run("concurrent_profile_claim_has_exactly_one_owner", func(t *testing.T) {
-		db, _ := autoBindingFixture(t)
-		a := autoAdd(t, db, "a@example.test", "")
-		b := autoAdd(t, db, "b@example.test", "")
-		var wg sync.WaitGroup
-		errs := make(chan error, 2)
-		for _, id := range []int64{a, b} {
-			wg.Add(1)
-			go func(id int64) {
-				defer wg.Done()
-				_, e := db.Exec("UPDATE users SET username='12345008@qq.com' WHERE id=$1", id)
-				errs <- e
-			}(id)
-		}
-		wg.Wait()
-		close(errs)
-		success, rejected := 0, 0
-		for e := range errs {
-			if e == nil {
-				success++
-			} else if pe, ok := e.(*pq.Error); ok && pe.Code == "23505" {
-				rejected++
-			} else {
-				t.Error(e)
-			}
-		}
-		t.Logf("concurrent_success=%d concurrent_unique_rejections=%d", success, rejected)
-		if success != 1 || rejected != 1 {
-			t.Errorf("expected 1 success/1 conflict")
-		}
-	})
+	db, s := autoBindingFixture(t)
+	registered := autoAdd(t, db, "12345001@qq.com", "")
+	alias := autoAdd(t, db, "fallback@example.test", "12345002@qq.com")
+	historical := autoAdd(t, db, "legacy@example.test", "")
+	if _, err := db.Exec("INSERT INTO qq_activity_bindings(qq,user_id,source) VALUES('12345003',$1,'matched_username')", historical); err != nil {
+		t.Fatal(err)
+	}
+	autoInitialize(t, s, "12345001", "12345002", "12345003", "12345004")
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings", 2)
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings WHERE user_id=$1", 1, registered)
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings WHERE user_id=$1", 0, alias)
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings WHERE user_id=$1", 1, historical)
+	if _, err := db.Exec("UPDATE users SET username='12345004' WHERE id=$1", alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings", 2)
+	autoAdd(t, db, "12345004@qq.com", "")
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings WHERE qq='12345004' AND source='matched_email'", 1)
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_claims", 0)
+}
+
+func TestPostgresHistoricalBindingsSurviveEmailMigration(t *testing.T) {
+	db, s := autoBindingFixtureAt(t, false)
+	legacy := autoAdd(t, db, "legacy@example.test", "12345002@qq.com")
+	autoAdd(t, db, "unmatched@example.test", "12345003@qq.com")
+	if _, err := db.Exec("INSERT INTO qq_activity_bindings(qq,user_id,source) VALUES('12345002',$1,'matched_username')", legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO qq_activity_rewards(kind,recipient_qq,recipient_user_id,subject_qq,subject_user_id,status,paid_at) VALUES('newcomer','12345002',$1,'12345002',$1,'paid',NOW())", legacy); err != nil {
+		t.Fatal(err)
+	}
+	b, err := migrations.FS.ReadFile("251_qq_activity_email_binding.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(b)); err != nil {
+		t.Fatal(err)
+	}
+	autoInitialize(t, s, "12345002", "12345003")
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings WHERE user_id=$1 AND source='matched_username'", 1, legacy)
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_binding_history WHERE user_id=$1 AND unbound_at IS NULL", 1, legacy)
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_rewards WHERE status='paid'", 1)
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_identity_owners WHERE qq='12345003'", 0)
+	autoCount(t, db, "SELECT count(*) FROM qq_activity_identity_owners WHERE qq='12345002'", 1)
 }

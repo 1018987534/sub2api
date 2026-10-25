@@ -61,6 +61,13 @@ func TestPostgresActivityScenarios(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec(string(identityMigration))
+	for _, file := range []string{"250_qq_activity_numeric_username.sql", "251_qq_activity_email_binding.sql"} {
+		b, e := migrations.FS.ReadFile(file)
+		if e != nil {
+			t.Fatal(e)
+		}
+		exec(string(b))
+	}
 	store := NewStore(db, nil)
 	addUser := func(qq, email, username string, verified bool) int64 {
 		t.Helper()
@@ -166,18 +173,18 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	process("unknown-retry", "56789012", "level", "", &l21, "")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, unknown)
 
-	// QQ email and profile fallback both bind without verification or a code.
+	// Registered QQ email still binds; a new profile alias does not establish ownership.
 	fallback := addUser("67890123", "fallback@example.com", "67890123@qq.com", false)
 	process("fallback-join", "67890123", "join", "", &l21, "")
-	requireNumber(`SELECT COUNT(*) FROM qq_activity_bindings WHERE user_id=$1`, 1, fallback)
-	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, fallback)
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_bindings WHERE user_id=$1`, 0, fallback)
+	requireNumber(`SELECT balance FROM users WHERE id=$1`, 0, fallback)
 	process("repeat-fallback", "67890123", "command", "绑定", &l21, "")
-	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, fallback)
+	requireNumber(`SELECT balance FROM users WHERE id=$1`, 0, fallback)
 	unverified := addUser("78901234", "78901234@qq.com", "", false)
 	process("unverified-join", "78901234", "join", "", &l21, "")
 	requireNumber(`SELECT COUNT(*) FROM qq_activity_bindings WHERE user_id=$1`, 1, unverified)
 	requireNumber(`SELECT COUNT(*) FROM qq_activity_claims`, 0)
-	t.Log("unverified QQ email and profile username bind directly; repeat binding cannot duplicate awards")
+	t.Log("registered QQ email auto-binds; profile-only accounts must verify QQ mailbox")
 
 	if err = store.Control(ctx, "test-admin", "paused"); err != nil {
 		t.Fatal(err)

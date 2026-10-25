@@ -26,6 +26,8 @@
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
+        <QQBindingEntry v-if="user" :key="user.id" />
+
         <router-link
           to="/beginner"
           data-testid="beginner-guide-entry"
@@ -270,6 +272,7 @@ import { useAdminSettingsStore } from '@/stores/adminSettings'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
+import QQBindingEntry from '@/components/layout/QQBindingEntry.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'

@@ -330,7 +330,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	supportChatHandler := handler.NewSupportChatHandler(db, redisClient)
 	lotteryService := service.NewLotteryService(db, apiKeyAuthCacheInvalidator, billingCacheService)
 	lotteryHandler := handler.NewLotteryHandler(lotteryService, authService)
-	qqActivityHandler := handler.NewQQActivityHandler(db, apiKeyAuthCacheInvalidator, billingCacheService, configConfig)
+	qqActivityHandler := handler.NewQQActivityHandler(db, apiKeyAuthCacheInvalidator, billingCacheService, configConfig, emailService)
 	idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, configConfig)
 	openAIQuotaAutoResetService := service.ProvideOpenAIQuotaAutoResetService(accountRepository, openAIQuotaService, rateLimitService, idempotencyCoordinator, auditLogService, settingService, leaderLockCache)
 	handlers := handler.ProvideHandlers(authHandler, userHandler, apiKeyHandler, usageHandler, redeemHandler, subscriptionHandler, announcementHandler, channelMonitorUserHandler, channelMonitorV2Handler, intelligenceHandler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, passkeyHandler, handlerPaymentHandler, paymentWebhookHandler, availableChannelHandler, modelPlazaHandler, asyncImageHandler, batchImageHandler, supportChatHandler, lotteryHandler, qqActivityHandler, idempotencyCoordinator, idempotencyCleanupService, openAIQuotaAutoResetService)

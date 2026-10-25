@@ -4,104 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/lib/pq"
 )
 
 func TestPostgresNumericQQAndPaymentNotices(t *testing.T) {
 	ctx := context.Background()
-	t.Run("both_username_formats_bind_automatically", func(t *testing.T) {
-		db, store := autoBindingFixture(t)
-		autoAdd(t, db, "12345101@qq.com", "12345101")
-		autoAdd(t, db, "number@example.test", " 12345102 ")
-		autoAdd(t, db, "mail@example.test", " 12345103@QQ.COM ")
-		autoInitialize(t, store, "12345101", "12345102", "12345103", "12345104")
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings", 3)
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings WHERE qq='12345101' AND source='matched_email'", 1)
-		id := autoAdd(t, db, "later@example.test", "")
-		if _, err := db.Exec("UPDATE users SET username='12345104' WHERE id=$1", id); err != nil {
-			t.Fatal(err)
-		}
-		if err := store.Tick(ctx); err != nil {
-			t.Fatal(err)
-		}
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings", 4)
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_claims", 0)
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_rewards", 0)
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_outbox", 0)
-	})
-	t.Run("numeric_username_command_and_permanent_ownership", func(t *testing.T) {
-		db, store := autoBindingFixture(t)
-		owner := autoAdd(t, db, "owner@example.test", "12345105")
-		other := autoAdd(t, db, "other@example.test", "")
-		autoInitialize(t, store)
-		level := 7
-		err := store.Process(ctx, Event{ID: "number-bind", GroupID: "87654321", QQ: "12345105", Kind: "command", Command: "绑定", Time: time.Now().Unix(), Level: &level, MemberConfirmed: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		autoCount(t, db, "SELECT count(*) FROM qq_activity_bindings WHERE qq='12345105'", 1)
-		if _, err = db.Exec("UPDATE users SET username='' WHERE id=$1", owner); err != nil {
-			t.Fatal(err)
-		}
-		_, err = db.Exec("UPDATE users SET username='12345105@qq.com' WHERE id=$1", other)
-		if pe, ok := err.(*pq.Error); !ok || pe.Code != "23505" {
-			t.Fatalf("permanently bound numeric QQ reused through email alias: %v", err)
-		}
-	})
-	t.Run("cross_format_unique_and_same_owner_can_change_format", func(t *testing.T) {
-		db, _ := autoBindingFixture(t)
-		owner := autoAdd(t, db, "12345106@qq.com", "")
-		other := autoAdd(t, db, "unique@example.test", "")
-		for _, username := range []string{"12345106", " 12345106@QQ.COM "} {
-			_, err := db.Exec("UPDATE users SET username=$1 WHERE id=$2", username, other)
-			if pe, ok := err.(*pq.Error); !ok || pe.Code != "23505" {
-				t.Errorf("cross-account alias %q was not rejected: %v", username, err)
-			}
-			if _, err = db.Exec("UPDATE users SET username=$1 WHERE id=$2", username, owner); err != nil {
-				t.Fatal("own identity format change rejected", err)
-			}
-		}
-		autoAdd(t, db, "numeric-owner@example.test", "12345107")
-		_, err := db.Exec("INSERT INTO users(email) VALUES('12345107@qq.com')")
-		if pe, ok := err.(*pq.Error); !ok || pe.Code != "23505" {
-			t.Fatalf("QQ registration bypassed numeric alias reservation: %v", err)
-		}
-	})
-	t.Run("concurrent_number_and_email_alias_have_one_owner", func(t *testing.T) {
-		db, _ := autoBindingFixture(t)
-		ids := []int64{autoAdd(t, db, "race-number@example.test", ""), autoAdd(t, db, "race-email@example.test", "")}
-		values := []string{"12345108", "12345108@qq.com"}
-		errs := make(chan error, 2)
-		var wg sync.WaitGroup
-		for i := range ids {
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				_, err := db.Exec("UPDATE users SET username=$1 WHERE id=$2", values[i], ids[i])
-				errs <- err
-			}(i)
-		}
-		wg.Wait()
-		close(errs)
-		success, rejected := 0, 0
-		for err := range errs {
-			if err == nil {
-				success++
-			} else if pe, ok := err.(*pq.Error); ok && pe.Code == "23505" {
-				rejected++
-			} else {
-				t.Fatal(err)
-			}
-		}
-		t.Logf("numeric/email concurrent success=%d unique_rejections=%d", success, rejected)
-		if success != 1 || rejected != 1 {
-			t.Fail()
-		}
-	})
 	t.Run("ordinary_replies_and_exactly_once_paid_notices", func(t *testing.T) {
 		db, store := autoBindingFixture(t)
 		autoAdd(t, db, "12345109@qq.com", "")

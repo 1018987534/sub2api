@@ -36,6 +36,16 @@ export interface QQClaim {
   code?: string
   consumed: boolean
 }
+export interface QQBindingStatus {
+  bound: boolean
+  qq_email?: string
+}
+export interface QQEmailChallenge {
+  challenge: string
+  qq_email: string
+  expires_at: string
+  resend_after: number
+}
 export interface QQMember {
   group_id: string
   qq: string
@@ -68,6 +78,10 @@ export interface QQAdminReport {
   invitations: QQInvitation[]
 }
 export const qqActivityAPI = {
+  async binding() { return (await apiClient.get<QQBindingStatus>('/qq-activity/binding')).data },
+  async unbind() { return (await apiClient.post<QQBindingStatus>('/qq-activity/binding/unbind')).data },
+  async sendBindingCode(email: string) { return (await apiClient.post<QQEmailChallenge>('/qq-activity/binding/send-code', { email })).data },
+  async verifyBinding(email: string, challenge: string, code: string) { return (await apiClient.post<QQBindingStatus>('/qq-activity/binding/verify', { email, challenge, code })).data },
   async current() { return (await apiClient.get<QQActivitySummary>('/qq-activity/current')).data },
   async claim(claim: string, issueCode = false) { return (await apiClient.post<QQClaim>('/qq-activity/claim', { claim }, { params: { issue_code: issueCode } })).data },
   async admin() { return (await apiClient.get<QQAdminReport>('/admin/qq-activity')).data },
