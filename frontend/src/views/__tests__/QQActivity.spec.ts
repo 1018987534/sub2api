@@ -34,6 +34,7 @@ describe('QQ activity administration', () => {
     expect(mocks.control).toHaveBeenCalledWith({ action: 'settings', settings: { newcomer_enabled: false, invitation_enabled: true, auto_process_join: true, group_messages_enabled: false } })
     expect(wrapper.text()).toContain('12****78@qq.com'); expect(wrapper.text()).not.toContain('12345678@qq.com')
     expect(wrapper.text()).toContain('邀请人本人不限等级')
+    expect(wrapper.text()).toContain('新人体验额度实际到账后才自动发放')
     wrapper.unmount()
   })
   it('cannot enable an incomplete initialization', async () => {
@@ -54,6 +55,12 @@ describe('QQ activity administration', () => {
   })
 })
 describe('QQ activity user page', () => {
+  it('requires the invitee newcomer credit to arrive before the inviter reward', async () => {
+    const wrapper = mount(UserQQActivity, options); await flushPromises()
+    expect(wrapper.text()).toContain('新人体验额度实际到账后，邀请人才会自动获得')
+    expect(wrapper.text()).toContain('邀请人本人不限等级')
+    wrapper.unmount()
+  })
   it('shows the common ineligible copy without explaining an existing-user classification', async () => {
     const wrapper = mount(UserQQActivity, options); await flushPromises()
     expect(wrapper.text()).toContain('当前暂不符合体验额度领取条件。')

@@ -38,7 +38,7 @@ func summaryForQQ(ctx context.Context, q queryer, qq string, c Config) (s Summar
 		if c.Status == "ended" {
 			s.WelcomeText = NotEligible
 		}
-		rows, e := q.QueryContext(ctx, `SELECT id,kind,amount::double precision,status,paid_at FROM qq_activity_rewards WHERE recipient_qq=$1 ORDER BY id DESC LIMIT 100`, qq)
+		rows, e := q.QueryContext(ctx, `SELECT r.id,r.kind,r.amount::double precision,r.status,r.paid_at FROM qq_activity_rewards r WHERE r.recipient_qq=$1 AND (r.kind<>'invitation' OR r.status='paid' OR `+invitationNewcomerPaid+`) ORDER BY r.id DESC LIMIT 100`, qq)
 		if e != nil {
 			return s, e
 		}
@@ -64,7 +64,7 @@ func summaryForQQ(ctx context.Context, q queryer, qq string, c Config) (s Summar
 			return s, e
 		}
 	}
-	err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(amount) FILTER(WHERE status='paid'),0)::double precision,COALESCE(SUM(amount) FILTER(WHERE status='pending' AND recipient_user_id IS NOT NULL),0)::double precision,COALESCE(SUM(amount) FILTER(WHERE status='pending' AND recipient_user_id IS NULL),0)::double precision FROM qq_activity_rewards WHERE kind='invitation' AND recipient_qq=$1`, qq).Scan(&s.InvitationPaid, &s.InvitationPending, &s.PendingInviterBinding)
+	err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(r.amount) FILTER(WHERE r.status='paid'),0)::double precision,COALESCE(SUM(r.amount) FILTER(WHERE r.status='pending' AND r.recipient_user_id IS NOT NULL),0)::double precision,COALESCE(SUM(r.amount) FILTER(WHERE r.status='pending' AND r.recipient_user_id IS NULL),0)::double precision FROM qq_activity_rewards r WHERE r.kind='invitation' AND r.recipient_qq=$1 AND (r.status='paid' OR `+invitationNewcomerPaid+`)`, qq).Scan(&s.InvitationPaid, &s.InvitationPending, &s.PendingInviterBinding)
 	return
 }
 func (s *Store) UserSummary(ctx context.Context, userID int64) (Summary, error) {
@@ -122,7 +122,7 @@ func (s *Store) AdminReport(ctx context.Context) (r AdminReport, err error) {
 	}
 	r.Members = []AdminMember{}
 	r.Invitations = []AdminInvitation{}
-	err = s.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM qq_activity_baseline_users),(SELECT COUNT(*) FROM qq_activity_members),(SELECT COUNT(*) FROM qq_activity_bindings),COALESCE(SUM(amount) FILTER(WHERE kind='newcomer' AND status='paid'),0)::double precision,COALESCE(SUM(amount) FILTER(WHERE kind='invitation' AND status='paid'),0)::double precision,COALESCE(SUM(amount) FILTER(WHERE status='pending'),0)::double precision,(SELECT COUNT(*) FROM qq_activity_outbox WHERE delivered_at IS NULL) FROM qq_activity_rewards`).Scan(&r.BaselineUsers, &r.MembersCount, &r.BindingsCount, &r.NewcomerPaid, &r.InvitationPaid, &r.PendingAmount, &r.UnsentMessages)
+	err = s.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM qq_activity_baseline_users),(SELECT COUNT(*) FROM qq_activity_members),(SELECT COUNT(*) FROM qq_activity_bindings),COALESCE(SUM(r.amount) FILTER(WHERE r.kind='newcomer' AND r.status='paid'),0)::double precision,COALESCE(SUM(r.amount) FILTER(WHERE r.kind='invitation' AND r.status='paid'),0)::double precision,COALESCE(SUM(r.amount) FILTER(WHERE r.status='pending' AND (r.kind='newcomer' OR `+invitationNewcomerPaid+`)),0)::double precision,(SELECT COUNT(*) FROM qq_activity_outbox WHERE delivered_at IS NULL) FROM qq_activity_rewards r`).Scan(&r.BaselineUsers, &r.MembersCount, &r.BindingsCount, &r.NewcomerPaid, &r.InvitationPaid, &r.PendingAmount, &r.UnsentMessages)
 	if err != nil {
 		return
 	}
