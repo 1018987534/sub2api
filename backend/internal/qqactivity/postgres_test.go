@@ -125,17 +125,17 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	t.Log("baseline group member leaves/rejoins: newcomer=0 invitation=0; manual review cannot override")
 	process("old-invitee-join", "23456789", "join", "", &l21, "12345678")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 0, oldInvitee)
-	requireNumber(`SELECT aff_quota FROM user_affiliates WHERE user_id=$1`, 2, inviter)
+	requireNumber(`SELECT COALESCE((SELECT aff_quota FROM user_affiliates WHERE user_id=$1),0)`, 0, inviter)
 	process("old-invitee-join", "23456789", "join", "", &l21, "12345678")
 	process("old-invitee-rejoin", "23456789", "join", "", &l21, "12345678")
-	requireNumber(`SELECT COUNT(*) FROM qq_activity_rewards`, 1)
-	t.Log("existing website user first joins + inviter 7: newcomer=0 invitation=2; duplicate/rejoin no second payout")
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_rewards`, 0)
+	t.Log("existing website user first joins + inviter 7: newcomer=0 invitation=0; no paid newcomer, no invitation payout")
 
-	// A genuinely new account and post-launch join receive the independent awards.
+	// A genuinely new account is credited first, unlocking its invitation award.
 	newcomer := addUser("34567890", "34567890@qq.com", "", true)
 	process("new-join", "34567890", "join", "", &l16, "12345678")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, newcomer)
-	requireNumber(`SELECT aff_quota FROM user_affiliates WHERE user_id=$1`, 4, inviter)
+	requireNumber(`SELECT aff_quota FROM user_affiliates WHERE user_id=$1`, 2, inviter)
 	process("repeat-bind", "34567890", "command", "绑定", &l16, "")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 2, newcomer)
 	exec(`INSERT INTO qq_activity_groups(group_id,bot_qq) VALUES('76543210','99999999')`)

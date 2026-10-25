@@ -118,6 +118,8 @@ func MaskEmail(email string) string {
 }
 func MaskText(text string) string { return emailPattern.ReplaceAllStringFunc(text, MaskEmail) }
 
+// InvitationQualifies checks invitation evidence and member eligibility only.
+// Payout additionally requires an actually paid newcomer reward in settle.
 // Inviter level is deliberately absent: only the actual invitee's level matters.
 func InvitationQualifies(evidence bool, joined bool, bound bool, level *int, robot bool, self bool) bool {
 	return evidence && joined && bound && level != nil && *level >= 16 && !robot && !self
