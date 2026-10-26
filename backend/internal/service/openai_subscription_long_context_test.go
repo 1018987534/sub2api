@@ -30,11 +30,13 @@ func TestOpenAISubscriptionLongContextExempt(t *testing.T) {
 		{name: "仅响应标签相同", account: oauth, result: &OpenAIForwardResult{Model: "gpt-6-sol", UpstreamResponseModel: "gpt-6.1-sol"}},
 		{name: "其他模型", account: oauth, result: &OpenAIForwardResult{Model: "gpt-6-astra"}},
 		{name: "相似名称", account: oauth, result: &OpenAIForwardResult{Model: "gpt-6.1-sol-preview"}},
-		{name: "API账号默认豁免", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}, want: true},
+		{name: "API账号默认不豁免", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}},
+		{name: "API账号无效开关不豁免", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_gpt61_sol_long_context_exempt": "true"}}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}},
 		{name: "API账号开启豁免", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_gpt61_sol_long_context_exempt": true}}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}, want: true},
 		{name: "API账号关闭豁免", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_gpt61_sol_long_context_exempt": false}}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}},
 		{name: "API账号其他模型", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6-sol"}},
-		{name: "API账号映射到目标", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "custom", UpstreamModel: "gpt-6.1-sol"}, want: true},
+		{name: "API账号映射到目标默认不豁免", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "custom", UpstreamModel: "gpt-6.1-sol"}},
+		{name: "API账号开启豁免并映射到目标", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"openai_gpt61_sol_long_context_exempt": true}}, result: &OpenAIForwardResult{Model: "custom", UpstreamModel: "gpt-6.1-sol"}, want: true},
 		{name: "API账号映射离开目标", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol", UpstreamModel: "gpt-6-sol"}},
 		{name: "API账号相似名称", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol-preview"}},
 		{name: "订阅不受API开关影响", account: &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Extra: map[string]any{"openai_gpt61_sol_long_context_exempt": false}}, result: &OpenAIForwardResult{Model: "gpt-6.1-sol"}, want: true},
@@ -216,7 +218,7 @@ func TestOpenAIGatewayServiceRecordUsage_GPT61SolLongContextBoundary(t *testing.
 }
 
 func TestOpenAIGatewayServiceRecordUsage_GPT61SolAPIKeyExemption(t *testing.T) {
-	for _, exempt := range []any{nil, true, false} {
+	for _, exempt := range []any{nil, true, false, "true"} {
 		for _, catalog := range []bool{false, true} {
 			for _, accountEnabled := range []bool{false, true} {
 				for _, groupEnabled := range []bool{false, true} {
@@ -244,7 +246,7 @@ func TestOpenAIGatewayServiceRecordUsage_GPT61SolAPIKeyExemption(t *testing.T) {
 							Account: &Account{ID: 3, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: extra},
 						})
 						require.NoError(t, err)
-						wantLong := exempt == false && (accountEnabled || groupEnabled)
+						wantLong := exempt != true && (accountEnabled || groupEnabled)
 						wantTotal := 0.478
 						if wantLong {
 							wantTotal = 0.946
