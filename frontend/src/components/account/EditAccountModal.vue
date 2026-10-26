@@ -3932,7 +3932,7 @@ const openaiPassthroughEnabled = ref(false)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
-const openAIGPT61SolLongContextExempt = ref(true)
+const openAIGPT61SolLongContextExempt = ref(false)
 // OpenAI 订阅档位（Plus / Pro 20x / Pro 5x / Business Standard / Business Premium / Free）手动覆盖值,
 // 存于 credentials.plan_type;'' 表示清空/自动识别
 const editPlanType = ref<string>('')
@@ -4438,7 +4438,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiPassthroughEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
-  openAIGPT61SolLongContextExempt.value = true
+  openAIGPT61SolLongContextExempt.value = false
   editPlanType.value = ''
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
@@ -4465,7 +4465,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       : ''
     openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
     if (newAccount.type === 'apikey') {
-      openAIGPT61SolLongContextExempt.value = extra?.openai_gpt61_sol_long_context_exempt !== false
+      openAIGPT61SolLongContextExempt.value = extra?.openai_gpt61_sol_long_context_exempt === true
       openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
       openAIEndpointCapabilities.value = readOpenAIEndpointCapabilities(
         newAccount.credentials as Record<string, unknown> | undefined

@@ -772,7 +772,7 @@ export default {
         longContextBilling: 'API 长上下文计费',
         longContextBillingDesc: '默认关闭。仅当该账号的上游会按模型阈值收取 OpenAI API 长上下文费率时开启。',
         gpt61SolLongContextExempt: 'GPT-6.1 Sol 长上下文附加费豁免',
-        gpt61SolLongContextExemptDesc: '默认开启。仅豁免 GPT-6.1 Sol 的模型长上下文附加费；关闭后沿用原计费配置。',
+        gpt61SolLongContextExemptDesc: '默认关闭，沿用原计费配置。仅显式开启时豁免 GPT-6.1 Sol 的模型长上下文附加费。',
         responsesWebsocketsV2: 'Responses WebSocket v2',
         responsesWebsocketsV2Desc:
           '默认关闭。开启后可启用 responses_websockets_v2 协议能力（受网关全局开关与账号类型开关约束）。',

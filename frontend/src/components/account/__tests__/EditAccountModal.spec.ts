@@ -1049,17 +1049,30 @@ describe('EditAccountModal', () => {
     )
   })
 
-  it('defaults the GPT-6.1 Sol API key exemption to enabled and saves an opt-out', async () => {
+  it('defaults the GPT-6.1 Sol API key exemption to disabled and saves that default', async () => {
     const account = buildAccount()
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    const wrapper = mountModal(account)
+    const toggle = wrapper.get('[data-testid="openai-gpt61-sol-long-context-exempt-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_gpt61_sol_long_context_exempt).toBe(false)
+  })
+
+  it.each([false, true])('loads an explicit GPT-6.1 Sol API key exemption (disable: %s)', async disable => {
+    const account = buildAccount()
+    account.extra = { openai_gpt61_sol_long_context_exempt: true }
     updateAccountMock.mockReset().mockResolvedValue(account)
     const wrapper = mountModal(account)
     const toggle = wrapper.get('[data-testid="openai-gpt61-sol-long-context-exempt-toggle"]')
     expect(toggle.attributes('aria-checked')).toBe('true')
 
-    await toggle.trigger('click')
+    if (disable) await toggle.trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
 
-    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_gpt61_sol_long_context_exempt).toBe(false)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.openai_gpt61_sol_long_context_exempt).toBe(!disable)
   })
 
   it('loads a saved GPT-6.1 Sol API key opt-out and can enable it again', async () => {
@@ -1084,7 +1097,7 @@ describe('EditAccountModal', () => {
     ])
 
     expect(wrapper.find('[data-testid="openai-long-context-billing-toggle"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="openai-gpt61-sol-long-context-exempt-toggle"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.get('[data-testid="openai-gpt61-sol-long-context-exempt-toggle"]').attributes('aria-checked')).toBe('false')
   })
 
   it.each(['oauth', 'setup-token'])('does not render or submit the API key exemption for %s', async type => {
