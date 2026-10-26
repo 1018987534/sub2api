@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import QQBindingForm from '@/components/user/QQBindingForm.vue'
+import QQActivityNotice from '@/components/user/QQActivityNotice.vue'
 import { qqActivityAPI, type QQBindingStatus } from '@/api/qqActivity'
 
 const status = ref<QQBindingStatus | null>(null)
@@ -27,13 +28,14 @@ async function refresh() {
   finally { if (!disposed) loading.value = false }
 }
 async function open() { show.value = true; confirmUnbind.value = false; notice.value = ''; await refresh() }
-function verified(result: QQBindingStatus) { revision++; status.value = result; error.value = ''; notice.value = 'QQ 绑定成功。' }
+function setStatus(result: QQBindingStatus) { status.value = { ...result, config: result.config ?? status.value?.config } }
+function verified(result: QQBindingStatus) { revision++; setStatus(result); error.value = ''; notice.value = 'QQ 绑定成功。' }
 async function unbind() {
   if (unbinding.value) return
   revision++
   unbinding.value = true; error.value = ''
   try {
-    status.value = await qqActivityAPI.unbind()
+    setStatus(await qqActivityAPI.unbind())
     confirmUnbind.value = false
     notice.value = '已取消绑定。历史和领奖记录已保留，重新绑定需验证 QQ 邮箱。'
     window.dispatchEvent(new Event('qq-binding-changed'))
@@ -68,6 +70,7 @@ onBeforeUnmount(() => {
     <span class="hidden sm:inline">{{ label }}</span>
   </button>
   <BaseDialog :show="show" title="QQ 绑定" width="narrow" @close="show = false">
+    <QQActivityNotice v-if="status?.config" :config="status.config" class="mb-4" />
     <p v-if="notice" role="status" class="mb-4 text-sm text-emerald-600">{{ notice }}</p>
     <div v-if="status?.bound" class="space-y-3">
       <p class="font-medium text-emerald-600">已绑定 QQ：{{ status.qq_email }}</p>
@@ -82,6 +85,6 @@ onBeforeUnmount(() => {
     </div>
     <p v-else-if="loading && !status" role="status">正在查询绑定状态…</p>
     <div v-else-if="error" class="space-y-3"><p role="alert">{{ error }}</p><button class="btn btn-secondary" @click="refresh">重试</button></div>
-    <QQBindingForm v-else-if="status" @verified="verified" />
+    <QQBindingForm v-else-if="status" :intro="status.config?.binding_display?.binding_intro" :note="status.config?.binding_display?.binding_note" @verified="verified" />
   </BaseDialog>
 </template>

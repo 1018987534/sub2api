@@ -2,6 +2,10 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { qqActivityAPI, type QQBindingStatus, type QQEmailChallenge } from '@/api/qqActivity'
 
+withDefaults(defineProps<{ intro?: string; note?: string }>(), {
+  intro: '注册 QQ 邮箱能匹配到群成员时会自动绑定，已有绑定继续有效。使用其他邮箱注册的，请在此验证本人 QQ 邮箱。',
+  note: '每个 QQ 只能关联一个官网账号。注册邮箱保持不变，修改个人资料中的用户名不再用于绑定。',
+})
 const emit = defineEmits<{ verified: [status: QQBindingStatus] }>()
 const email = ref('')
 const code = ref('')
@@ -52,7 +56,7 @@ onBeforeUnmount(() => { disposed = true; clearInterval(timer) })
 
 <template>
   <form class="space-y-4" @submit.prevent="verify">
-    <p class="text-sm text-gray-500 dark:text-dark-400">注册 QQ 邮箱能匹配到群成员时会自动绑定，已有绑定继续有效。使用其他邮箱注册的，请在此验证本人 QQ 邮箱。</p>
+    <p v-if="intro" class="whitespace-pre-line break-words text-sm text-gray-500 dark:text-dark-400">{{ intro }}</p>
     <label class="block space-y-2 text-sm">
       <span class="font-medium">QQ 邮箱</span>
       <input v-model="email" name="qq-email" class="input w-full" type="text" inputmode="email" autocomplete="off" maxlength="80" placeholder="输入 QQ 号或完整数字 QQ 邮箱" :disabled="busy" required>
@@ -67,6 +71,6 @@ onBeforeUnmount(() => { disposed = true; clearInterval(timer) })
     </label>
     <p v-if="error" role="alert" class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
     <button class="btn btn-primary" type="submit" :disabled="busy || !challenge || !validCode">{{ busy ? '处理中…' : '验证并绑定' }}</button>
-    <p class="text-xs text-gray-500">每个 QQ 只能关联一个官网账号。注册邮箱保持不变，修改个人资料中的用户名不再用于绑定。</p>
+    <p v-if="note" class="whitespace-pre-line break-words text-xs text-gray-500">{{ note }}</p>
   </form>
 </template>

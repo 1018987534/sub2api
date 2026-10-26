@@ -174,15 +174,16 @@ func (h *QQActivityHandler) AdminControl(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Action   string                    `json:"action"`
-		Status   string                    `json:"status"`
-		Invitee  string                    `json:"invitee"`
-		Inviter  string                    `json:"inviter"`
-		GroupID  string                    `json:"group_id"`
-		Evidence string                    `json:"evidence"`
-		QQ       string                    `json:"qq"`
-		Reason   string                    `json:"reason"`
-		Settings qqactivity.SettingsUpdate `json:"settings"`
+		Action         string                     `json:"action"`
+		Status         string                     `json:"status"`
+		Invitee        string                     `json:"invitee"`
+		Inviter        string                     `json:"inviter"`
+		GroupID        string                     `json:"group_id"`
+		Evidence       string                     `json:"evidence"`
+		QQ             string                     `json:"qq"`
+		Reason         string                     `json:"reason"`
+		Settings       qqactivity.SettingsUpdate  `json:"settings"`
+		BindingDisplay *qqactivity.BindingDisplay `json:"binding_display"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
 		response.BadRequest(c, "无效的请求。")
@@ -195,6 +196,12 @@ func (h *QQActivityHandler) AdminControl(c *gin.Context) {
 		err = h.store.Control(c.Request.Context(), actor, req.Status)
 	case "settings":
 		err = h.store.UpdateSettings(c.Request.Context(), actor, req.Settings)
+	case "binding_display":
+		if req.BindingDisplay == nil {
+			response.BadRequest(c, "请填写绑定弹窗展示配置。")
+			return
+		}
+		err = h.store.UpdateBindingDisplay(c.Request.Context(), actor, *req.BindingDisplay)
 	case "verify_invitation":
 		err = h.store.VerifyInvitation(c.Request.Context(), actor, req.Invitee, req.Inviter, req.GroupID, req.Evidence)
 	case "lock_binding":
@@ -206,6 +213,10 @@ func (h *QQActivityHandler) AdminControl(c *gin.Context) {
 		return
 	}
 	if err != nil {
+		if errors.Is(err, qqactivity.ErrBindingDisplay) {
+			response.BadRequest(c, err.Error())
+			return
+		}
 		response.BadRequest(c, "操作未完成，请核对活动状态、绑定记录和邀请证据后重试。")
 		return
 	}
