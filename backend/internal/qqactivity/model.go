@@ -49,14 +49,15 @@ type Event struct {
 	EvidenceKey     string `json:"evidence_key,omitempty"`
 }
 type Config struct {
-	Status               string     `json:"status"`
-	InitializedAt        *time.Time `json:"initialized_at"`
-	StartedAt            *time.Time `json:"started_at"`
-	EndedAt              *time.Time `json:"ended_at"`
-	NewcomerEnabled      bool       `json:"newcomer_enabled"`
-	InvitationEnabled    bool       `json:"invitation_enabled"`
-	AutoProcessJoin      bool       `json:"auto_process_join"`
-	GroupMessagesEnabled bool       `json:"group_messages_enabled"`
+	Status               string         `json:"status"`
+	InitializedAt        *time.Time     `json:"initialized_at"`
+	StartedAt            *time.Time     `json:"started_at"`
+	EndedAt              *time.Time     `json:"ended_at"`
+	NewcomerEnabled      bool           `json:"newcomer_enabled"`
+	InvitationEnabled    bool           `json:"invitation_enabled"`
+	AutoProcessJoin      bool           `json:"auto_process_join"`
+	GroupMessagesEnabled bool           `json:"group_messages_enabled"`
+	BindingDisplay       BindingDisplay `json:"binding_display"`
 }
 type Summary struct {
 	Config                Config   `json:"config"`

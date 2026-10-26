@@ -1,5 +1,12 @@
 import { apiClient } from './client'
 
+export interface QQBindingDisplay {
+  group_number: string
+  activity_title: string
+  activity_text: string
+  binding_intro: string
+  binding_note: string
+}
 export interface QQActivityConfig {
   status: 'preparing' | 'active' | 'paused' | 'ended'
   initialized_at: string | null
@@ -9,6 +16,7 @@ export interface QQActivityConfig {
   invitation_enabled: boolean
   auto_process_join: boolean
   group_messages_enabled: boolean
+  binding_display: QQBindingDisplay
 }
 export interface QQReward {
   id: number
@@ -39,6 +47,7 @@ export interface QQClaim {
 export interface QQBindingStatus {
   bound: boolean
   qq_email?: string
+  config?: QQActivityConfig
 }
 export interface QQEmailChallenge {
   challenge: string

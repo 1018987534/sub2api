@@ -71,6 +71,7 @@ func autoBindingFixtureAt(t *testing.T, mail bool) (*sql.DB, *Store) {
 	if mail {
 		files = append(files, "251_qq_activity_email_binding.sql")
 	}
+	files = append(files, "252_qq_activity_binding_display.sql")
 	for _, file := range files {
 		data, e := migrations.FS.ReadFile(file)
 		if e != nil {

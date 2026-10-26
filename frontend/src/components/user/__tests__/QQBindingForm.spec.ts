@@ -14,6 +14,16 @@ beforeEach(() => {
 afterEach(() => { view?.unmount(); view = undefined })
 
 describe('verified QQ mailbox form', () => {
+  it('renders configured plain text and allows empty explanatory copy', async () => {
+    view = mount(QQBindingForm, { props: { intro: '第一行\n第二行 <b>文本</b>', note: '自定义提示' } })
+    expect(view.text()).toContain('第一行\n第二行 <b>文本</b>')
+    expect(view.text()).toContain('自定义提示')
+    expect(view.find('b').exists()).toBe(false)
+    await view.setProps({ intro: '', note: '' })
+    expect(view.findAll('p')).toHaveLength(0)
+    expect(view.get('input[name="qq-email"]').exists()).toBe(true)
+  })
+
   it.each(['12345678', '12345678@qq.com'])('accepts %s and sends the proof only to the website', async email => {
     view = mount(QQBindingForm)
     await view.get('input[name="qq-email"]').setValue(email)

@@ -61,7 +61,7 @@ func TestPostgresActivityScenarios(t *testing.T) {
 		t.Fatal(err)
 	}
 	exec(string(identityMigration))
-	for _, file := range []string{"250_qq_activity_numeric_username.sql", "251_qq_activity_email_binding.sql"} {
+	for _, file := range []string{"250_qq_activity_numeric_username.sql", "251_qq_activity_email_binding.sql", "252_qq_activity_binding_display.sql"} {
 		b, e := migrations.FS.ReadFile(file)
 		if e != nil {
 			t.Fatal(e)

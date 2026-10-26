@@ -21,8 +21,9 @@ var (
 )
 
 type BindingStatus struct {
-	Bound   bool   `json:"bound"`
-	QQEmail string `json:"qq_email,omitempty"`
+	Bound   bool    `json:"bound"`
+	QQEmail string  `json:"qq_email,omitempty"`
+	Config  *Config `json:"config,omitempty"`
 }
 
 type EmailChallenge struct {
@@ -48,15 +49,22 @@ func normalizeQQEmail(input string) (qq, email string, err error) {
 }
 
 func (s *Store) BindingStatus(ctx context.Context, userID int64) (BindingStatus, error) {
+	c, err := s.Config(ctx)
+	if err != nil {
+		return BindingStatus{}, err
+	}
+	view := BindingStatus{Config: &c}
 	var qq string
-	err := s.db.QueryRowContext(ctx, `SELECT qq FROM qq_activity_bindings WHERE user_id=$1`, userID).Scan(&qq)
+	err = s.db.QueryRowContext(ctx, `SELECT qq FROM qq_activity_bindings WHERE user_id=$1`, userID).Scan(&qq)
 	if errors.Is(err, sql.ErrNoRows) {
-		return BindingStatus{}, nil
+		return view, nil
 	}
 	if err != nil {
 		return BindingStatus{}, err
 	}
-	return BindingStatus{Bound: true, QQEmail: MaskEmail(qq + "@qq.com")}, nil
+	view.Bound = true
+	view.QQEmail = MaskEmail(qq + "@qq.com")
+	return view, nil
 }
 
 func (s *Store) Unbind(ctx context.Context, userID int64) error {

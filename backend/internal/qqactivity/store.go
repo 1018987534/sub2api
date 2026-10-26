@@ -69,7 +69,7 @@ type queryer interface {
 }
 
 func readConfig(ctx context.Context, q queryer) (c Config, err error) {
-	err = q.QueryRowContext(ctx, `SELECT status,initialized_at,started_at,ended_at,newcomer_enabled,invitation_enabled,auto_process_join,group_messages_enabled FROM qq_activity_config WHERE id=1`).Scan(&c.Status, &c.InitializedAt, &c.StartedAt, &c.EndedAt, &c.NewcomerEnabled, &c.InvitationEnabled, &c.AutoProcessJoin, &c.GroupMessagesEnabled)
+	err = q.QueryRowContext(ctx, `SELECT status,initialized_at,started_at,ended_at,newcomer_enabled,invitation_enabled,auto_process_join,group_messages_enabled,COALESCE(NULLIF(display_group_number,''),(SELECT string_agg(group_id,'、' ORDER BY group_id) FROM qq_activity_groups),''),display_activity_title,display_activity_text,display_binding_intro,display_binding_note FROM qq_activity_config WHERE id=1`).Scan(&c.Status, &c.InitializedAt, &c.StartedAt, &c.EndedAt, &c.NewcomerEnabled, &c.InvitationEnabled, &c.AutoProcessJoin, &c.GroupMessagesEnabled, &c.BindingDisplay.GroupNumber, &c.BindingDisplay.ActivityTitle, &c.BindingDisplay.ActivityText, &c.BindingDisplay.BindingIntro, &c.BindingDisplay.BindingNote)
 	return
 }
 func (s *Store) Config(ctx context.Context) (Config, error) { return readConfig(ctx, s.db) }
