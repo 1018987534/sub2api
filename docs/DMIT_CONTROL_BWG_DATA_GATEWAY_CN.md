@@ -1,133 +1,77 @@
-# DMIT Control + BWG Data Gateway 生产拓扑
+# DMIT 主控和数据层：四节点生产拓扑
 
-## 目标状态
+## 当前状态
 
-自 2026-09-09 起，Sub2API 五节点按以下职责运行：
+2026-10-29，BWG `95.169.18.157` / `bwg-us-01` 退役。本文保留原文件名供历史链接使用。
+BWG 已从动态调度名单删除，同时移除 Worker 静态 origin、DNS 和 DMIT WireGuard peer。
+不能只把 BWG 权重设为 0：已配置的零权重节点仍可能被紧急兜底选中。
 
-| 实例 | 主机 | 应用角色 | 数据访问 | 对外入口 |
+| 实例 | 主机 | 职责 | 数据访问 | 网关 origin |
 |---|---|---|---|---|
-| `dmit-us-01` | `179.255.105.184` | 唯一 `control`，包含前端、管理、登录、计费和后台任务 | WireGuard `10.20.0.1` | `xiaohondou.com`、`control-origin.xiaohondou.com`、`gateway3-origin.xiaohondou.com` |
-| `bwg-us-01` | `95.169.18.157` | `gateway`，保留 Responses 请求内调度 | 本机 Compose 网络 | `gateway-bwg-origin.xiaohondou.com` |
-| `vmiss-us-01` | `38.47.117.85` | `gateway` | WireGuard `10.20.0.1` | `gateway-origin.xiaohondou.com` |
-| `yt-us-01` | `154.23.243.26` | `gateway` | WireGuard `10.20.0.1` | `gateway154-origin.xiaohondou.com` |
-| `vmiss-us-02` | `38.47.113.166` | `gateway` | WireGuard `10.20.0.1` | `gateway2-origin.xiaohondou.com` |
+| `dmit-us-01` | `179.255.105.184` | 唯一 control、嵌入前端、PostgreSQL、Redis、Komari | 本机 `10.20.0.1` | `gateway3-origin.xiaohondou.com` |
+| `vmiss-us-01` | `38.47.117.85` | gateway | WireGuard → DMIT | `gateway-origin.xiaohondou.com` |
+| `yt-us-01` | `154.23.243.26` | gateway | WireGuard → DMIT | `gateway154-origin.xiaohondou.com` |
+| `vmiss-us-02` | `38.47.113.166` | gateway | WireGuard → DMIT | `gateway2-origin.xiaohondou.com` |
 
-权威 PostgreSQL、Redis 和面向远端节点的 relay 保留在 BWG。BWG 应用使用
-Docker 服务名直接连接本机数据层；其余四个应用节点通过 WireGuard 访问
-`10.20.0.1:5432` 和 `10.20.0.1:6379`。数据库、Redis和应用端口均不暴露公网。
-
-`INSTANCE_ROLE=control` 只能出现在 DMIT。数据库 migration、聚合、扫描、支付
-过期、备份和其他 control 后台任务不得在 BWG gateway 重复运行。所有 gateway
-继续执行 Responses 请求链上的鉴权、账号选择、额度、计费、用量写入和缓存失效。
+权威 PostgreSQL 容器是 DMIT 的 `sub2api-migration-postgres`，Redis 容器是
+`sub2api-migration-redis`。BWG 的旧数据容器自 2026-10-23 起已停止；其旧卷不能重新作为主库启动。
+所有运行节点使用 DMIT 的 `10.20.0.1:5432` 和 `10.20.0.1:6379`，数据端口不对公网开放。
 
 ## 边缘路由
 
-- `xiaohondou.com` 的普通网页和未参与分流的 API 固定进入 DMIT control；
-  Responses 和 Chat Completions 按同一份有效权重分流。
-- `control-origin.xiaohondou.com` 指向 DMIT，只服务 control 运行时和运维验证。
-- `gateway3-origin.xiaohondou.com` 仍指向 DMIT，供 Responses Worker 独立访问。
-- `gateway-bwg-origin.xiaohondou.com` 指向 BWG，只允许 health、三类 Responses 路径和
-  `/v1/chat/completions`、`/chat/completions`。
-- Worker 只绑定 canonical 域名的 `/v1/responses*`、`/responses*`、
-  `/backend-api/codex/responses*`、`/v1/chat/completions*`、`/chat/completions*`，
-  不得恢复退役域名路由。Chat Completions 保留请求体、流式响应、鉴权和并发准入。
+主站 `xiaohondou.com` 的网页、管理和普通 API 进入 DMIT。
+`control-origin.xiaohondou.com` 指向 DMIT，提供带专用 token 的运行时配置。
+Responses 的三类路径及两类 Chat Completions 路径由现有 Worker 分流。
+退役的 `nideyiyi.com` 和 `api.nideyiyi.com` 应用 DNS 和 Worker 路由不得恢复。
 
-动态权重由 DMIT control 的 `gateway_routing_settings` 和
-`GET /api/v1/gateway-routing/runtime` 提供。配置该地址后，Worker 冷启动或缓存过期
-都必须先等待运行时配置；获取失败返回 503，不使用静态或过期权重。当前 Worker 缓存
-TTL 为 1 秒，权威配置摘流后仍有最多约 1 秒的缓存传播窗口；已经发往源站的流无法迁移。
+权威目标来自 DMIT `settings.gateway_routing_settings`；
+有效权重来自 `GET /api/v1/gateway-routing/runtime`。2026-10-29 摘除 BWG 后的目标为：
 
-连续丢包保护还会在运行态请求触发的独立后台任务中，约每 2 秒向各配置节点（包括
-目标权重为 0 的备用节点）发送一个 `GET /health/ready`。每次超时上限为 1 秒，首次
-连接失败、超时或 5xx 立即以第二个小请求复核，两个都失败才暂停该节点的新请求。源站
-Nginx 只允许 Cloudflare 回源；控制节点直接探测时收到及时的 4xx 只证明 TCP/TLS/HTTP
-网络可达，不将访问权限拦截误判为丢包，也不将它作为应用就绪的证明。并发运行态请求共享
-同一轮探测，不等待探测完成，不调用模型接口；没有运行态请求时不会持续发送探针。
-一小时 ICMP / 流量数据仍使用原有的 30 秒缓存，不因轻量探测而加大监控记录拉取频率。
-故障确认后在后续运行态请求中更新持久化暂停状态；恢复需经过管理员配置的冷却时间和
-三轮不同的成功探测。ICMP 导致的暂停仍需要 ICMP 恢复确认，轻量健康检查成功不会绕过它。
+| 实例 | 目标权重 |
+|---|---|
+| `vmiss-us-01` | 22% |
+| `yt-us-01` | 57% |
+| `vmiss-us-02` | 7% |
+| `dmit-us-01` | 14% |
 
-正常情况下只按正生效权重分流，且保留指定的满载备用节点。当所有正权重节点均暂停时，
-优先随机选择没有自动摘流、监控未过期的零目标权重节点；如果这类备用节点也不可用，
-随机选择所有已配置节点继续尝试（含暂停节点）。紧急兜底不修改管理员权重或暂停状态，
-备用节点在接收 POST 前明确拒绝并发准入时，也会继续尝试后面的随机节点。
-也不把任意网络错误或模型错误当作可重放 POST。全节点故障时仍尝试调度，但不能保证请求成功。
-静态百分比仅用于未配置运行时地址的部署。角色迁移不自动改变管理员目标权重；
-调整权重必须单独记录并验证五个节点之和。
+以上保留原四台存活节点 15:40:5:10 的相对比例，按最大余数法分配至 100%。
+后续以管理员配置为准。Worker 中仅保留这四台的静态变量，与本次目标一致。
 
-配置 `GATEWAY_ROUTING_RUNTIME_TOKEN` 的多节点部署中，降智检测的 Responses 和
-Chat Completions 请求改走管理员配置的公共 `api_base_url`，由同一 Worker 根据有效
-权重分流（包括管理员显式配置的满载兜底规则）。URL 只允许 HTTPS 公网域名或地址，
-以及根路径或 `/v1` 后缀；配置缺失、读取失败、路由不可用时记录检测错误，不回退
-本机、不重放模型 POST、不跟随重定向。未配置多节点路由的
-单机部署，以及尚未分流的 Messages 检测，保留原本机入口。
+配置运行时地址时，Worker 冷启动及缓存过期均等待权威配置，获取失败返回 503；
+不使用静态或过期权重。缓存 TTL 为 1 秒。已经发出的流不能迁移，应先摘流并确认请求排空再停服务。
+不要因连接失败、5xx 或模型错误重放 Responses POST。
+仅 GET/HEAD 可在现有规则允许时故障切换。
 
-首次发布 Chat Completions 分流时，先更新四个 gateway 的应用及 Nginx 白名单
-（参照 `deploy/multi-node/nginx/sub2api-gateway.conf.example`，保留现有 TLS、Host
-和访问控制），确认两个 Chat Completions 路径已进入鉴权，再发布 Worker 的五条路由，
-最后更新 control，确保检测切换公共入口时 Chat Completions 已能分流。
-仅推送代码不改变线上 Worker 或 Nginx 配置。
+现有流量阈值、健康和丢包保护保持启用。零权重备用和全节点故障时的紧急兜底仅从配置中的节点选择，
+因此退役节点必须从 `nodes` 删除。历史 `usage_logs.instance_id=bwg-us-01` 继续保留。
 
-迁移完成后的初始目标与静态变量统一为 BWG 10%、VMISS-01 10%、YT 54%、
-VMISS-02 10%、DMIT 16%，后续可从管理端动态调整。
+## 发布与监控
 
-## 角色化产物
+DMIT control 使用 `-tags embed` 构建；三台 gateway 使用无前端产物。
+常规应用发布仍使用兼容文件名 `release_five_node.sh`，但其目标仅包含当前四台节点。
+发布前从 DMIT 的 `sub2api-migration-postgres` 检查 schema：
 
-- DMIT 必须使用 `-tags embed` 构建的 control 二进制，`/admin/accounts` 返回前端。
-- BWG、VMISS-01、YT和 VMISS-02 必须使用无 `embed` 的 gateway 二进制，前端路径
-  返回 404，Responses 未鉴权请求返回 401。
-- 五个实例必须运行同一版本和同一 commit。差异只允许来自角色、实例 ID、数据连接、
-  Nginx源站和主机级配置。
+- 无待执行 migration：依次发布 VMISS-01、YT、VMISS-02、DMIT。
+- 存在兼容的待执行 migration：先备份 DMIT PostgreSQL 并以 DMIT control 执行官方 migration，
+  再发布三台 gateway。不得手工写 migration 表。
 
-## 正常发布顺序
+发布保留既有 main 提交、远端同步、干净构建、逐节点检查和失败回滚门禁。
+数据库、Redis 和其他业务不随应用发布重建或重启。
 
-发布前从 BWG PostgreSQL执行 schema gate。
+Komari 位于 DMIT；公开页面为四节点监控。BWG 记录隐藏以保留历史指标，
+首页 ping 和任务绑定去掉 BWG，不能让退役节点重新成为调度候选。
 
-- 无 pending migration：`bwg-us-01 -> vmiss-us-01 -> yt-us-01 -> vmiss-us-02 -> dmit-us-01`。
-- 有 pending migration：先在 BWG 创建并验证 PostgreSQL备份，发布 DMIT control并确认
-  migration 完成，再按上述顺序发布四个 gateway。
+## 退役与恢复边界
 
-每次只重启一个应用节点。PostgreSQL、Redis、relay、WireGuard和无关容器不得随应用
-发布重建或重启。每个节点必须完成版本、commit、二进制 hash、角色、ready、Nginx和
-直接 origin 验证后才能继续下一个节点。
+退役前已确认：主站、PostgreSQL、Redis、Komari 均在 DMIT；
+三台存活 gateway 通过 WireGuard 直接访问 DMIT；BWG 未运行其他独立业务。
+先删调度、等待请求排空，再停 BWG 应用、Nginx、WireGuard、监控代理及相关 timer；
+最后移除 DNS、Worker BWG 变量及 DMIT peer。
 
-## 主控迁移切换
+BWG 原始配置与旧数据归档于 DMIT 的 `/root/bwg-retirement-20261029/`。
+该目录包含敏感配置和旧数据库，权限保持 root 私有，不提交仓库或公开。
+备份核验与机器关机/供应商释放是不同状态；供应商账单取消须以供应商实际回执为准。
 
-从旧拓扑切换时先把 DMIT 和 BWG 的动态权重临时设为 0，并保证 Worker 冷启动回退也
-不会把 POST 送到切换中的节点。随后按以下顺序执行：
-
-1. 准备 DMIT 的 canonical/control TLS、完整 Nginx vhost和嵌入前端的 control产物。
-2. 准备 BWG 的 `gateway-bwg-origin` TLS、Responses-only Nginx vhost和 gateway产物。
-3. 备份两台 `.env`、Compose、Nginx和当前二进制，记录 SHA-256。
-4. 停止旧 BWG control应用；保持 PostgreSQL、Redis和 relay运行。
-5. 以 `INSTANCE_ROLE=control`、`INSTANCE_ID=dmit-us-01` 启动 DMIT，验证远端数据层、
-   migration、前端、登录、管理、计费和运行时权重接口。
-6. 把 canonical 和 `control-origin` 切到 DMIT，验证 Cloudflare/public边界。
-7. 以 `INSTANCE_ROLE=gateway`、`INSTANCE_ID=bwg-us-01` 启动 BWG，验证本机 DB/Redis、
-   404 前端边界和 Responses 401/真实请求。
-8. 恢复两节点目标权重，验证 Worker 运行时、五节点用量行和监控角色。
-
-切换窗口不得同时运行两个 control，避免后台任务重复。创建 Responses 的 POST 不得因
-连接失败在边缘重放。
-
-## 回滚
-
-角色切换失败时保持 PostgreSQL和 Redis在 BWG运行：
-
-1. 把 BWG和 DMIT 的 Responses 权重设为 0。
-2. 停止 DMIT control，恢复其 gateway `.env` 和无前端二进制。
-3. 恢复 BWG control `.env` 和嵌入前端二进制并启动。
-4. 把 `xiaohondou.com`、`control-origin.xiaohondou.com` 恢复指向 BWG。
-5. 验证前端、管理 API、运行时权重、Responses 和共享用量后再恢复节点权重。
-
-回滚不恢复旧数据库、不复制数据卷，也不启动双 control。数据库始终以 BWG当前
-PostgreSQL为唯一权威数据源。
-
-## 完成标准
-
-- DMIT ready 报告 `role=control`、`instance_id=dmit-us-01`，前端和完整 API可用。
-- BWG ready 报告 `role=gateway`、`instance_id=bwg-us-01`，前端路径 404。
-- BWG本机 PostgreSQL、Redis及四个远端节点的 WireGuard数据路径均正常。
-- Worker运行时包含五个 ID，所有正权重 origin ready，Responses POST无重放。
-- Komari保留五个 UUID，DMIT 标记 `control`，其余四台标记 `gateway`。
-- 发布脚本、技能、Worker fallback和本文件描述完全一致。
+恢复现行服务应使用 DMIT 的当前数据和当前四节点备份。禁止从 BWG 陈旧 PostgreSQL 数据回滚现行业务。
+确需恢复 BWG gateway 时，必须先恢复其到 DMIT 的专属 peer、配置、源站 TLS/DNS 和监控，
+验证直接健康及鉴权后，再显式把节点加回管理员配置；不启动旧 control 或旧数据容器。
