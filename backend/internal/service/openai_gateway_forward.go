@@ -37,8 +37,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, err
 	}
 	startTime := time.Now()
-	// 固定渠道映射后的请求级 canonical body；账号 normalize/strip 不得改写跨 failover hint。
-	canonicalImageIntentBody := body
 
 	restrictionResult := s.detectCodexClientRestriction(c, account, body)
 	apiKeyID := getAPIKeyIDFromContext(c)
@@ -57,6 +55,29 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		})
 		return nil, errors.New("codex_cli_only restriction: only codex official clients are allowed")
 	}
+
+	apiKey := getAPIKeyFromContext(c)
+	imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
+	if !imageGenerationAllowed {
+		// A passive Codex image catalog must not block ordinary text requests,
+		// but it must not reach any upstream protocol when the group disables images.
+		// Check explicit intent without trusting the request-level hint or account strip policy.
+		// Compact requests retain their dedicated model-mapping check below.
+		requestedModel := gjson.GetBytes(body, "model").String()
+		if !isOpenAIResponsesCompactPath(c) && IsExplicitImageGenerationIntent(openAIResponsesEndpoint, account.GetMappedModel(requestedModel), body) {
+			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
+			c.JSON(http.StatusForbidden, gin.H{"error": gin.H{"type": "permission_error", "message": ImageGenerationPermissionMessage()}})
+			return nil, errors.New("image generation disabled for group")
+		}
+		strippedBody, _, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(body)
+		if stripErr != nil {
+			return nil, stripErr
+		}
+		body = strippedBody
+	}
+	// Group policy is request-wide; account normalize/strip remains attempt-local
+	// and must not rewrite this canonical body or the hint across failover.
+	canonicalImageIntentBody := body
 
 	normalizedBody, normalized, err := normalizeOpenAICodexCompactReasoningEffortForAccount(c, account, body)
 	if err != nil {
@@ -339,11 +360,6 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		disablePatch()
 	}
 
-	apiKey := getAPIKeyFromContext(c)
-	imageGenerationAllowed := GroupAllowsImageGeneration(nil)
-	if apiKey != nil {
-		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
-	}
 	codexImageGenerationBridgeEnabled := isCodexCLI &&
 		!isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) &&
 		imageGenerationAllowed &&

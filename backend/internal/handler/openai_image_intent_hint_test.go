@@ -17,7 +17,7 @@ func TestSeedOpenAIForwardImageIntentHint(t *testing.T) {
 		wantHint      bool
 	}{
 		{name: "seed true", imageIntent: true, wantHint: true},
-		{name: "seed false", imageIntent: false, wantHint: true},
+		{name: "negative explicit intent stays unknown", imageIntent: false},
 		{name: "mapped body stays unknown", channelMapped: true, imageIntent: true},
 	}
 
