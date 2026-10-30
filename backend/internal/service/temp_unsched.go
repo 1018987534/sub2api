@@ -86,7 +86,7 @@ type TotalDurationLatencyPolicy struct {
 func DefaultTotalDurationLatencyPolicy() TotalDurationLatencyPolicy {
 	return TotalDurationLatencyPolicy{
 		CircuitBreakThreshold: 3 * time.Minute,
-		CircuitBreakCount:     16, // More than 15 qualifying requests trips the breaker.
+		CircuitBreakCount:     16, // Trip after more than 15 qualifying requests.
 		CircuitBreakWindow:    30 * time.Minute,
 	}
 }
@@ -127,6 +127,12 @@ type DimensionAwareFirstTokenLatencyStatsCache interface {
 
 type TotalDurationLatencyPolicyConfigurable interface {
 	ConfigureTotalDurationLatencyPolicy(policy TotalDurationLatencyPolicy)
+}
+
+// TotalDurationLatencyPolicyRecorder applies one policy to one completed sample,
+// so concurrent completions cannot replace each other's policy snapshot.
+type TotalDurationLatencyPolicyRecorder interface {
+	RecordSampleWithPolicy(ctx context.Context, accountID int64, requestID string, durationMs int, policy TotalDurationLatencyPolicy) error
 }
 
 func NormalizeTotalDurationLatencyDimension(dimension TotalDurationLatencyDimension) TotalDurationLatencyDimension {

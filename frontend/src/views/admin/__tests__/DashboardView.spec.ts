@@ -5,12 +5,13 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { AccountFirstTokenLatencyMetric, DashboardStats } from '@/types'
 import DashboardView from '../DashboardView.vue'
 
-const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, showSuccess, showError } = vi.hoisted(() => ({
+const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, getTotalDurationCircuitBreakerSettings, showSuccess, showError } = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
   getUserUsageTrend: vi.fn(),
   getUserSpendingRanking: vi.fn(),
   getFirstTokenLatencies: vi.fn(),
   requestFirstTokenManualProbe: vi.fn(),
+  getTotalDurationCircuitBreakerSettings: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn()
 }))
@@ -26,7 +27,8 @@ vi.mock('@/api/admin', () => ({
       getUserUsageTrend,
       getUserSpendingRanking
     },
-    accounts: { getFirstTokenLatencies, requestFirstTokenManualProbe }
+    accounts: { getFirstTokenLatencies, requestFirstTokenManualProbe },
+    settings: { getTotalDurationCircuitBreakerSettings }
   }
 }))
 
@@ -130,6 +132,8 @@ describe('admin DashboardView', () => {
     getUserSpendingRanking.mockReset()
     getFirstTokenLatencies.mockReset()
     requestFirstTokenManualProbe.mockReset()
+    getTotalDurationCircuitBreakerSettings.mockReset()
+    getTotalDurationCircuitBreakerSettings.mockResolvedValue({ max_slow_requests: 15, threshold_seconds: 180, window_seconds: 1800 })
     showSuccess.mockReset()
     showError.mockReset()
 
@@ -168,6 +172,7 @@ describe('admin DashboardView', () => {
       } }
     })
     await flushPromises()
+    expect(wrapper.find('[data-testid="total-duration-circuit-limit"]').exists()).toBe(true)
     expect(getUserUsageTrend).toHaveBeenCalledWith(expect.objectContaining({ metric: 'tokens', limit: 12 }))
     await wrapper.findAll('button').find(button => button.text() === 'admin.dashboard.actualSpending')!.trigger('click')
     expect(getUserUsageTrend).toHaveBeenCalledWith(expect.objectContaining({ metric: 'actual_cost', limit: 12 }))

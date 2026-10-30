@@ -338,7 +338,16 @@ func (s *RateLimitService) ObserveTotalDurationLatency(ctx context.Context, acco
 	}
 	// Keep requested model/reasoning effort on the usage record, but aggregate
 	// scheduler samples at account scope so one account has one pool state.
-	err := s.firstTokenLatencyStatsCache.RecordSample(ctx, account.ID, usageLog.RequestID, *usageLog.DurationMs)
+	var err error
+	if recorder, ok := s.firstTokenLatencyStatsCache.(TotalDurationLatencyPolicyRecorder); ok && s.settingService != nil {
+		policy, policyErr := s.settingService.GetTotalDurationLatencyPolicy(ctx)
+		if policyErr != nil {
+			slog.Warn("total_duration_circuit_policy_read_failed", "error", policyErr)
+		}
+		err = recorder.RecordSampleWithPolicy(ctx, account.ID, usageLog.RequestID, *usageLog.DurationMs, policy)
+	} else {
+		err = s.firstTokenLatencyStatsCache.RecordSample(ctx, account.ID, usageLog.RequestID, *usageLog.DurationMs)
+	}
 	if err != nil {
 		slog.Warn("total_duration_latency_stats_record_failed", "account_id", account.ID, "error", err)
 	}

@@ -602,6 +602,8 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpA
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.GET("/sidebar", h.Admin.Setting.GetSidebarSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
+		adminSettings.GET("/total-duration-circuit-breaker", h.Admin.Setting.GetTotalDurationCircuitBreakerSettings)
+		adminSettings.PUT("/total-duration-circuit-breaker", h.Admin.Setting.UpdateTotalDurationCircuitBreakerSettings)
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)
 		adminSettings.GET("/email-templates", h.Admin.Setting.ListEmailTemplates)

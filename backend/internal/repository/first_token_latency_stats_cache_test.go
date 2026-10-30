@@ -282,6 +282,58 @@ func TestTotalLatencyStatsCacheCircuitCountExpiresAfterThirtyMinutes(t *testing.
 	require.True(t, stats[accountID].CircuitBroken, "sixteen over-threshold samples inside the current thirty-minute window must trip the breaker")
 }
 
+type totalDurationCircuitSharedSettingsRepo struct {
+	service.SettingRepository
+	value string
+}
+
+func (r *totalDurationCircuitSharedSettingsRepo) GetValue(context.Context, string) (string, error) {
+	return r.value, nil
+}
+
+func (r *totalDurationCircuitSharedSettingsRepo) Set(_ context.Context, _, value string) error {
+	r.value = value
+	return nil
+}
+
+func TestTotalLatencyStatsCacheUpdatedPolicyUsesExistingWindowAcrossNodes(t *testing.T) {
+	_, rdb, cacheA := newTotalLatencyTestCache(t)
+	cacheB := &firstTokenLatencyStatsCache{rdb: rdb}
+	repo := &totalDurationCircuitSharedSettingsRepo{}
+	control := service.NewSettingService(repo, nil)
+	nodes := []*service.RateLimitService{
+		service.NewRateLimitService(nil, nil, nil, nil, nil),
+		service.NewRateLimitService(nil, nil, nil, nil, nil),
+	}
+	for index, cache := range []*firstTokenLatencyStatsCache{cacheA, cacheB} {
+		nodes[index].SetSettingService(service.NewSettingService(repo, nil))
+		nodes[index].SetFirstTokenLatencyStatsCache(cache)
+	}
+	ctx := context.Background()
+	account := &service.Account{ID: 185, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true}
+	durationMS := 180_001
+	record := func(index int) {
+		nodes[index%2].ObserveTotalDurationLatency(ctx, account, &service.UsageLog{
+			RequestID: fmt.Sprintf("cross-node-slow-%d", index), RequestType: service.RequestTypeStream,
+			Stream: true, ActualCost: 0.01, DurationMs: &durationMS,
+		})
+	}
+	for index := 1; index <= 3; index++ {
+		record(index)
+	}
+	before, err := cacheA.GetStatsBatch(ctx, []int64{account.ID})
+	require.NoError(t, err)
+	require.Equal(t, int64(3), before[account.ID].SampleCount)
+	require.False(t, before[account.ID].CircuitBroken)
+	_, err = control.UpdateTotalDurationCircuitBreakerSettings(ctx, 3)
+	require.NoError(t, err)
+	record(4)
+	after, err := cacheB.GetStatsBatch(ctx, []int64{account.ID})
+	require.NoError(t, err)
+	require.True(t, after[account.ID].CircuitBroken, "the next completion on another node must use the saved limit and existing samples")
+	require.Zero(t, after[account.ID].SampleCount)
+}
+
 func TestTotalLatencyStatsCacheFallsBackToTwentyFourHours(t *testing.T) {
 	_, rdb, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
