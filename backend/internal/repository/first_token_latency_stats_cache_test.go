@@ -208,7 +208,7 @@ func TestTotalLatencyStatsCacheRecentMinutePlusSamplesDoNotResetHistory(t *testi
 	require.False(t, stats[accountID].CircuitBroken)
 }
 
-func TestTotalLatencyStatsCacheThreeOverThresholdRequestsWithinThirtyMinutesBreakAffinity(t *testing.T) {
+func TestTotalLatencyStatsCacheMoreThanFifteenOverThresholdRequestsWithinThirtyMinutesBreakAffinity(t *testing.T) {
 	mr, rdb, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()
 	accountID := int64(183)
@@ -228,17 +228,18 @@ func TestTotalLatencyStatsCacheThreeOverThresholdRequestsWithinThirtyMinutesBrea
 	require.NoError(t, err)
 	require.False(t, atThreshold[accountID].CircuitBroken, "exactly three minutes must not count as over the threshold")
 
-	for index := 1; index <= 2; index++ {
-		mr.SetTime(base.Add(time.Duration(index) * 10 * time.Minute))
+	for index := 1; index <= 15; index++ {
+		mr.SetTime(base.Add(time.Duration(index) * time.Minute))
+		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("ordinary-request-%d", index), 8_000))
 		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("over-threshold-request-%d", index), 180_001))
 		pending, pendingErr := cache.GetStatsBatch(ctx, []int64{accountID})
 		require.NoError(t, pendingErr)
-		require.Equal(t, int64(25+index), pending[accountID].SampleCount)
-		require.False(t, pending[accountID].CircuitBroken, "the first two qualifying requests must not trip the breaker")
+		require.Equal(t, int64(25+2*index), pending[accountID].SampleCount)
+		require.False(t, pending[accountID].CircuitBroken, "the first fifteen qualifying requests must not trip the breaker")
 		require.True(t, mr.Exists(fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)))
 	}
 	mr.SetTime(base.Add(29 * time.Minute))
-	require.NoError(t, cache.RecordSample(ctx, accountID, "over-threshold-request-3", 180_001))
+	require.NoError(t, cache.RecordSample(ctx, accountID, "over-threshold-request-16", 180_001))
 
 	after, err := cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
@@ -264,19 +265,21 @@ func TestTotalLatencyStatsCacheCircuitCountExpiresAfterThirtyMinutes(t *testing.
 	mr.SetTime(base)
 	require.NoError(t, cache.RecordSample(ctx, accountID, "over-threshold-1", 180_001))
 	mr.SetTime(base.Add(29 * time.Minute))
-	require.NoError(t, cache.RecordSample(ctx, accountID, "over-threshold-2", 180_001))
+	for index := 2; index <= 15; index++ {
+		require.NoError(t, cache.RecordSample(ctx, accountID, fmt.Sprintf("over-threshold-%d", index), 180_001))
+	}
 	mr.SetTime(base.Add(30 * time.Minute))
-	require.NoError(t, cache.RecordSample(ctx, accountID, "over-threshold-3", 180_001))
+	require.NoError(t, cache.RecordSample(ctx, accountID, "over-threshold-16", 180_001))
 
 	stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
 	require.False(t, stats[accountID].CircuitBroken, "the first sample must expire exactly at the thirty-minute boundary")
 
 	mr.SetTime(base.Add(30*time.Minute + time.Second))
-	require.NoError(t, cache.RecordSample(ctx, accountID, "over-threshold-4", 180_001))
+	require.NoError(t, cache.RecordSample(ctx, accountID, "over-threshold-17", 180_001))
 	stats, err = cache.GetStatsBatch(ctx, []int64{accountID})
 	require.NoError(t, err)
-	require.True(t, stats[accountID].CircuitBroken, "three over-threshold samples inside the current thirty-minute window must trip the breaker")
+	require.True(t, stats[accountID].CircuitBroken, "sixteen over-threshold samples inside the current thirty-minute window must trip the breaker")
 }
 
 func TestTotalLatencyStatsCacheFallsBackToTwentyFourHours(t *testing.T) {
