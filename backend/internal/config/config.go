@@ -2498,7 +2498,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_request_trace_enabled", true)
 	viper.SetDefault("gateway.openai_slow_request_trace_threshold_ms", 3000)
 	viper.SetDefault("gateway.total_duration_circuit_break_threshold_seconds", 180)
-	viper.SetDefault("gateway.total_duration_circuit_break_count", 3)
+	viper.SetDefault("gateway.total_duration_circuit_break_count", 16)
 	viper.SetDefault("gateway.total_duration_circuit_break_window_seconds", 1800)
 	viper.SetDefault("gateway.log_upstream_error_body", true)
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)

@@ -86,7 +86,7 @@ type TotalDurationLatencyPolicy struct {
 func DefaultTotalDurationLatencyPolicy() TotalDurationLatencyPolicy {
 	return TotalDurationLatencyPolicy{
 		CircuitBreakThreshold: 3 * time.Minute,
-		CircuitBreakCount:     3,
+		CircuitBreakCount:     16, // More than 15 qualifying requests trips the breaker.
 		CircuitBreakWindow:    30 * time.Minute,
 	}
 }

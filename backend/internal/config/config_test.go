@@ -763,8 +763,14 @@ func TestLoadTotalDurationCircuitBreakWindow(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.Equal(t, 180, cfg.Gateway.TotalDurationCircuitBreakThresholdSeconds)
-	require.Equal(t, 3, cfg.Gateway.TotalDurationCircuitBreakCount)
+	require.Equal(t, 16, cfg.Gateway.TotalDurationCircuitBreakCount)
 	require.Equal(t, 1800, cfg.Gateway.TotalDurationCircuitBreakWindowSeconds)
+
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_TOTAL_DURATION_CIRCUIT_BREAK_COUNT", "7")
+	cfg, err = Load()
+	require.NoError(t, err)
+	require.Equal(t, 7, cfg.Gateway.TotalDurationCircuitBreakCount)
 }
 
 func TestLoadImageNonstreamKeepaliveFromEnv(t *testing.T) {
