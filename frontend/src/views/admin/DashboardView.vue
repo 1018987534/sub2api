@@ -251,6 +251,7 @@
               </button>
             </div>
           </div>
+          <TotalDurationCircuitBreakerControl />
           <div v-if="firstTokenLoading" class="flex min-h-32 items-center justify-center border-t border-gray-100 dark:border-dark-700">
             <LoadingSpinner size="md" />
           </div>
@@ -543,6 +544,7 @@ import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
+import TotalDurationCircuitBreakerControl from '@/components/admin/TotalDurationCircuitBreakerControl.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'

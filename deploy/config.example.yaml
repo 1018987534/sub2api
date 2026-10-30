@@ -248,6 +248,8 @@ gateway:
   # duration exceeds 3 minutes; more than 15 counted requests in a rolling
   # 30-minute window reset the account to pending collection (on request 16).
   # 快池熔断：单次总耗时超过 3 分钟计数，滚动 30 分钟内超过 15 次（第 16 次）重置为待采集。
+  # The admin homepage can save a count override shared by all nodes without a restart.
+  # 可在管理首页调整次数；保存的设置优先于下方默认次数，并在所有节点立即生效。
   total_duration_circuit_break_threshold_seconds: 180
   total_duration_circuit_break_count: 16
   total_duration_circuit_break_window_seconds: 1800

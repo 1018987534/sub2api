@@ -1692,7 +1692,32 @@ export async function resetWebSearchUsage(payload: {
   );
 }
 
+export interface TotalDurationCircuitBreakerSettings {
+  max_slow_requests: number;
+  threshold_seconds: number;
+  window_seconds: number;
+}
+
+export async function getTotalDurationCircuitBreakerSettings(): Promise<TotalDurationCircuitBreakerSettings> {
+  const { data } = await apiClient.get<TotalDurationCircuitBreakerSettings>(
+    "/admin/settings/total-duration-circuit-breaker",
+  );
+  return data;
+}
+
+export async function updateTotalDurationCircuitBreakerSettings(
+  maxSlowRequests: number,
+): Promise<TotalDurationCircuitBreakerSettings> {
+  const { data } = await apiClient.put<TotalDurationCircuitBreakerSettings>(
+    "/admin/settings/total-duration-circuit-breaker",
+    { max_slow_requests: maxSlowRequests },
+  );
+  return data;
+}
+
 export const settingsAPI = {
+  getTotalDurationCircuitBreakerSettings,
+  updateTotalDurationCircuitBreakerSettings,
   getSettings,
   getSidebarSettings,
   updateSettings,

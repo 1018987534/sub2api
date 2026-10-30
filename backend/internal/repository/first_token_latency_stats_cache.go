@@ -280,6 +280,10 @@ func (c *firstTokenLatencyStatsCache) totalDurationLatencyPolicy() service.Total
 }
 
 func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountID int64, requestID string, durationMs int) error {
+	return c.RecordSampleWithPolicy(ctx, accountID, requestID, durationMs, c.totalDurationLatencyPolicy())
+}
+
+func (c *firstTokenLatencyStatsCache) RecordSampleWithPolicy(ctx context.Context, accountID int64, requestID string, durationMs int, policy service.TotalDurationLatencyPolicy) error {
 	requestID = strings.TrimSpace(requestID)
 	if accountID <= 0 || requestID == "" || durationMs <= 0 {
 		return nil
@@ -291,7 +295,7 @@ func (c *firstTokenLatencyStatsCache) RecordSample(ctx context.Context, accountI
 	dedupeKey := fmt.Sprintf("scheduler:total_duration:event:%d:%s", accountID, requestID)
 	probeKey := fmt.Sprintf("%s%d", totalLatencyProbePrefix, accountID)
 	manualProbeKey := fmt.Sprintf("%s%d", totalLatencyManualProbePrefix, accountID)
-	policy := c.totalDurationLatencyPolicy()
+	policy = service.NormalizeTotalDurationLatencyPolicy(policy)
 	if _, err := totalLatencyStatsRecordScript.Run(
 		ctx,
 		c.rdb,
