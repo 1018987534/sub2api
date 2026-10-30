@@ -226,9 +226,12 @@ func TestOpenAIGatewayServiceForward_AccountPolicyStripsImageNamespaceTools(t *t
 	tests := []struct {
 		name        string
 		passthrough bool
+		allowImages bool
 	}{
-		{name: "managed forwarding"},
-		{name: "passthrough forwarding", passthrough: true},
+		{name: "managed disabled group"},
+		{name: "passthrough disabled group", passthrough: true},
+		{name: "managed allowed group", allowImages: true},
+		{name: "passthrough allowed group", passthrough: true, allowImages: true},
 	}
 
 	for _, tt := range tests {
@@ -241,7 +244,7 @@ func TestOpenAIGatewayServiceForward_AccountPolicyStripsImageNamespaceTools(t *t
 				},
 			}
 			svc := newOpenAIImageGenerationControlTestService(upstream)
-			c, _ := newOpenAIImageGenerationControlTestContext(false, "codex_cli_rs/0.144.1")
+			c, _ := newOpenAIImageGenerationControlTestContext(tt.allowImages, "codex_cli_rs/0.144.1")
 			SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
 			account := newOpenAIImageGenerationControlTestAccount()
 			account.Extra = map[string]any{
@@ -277,7 +280,7 @@ func TestOpenAIGatewayServiceForward_AccountPolicyStripsImageNamespaceTools(t *t
 			require.Equal(t, "write code", gjson.GetBytes(upstream.lastBody, "input.0.content.0.text").String())
 			cached, known := getOpenAIImageIntentHint(c)
 			require.True(t, known)
-			require.True(t, cached)
+			require.Equal(t, tt.allowImages, cached, "group stripping is canonical; account stripping stays attempt-local")
 		})
 	}
 }

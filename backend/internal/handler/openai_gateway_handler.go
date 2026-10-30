@@ -225,7 +225,11 @@ func seedOpenAIForwardImageIntentHint(c *gin.Context, channelMapped bool, imageI
 		// 渠道映射改变了规范请求，保持 unknown，由 Forward 按映射后的 model/body 初始化。
 		return
 	}
-	service.SetOpenAIImageIntentHint(c, imageIntent)
+	// A negative explicit check does not exclude passive image tool declarations.
+	// Leave it unknown so Forward can classify the complete canonical request.
+	if imageIntent {
+		service.SetOpenAIImageIntentHint(c, true)
+	}
 }
 
 func newOpenAIModelMappedBodyCache(body []byte, replace openAIModelBodyReplaceFunc) func(bool, string) []byte {
