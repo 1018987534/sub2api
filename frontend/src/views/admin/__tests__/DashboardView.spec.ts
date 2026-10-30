@@ -5,13 +5,15 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { AccountFirstTokenLatencyMetric, DashboardStats } from '@/types'
 import DashboardView from '../DashboardView.vue'
 
-const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, getTotalDurationCircuitBreakerSettings, showSuccess, showError } = vi.hoisted(() => ({
+const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings, showSuccess, showError } = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
   getUserUsageTrend: vi.fn(),
   getUserSpendingRanking: vi.fn(),
   getFirstTokenLatencies: vi.fn(),
   requestFirstTokenManualProbe: vi.fn(),
   getTotalDurationCircuitBreakerSettings: vi.fn(),
+  getFastPoolPrioritySettings: vi.fn(),
+  updateFastPoolPrioritySettings: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn()
 }))
@@ -28,7 +30,7 @@ vi.mock('@/api/admin', () => ({
       getUserSpendingRanking
     },
     accounts: { getFirstTokenLatencies, requestFirstTokenManualProbe },
-    settings: { getTotalDurationCircuitBreakerSettings }
+    settings: { getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings }
   }
 }))
 
@@ -134,6 +136,10 @@ describe('admin DashboardView', () => {
     requestFirstTokenManualProbe.mockReset()
     getTotalDurationCircuitBreakerSettings.mockReset()
     getTotalDurationCircuitBreakerSettings.mockResolvedValue({ max_slow_requests: 15, threshold_seconds: 180, window_seconds: 1800 })
+    getFastPoolPrioritySettings.mockReset()
+    getFastPoolPrioritySettings.mockResolvedValue({ mode: 'intelligence' })
+    updateFastPoolPrioritySettings.mockReset()
+    updateFastPoolPrioritySettings.mockImplementation(async (mode: string) => ({ mode }))
     showSuccess.mockReset()
     showError.mockReset()
 
@@ -183,6 +189,30 @@ describe('admin DashboardView', () => {
     resolveTokens({ trend: [{ date: '2026-01-01', user_id: 1, username: 'tokens', email: '', requests: 1, tokens: 100, cost: 1, actual_cost: 1 }] })
     await flushPromises()
     expect(chart.props('data').datasets[0].data).toEqual([5])
+  })
+
+  it('switches the displayed fast-pool order only after saving and keeps slow accounts last', async () => {
+    getFirstTokenLatencies.mockResolvedValueOnce({ items: [
+      createFirstTokenMetric({ account_id: 1, account_name: 'cheap-fast', scheduling_rate_multiplier: 0.05, cache_rate: 0.5 }),
+      createFirstTokenMetric({ account_id: 2, account_name: 'cache-fast', scheduling_rate_multiplier: 0.5, cache_rate: 0.95 }),
+      createFirstTokenMetric({ account_id: 3, account_name: 'slow-high-cache', scheduling_rate_multiplier: 0.01, cache_rate: 0.99, is_fast_pool: false })
+    ], total: 3 })
+    const wrapper = mount(DashboardView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true,
+      DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true, Line: true
+    } } })
+    await flushPromises()
+    const rows = () => wrapper.findAll('[data-testid="first-token-latency-row"]').map(row => row.text())
+    expect(rows()[0]).toContain('cache-fast')
+    expect(rows()[2]).toContain('slow-high-cache')
+    await wrapper.get('[data-testid="fast-pool-priority-mode"]').setValue('rate')
+    expect(rows()[0]).toContain('cache-fast')
+    await wrapper.get('[data-testid="fast-pool-priority-control"] form').trigger('submit')
+    await flushPromises()
+    expect(updateFastPoolPrioritySettings).toHaveBeenCalledWith('rate')
+    expect(rows()[0]).toContain('cheap-fast')
+    expect(rows()[2]).toContain('slow-high-cache')
+    wrapper.unmount()
   })
 
   it('uses today as default dashboard range', async () => {

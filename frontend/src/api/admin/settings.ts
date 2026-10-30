@@ -1715,7 +1715,32 @@ export async function updateTotalDurationCircuitBreakerSettings(
   return data;
 }
 
+export type FastPoolPriorityMode = "intelligence" | "rate";
+
+export interface FastPoolPrioritySettings {
+  mode: FastPoolPriorityMode;
+}
+
+export async function getFastPoolPrioritySettings(): Promise<FastPoolPrioritySettings> {
+  const { data } = await apiClient.get<FastPoolPrioritySettings>(
+    "/admin/settings/fast-pool-priority",
+  );
+  return data;
+}
+
+export async function updateFastPoolPrioritySettings(
+  mode: FastPoolPriorityMode,
+): Promise<FastPoolPrioritySettings> {
+  const { data } = await apiClient.put<FastPoolPrioritySettings>(
+    "/admin/settings/fast-pool-priority",
+    { mode },
+  );
+  return data;
+}
+
 export const settingsAPI = {
+  getFastPoolPrioritySettings,
+  updateFastPoolPrioritySettings,
   getTotalDurationCircuitBreakerSettings,
   updateTotalDurationCircuitBreakerSettings,
   getSettings,

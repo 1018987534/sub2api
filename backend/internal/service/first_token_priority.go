@@ -385,7 +385,8 @@ func (s *SettingService) FirstTokenPriorityEnabled(ctx context.Context) bool {
 }
 
 // firstTokenPriorityOrder returns every candidate. The fast pool retains the
-// caller's low-rate order, refined by cache rate above 80% within that pool.
+// caller's low-rate order, optionally refined by cache rate above 80% within
+// that pool according to the shared fast-pool priority setting.
 // The slow pool uses normal total duration. When an adaptive probe is due,
 // a shared lease promotes exactly one account across all gateway instances.
 func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache) []int64 {
@@ -455,7 +456,9 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 			}
 			fastPoolEnd++
 		}
-		orderFastPoolByCacheRate(ctx, baseline[:fastPoolEnd], cacheStatsService)
+		if fastPoolEnd > 1 && cacheStatsService.fastPoolPriorityMode(ctx) == FastPoolPriorityIntelligence {
+			orderFastPoolByCacheRate(ctx, baseline[:fastPoolEnd], cacheStatsService)
+		}
 	}
 	ordered := append(baseline, fallbackAccountIDs...)
 	if allowManualProbe {

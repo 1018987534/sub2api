@@ -252,6 +252,7 @@
             </div>
           </div>
           <TotalDurationCircuitBreakerControl />
+          <FastPoolPriorityControl @change="fastPoolPriorityMode = $event" />
           <div v-if="firstTokenLoading" class="flex min-h-32 items-center justify-center border-t border-gray-100 dark:border-dark-700">
             <LoadingSpinner size="md" />
           </div>
@@ -545,6 +546,8 @@ import Icon from '@/components/icons/Icon.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
 import TotalDurationCircuitBreakerControl from '@/components/admin/TotalDurationCircuitBreakerControl.vue'
+import FastPoolPriorityControl from '@/components/admin/FastPoolPriorityControl.vue'
+import type { FastPoolPriorityMode } from '@/api/admin/settings'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
@@ -585,6 +588,7 @@ const rankingError = ref(false)
 const firstTokenLoading = ref(false)
 const firstTokenError = ref(false)
 const firstTokenMetrics = ref<AccountFirstTokenLatencyMetric[]>([])
+const fastPoolPriorityMode = ref<FastPoolPriorityMode>('intelligence')
 const firstTokenGroupFilter = ref<string | number>('all')
 const firstTokenManualProbeLoading = ref<Set<number>>(new Set())
 let firstTokenRefreshInFlight = false
@@ -624,6 +628,13 @@ const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
     section.metrics.sort((left, right) => {
       if (left.is_fast_pool !== right.is_fast_pool) return left.is_fast_pool ? -1 : 1
       if (left.is_fast_pool && right.is_fast_pool) {
+        if (fastPoolPriorityMode.value === 'intelligence') {
+          const priorityCacheRate = (metric: AccountFirstTokenLatencyMetric) =>
+            metric.cache_rate_denominator > 0 && metric.cache_rate != null && metric.cache_rate > 0.8
+              ? metric.cache_rate : 0
+          const cacheDifference = priorityCacheRate(right) - priorityCacheRate(left)
+          if (cacheDifference !== 0) return cacheDifference
+        }
         const leftRate = left.scheduling_rate_multiplier ?? Number.POSITIVE_INFINITY
         const rightRate = right.scheduling_rate_multiplier ?? Number.POSITIVE_INFINITY
         if (leftRate !== rightRate) return leftRate - rightRate
