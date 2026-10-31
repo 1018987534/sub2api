@@ -207,7 +207,8 @@ func TestPostgresActivityScenarios(t *testing.T) {
 	switched := addUser("90123456", "90123456@qq.com", "", true)
 	process("switches-off", "90123456", "join", "", &l21, "12345678")
 	requireNumber(`SELECT balance FROM users WHERE id=$1`, 0, switched)
-	requireNumber(`SELECT COUNT(*) FROM qq_activity_outbox WHERE delivered_at IS NULL`, 0)
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_outbox WHERE delivered_at IS NULL AND dedup_key NOT LIKE 'reward:%'`, 0)
+	requireNumber(`SELECT COUNT(*) FROM qq_activity_outbox WHERE delivered_at IS NULL AND dedup_key LIKE 'reward:%'`, 9)
 	if err = store.UpdateSettings(ctx, "test-admin", SettingsUpdate{NewcomerEnabled: &on, InvitationEnabled: &on}); err != nil {
 		t.Fatal(err)
 	}

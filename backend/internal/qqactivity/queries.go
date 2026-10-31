@@ -213,7 +213,7 @@ func (s *Store) UpdateSettings(ctx context.Context, actor string, update Setting
 			return err
 		}
 		if update.GroupMessagesEnabled != nil && !*update.GroupMessagesEnabled {
-			if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_outbox SET delivered_at=NOW() WHERE delivered_at IS NULL`); err != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_outbox SET delivered_at=NOW() WHERE delivered_at IS NULL AND dedup_key NOT LIKE 'reward:%'`); err != nil {
 				return err
 			}
 		}

@@ -205,20 +205,19 @@ func (s *Store) settleKind(ctx context.Context, tx *sql.Tx, kind string) ([]int6
 		}
 		// Payment notices belong to this newly paid reward, never to a binding
 		// summary. Repeated commands cannot replay a historical reward notice.
+		// An inviter may already have left; still announce the credited reward
+		// in the invitee's activity group. A payment without a group is rejected.
 		{
 			var group string
-			e := tx.QueryRowContext(ctx, `SELECT group_id FROM qq_activity_members WHERE qq=$1 AND in_group AND NOT is_robot ORDER BY last_seen_at DESC LIMIT 1`, p.qq).Scan(&group)
-			if e != nil && !errors.Is(e, sql.ErrNoRows) {
-				return nil, e
+			if err = tx.QueryRowContext(ctx, `SELECT group_id FROM qq_activity_groups g ORDER BY CASE WHEN EXISTS(SELECT 1 FROM qq_activity_members m WHERE m.group_id=g.group_id AND m.qq=$1 AND m.in_group AND NOT m.is_robot) THEN 0 WHEN EXISTS(SELECT 1 FROM qq_activity_invitations i WHERE i.group_id=g.group_id AND i.invitee_qq=$2) THEN 1 WHEN EXISTS(SELECT 1 FROM qq_activity_members m WHERE m.group_id=g.group_id AND m.qq=$2 AND NOT m.is_robot) THEN 2 ELSE 3 END,g.initialized_at,g.group_id LIMIT 1`, p.qq, p.subjectQQ).Scan(&group); err != nil {
+				return nil, err
 			}
-			if e == nil {
-				text := "$2 体验额度已到账，可在官网余额中查看。"
-				if p.kind == "invitation" {
-					text = "一笔符合条件的邀请已完成！$2 邀请余额已到账，可在官网「邀请奖励」查看。"
-				}
-				if err = enqueue(ctx, tx, fmt.Sprintf("reward:%d", p.id), group, p.qq, text); err != nil {
-					return nil, err
-				}
+			text := "$2 体验额度已到账，可在官网余额中查看。"
+			if p.kind == "invitation" {
+				text = "一笔符合条件的邀请已完成！$2 邀请余额已到账，可在官网「邀请奖励」查看。"
+			}
+			if err = enqueue(ctx, tx, fmt.Sprintf("reward:%d", p.id), group, p.qq, text); err != nil {
+				return nil, err
 			}
 		}
 	}

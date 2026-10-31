@@ -227,7 +227,7 @@ func (s *Store) LevelChecks(ctx context.Context) ([]Event, error) {
 }
 
 func (s *Store) Outbox(ctx context.Context) ([]Outbox, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,group_id,qq,text FROM qq_activity_outbox WHERE delivered_at IS NULL AND attempts<8 AND next_attempt_at<=NOW() ORDER BY id LIMIT 20`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,group_id,qq,text,dedup_key LIKE 'reward:%' FROM qq_activity_outbox WHERE delivered_at IS NULL AND (attempts<8 OR dedup_key LIKE 'reward:%') AND next_attempt_at<=NOW() ORDER BY id LIMIT 20`)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +235,7 @@ func (s *Store) Outbox(ctx context.Context) ([]Outbox, error) {
 	result := []Outbox{}
 	for rows.Next() {
 		var m Outbox
-		if err = rows.Scan(&m.ID, &m.GroupID, &m.QQ, &m.Text); err != nil {
+		if err = rows.Scan(&m.ID, &m.GroupID, &m.QQ, &m.Text, &m.Reward); err != nil {
 			return nil, err
 		}
 		m.Text = MaskText(m.Text)
