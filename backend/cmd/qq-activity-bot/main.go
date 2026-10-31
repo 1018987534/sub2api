@@ -395,14 +395,22 @@ func (b *bot) outputs(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if !inGroup {
+		if !inGroup && !m.Reward {
 			if err = b.bridge(ctx, "ack", map[string]any{"id": m.ID, "delivered": true}, nil); err != nil {
 				return err
 			}
 			continue
 		}
-		params := map[string]any{"group_id": m.GroupID, "message": []any{map[string]any{"type": "at", "data": map[string]string{"qq": m.QQ}}, map[string]any{"type": "text", "data": map[string]string{"text": " " + qqactivity.MaskText(m.Text)}}}}
-		sent := b.onebot(ctx, "send_group_msg", params, nil) == nil
+		var recipient any = map[string]any{"type": "at", "data": map[string]string{"qq": m.QQ}}
+		if !inGroup {
+			recipient = map[string]any{"type": "text", "data": map[string]string{"text": qqactivity.MaskEmail(m.QQ+"@qq.com") + "："}}
+		}
+		params := map[string]any{"group_id": m.GroupID, "message": []any{recipient, map[string]any{"type": "text", "data": map[string]string{"text": " " + qqactivity.MaskText(m.Text)}}}}
+		var receipt struct {
+			MessageID json.Number `json:"message_id"`
+		}
+		sendErr := b.onebot(ctx, "send_group_msg", params, &receipt)
+		sent := sendErr == nil && receipt.MessageID.String() != "" && receipt.MessageID.String() != "0"
 		if err = b.bridge(ctx, "ack", map[string]any{"id": m.ID, "delivered": sent}, nil); err != nil {
 			return err
 		}

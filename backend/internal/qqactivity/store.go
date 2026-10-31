@@ -346,7 +346,9 @@ func enqueue(ctx context.Context, tx *sql.Tx, key, group, qq, text string) error
 	if err != nil {
 		return err
 	}
-	if !c.GroupMessagesEnabled {
+	// Actual payments always get a durable group notice. The switch only
+	// controls ordinary activity replies, never payment receipts.
+	if !c.GroupMessagesEnabled && !strings.HasPrefix(key, "reward:") {
 		return nil
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_outbox(dedup_key,group_id,qq,text) VALUES($1,$2,$3,$4) ON CONFLICT(dedup_key) DO NOTHING`, key, group, qq, MaskText(text))

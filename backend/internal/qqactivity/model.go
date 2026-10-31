@@ -83,6 +83,7 @@ type Outbox struct {
 	GroupID string `json:"group_id"`
 	QQ      string `json:"qq"`
 	Text    string `json:"text"`
+	Reward  bool   `json:"reward"`
 }
 type Candidate struct {
 	ID     int64
