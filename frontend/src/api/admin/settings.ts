@@ -1706,16 +1706,16 @@ export async function getTotalDurationCircuitBreakerSettings(): Promise<TotalDur
 }
 
 export async function updateTotalDurationCircuitBreakerSettings(
-  maxSlowRequests: number,
+  settings: Pick<TotalDurationCircuitBreakerSettings, "max_slow_requests" | "threshold_seconds" | "window_seconds">,
 ): Promise<TotalDurationCircuitBreakerSettings> {
   const { data } = await apiClient.put<TotalDurationCircuitBreakerSettings>(
     "/admin/settings/total-duration-circuit-breaker",
-    { max_slow_requests: maxSlowRequests },
+    settings,
   );
   return data;
 }
 
-export type FastPoolPriorityMode = "intelligence" | "rate";
+export type FastPoolPriorityMode = "intelligence" | "latency" | "rate";
 
 export interface FastPoolPrioritySettings {
   mode: FastPoolPriorityMode;

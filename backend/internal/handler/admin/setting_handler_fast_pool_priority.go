@@ -17,10 +17,10 @@ func (h *SettingHandler) GetFastPoolPrioritySettings(c *gin.Context) {
 
 func (h *SettingHandler) UpdateFastPoolPrioritySettings(c *gin.Context) {
 	var req struct {
-		Mode service.FastPoolPriorityMode `json:"mode" binding:"required,oneof=intelligence rate"`
+		Mode service.FastPoolPriorityMode `json:"mode" binding:"required,oneof=intelligence latency rate"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.BadRequest(c, "mode must be intelligence or rate")
+		response.BadRequest(c, "mode must be intelligence, latency, or rate")
 		return
 	}
 	settings, err := h.settingService.UpdateFastPoolPrioritySettings(c.Request.Context(), req.Mode)

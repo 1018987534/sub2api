@@ -456,8 +456,13 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 			}
 			fastPoolEnd++
 		}
-		if fastPoolEnd > 1 && cacheStatsService.fastPoolPriorityMode(ctx) == FastPoolPriorityIntelligence {
-			orderFastPoolByCacheRate(ctx, baseline[:fastPoolEnd], cacheStatsService)
+		if fastPoolEnd > 1 {
+			switch cacheStatsService.fastPoolPriorityMode(ctx) {
+			case FastPoolPriorityLatency:
+				orderFastPoolByLatency(ctx, baseline[:fastPoolEnd], stats, cacheStatsService)
+			case FastPoolPriorityIntelligence:
+				orderFastPoolByCacheRate(ctx, baseline[:fastPoolEnd], cacheStatsService)
+			}
 		}
 	}
 	ordered := append(baseline, fallbackAccountIDs...)
@@ -511,6 +516,36 @@ func orderFastPoolByCacheRate(ctx context.Context, accountIDs []int64, cacheStat
 	}
 	sort.SliceStable(accountIDs, func(i, j int) bool {
 		return rates[accountIDs[i]] > rates[accountIDs[j]]
+	})
+}
+
+// orderFastPoolByLatency keeps the existing cache-rate fast-pool admission
+// rule, then orders accounts above the 80% cache threshold by measured
+// normal total duration. Accounts at or below the threshold retain the
+// cache-rate mode fallback order (the existing low-rate order).
+func orderFastPoolByLatency(ctx context.Context, accountIDs []int64, latencyStats map[int64]FirstTokenLatencyStats, cacheStatsService *RateLimitService) {
+	if len(accountIDs) <= 1 {
+		return
+	}
+	orderFastPoolByCacheRate(ctx, accountIDs, cacheStatsService)
+	cacheStats := cacheStatsService.loadAccountCacheStatsCached(ctx, accountIDs)
+	highCacheEnd := 0
+	for _, accountID := range accountIDs {
+		entry := cacheStats[accountID]
+		if !entry.available || entry.stats.CacheRateDenominator <= 0 || float64(entry.stats.CacheReadTokens)/float64(entry.stats.CacheRateDenominator) <= 0.8 {
+			break
+		}
+		highCacheEnd++
+	}
+	if highCacheEnd <= 1 {
+		return
+	}
+	sort.SliceStable(accountIDs[:highCacheEnd], func(i, j int) bool {
+		left, right := latencyStats[accountIDs[i]], latencyStats[accountIDs[j]]
+		if left.PredictedMS != right.PredictedMS {
+			return left.PredictedMS < right.PredictedMS
+		}
+		return accountIDs[i] < accountIDs[j]
 	})
 }
 

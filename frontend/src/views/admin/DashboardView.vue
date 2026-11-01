@@ -634,6 +634,22 @@ const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
               ? metric.cache_rate : 0
           const cacheDifference = priorityCacheRate(right) - priorityCacheRate(left)
           if (cacheDifference !== 0) return cacheDifference
+        } else if (fastPoolPriorityMode.value === 'latency') {
+          const priorityCacheRate = (metric: AccountFirstTokenLatencyMetric) =>
+            metric.cache_rate_denominator > 0 && metric.cache_rate != null && metric.cache_rate > 0.8
+              ? metric.cache_rate : 0
+          const leftCacheRate = priorityCacheRate(left)
+          const rightCacheRate = priorityCacheRate(right)
+          const leftHighCache = leftCacheRate > 0
+          const rightHighCache = rightCacheRate > 0
+          if (leftHighCache !== rightHighCache) return leftHighCache ? -1 : 1
+          if (leftHighCache && rightHighCache) {
+            const leftDuration = left.normal_total_ms ?? left.predicted_ms
+            const rightDuration = right.normal_total_ms ?? right.predicted_ms
+            if (leftDuration !== rightDuration) return leftDuration - rightDuration
+          } else if (leftCacheRate !== rightCacheRate) {
+            return rightCacheRate - leftCacheRate
+          }
         }
         const leftRate = left.scheduling_rate_multiplier ?? Number.POSITIVE_INFINITY
         const rightRate = right.scheduling_rate_multiplier ?? Number.POSITIVE_INFINITY

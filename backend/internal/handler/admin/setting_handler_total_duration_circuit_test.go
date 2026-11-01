@@ -17,11 +17,22 @@ import (
 type totalDurationCircuitHandlerRepo struct {
 	service.SettingRepository
 	value  string
+	values map[string]string
 	getErr error
 	setErr error
 }
 
-func (r *totalDurationCircuitHandlerRepo) GetValue(context.Context, string) (string, error) {
+func (r *totalDurationCircuitHandlerRepo) GetValue(_ context.Context, key string) (string, error) {
+	if r.values != nil {
+		value, ok := r.values[key]
+		if !ok {
+			return "", service.ErrSettingNotFound
+		}
+		return value, r.getErr
+	}
+	if key != service.SettingKeyTotalDurationCircuitBreakCount && key != service.SettingKeyFastPoolPriorityMode {
+		return "", service.ErrSettingNotFound
+	}
 	return r.value, r.getErr
 }
 
@@ -30,6 +41,22 @@ func (r *totalDurationCircuitHandlerRepo) Set(_ context.Context, _, value string
 		return r.setErr
 	}
 	r.value = value
+	return nil
+}
+
+func (r *totalDurationCircuitHandlerRepo) SetMultiple(_ context.Context, values map[string]string) error {
+	if r.setErr != nil {
+		return r.setErr
+	}
+	if r.values == nil {
+		r.values = make(map[string]string)
+	}
+	for key, value := range values {
+		r.values[key] = value
+		if key == service.SettingKeyTotalDurationCircuitBreakCount {
+			r.value = value
+		}
+	}
 	return nil
 }
 
@@ -57,9 +84,11 @@ func TestTotalDurationCircuitSettingsHandlerPersistsAndReadsBack(t *testing.T) {
 	require.Equal(t, http.StatusOK, initial.Code)
 	require.Contains(t, initial.Body.String(), `"max_slow_requests":15`)
 
-	updated := circuitSettingsRequest(router, http.MethodPut, `{"max_slow_requests":7}`)
+	updated := circuitSettingsRequest(router, http.MethodPut, `{"max_slow_requests":7,"threshold_seconds":120,"window_seconds":600}`)
 	require.Equal(t, http.StatusOK, updated.Code)
 	require.Equal(t, "8", repo.value)
+	require.Equal(t, "120", repo.values[service.SettingKeyTotalDurationCircuitBreakThresholdSeconds])
+	require.Equal(t, "600", repo.values[service.SettingKeyTotalDurationCircuitBreakWindowSeconds])
 	readback := circuitSettingsRequest(totalDurationCircuitTestRouter(repo), http.MethodGet, "")
 	require.Equal(t, http.StatusOK, readback.Code)
 	var result struct {
@@ -67,16 +96,16 @@ func TestTotalDurationCircuitSettingsHandlerPersistsAndReadsBack(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(readback.Body.Bytes(), &result))
 	require.Equal(t, 7, result.Data.MaxSlowRequests)
-	require.Equal(t, 180, result.Data.ThresholdSeconds)
-	require.Equal(t, 1800, result.Data.WindowSeconds)
+	require.Equal(t, 120, result.Data.ThresholdSeconds)
+	require.Equal(t, 600, result.Data.WindowSeconds)
 
-	zero := circuitSettingsRequest(router, http.MethodPut, `{"max_slow_requests":0}`)
+	zero := circuitSettingsRequest(router, http.MethodPut, `{"max_slow_requests":0,"threshold_seconds":120,"window_seconds":600}`)
 	require.Equal(t, http.StatusOK, zero.Code)
 	require.Equal(t, "1", repo.value)
 }
 
 func TestTotalDurationCircuitSettingsHandlerRejectsInvalidInput(t *testing.T) {
-	for _, body := range []string{`{}`, `{"max_slow_requests":null}`, `{"max_slow_requests":-1}`, `{"max_slow_requests":1.5}`, `{"max_slow_requests":10000}`, `{"max_slow_requests":"7"}`, `{`} {
+	for _, body := range []string{`{}`, `{"max_slow_requests":null,"threshold_seconds":180,"window_seconds":1800}`, `{"max_slow_requests":-1,"threshold_seconds":180,"window_seconds":1800}`, `{"max_slow_requests":1.5,"threshold_seconds":180,"window_seconds":1800}`, `{"max_slow_requests":10000,"threshold_seconds":180,"window_seconds":1800}`, `{"max_slow_requests":"7","threshold_seconds":180,"window_seconds":1800}`, `{"max_slow_requests":7,"threshold_seconds":0,"window_seconds":1800}`, `{"max_slow_requests":7,"threshold_seconds":180,"window_seconds":0}`, `{`} {
 		t.Run(body, func(t *testing.T) {
 			repo := &totalDurationCircuitHandlerRepo{value: "16"}
 			result := circuitSettingsRequest(totalDurationCircuitTestRouter(repo), http.MethodPut, body)
@@ -89,7 +118,7 @@ func TestTotalDurationCircuitSettingsHandlerRejectsInvalidInput(t *testing.T) {
 func TestTotalDurationCircuitSettingsHandlerReportsStorageFailures(t *testing.T) {
 	repo := &totalDurationCircuitHandlerRepo{value: "16", setErr: errors.New("write failed")}
 	router := totalDurationCircuitTestRouter(repo)
-	require.Equal(t, http.StatusInternalServerError, circuitSettingsRequest(router, http.MethodPut, `{"max_slow_requests":7}`).Code)
+	require.Equal(t, http.StatusInternalServerError, circuitSettingsRequest(router, http.MethodPut, `{"max_slow_requests":7,"threshold_seconds":180,"window_seconds":1800}`).Code)
 	require.Equal(t, "16", repo.value)
 	repo.getErr = errors.New("read failed")
 	require.Equal(t, http.StatusInternalServerError, circuitSettingsRequest(router, http.MethodGet, "").Code)

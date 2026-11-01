@@ -11,7 +11,20 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
-const SettingKeyTotalDurationCircuitBreakCount = "total_duration_circuit_break_count"
+const (
+	SettingKeyTotalDurationCircuitBreakCount            = "total_duration_circuit_break_count"
+	SettingKeyTotalDurationCircuitBreakThresholdSeconds = "total_duration_circuit_break_threshold_seconds"
+	SettingKeyTotalDurationCircuitBreakWindowSeconds    = "total_duration_circuit_break_window_seconds"
+
+	totalDurationCircuitBreakCountMin = 1
+	totalDurationCircuitBreakCountMax = 10000
+	// The dashboard edits these values in whole minutes, while the shared
+	// setting and scheduler policy retain seconds for compatibility.
+	totalDurationCircuitBreakThresholdSecondsMin = 1
+	totalDurationCircuitBreakThresholdSecondsMax = 24 * 60 * 60
+	totalDurationCircuitBreakWindowSecondsMin    = 1
+	totalDurationCircuitBreakWindowSecondsMax    = 24 * 60 * 60
+)
 
 type TotalDurationCircuitBreakerSettings struct {
 	MaxSlowRequests  int `json:"max_slow_requests"`
@@ -41,19 +54,43 @@ func (s *SettingService) GetTotalDurationLatencyPolicy(ctx context.Context) (Tot
 	}
 	dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	value, err := s.settingRepo.GetValue(dbCtx, SettingKeyTotalDurationCircuitBreakCount)
-	if errors.Is(err, ErrSettingNotFound) || (err == nil && strings.TrimSpace(value) == "") {
-		return policy, nil
-	}
+	stored, found, err := readTotalDurationCircuitSetting(dbCtx, s.settingRepo, SettingKeyTotalDurationCircuitBreakCount, totalDurationCircuitBreakCountMin, totalDurationCircuitBreakCountMax)
 	if err != nil {
 		return policy, fmt.Errorf("get total-duration circuit breaker count: %w", err)
 	}
-	count, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || count < 1 || count > 10000 {
-		return policy, fmt.Errorf("invalid stored total-duration circuit breaker count")
+	if found {
+		policy.CircuitBreakCount = stored
 	}
-	policy.CircuitBreakCount = count
+	stored, found, err = readTotalDurationCircuitSetting(dbCtx, s.settingRepo, SettingKeyTotalDurationCircuitBreakThresholdSeconds, totalDurationCircuitBreakThresholdSecondsMin, totalDurationCircuitBreakThresholdSecondsMax)
+	if err != nil {
+		return policy, fmt.Errorf("get total-duration circuit breaker threshold: %w", err)
+	}
+	if found {
+		policy.CircuitBreakThreshold = time.Duration(stored) * time.Second
+	}
+	stored, found, err = readTotalDurationCircuitSetting(dbCtx, s.settingRepo, SettingKeyTotalDurationCircuitBreakWindowSeconds, totalDurationCircuitBreakWindowSecondsMin, totalDurationCircuitBreakWindowSecondsMax)
+	if err != nil {
+		return policy, fmt.Errorf("get total-duration circuit breaker window: %w", err)
+	}
+	if found {
+		policy.CircuitBreakWindow = time.Duration(stored) * time.Second
+	}
 	return policy, nil
+}
+
+func readTotalDurationCircuitSetting(ctx context.Context, repo SettingRepository, key string, min, max int) (int, bool, error) {
+	value, err := repo.GetValue(ctx, key)
+	if errors.Is(err, ErrSettingNotFound) || (err == nil && strings.TrimSpace(value) == "") {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed < min || parsed > max {
+		return 0, false, fmt.Errorf("invalid stored setting %s", key)
+	}
+	return parsed, true, nil
 }
 
 func totalDurationCircuitBreakerSettings(policy TotalDurationLatencyPolicy) *TotalDurationCircuitBreakerSettings {
@@ -72,17 +109,29 @@ func (s *SettingService) GetTotalDurationCircuitBreakerSettings(ctx context.Cont
 	return totalDurationCircuitBreakerSettings(policy), nil
 }
 
-func (s *SettingService) UpdateTotalDurationCircuitBreakerSettings(ctx context.Context, maxSlowRequests int) (*TotalDurationCircuitBreakerSettings, error) {
-	if maxSlowRequests < 0 || maxSlowRequests > 9999 {
+func (s *SettingService) UpdateTotalDurationCircuitBreakerSettings(ctx context.Context, maxSlowRequests, thresholdSeconds, windowSeconds int) (*TotalDurationCircuitBreakerSettings, error) {
+	if maxSlowRequests < 0 || maxSlowRequests >= totalDurationCircuitBreakCountMax {
 		return nil, infraerrors.BadRequest("TOTAL_DURATION_CIRCUIT_LIMIT_INVALID", "max_slow_requests must be an integer between 0 and 9999")
+	}
+	if thresholdSeconds < totalDurationCircuitBreakThresholdSecondsMin || thresholdSeconds > totalDurationCircuitBreakThresholdSecondsMax {
+		return nil, infraerrors.BadRequest("TOTAL_DURATION_CIRCUIT_THRESHOLD_INVALID", "threshold_seconds must be an integer between 1 and 86400")
+	}
+	if windowSeconds < totalDurationCircuitBreakWindowSecondsMin || windowSeconds > totalDurationCircuitBreakWindowSecondsMax {
+		return nil, infraerrors.BadRequest("TOTAL_DURATION_CIRCUIT_WINDOW_INVALID", "window_seconds must be an integer between 1 and 86400")
 	}
 	if s == nil || s.settingRepo == nil {
 		return nil, fmt.Errorf("total-duration circuit breaker settings storage is unavailable")
 	}
 	policy := s.defaultTotalDurationLatencyPolicy()
 	policy.CircuitBreakCount = maxSlowRequests + 1
-	if err := s.settingRepo.Set(ctx, SettingKeyTotalDurationCircuitBreakCount, strconv.Itoa(policy.CircuitBreakCount)); err != nil {
-		return nil, fmt.Errorf("save total-duration circuit breaker count: %w", err)
+	policy.CircuitBreakThreshold = time.Duration(thresholdSeconds) * time.Second
+	policy.CircuitBreakWindow = time.Duration(windowSeconds) * time.Second
+	if err := s.settingRepo.SetMultiple(ctx, map[string]string{
+		SettingKeyTotalDurationCircuitBreakCount:            strconv.Itoa(policy.CircuitBreakCount),
+		SettingKeyTotalDurationCircuitBreakThresholdSeconds: strconv.Itoa(thresholdSeconds),
+		SettingKeyTotalDurationCircuitBreakWindowSeconds:    strconv.Itoa(windowSeconds),
+	}); err != nil {
+		return nil, fmt.Errorf("save total-duration circuit breaker settings: %w", err)
 	}
 	return totalDurationCircuitBreakerSettings(policy), nil
 }

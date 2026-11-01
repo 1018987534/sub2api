@@ -195,23 +195,29 @@ describe('admin DashboardView', () => {
     getFirstTokenLatencies.mockResolvedValueOnce({ items: [
       createFirstTokenMetric({ account_id: 1, account_name: 'cheap-fast', scheduling_rate_multiplier: 0.05, cache_rate: 0.5 }),
       createFirstTokenMetric({ account_id: 2, account_name: 'cache-fast', scheduling_rate_multiplier: 0.5, cache_rate: 0.95 }),
+      createFirstTokenMetric({ account_id: 4, account_name: 'slower-cache-fast', scheduling_rate_multiplier: 0.8, cache_rate: 0.99, predicted_ms: 9000, normal_total_ms: 9000 }),
       createFirstTokenMetric({ account_id: 3, account_name: 'slow-high-cache', scheduling_rate_multiplier: 0.01, cache_rate: 0.99, is_fast_pool: false })
-    ], total: 3 })
+    ], total: 4 })
     const wrapper = mount(DashboardView, { global: { stubs: {
       AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true,
       DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true, Line: true
     } } })
     await flushPromises()
     const rows = () => wrapper.findAll('[data-testid="first-token-latency-row"]').map(row => row.text())
+    expect(rows()[0]).toContain('slower-cache-fast')
+    expect(rows()[3]).toContain('slow-high-cache')
+    await wrapper.get('[data-testid="fast-pool-priority-mode"]').setValue('latency')
+    await wrapper.get('[data-testid="fast-pool-priority-control"] form').trigger('submit')
+    await flushPromises()
+    expect(updateFastPoolPrioritySettings).toHaveBeenCalledWith('latency')
     expect(rows()[0]).toContain('cache-fast')
-    expect(rows()[2]).toContain('slow-high-cache')
     await wrapper.get('[data-testid="fast-pool-priority-mode"]').setValue('rate')
     expect(rows()[0]).toContain('cache-fast')
     await wrapper.get('[data-testid="fast-pool-priority-control"] form').trigger('submit')
     await flushPromises()
     expect(updateFastPoolPrioritySettings).toHaveBeenCalledWith('rate')
     expect(rows()[0]).toContain('cheap-fast')
-    expect(rows()[2]).toContain('slow-high-cache')
+    expect(rows()[3]).toContain('slow-high-cache')
     wrapper.unmount()
   })
 
