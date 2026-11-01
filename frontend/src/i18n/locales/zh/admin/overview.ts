@@ -106,7 +106,7 @@ export default {
       circuitBreakerLimit: '熔断前允许的慢请求次数',
       circuitBreakerSuffix: '次时熔断',
       circuitBreakerHint: '第 {count} 次触发；保存后全站立即生效。',
-      circuitBreakerInvalid: '请输入 0–9999 的整数。',
+      circuitBreakerInvalid: '次数请输入 0–9999 的整数；窗口和时长请输入 1–1440 分钟的整数。',
       circuitBreakerLoadFailed: '熔断规则加载失败',
       circuitBreakerRetry: '重试',
       circuitBreakerSaved: '熔断规则已保存并生效',
