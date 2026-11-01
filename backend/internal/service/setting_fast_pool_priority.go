@@ -17,6 +17,7 @@ type FastPoolPriorityMode string
 
 const (
 	FastPoolPriorityIntelligence FastPoolPriorityMode = "intelligence"
+	FastPoolPriorityLatency      FastPoolPriorityMode = "latency"
 	FastPoolPriorityRate         FastPoolPriorityMode = "rate"
 )
 
@@ -25,7 +26,7 @@ type FastPoolPrioritySettings struct {
 }
 
 func validFastPoolPriorityMode(mode FastPoolPriorityMode) bool {
-	return mode == FastPoolPriorityIntelligence || mode == FastPoolPriorityRate
+	return mode == FastPoolPriorityIntelligence || mode == FastPoolPriorityLatency || mode == FastPoolPriorityRate
 }
 
 // Read shared storage for each new ordering decision so all running gateways
@@ -54,7 +55,7 @@ func (s *SettingService) GetFastPoolPrioritySettings(ctx context.Context) (*Fast
 
 func (s *SettingService) UpdateFastPoolPrioritySettings(ctx context.Context, mode FastPoolPriorityMode) (*FastPoolPrioritySettings, error) {
 	if !validFastPoolPriorityMode(mode) {
-		return nil, infraerrors.BadRequest("FAST_POOL_PRIORITY_MODE_INVALID", "mode must be intelligence or rate")
+		return nil, infraerrors.BadRequest("FAST_POOL_PRIORITY_MODE_INVALID", "mode must be intelligence, latency, or rate")
 	}
 	if s == nil || s.settingRepo == nil {
 		return nil, fmt.Errorf("fast-pool priority settings storage is unavailable")

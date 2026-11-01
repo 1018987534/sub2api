@@ -14,12 +14,20 @@ import (
 type totalDurationCircuitSettingsRepo struct {
 	SettingRepository
 	value  string
+	values map[string]string
 	getErr error
 	setErr error
 	writes int
 }
 
 func (r *totalDurationCircuitSettingsRepo) GetValue(_ context.Context, key string) (string, error) {
+	if r.values != nil {
+		value, ok := r.values[key]
+		if !ok {
+			return "", ErrSettingNotFound
+		}
+		return value, r.getErr
+	}
 	if key != SettingKeyTotalDurationCircuitBreakCount {
 		return "", ErrSettingNotFound
 	}
@@ -32,6 +40,23 @@ func (r *totalDurationCircuitSettingsRepo) Set(_ context.Context, key, value str
 	}
 	r.value = value
 	r.writes++
+	return nil
+}
+
+func (r *totalDurationCircuitSettingsRepo) SetMultiple(_ context.Context, values map[string]string) error {
+	if r.setErr != nil {
+		return r.setErr
+	}
+	if r.values == nil {
+		r.values = make(map[string]string)
+	}
+	for key, value := range values {
+		r.values[key] = value
+		if key == SettingKeyTotalDurationCircuitBreakCount {
+			r.value = value
+		}
+	}
+	r.writes += len(values)
 	return nil
 }
 
@@ -61,10 +86,12 @@ func TestTotalDurationCircuitSettingsPersistAndRefreshAcrossInstances(t *testing
 	require.Equal(t, 16, before.CircuitBreakCount)
 
 	for _, limit := range []int{7, 0, 9999, 15} {
-		saved, err := control.UpdateTotalDurationCircuitBreakerSettings(ctx, limit)
+		saved, err := control.UpdateTotalDurationCircuitBreakerSettings(ctx, limit, 120, 600)
 		require.NoError(t, err)
 		require.Equal(t, limit, saved.MaxSlowRequests)
 		require.Equal(t, strconv.Itoa(limit+1), repo.value)
+		require.Equal(t, "120", repo.values[SettingKeyTotalDurationCircuitBreakThresholdSeconds])
+		require.Equal(t, "600", repo.values[SettingKeyTotalDurationCircuitBreakWindowSeconds])
 		policy, err := gateway.GetTotalDurationLatencyPolicy(ctx)
 		require.NoError(t, err)
 		require.Equal(t, limit+1, policy.CircuitBreakCount, "an already-running gateway must read each saved change immediately")
@@ -79,13 +106,13 @@ func TestTotalDurationCircuitSettingsRejectInvalidAndFailedWrites(t *testing.T) 
 	repo := &totalDurationCircuitSettingsRepo{value: "16"}
 	svc := NewSettingService(repo, nil)
 	for _, invalid := range []int{-1, 10000} {
-		_, err := svc.UpdateTotalDurationCircuitBreakerSettings(ctx, invalid)
+		_, err := svc.UpdateTotalDurationCircuitBreakerSettings(ctx, invalid, 180, 1800)
 		require.Error(t, err)
 	}
 	require.Zero(t, repo.writes)
 	require.Equal(t, "16", repo.value)
 	repo.setErr = errors.New("storage write failed")
-	_, err := svc.UpdateTotalDurationCircuitBreakerSettings(ctx, 7)
+	_, err := svc.UpdateTotalDurationCircuitBreakerSettings(ctx, 7, 180, 1800)
 	require.Error(t, err)
 	require.Equal(t, "16", repo.value)
 }
@@ -98,6 +125,20 @@ type totalDurationCircuitPolicyRecorder struct {
 func (c *totalDurationCircuitPolicyRecorder) RecordSampleWithPolicy(_ context.Context, _ int64, _ string, _ int, policy TotalDurationLatencyPolicy) error {
 	c.policies = append(c.policies, policy)
 	return nil
+}
+
+func TestTotalDurationCircuitSettingsPersistDynamicThresholdAndWindow(t *testing.T) {
+	ctx := context.Background()
+	repo := &totalDurationCircuitSettingsRepo{}
+	svc := NewSettingService(repo, nil)
+	saved, err := svc.UpdateTotalDurationCircuitBreakerSettings(ctx, 15, 90, 7200)
+	require.NoError(t, err)
+	require.Equal(t, &TotalDurationCircuitBreakerSettings{MaxSlowRequests: 15, ThresholdSeconds: 90, WindowSeconds: 7200}, saved)
+	policy, err := svc.GetTotalDurationLatencyPolicy(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 16, policy.CircuitBreakCount)
+	require.Equal(t, 90*time.Second, policy.CircuitBreakThreshold)
+	require.Equal(t, 2*time.Hour, policy.CircuitBreakWindow)
 }
 
 func TestObserveTotalDurationLatencyReadsSavedPolicyAndFallsBackOnReadFailure(t *testing.T) {

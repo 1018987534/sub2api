@@ -12,14 +12,15 @@
         aria-describedby="fast-pool-priority-hint"
         data-testid="fast-pool-priority-mode"
       >
-        <option value="intelligence">{{ t('admin.dashboard.fastPoolIntelligencePriority') }}</option>
+        <option value="intelligence">{{ t('admin.dashboard.fastPoolCacheRatePriority') }}</option>
+        <option value="latency">{{ t('admin.dashboard.fastPoolLatencyPriority') }}</option>
         <option value="rate">{{ t('admin.dashboard.fastPoolRatePriority') }}</option>
       </select>
       <button type="submit" class="btn btn-secondary py-1.5 text-xs" :disabled="!canSave" data-testid="save-fast-pool-priority">
         {{ t(saving ? 'common.saving' : 'common.save') }}
       </button>
       <span id="fast-pool-priority-hint" class="text-gray-500 dark:text-gray-400" aria-live="polite">
-        {{ t(mode === 'rate' ? 'admin.dashboard.fastPoolRatePriorityHint' : 'admin.dashboard.fastPoolIntelligencePriorityHint') }}
+        {{ t(mode === 'rate' ? 'admin.dashboard.fastPoolRatePriorityHint' : mode === 'latency' ? 'admin.dashboard.fastPoolLatencyPriorityHint' : 'admin.dashboard.fastPoolCacheRatePriorityHint') }}
       </span>
     </form>
     <div v-else-if="loadError" class="flex items-center gap-2 text-red-600 dark:text-red-400" role="alert">

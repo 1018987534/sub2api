@@ -35,7 +35,7 @@ func TestFastPoolPrioritySettingsHandlerPersistsAndReadsBack(t *testing.T) {
 	initial := fastPoolPriorityRequest(router, http.MethodGet, "")
 	require.Equal(t, http.StatusOK, initial.Code)
 	require.Contains(t, initial.Body.String(), `"mode":"intelligence"`)
-	for _, mode := range []string{"rate", "intelligence"} {
+	for _, mode := range []string{"rate", "latency", "intelligence"} {
 		updated := fastPoolPriorityRequest(router, http.MethodPut, `{"mode":"`+mode+`"}`)
 		require.Equal(t, http.StatusOK, updated.Code)
 		require.Equal(t, mode, repo.value)

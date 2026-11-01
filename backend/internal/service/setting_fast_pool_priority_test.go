@@ -40,12 +40,14 @@ func TestFastPoolPrioritySettingsDefaultsValidationAndReadFailures(t *testing.T)
 	ctx := context.Background()
 	repo := &fastPoolPrioritySettingsRepo{}
 	svc := NewSettingService(repo, nil)
-	for _, value := range []string{"", "  ", "intelligence", " rate "} {
+	for _, value := range []string{"", "  ", "intelligence", " latency ", " rate "} {
 		repo.values = map[string]string{SettingKeyFastPoolPriorityMode: value}
 		got, err := svc.GetFastPoolPrioritySettings(ctx)
 		require.NoError(t, err)
 		want := FastPoolPriorityIntelligence
-		if value == " rate " {
+		if value == " latency " {
+			want = FastPoolPriorityLatency
+		} else if value == " rate " {
 			want = FastPoolPriorityRate
 		}
 		require.Equal(t, want, got.Mode)
@@ -71,7 +73,7 @@ func TestFastPoolPrioritySettingsPersistsAcrossRunningInstances(t *testing.T) {
 	repo := &fastPoolPrioritySettingsRepo{}
 	control := NewSettingService(repo, nil)
 	gateway := NewSettingService(repo, nil)
-	for _, mode := range []FastPoolPriorityMode{FastPoolPriorityRate, FastPoolPriorityIntelligence} {
+	for _, mode := range []FastPoolPriorityMode{FastPoolPriorityRate, FastPoolPriorityLatency, FastPoolPriorityIntelligence} {
 		saved, err := control.UpdateFastPoolPrioritySettings(ctx, mode)
 		require.NoError(t, err)
 		require.Equal(t, mode, saved.Mode)
@@ -86,7 +88,7 @@ func TestFastPoolPrioritySettingsPersistsAcrossRunningInstances(t *testing.T) {
 		_, err := control.UpdateFastPoolPrioritySettings(ctx, mode)
 		require.Error(t, err)
 	}
-	require.Equal(t, 2, repo.writes)
+	require.Equal(t, 3, repo.writes)
 	repo.setErr = errors.New("write failed")
 	_, err := control.UpdateFastPoolPrioritySettings(ctx, FastPoolPriorityRate)
 	require.Error(t, err)
@@ -111,6 +113,15 @@ func TestFastPoolPrioritySavedModeChangesNewSelectionsAndKeepsSlowTail(t *testin
 		cacheStats[account.ID] = AccountCacheStats{CacheReadTokens: []int64{50, 90, 95, 99}[i], CacheRateDenominator: 100}
 	}
 	latency[4] = FirstTokenLatencyStats{PredictedMS: 35000, SampleCount: 20, UpdatedAt: now, FastConfirmationTracked: true}
+	latencyOne := latency[1]
+	latencyOne.PredictedMS = 9000
+	latency[1] = latencyOne
+	latencyTwo := latency[2]
+	latencyTwo.PredictedMS = 6000
+	latency[2] = latencyTwo
+	latencyThree := latency[3]
+	latencyThree.PredictedMS = 9000
+	latency[3] = latencyThree
 	repo := &fastPoolPrioritySettingsRepo{openAIAdvancedSchedulerSettingRepoStub: openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyFirstTokenPriorityEnabled: "true"}}}
 	control := NewSettingService(repo, nil)
 	gateways := make([]*OpenAIGatewayService, 2)
@@ -131,6 +142,7 @@ func TestFastPoolPrioritySavedModeChangesNewSelectionsAndKeepsSlowTail(t *testin
 		want []int64
 	}{
 		{FastPoolPriorityIntelligence, []int64{3, 2, 1, 4}},
+		{FastPoolPriorityLatency, []int64{2, 3, 1, 4}},
 		{FastPoolPriorityRate, []int64{1, 2, 3, 4}},
 		{FastPoolPriorityIntelligence, []int64{3, 2, 1, 4}},
 	} {
@@ -154,5 +166,28 @@ func TestFastPoolPrioritySavedModeChangesNewSelectionsAndKeepsSlowTail(t *testin
 				require.Equal(t, rank, ranks[id], "generic gateway rank in %s mode", scenario.mode)
 			}
 		}
+	}
+}
+
+func TestFastPoolPriorityLatencyStrictCacheBoundaryAndFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		rates map[int64]AccountCacheStats
+		err   error
+		want  []int64
+	}{
+		{"high cache uses duration not cache rank", map[int64]AccountCacheStats{1: {CacheReadTokens: 95, CacheRateDenominator: 100}, 2: {CacheReadTokens: 81, CacheRateDenominator: 100}, 3: {CacheReadTokens: 80, CacheRateDenominator: 100}}, nil, []int64{2, 1, 3}},
+		{"exactly eighty retains existing fallback", map[int64]AccountCacheStats{1: {CacheReadTokens: 50, CacheRateDenominator: 100}, 2: {CacheReadTokens: 80, CacheRateDenominator: 100}, 3: {CacheReadTokens: 79, CacheRateDenominator: 100}}, nil, []int64{1, 2, 3}},
+		{"strictly above eighty is promoted", map[int64]AccountCacheStats{1: {CacheReadTokens: 80, CacheRateDenominator: 100}, 2: {CacheReadTokens: 80001, CacheRateDenominator: 100000}, 3: {CacheReadTokens: 80, CacheRateDenominator: 100}}, nil, []int64{2, 1, 3}},
+		{"missing samples retain fallback", nil, nil, []int64{1, 2, 3}},
+		{"read failure retains fallback", nil, errors.New("unavailable"), []int64{1, 2, 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ids := []int64{1, 2, 3}
+			latency := map[int64]FirstTokenLatencyStats{1: {PredictedMS: 9000}, 2: {PredictedMS: 6000}, 3: {PredictedMS: 1000}}
+			svc := &RateLimitService{usageRepo: cacheRateProviderStub{stats: tc.rates, err: tc.err}}
+			orderFastPoolByLatency(context.Background(), ids, latency, svc)
+			require.Equal(t, tc.want, ids)
+		})
 	}
 }

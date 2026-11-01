@@ -284,15 +284,36 @@ func TestTotalLatencyStatsCacheCircuitCountExpiresAfterThirtyMinutes(t *testing.
 
 type totalDurationCircuitSharedSettingsRepo struct {
 	service.SettingRepository
-	value string
+	value  string
+	values map[string]string
 }
 
-func (r *totalDurationCircuitSharedSettingsRepo) GetValue(context.Context, string) (string, error) {
+func (r *totalDurationCircuitSharedSettingsRepo) GetValue(_ context.Context, key string) (string, error) {
+	if r.values != nil {
+		value, ok := r.values[key]
+		if !ok {
+			return "", service.ErrSettingNotFound
+		}
+		return value, nil
+	}
 	return r.value, nil
 }
 
 func (r *totalDurationCircuitSharedSettingsRepo) Set(_ context.Context, _, value string) error {
 	r.value = value
+	return nil
+}
+
+func (r *totalDurationCircuitSharedSettingsRepo) SetMultiple(_ context.Context, values map[string]string) error {
+	if r.values == nil {
+		r.values = make(map[string]string)
+	}
+	for key, value := range values {
+		r.values[key] = value
+		if key == service.SettingKeyTotalDurationCircuitBreakCount {
+			r.value = value
+		}
+	}
 	return nil
 }
 
@@ -325,13 +346,45 @@ func TestTotalLatencyStatsCacheUpdatedPolicyUsesExistingWindowAcrossNodes(t *tes
 	require.NoError(t, err)
 	require.Equal(t, int64(3), before[account.ID].SampleCount)
 	require.False(t, before[account.ID].CircuitBroken)
-	_, err = control.UpdateTotalDurationCircuitBreakerSettings(ctx, 3)
+	_, err = control.UpdateTotalDurationCircuitBreakerSettings(ctx, 3, 180, 1800)
 	require.NoError(t, err)
 	record(4)
 	after, err := cacheB.GetStatsBatch(ctx, []int64{account.ID})
 	require.NoError(t, err)
 	require.True(t, after[account.ID].CircuitBroken, "the next completion on another node must use the saved limit and existing samples")
 	require.Zero(t, after[account.ID].SampleCount)
+}
+
+func TestTotalLatencyStatsCacheDynamicThresholdAndWindowAcrossNodes(t *testing.T) {
+	mr, rdb, cacheA := newTotalLatencyTestCache(t)
+	cacheB := &firstTokenLatencyStatsCache{rdb: rdb}
+	repo := &totalDurationCircuitSharedSettingsRepo{}
+	control := service.NewSettingService(repo, nil)
+	ctx := context.Background()
+	_, err := control.UpdateTotalDurationCircuitBreakerSettings(ctx, 1, 120, 600)
+	require.NoError(t, err)
+	nodes := []*service.RateLimitService{service.NewRateLimitService(nil, nil, nil, nil, nil), service.NewRateLimitService(nil, nil, nil, nil, nil)}
+	for index, cache := range []*firstTokenLatencyStatsCache{cacheA, cacheB} {
+		nodes[index].SetSettingService(service.NewSettingService(repo, nil))
+		nodes[index].SetFirstTokenLatencyStatsCache(cache)
+	}
+	account := &service.Account{ID: 186, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true}
+	base := time.Unix(1_700_300_000, 0)
+	record := func(index, seconds, durationMS int) bool {
+		mr.SetTime(base.Add(time.Duration(seconds) * time.Second))
+		nodes[index%2].ObserveTotalDurationLatency(ctx, account, &service.UsageLog{RequestID: fmt.Sprintf("dynamic-policy-%d", index), RequestType: service.RequestTypeStream, Stream: true, ActualCost: 0.01, DurationMs: &durationMS})
+		stats, readErr := cacheB.GetStatsBatch(ctx, []int64{account.ID})
+		require.NoError(t, readErr)
+		return stats[account.ID].CircuitBroken
+	}
+	require.False(t, record(0, 0, 120000), "exact threshold must not count")
+	require.False(t, record(1, 1, 120001))
+	require.False(t, record(2, 601, 120001), "the old request expires exactly at the configured ten-minute boundary")
+	require.True(t, record(3, 602, 120001), "the second qualifying request inside the dynamic window trips across nodes")
+	_, err = control.UpdateTotalDurationCircuitBreakerSettings(ctx, 0, 60, 300)
+	require.NoError(t, err)
+	require.False(t, record(4, 603, 60000))
+	require.True(t, record(5, 604, 60001), "already-running nodes use the newly saved threshold and count")
 }
 
 func TestTotalLatencyStatsCacheFallsBackToTwentyFourHours(t *testing.T) {
