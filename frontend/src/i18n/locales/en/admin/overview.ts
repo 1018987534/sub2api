@@ -106,7 +106,7 @@ export default {
       circuitBreakerLimit: 'Slow requests allowed before the circuit breaks',
       circuitBreakerSuffix: 'requests',
       circuitBreakerHint: 'Triggers on request {count}. Saving takes effect across all nodes immediately.',
-      circuitBreakerInvalid: 'Enter an integer from 0 to 9999.',
+      circuitBreakerInvalid: 'Use 0–9999 requests and whole minutes from 1 to 1440.',
       circuitBreakerLoadFailed: 'Failed to load the circuit breaker rule',
       circuitBreakerRetry: 'Retry',
       circuitBreakerSaved: 'Circuit breaker rule saved and applied',
