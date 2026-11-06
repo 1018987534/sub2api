@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/stretchr/testify/require"
 )
@@ -392,4 +393,72 @@ func TestDashboardService_AggDisabled_UsesUsageLogsFallback(t *testing.T) {
 	require.Equal(t, int32(1), atomic.LoadInt32(&repo.rangeCalls))
 	require.False(t, repo.rangeEnd.IsZero())
 	require.Equal(t, truncateToDayUTC(repo.rangeEnd.AddDate(0, 0, -7)), repo.rangeStart)
+}
+
+type dashboardProfitRepoStub struct {
+	UsageLogRepository
+	usage map[int64]*usagestats.BatchUserUsageStats
+	err   error
+	ids   []int64
+	start time.Time
+	end   time.Time
+}
+
+func (r *dashboardProfitRepoStub) GetBatchUserUsageStats(_ context.Context, ids []int64, start, end time.Time) (map[int64]*usagestats.BatchUserUsageStats, error) {
+	r.ids, r.start, r.end = ids, start, end
+	return r.usage, r.err
+}
+
+func TestDashboardService_ProfitExcludesCurrentAdminActualCost(t *testing.T) {
+	stats := &usagestats.DashboardStats{TodayActualCost: 315.88, TodayAccountCost: 202}
+	repo := &dashboardProfitRepoStub{usage: map[int64]*usagestats.BatchUserUsageStats{
+		7: {UserID: 7, TodayActualCost: 20, TotalActualCost: 9999},
+		8: {UserID: 8, TodayActualCost: 100},
+	}}
+	svc := NewDashboardService(repo, nil, nil, nil)
+	before := time.Now().UTC()
+	profit, err := svc.GetDashboardProfitStats(context.Background(), 7, stats)
+	require.NoError(t, err)
+	require.Equal(t, []int64{7}, repo.ids)
+	require.Equal(t, timezone.Today(), repo.start)
+	require.WithinRange(t, repo.end, before, time.Now().UTC())
+	require.Equal(t, 20.0, profit.TodayAdminActualCost)
+	require.InDelta(t, 93.88, profit.TodayProfit, 1e-9)
+	require.Equal(t, 315.88, stats.TodayActualCost, "shared dashboard statistics must stay unchanged")
+}
+
+func TestDashboardService_ProfitAllowsLossAndNoSelfUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		actual float64
+		cost   float64
+		own    float64
+		want   float64
+	}{
+		{"loss", 10, 12, 3, -5},
+		{"no self usage", 315.88, 202, 0, 113.88},
+		{"empty day", 0, 0, 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &dashboardProfitRepoStub{usage: map[int64]*usagestats.BatchUserUsageStats{}}
+			if tc.own != 0 {
+				repo.usage[7] = &usagestats.BatchUserUsageStats{TodayActualCost: tc.own}
+			}
+			svc := NewDashboardService(repo, nil, nil, nil)
+			profit, err := svc.GetDashboardProfitStats(context.Background(), 7, &usagestats.DashboardStats{TodayActualCost: tc.actual, TodayAccountCost: tc.cost})
+			require.NoError(t, err)
+			require.InDelta(t, tc.want, profit.TodayProfit, 1e-9)
+		})
+	}
+}
+
+func TestDashboardService_ProfitFailsWhenSelfUsageUnavailable(t *testing.T) {
+	repo := &dashboardProfitRepoStub{err: errors.New("usage database unavailable")}
+	svc := NewDashboardService(repo, nil, nil, nil)
+	_, err := svc.GetDashboardProfitStats(context.Background(), 7, &usagestats.DashboardStats{})
+	require.ErrorContains(t, err, "usage database unavailable")
+	_, err = svc.GetDashboardProfitStats(context.Background(), 0, &usagestats.DashboardStats{})
+	require.ErrorContains(t, err, "authenticated administrator")
+	_, err = svc.GetDashboardProfitStats(context.Background(), 7, nil)
+	require.ErrorContains(t, err, "statistics")
 }

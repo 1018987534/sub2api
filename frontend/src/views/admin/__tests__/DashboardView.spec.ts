@@ -86,6 +86,7 @@ const createDashboardStats = (): DashboardStats => ({
   total_tokens: 0,
   total_cost: 0,
   total_actual_cost: 0,
+  total_account_cost: 0,
   today_requests: 0,
   today_input_tokens: 0,
   today_output_tokens: 0,
@@ -94,6 +95,7 @@ const createDashboardStats = (): DashboardStats => ({
   today_tokens: 0,
   today_cost: 0,
   today_actual_cost: 0,
+  today_account_cost: 0,
   average_duration_ms: 0,
   uptime: 0,
   rpm: 0,
@@ -164,6 +166,43 @@ describe('admin DashboardView', () => {
     })
     getFirstTokenLatencies.mockResolvedValue({ items: [], total: 0 })
     requestFirstTokenManualProbe.mockResolvedValue({ account_id: 42, queued: true })
+  })
+
+  it.each([
+    { actual: 315.88, cost: 202, own: 20, profit: 93.88, display: '$93.88', color: 'text-emerald-600' },
+    { actual: 10, cost: 12, own: 3, profit: -5, display: '-$5.00', color: 'text-red-600' },
+    { actual: 0, cost: 0, own: 0, profit: 0, display: '$0.00', color: 'text-emerald-600' }
+  ])('shows daily profit and the current administrator deduction ($display)', async ({ actual, cost, own, profit, display, color }) => {
+    getSnapshotV2.mockResolvedValueOnce({
+      stats: { ...createDashboardStats(), today_actual_cost: actual, today_account_cost: cost, today_admin_actual_cost: own, today_profit: profit },
+      trend: [], models: []
+    })
+    const wrapper = mount(DashboardView, {
+      global: { stubs: {
+        AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true,
+        Icon: true, DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+      } }
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="today-profit"]').text()).toBe(display)
+    expect(wrapper.get('[data-testid="today-profit"]').classes()).toContain(color)
+    const breakdown = wrapper.get('[data-testid="today-profit-breakdown"]').text()
+    expect(breakdown).toContain(`admin.dashboard.actual $${actual.toFixed(2)}`)
+    expect(breakdown).toContain(`admin.dashboard.accountCost $${cost.toFixed(2)}`)
+    expect(breakdown).toContain(`admin.dashboard.adminSelfUsage $${own.toFixed(2)}`)
+    wrapper.unmount()
+  })
+
+  it('hides profit until the backend provides the administrator deduction', async () => {
+    const wrapper = mount(DashboardView, {
+      global: { stubs: {
+        AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true,
+        Icon: true, DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+      } }
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="today-profit"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('switches metrics and ignores a stale tokens response', async () => {

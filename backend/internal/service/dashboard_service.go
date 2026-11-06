@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 )
 
@@ -122,6 +123,27 @@ func (s *DashboardService) GetDashboardStats(ctx context.Context) (*usagestats.D
 		return nil, fmt.Errorf("get dashboard stats: %w", err)
 	}
 	return stats, nil
+}
+
+// GetDashboardProfitStats keeps administrator-specific usage out of the shared
+// dashboard cache. Only today's profit is calculated because historical user
+// logs may have expired while the global dashboard aggregates are retained.
+func (s *DashboardService) GetDashboardProfitStats(ctx context.Context, adminID int64, stats *usagestats.DashboardStats) (*usagestats.DashboardProfitStats, error) {
+	if adminID <= 0 || stats == nil {
+		return nil, errors.New("dashboard profit requires an authenticated administrator and statistics")
+	}
+
+	now := time.Now().UTC()
+	usage, err := s.GetBatchUserUsageStats(ctx, []int64{adminID}, timezone.Today(), now)
+	if err != nil {
+		return nil, fmt.Errorf("get administrator self usage: %w", err)
+	}
+	profit := &usagestats.DashboardProfitStats{}
+	if own := usage[adminID]; own != nil {
+		profit.TodayAdminActualCost = own.TodayActualCost
+	}
+	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost
+	return profit, nil
 }
 
 func (s *DashboardService) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) ([]usagestats.TrendDataPoint, error) {

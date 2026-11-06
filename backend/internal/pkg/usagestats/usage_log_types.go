@@ -79,6 +79,13 @@ type DashboardStats struct {
 	Tpm int64 `json:"tpm"` // 近5分钟平均每分钟Token数
 }
 
+// DashboardProfitStats excludes the current administrator's own billed usage
+// from revenue. Account cost already includes the upstream cost of that usage.
+type DashboardProfitStats struct {
+	TodayAdminActualCost float64 `json:"today_admin_actual_cost"`
+	TodayProfit          float64 `json:"today_profit"`
+}
+
 // TrendDataPoint represents a single point in trend data
 type TrendDataPoint struct {
 	Date                string  `json:"date"`

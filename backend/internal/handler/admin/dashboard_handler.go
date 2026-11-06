@@ -10,6 +10,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -79,9 +80,20 @@ func parseOptionalBoolDashboardFilter(c *gin.Context, name string) (*bool, error
 // GetStats handles getting dashboard statistics
 // GET /api/v1/admin/dashboard/stats
 func (h *DashboardHandler) GetStats(c *gin.Context) {
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Error(c, 401, "Authentication required")
+		return
+	}
 	stats, err := h.dashboardService.GetDashboardStats(c.Request.Context())
 	if err != nil {
 		response.Error(c, 500, "Failed to get dashboard statistics")
+		return
+	}
+
+	profit, err := h.dashboardService.GetDashboardProfitStats(c.Request.Context(), subject.UserID, stats)
+	if err != nil {
+		response.Error(c, 500, "Failed to get dashboard profit statistics")
 		return
 	}
 
@@ -114,6 +126,7 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		"total_tokens":                stats.TotalTokens,
 		"total_cost":                  stats.TotalCost,       // 标准计费
 		"total_actual_cost":           stats.TotalActualCost, // 实际扣除
+		"total_account_cost":          stats.TotalAccountCost,
 
 		// 今日 Token 使用统计
 		"today_requests":              stats.TodayRequests,
@@ -124,6 +137,9 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		"today_tokens":                stats.TodayTokens,
 		"today_cost":                  stats.TodayCost,       // 今日标准计费
 		"today_actual_cost":           stats.TodayActualCost, // 今日实际扣除
+		"today_account_cost":          stats.TodayAccountCost,
+		"today_admin_actual_cost":     profit.TodayAdminActualCost,
+		"today_profit":                profit.TodayProfit,
 
 		// 系统运行统计
 		"average_duration_ms": stats.AverageDurationMs,
