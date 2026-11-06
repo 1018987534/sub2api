@@ -216,6 +216,33 @@
           </div>
         </div>
 
+        <section
+          v-if="stats.today_profit != null"
+          class="card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+          :aria-label="t('admin.dashboard.profitStats')"
+          :title="t('admin.dashboard.profitFormula')"
+        >
+          <div>
+            <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
+              {{ t('admin.dashboard.todayProfit') }}
+            </p>
+            <p
+              class="mt-1 text-xl font-bold tabular-nums"
+              :class="stats.today_profit < 0
+                ? 'text-red-600 dark:text-red-400'
+                : 'text-emerald-600 dark:text-emerald-400'"
+              data-testid="today-profit"
+            >
+              {{ formatProfit(stats.today_profit) }}
+            </p>
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="today-profit-breakdown">
+            {{ t('admin.dashboard.actual') }} {{ formatProfit(stats.today_actual_cost) }}
+            − {{ t('admin.dashboard.accountCost') }} {{ formatProfit(stats.today_account_cost) }}
+            − {{ t('admin.dashboard.adminSelfUsage') }} {{ formatProfit(stats.today_admin_actual_cost) }}
+          </p>
+        </section>
+
         <section class="border-y border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800/40" data-testid="first-token-latency-panel">
           <div class="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -926,6 +953,12 @@ const formatCost = (value: number | null | undefined): string => {
     return safeValue.toFixed(3)
   }
   return safeValue.toFixed(4)
+}
+
+const formatProfit = (value: number | null | undefined): string => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2
+  }).format(toFiniteNumber(value))
 }
 
 const formatDuration = (ms: number): string => {

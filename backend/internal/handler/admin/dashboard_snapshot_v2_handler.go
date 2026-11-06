@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +20,7 @@ var dashboardSnapshotV2Cache = newSnapshotCache(30 * time.Second)
 
 type dashboardSnapshotV2Stats struct {
 	usagestats.DashboardStats
+	usagestats.DashboardProfitStats
 	Uptime int64 `json:"uptime"`
 }
 
@@ -37,6 +39,7 @@ type dashboardSnapshotV2Response struct {
 }
 
 type dashboardSnapshotV2Filters struct {
+	AdminID               int64
 	UserID                int64
 	APIKeyID              int64
 	AccountID             int64
@@ -51,6 +54,7 @@ type dashboardSnapshotV2Filters struct {
 }
 
 type dashboardSnapshotV2CacheKey struct {
+	AdminID               int64  `json:"admin_id"`
 	StartTime             string `json:"start_time"`
 	EndTime               string `json:"end_time"`
 	Granularity           string `json:"granularity"`
@@ -97,8 +101,17 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	if includeStats {
+		subject, ok := middleware.GetAuthSubjectFromContext(c)
+		if !ok || subject.UserID <= 0 {
+			response.Error(c, http.StatusUnauthorized, "Authentication required")
+			return
+		}
+		filters.AdminID = subject.UserID
+	}
 
 	keyRaw, _ := json.Marshal(dashboardSnapshotV2CacheKey{
+		AdminID:               filters.AdminID,
 		StartTime:             startTime.UTC().Format(time.RFC3339),
 		EndTime:               endTime.UTC().Format(time.RFC3339),
 		Granularity:           granularity,
@@ -173,9 +186,14 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 		if err != nil {
 			return nil, errors.New("failed to get dashboard statistics")
 		}
+		profit, err := h.dashboardService.GetDashboardProfitStats(ctx, filters.AdminID, stats)
+		if err != nil {
+			return nil, errors.New("failed to get dashboard profit statistics")
+		}
 		resp.Stats = &dashboardSnapshotV2Stats{
-			DashboardStats: *stats,
-			Uptime:         int64(time.Since(h.startTime).Seconds()),
+			DashboardStats:       *stats,
+			DashboardProfitStats: *profit,
+			Uptime:               int64(time.Since(h.startTime).Seconds()),
 		}
 	}
 

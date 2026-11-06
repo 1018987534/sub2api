@@ -1,0 +1,116 @@
+package admin
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+)
+
+type dashboardProfitHandlerRepo struct {
+	service.UsageLogRepository
+	calls int
+	err   error
+}
+
+func (r *dashboardProfitHandlerRepo) GetDashboardStats(context.Context) (*usagestats.DashboardStats, error) {
+	return &usagestats.DashboardStats{TodayActualCost: 315.88, TodayAccountCost: 202}, nil
+}
+
+func (r *dashboardProfitHandlerRepo) GetBatchUserUsageStats(_ context.Context, ids []int64, _, _ time.Time) (map[int64]*usagestats.BatchUserUsageStats, error) {
+	r.calls++
+	return map[int64]*usagestats.BatchUserUsageStats{
+		ids[0]: {UserID: ids[0], TodayActualCost: float64(ids[0]) * 10},
+	}, r.err
+}
+
+func newDashboardProfitRouter(repo *dashboardProfitHandlerRepo, adminID *int64) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	handler := NewDashboardHandler(service.NewDashboardService(repo, nil, nil, nil), nil)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		if *adminID > 0 {
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: *adminID})
+		}
+	})
+	router.GET("/stats", handler.GetStats)
+	router.GET("/snapshot", handler.GetSnapshotV2)
+	return router
+}
+
+func TestDashboardHandler_ProfitSnapshotCacheIsolatedByAuthenticatedAdmin(t *testing.T) {
+	resetDashboardReadCachesForTest()
+	t.Cleanup(resetDashboardReadCachesForTest)
+	repo := &dashboardProfitHandlerRepo{}
+	adminID := int64(2)
+	router := newDashboardProfitRouter(repo, &adminID)
+	const url = "/snapshot?include_trend=false&include_model_stats=false&user_id=999"
+	request := func(etag string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("If-None-Match", etag)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	first := request("")
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	var body struct {
+		Data struct {
+			Stats usagestats.DashboardProfitStats `json:"stats"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &body))
+	require.Equal(t, 20.0, body.Data.Stats.TodayAdminActualCost)
+	require.InDelta(t, 93.88, body.Data.Stats.TodayProfit, 1e-9)
+	require.Equal(t, "miss", first.Header().Get("X-Snapshot-Cache"))
+	require.Equal(t, http.StatusNotModified, request(first.Header().Get("ETag")).Code)
+	require.Equal(t, 1, repo.calls)
+
+	adminID = 3
+	second := request(first.Header().Get("ETag"))
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &body))
+	require.Equal(t, 30.0, body.Data.Stats.TodayAdminActualCost)
+	require.InDelta(t, 83.88, body.Data.Stats.TodayProfit, 1e-9)
+	require.NotEqual(t, first.Header().Get("ETag"), second.Header().Get("ETag"))
+	require.Equal(t, 2, repo.calls)
+}
+
+func TestDashboardHandler_ProfitStatsAndFailureHandling(t *testing.T) {
+	resetDashboardReadCachesForTest()
+	t.Cleanup(resetDashboardReadCachesForTest)
+	repo := &dashboardProfitHandlerRepo{}
+	adminID := int64(2)
+	router := newDashboardProfitRouter(repo, &adminID)
+	for _, url := range []string{"/stats", "/snapshot?include_trend=false&include_model_stats=false"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), `"today_admin_actual_cost":20`)
+		require.Contains(t, rec.Body.String(), `"today_account_cost":202`)
+
+		adminID = 0
+		rec = httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		require.Equal(t, http.StatusUnauthorized, rec.Code)
+		adminID = 2
+	}
+
+	repo.err = errors.New("self usage unavailable")
+	resetDashboardReadCachesForTest()
+	for _, url := range []string{"/stats", "/snapshot?include_trend=false&include_model_stats=false"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		require.Equal(t, http.StatusInternalServerError, rec.Code)
+		require.NotContains(t, rec.Body.String(), `"today_profit"`)
+	}
+}
