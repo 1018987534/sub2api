@@ -274,7 +274,9 @@ func TestOpenAIGatewayService_Forward_MappedImageModelUsesImageGate(t *testing.T
 	require.Nil(t, upstream.lastReq)
 	require.Equal(t, http.StatusForbidden, rec.Code)
 	cached, known := getOpenAIImageIntentHint(c)
-	require.True(t, known)
+	// An early mapped-model rejection must not populate a request-level hint
+	// from this account's mapping; the text-account retry computes its own hint.
+	require.False(t, known)
 	require.False(t, cached)
 
 	textAccount := *account

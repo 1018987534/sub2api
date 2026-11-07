@@ -10,10 +10,35 @@ import (
 	"os"
 	"testing"
 
+	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestReadRequestBodyWithLimitPreservesChargedPrereadBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"prompt":"cat"}`)
+	ctx, release := pkghttputil.WithRequestBodyMemoryBudget(context.Background(), pkghttputil.NewBodyMemoryBudget(int64(len(body))))
+	defer release()
+	require.NoError(t, pkghttputil.ReserveRequestBodyMemory(ctx, int64(len(body))))
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", pkghttputil.NewPrereadBody(body)).WithContext(ctx)
+	got, err := readRequestBodyWithLimit(c, int64(len(body)))
+	require.NoError(t, err)
+	require.Equal(t, body, got)
+}
+
+func TestReadRequestBodyWithLimitRejectsOversizedPrereadBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", pkghttputil.NewPrereadBody([]byte("oversized")))
+	body, err := readRequestBodyWithLimit(c, 8)
+	var maxErr *http.MaxBytesError
+	require.ErrorAs(t, err, &maxErr)
+	require.Equal(t, int64(8), maxErr.Limit)
+	require.Nil(t, body)
+}
 
 func TestRequestBodyLimitTooLarge(t *testing.T) {
 	gin.SetMode(gin.TestMode)

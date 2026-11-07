@@ -76,8 +76,7 @@ func (h *AsyncImageHandler) Submit(c *gin.Context) {
 		return
 	}
 
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.OpenAIImagesMaxRequestBodyBytes)
-	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	body, err := readRequestBodyWithLimit(c, service.OpenAIImagesMaxRequestBodyBytes)
 	if err != nil {
 		bodyLog := requestLogger(c, "handler.image_task.create")
 		if handleRequestBodyReadError(c, bodyLog, err) {
