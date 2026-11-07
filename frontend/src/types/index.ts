@@ -2107,6 +2107,16 @@ export interface DashboardStats {
   today_server_cost_usd?: number
   today_profit?: number
 
+  // 本月 1 日至今天的利润，服务器成本按当前月费用分摊并累计至今天（含今天）。
+  month_actual_cost?: number
+  month_account_cost?: number
+  month_admin_actual_cost?: number
+  month_lottery_cost?: number
+  month_qq_reward_cost?: number
+  month_withdrawal_fee?: number
+  month_server_cost_usd?: number
+  month_profit?: number
+
   // 系统运行统计
   average_duration_ms: number // 平均响应时间
   uptime: number // 系统运行时间(秒)

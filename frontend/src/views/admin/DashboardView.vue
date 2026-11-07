@@ -247,6 +247,35 @@
               − {{ t('admin.dashboard.dailyServerCost') }} {{ formatProfit(stats.today_server_cost_usd) }}
             </p>
           </div>
+          <div
+            v-if="stats.month_profit != null && stats.month_actual_cost != null && stats.month_account_cost != null && stats.month_admin_actual_cost != null && stats.month_lottery_cost != null && stats.month_qq_reward_cost != null && stats.month_withdrawal_fee != null && stats.month_server_cost_usd != null"
+            class="mt-3 flex flex-col gap-3 border-t border-gray-200 pt-3 dark:border-dark-600 sm:flex-row sm:items-center sm:justify-between"
+            :title="t('admin.dashboard.monthProfitFormula')"
+          >
+            <div>
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
+                {{ t('admin.dashboard.monthProfit') }}
+              </p>
+              <p
+                class="mt-1 text-xl font-bold tabular-nums"
+                :class="stats.month_profit < 0
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-emerald-600 dark:text-emerald-400'"
+                data-testid="month-profit"
+              >
+                {{ formatProfit(stats.month_profit) }}
+              </p>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="month-profit-breakdown">
+              {{ t('admin.dashboard.actual') }} {{ formatProfit(stats.month_actual_cost) }}
+              − {{ t('admin.dashboard.accountCost') }} {{ formatProfit(stats.month_account_cost) }}
+              − {{ t('admin.dashboard.adminSelfUsage') }} {{ formatProfit(stats.month_admin_actual_cost) }}
+              − {{ t('admin.dashboard.lotteryCost') }} {{ formatProfit(stats.month_lottery_cost) }}
+              − {{ t('admin.dashboard.qqRewardCost') }} {{ formatProfit(stats.month_qq_reward_cost) }}
+              − {{ t('admin.dashboard.withdrawalFee') }} {{ formatProfit(stats.month_withdrawal_fee) }}
+              − {{ t('admin.dashboard.monthServerCost') }} {{ formatProfit(stats.month_server_cost_usd) }}
+            </p>
+          </div>
           <DashboardServerCostControl @saved="loadDashboardSnapshot(true)" />
         </section>
 

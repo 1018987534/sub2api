@@ -23,13 +23,14 @@ type dashboardProfitHandlerRepo struct {
 }
 
 func (r *dashboardProfitHandlerRepo) GetDashboardStats(context.Context) (*usagestats.DashboardStats, error) {
-	return &usagestats.DashboardStats{TodayActualCost: 315.88, TodayAccountCost: 202, TodayLotteryCost: 5, TodayQQRewardCost: 4}, nil
+	return &usagestats.DashboardStats{TodayActualCost: 315.88, TodayAccountCost: 202, TodayLotteryCost: 5, TodayQQRewardCost: 4,
+		MonthActualCost: 1000, MonthAccountCost: 600, MonthLotteryCost: 10, MonthQQRewardCost: 20}, nil
 }
 
 func (r *dashboardProfitHandlerRepo) GetBatchUserUsageStats(_ context.Context, ids []int64, _, _ time.Time) (map[int64]*usagestats.BatchUserUsageStats, error) {
 	r.calls++
 	return map[int64]*usagestats.BatchUserUsageStats{
-		ids[0]: {UserID: ids[0], TodayActualCost: float64(ids[0]) * 10},
+		ids[0]: {UserID: ids[0], TodayActualCost: float64(ids[0]) * 10, TotalActualCost: float64(ids[0]) * 50},
 	}, r.err
 }
 
@@ -81,6 +82,8 @@ func TestDashboardHandler_ProfitSnapshotCacheIsolatedByAuthenticatedAdmin(t *tes
 	require.Equal(t, 4.0, body.Data.Stats.TodayQQRewardCost)
 	require.InDelta(t, 5.32584, body.Data.Stats.TodayWithdrawalFee, 1e-9)
 	require.InDelta(t, 79.55416, body.Data.Stats.TodayProfit, 1e-9)
+	require.InDelta(t, 253.8, body.Data.Stats.MonthProfit, 1e-9)
+	require.Equal(t, 100.0, body.Data.Stats.MonthAdminActualCost)
 	require.Equal(t, "miss", first.Header().Get("X-Snapshot-Cache"))
 	require.Equal(t, http.StatusNotModified, request(first.Header().Get("ETag")).Code)
 	require.Equal(t, 1, repo.calls)
@@ -94,6 +97,7 @@ func TestDashboardHandler_ProfitSnapshotCacheIsolatedByAuthenticatedAdmin(t *tes
 	require.Equal(t, 4.0, body.Data.Stats.TodayQQRewardCost)
 	require.InDelta(t, 5.14584, body.Data.Stats.TodayWithdrawalFee, 1e-9)
 	require.InDelta(t, 69.73416, body.Data.Stats.TodayProfit, 1e-9)
+	require.InDelta(t, 204.7, body.Data.Stats.MonthProfit, 1e-9)
 	require.NotEqual(t, first.Header().Get("ETag"), second.Header().Get("ETag"))
 	require.Equal(t, 2, repo.calls)
 }
@@ -113,6 +117,10 @@ func TestDashboardHandler_ProfitStatsAndFailureHandling(t *testing.T) {
 		require.Contains(t, rec.Body.String(), `"today_lottery_cost":5`)
 		require.Contains(t, rec.Body.String(), `"today_qq_reward_cost":4`)
 		require.Contains(t, rec.Body.String(), `"today_server_cost_usd":0`)
+		require.Contains(t, rec.Body.String(), `"month_actual_cost":1000`)
+		require.Contains(t, rec.Body.String(), `"month_account_cost":600`)
+		require.Contains(t, rec.Body.String(), `"month_lottery_cost":10`)
+		require.Contains(t, rec.Body.String(), `"month_qq_reward_cost":20`)
 		var body struct {
 			Data struct {
 				Stats *usagestats.DashboardProfitStats `json:"stats"`
@@ -126,6 +134,7 @@ func TestDashboardHandler_ProfitStatsAndFailureHandling(t *testing.T) {
 		}
 		require.InDelta(t, 5.32584, profit.TodayWithdrawalFee, 1e-9)
 		require.InDelta(t, 79.55416, profit.TodayProfit, 1e-9)
+		require.InDelta(t, 253.8, profit.MonthProfit, 1e-9)
 
 		adminID = 0
 		rec = httptest.NewRecorder()
@@ -180,6 +189,8 @@ func TestDashboardHandler_ProfitServerCostSaveRefreshesSnapshotImmediately(t *te
 	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &body))
 	require.InDelta(t, saved.Data.DailyServerCostUSD, body.Data.Stats.TodayServerCostUSD, 1e-9)
 	require.InDelta(t, 79.55416-saved.Data.DailyServerCostUSD, body.Data.Stats.TodayProfit, 1e-9)
+	require.Greater(t, body.Data.Stats.MonthServerCostUSD, 0.0)
+	require.InDelta(t, 253.8-body.Data.Stats.MonthServerCostUSD, body.Data.Stats.MonthProfit, 1e-9)
 	require.NotEqual(t, first.Header().Get("ETag"), second.Header().Get("ETag"))
 	cleared := dashboardProfitSettingsRequest(router, http.MethodPut, `{"monthly_server_cost_usd":0}`)
 	require.Equal(t, http.StatusOK, cleared.Code)
@@ -188,6 +199,7 @@ func TestDashboardHandler_ProfitServerCostSaveRefreshesSnapshotImmediately(t *te
 	require.NoError(t, json.Unmarshal(third.Body.Bytes(), &body))
 	require.Zero(t, body.Data.Stats.TodayServerCostUSD)
 	require.InDelta(t, 79.55416, body.Data.Stats.TodayProfit, 1e-9)
+	require.InDelta(t, 253.8, body.Data.Stats.MonthProfit, 1e-9)
 	settingsRepo.getErr = errors.New("settings unavailable")
 	require.Equal(t, http.StatusInternalServerError, request("").Code, "must not serve cached profit with an unknown server expense")
 }

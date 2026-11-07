@@ -81,7 +81,7 @@ type DashboardStats = usagestats.DashboardStats
 func (r *usageLogRepository) GetDashboardStats(ctx context.Context) (*DashboardStats, error) {
 	stats := &DashboardStats{}
 	now := timezone.Now()
-	todayStart := timezone.Today()
+	todayStart := timezone.StartOfDay(now)
 
 	if err := r.fillDashboardEntityStats(ctx, stats, todayStart, now); err != nil {
 		return nil, err
@@ -93,6 +93,9 @@ func (r *usageLogRepository) GetDashboardStats(ctx context.Context) (*DashboardS
 		return nil, err
 	}
 	if err := r.fillDashboardQQRewardStats(ctx, stats, todayStart); err != nil {
+		return nil, err
+	}
+	if err := r.fillDashboardMonthStats(ctx, stats, todayStart, true); err != nil {
 		return nil, err
 	}
 
@@ -115,7 +118,7 @@ func (r *usageLogRepository) GetDashboardStatsWithRange(ctx context.Context, sta
 
 	stats := &DashboardStats{}
 	now := timezone.Now()
-	todayStart := timezone.Today()
+	todayStart := timezone.StartOfDay(now)
 
 	if err := r.fillDashboardEntityStats(ctx, stats, todayStart, now); err != nil {
 		return nil, err
@@ -127,6 +130,9 @@ func (r *usageLogRepository) GetDashboardStatsWithRange(ctx context.Context, sta
 		return nil, err
 	}
 	if err := r.fillDashboardQQRewardStats(ctx, stats, todayStart); err != nil {
+		return nil, err
+	}
+	if err := r.fillDashboardMonthStats(ctx, stats, todayStart, false); err != nil {
 		return nil, err
 	}
 
@@ -161,6 +167,31 @@ func (r *usageLogRepository) fillDashboardQQRewardStats(ctx context.Context, sta
 		WHERE status = 'paid' AND paid_at >= $1 AND paid_at < $2
 	`
 	return scanSingleRow(ctx, r.sql, query, []any{todayStart, todayStart.AddDate(0, 0, 1)}, &stats.TodayQQRewardCost)
+}
+
+// Month-to-date totals use the same source as today's usage, regardless of the
+// chart range. Reward ledgers are counted once, when the credit was committed.
+func (r *usageLogRepository) fillDashboardMonthStats(ctx context.Context, stats *DashboardStats, todayStart time.Time, aggregated bool) error {
+	monthStart := time.Date(todayStart.Year(), todayStart.Month(), 1, 0, 0, 0, 0, todayStart.Location())
+	end := todayStart.AddDate(0, 0, 1)
+	usageQuery := `SELECT COALESCE(SUM(actual_cost), 0),
+		COALESCE(SUM(COALESCE(account_stats_cost, total_cost) * COALESCE(account_rate_multiplier, 1)), 0)
+		FROM usage_logs WHERE created_at >= $1 AND created_at < $2`
+	args := []any{monthStart, end}
+	if aggregated {
+		usageQuery = `SELECT COALESCE(SUM(actual_cost), 0), COALESCE(SUM(account_cost), 0)
+			FROM usage_dashboard_daily WHERE bucket_date >= $1::date AND bucket_date < $2::date`
+		args = []any{monthStart.Format("2006-01-02"), end.Format("2006-01-02")}
+	}
+	if err := scanSingleRow(ctx, r.sql, usageQuery, args, &stats.MonthActualCost, &stats.MonthAccountCost); err != nil {
+		return err
+	}
+	if err := scanSingleRow(ctx, r.sql, `SELECT COALESCE(SUM(amount), 0) FROM lottery_balance_ledger
+		WHERE created_at >= $1 AND created_at < $2`, []any{monthStart, end}, &stats.MonthLotteryCost); err != nil {
+		return err
+	}
+	return scanSingleRow(ctx, r.sql, `SELECT COALESCE(SUM(amount), 0) FROM qq_activity_rewards
+		WHERE status = 'paid' AND paid_at >= $1 AND paid_at < $2`, []any{monthStart, end}, &stats.MonthQQRewardCost)
 }
 
 func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats *DashboardStats, todayUTC, now time.Time) error {

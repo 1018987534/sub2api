@@ -227,6 +227,51 @@ describe('admin DashboardView', () => {
     wrapper.unmount()
   })
 
+  it.each([
+    { actual: 1000, actualDisplay: '$1,000.00', cost: 600, own: 100, lottery: 10, qq: 20, fee: 16.2, server: 160, profit: 93.8, display: '$93.80', color: 'text-emerald-600' },
+    { actual: 10, actualDisplay: '$10.00', cost: 12, own: 3, lottery: 0, qq: 4, fee: 0.126, server: 0, profit: -9.126, display: '-$9.13', color: 'text-red-600' },
+    { actual: 0, actualDisplay: '$0.00', cost: 0, own: 0, lottery: 0, qq: 0, fee: 0, server: 0, profit: 0, display: '$0.00', color: 'text-emerald-600' }
+  ])('shows month-to-date profit with its own cost breakdown ($display)', async ({ actual, actualDisplay, cost, own, lottery, qq, fee, server, profit, display, color }) => {
+    getSnapshotV2.mockResolvedValueOnce({
+      stats: { ...createDashboardStats(), today_lottery_cost: 0, today_withdrawal_fee: 0, today_profit: 0,
+        month_actual_cost: actual, month_account_cost: cost, month_admin_actual_cost: own, month_lottery_cost: lottery, month_qq_reward_cost: qq,
+        month_withdrawal_fee: fee, month_server_cost_usd: server, month_profit: profit },
+      trend: [], models: []
+    })
+    const wrapper = mount(DashboardView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true,
+      DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+    } } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="today-profit"]').text()).toBe('$0.00')
+    expect(wrapper.get('[data-testid="month-profit"]').text()).toBe(display)
+    expect(wrapper.get('[data-testid="month-profit"]').classes()).toContain(color)
+    const breakdown = wrapper.get('[data-testid="month-profit-breakdown"]').text()
+    expect(breakdown).toContain(`admin.dashboard.actual ${actualDisplay}`)
+    expect(breakdown).toContain(`admin.dashboard.accountCost $${cost.toFixed(2)}`)
+    expect(breakdown).toContain(`admin.dashboard.adminSelfUsage $${own.toFixed(2)}`)
+    expect(breakdown).toContain(`admin.dashboard.lotteryCost $${lottery.toFixed(2)}`)
+    expect(breakdown).toContain(`admin.dashboard.qqRewardCost $${qq.toFixed(2)}`)
+    expect(breakdown).toContain(`admin.dashboard.withdrawalFee $${fee.toFixed(2)}`)
+    expect(breakdown).toContain(`admin.dashboard.monthServerCost $${server.toFixed(2)}`)
+    wrapper.unmount()
+  })
+
+  it('keeps daily profit visible while month totals are unavailable', async () => {
+    getSnapshotV2.mockResolvedValueOnce({
+      stats: { ...createDashboardStats(), today_lottery_cost: 0, today_withdrawal_fee: 0, today_profit: 12.34 },
+      trend: [], models: []
+    })
+    const wrapper = mount(DashboardView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true,
+      DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+    } } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="today-profit"]').text()).toBe('$12.34')
+    expect(wrapper.find('[data-testid="month-profit"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('hides profit until the backend provides withdrawal fees', async () => {
     getSnapshotV2.mockResolvedValueOnce({
       stats: { ...createDashboardStats(), today_admin_actual_cost: 20, today_lottery_cost: 5, today_profit: 88.88 },
@@ -261,7 +306,9 @@ describe('admin DashboardView', () => {
 
   it('refreshes profit immediately after the monthly server expense is saved', async () => {
     getSnapshotV2.mockResolvedValueOnce({
-      stats: { ...createDashboardStats(), today_admin_actual_cost: 3.61, today_lottery_cost: 0, today_withdrawal_fee: 4.46976, today_profit: 107.60024 },
+      stats: { ...createDashboardStats(), today_admin_actual_cost: 3.61, today_lottery_cost: 0, today_withdrawal_fee: 4.46976, today_profit: 107.60024,
+        month_actual_cost: 1000, month_account_cost: 600, month_admin_actual_cost: 100, month_lottery_cost: 10, month_qq_reward_cost: 20,
+        month_withdrawal_fee: 16.2, month_server_cost_usd: 0, month_profit: 253.8 },
       trend: [], models: []
     })
     const wrapper = mount(DashboardView, {
@@ -272,7 +319,9 @@ describe('admin DashboardView', () => {
     })
     await flushPromises()
     getSnapshotV2.mockResolvedValueOnce({
-      stats: { ...createDashboardStats(), today_admin_actual_cost: 3.61, today_lottery_cost: 0, today_withdrawal_fee: 4.46976, today_server_cost_usd: 20, today_profit: 87.60024 },
+      stats: { ...createDashboardStats(), today_admin_actual_cost: 3.61, today_lottery_cost: 0, today_withdrawal_fee: 4.46976, today_server_cost_usd: 20, today_profit: 87.60024,
+        month_actual_cost: 1000, month_account_cost: 600, month_admin_actual_cost: 100, month_lottery_cost: 10, month_qq_reward_cost: 20,
+        month_withdrawal_fee: 16.2, month_server_cost_usd: 160, month_profit: 93.8 },
       trend: [], models: []
     })
     await wrapper.get('[data-testid="monthly-server-cost"]').setValue('600')
@@ -282,6 +331,8 @@ describe('admin DashboardView', () => {
     expect(getSnapshotV2).toHaveBeenCalledTimes(2)
     expect(wrapper.get('[data-testid="today-profit"]').text()).toBe('$87.60')
     expect(wrapper.get('[data-testid="today-profit-breakdown"]').text()).toContain('admin.dashboard.dailyServerCost $20.00')
+    expect(wrapper.get('[data-testid="month-profit"]').text()).toBe('$93.80')
+    expect(wrapper.get('[data-testid="month-profit-breakdown"]').text()).toContain('admin.dashboard.monthServerCost $160.00')
     wrapper.unmount()
   })
 

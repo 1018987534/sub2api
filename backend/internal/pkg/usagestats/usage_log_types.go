@@ -73,6 +73,12 @@ type DashboardStats struct {
 	TodayLotteryCost         float64 `json:"today_lottery_cost"`   // 今日已到账抽奖奖金
 	TodayQQRewardCost        float64 `json:"today_qq_reward_cost"` // 今日已到账 QQ 新人和邀请奖励
 
+	// 业务时区本月累计成本，独立于图表所选时间范围。
+	MonthActualCost   float64 `json:"month_actual_cost"`
+	MonthAccountCost  float64 `json:"month_account_cost"`
+	MonthLotteryCost  float64 `json:"month_lottery_cost"`
+	MonthQQRewardCost float64 `json:"month_qq_reward_cost"`
+
 	// 系统运行统计
 	AverageDurationMs float64 `json:"average_duration_ms"` // 平均响应时间
 
@@ -88,6 +94,10 @@ type DashboardProfitStats struct {
 	TodayWithdrawalFee   float64 `json:"today_withdrawal_fee"`
 	TodayServerCostUSD   float64 `json:"today_server_cost_usd"`
 	TodayProfit          float64 `json:"today_profit"`
+	MonthAdminActualCost float64 `json:"month_admin_actual_cost"`
+	MonthWithdrawalFee   float64 `json:"month_withdrawal_fee"`
+	MonthServerCostUSD   float64 `json:"month_server_cost_usd"`
+	MonthProfit          float64 `json:"month_profit"`
 }
 
 // TrendDataPoint represents a single point in trend data
