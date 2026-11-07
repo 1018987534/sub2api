@@ -84,6 +84,7 @@ type DashboardStats struct {
 // from revenue. Account cost already includes the upstream cost of that usage.
 type DashboardProfitStats struct {
 	TodayAdminActualCost float64 `json:"today_admin_actual_cost"`
+	TodayWithdrawalFee   float64 `json:"today_withdrawal_fee"`
 	TodayProfit          float64 `json:"today_profit"`
 }
 

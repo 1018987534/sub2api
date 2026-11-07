@@ -423,7 +423,8 @@ func TestDashboardService_ProfitExcludesCurrentAdminActualCost(t *testing.T) {
 	require.Equal(t, timezone.Today(), repo.start)
 	require.WithinRange(t, repo.end, before, time.Now().UTC())
 	require.Equal(t, 20.0, profit.TodayAdminActualCost)
-	require.InDelta(t, 93.88, profit.TodayProfit, 1e-9)
+	require.InDelta(t, 5.32584, profit.TodayWithdrawalFee, 1e-9)
+	require.InDelta(t, 88.55416, profit.TodayProfit, 1e-9)
 	require.Equal(t, 315.88, stats.TodayActualCost, "shared dashboard statistics must stay unchanged")
 }
 
@@ -434,13 +435,17 @@ func TestDashboardService_ProfitAllowsLossAndNoSelfUsage(t *testing.T) {
 		cost    float64
 		own     float64
 		lottery float64
+		fee     float64
 		want    float64
 	}{
-		{"loss", 10, 12, 3, 0, -5},
-		{"no self usage", 315.88, 202, 0, 0, 113.88},
-		{"empty day", 0, 0, 0, 0, 0},
-		{"lottery payout", 315.88, 202, 20, 5, 88.88},
-		{"lottery creates loss", 10, 5, 2, 10, -7},
+		{"loss", 10, 12, 3, 0, 0.126, -5.126},
+		{"no self usage", 315.88, 202, 0, 0, 5.68584, 108.19416},
+		{"empty day", 0, 0, 0, 0, 0, 0},
+		{"lottery payout", 315.88, 202, 20, 5, 5.32584, 83.55416},
+		{"lottery creates loss", 10, 5, 2, 10, 0.144, -7.144},
+		{"administrator only", 20, 8, 20, 0, 0, -8},
+		{"administrator exceeds total", 10, 5, 12, 0, 0, -7},
+		{"screenshot", 251.93, 136.25, 3.61, 0, 4.46976, 107.60024},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &dashboardProfitRepoStub{usage: map[int64]*usagestats.BatchUserUsageStats{}}
@@ -450,6 +455,7 @@ func TestDashboardService_ProfitAllowsLossAndNoSelfUsage(t *testing.T) {
 			svc := NewDashboardService(repo, nil, nil, nil)
 			profit, err := svc.GetDashboardProfitStats(context.Background(), 7, &usagestats.DashboardStats{TodayActualCost: tc.actual, TodayAccountCost: tc.cost, TodayLotteryCost: tc.lottery})
 			require.NoError(t, err)
+			require.InDelta(t, tc.fee, profit.TodayWithdrawalFee, 1e-9)
 			require.InDelta(t, tc.want, profit.TodayProfit, 1e-9)
 		})
 	}

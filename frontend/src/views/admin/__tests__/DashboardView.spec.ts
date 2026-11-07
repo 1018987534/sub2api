@@ -169,13 +169,14 @@ describe('admin DashboardView', () => {
   })
 
   it.each([
-    { actual: 315.88, cost: 202, own: 20, lottery: 0, profit: 93.88, display: '$93.88', color: 'text-emerald-600' },
-    { actual: 315.88, cost: 202, own: 20, lottery: 5, profit: 88.88, display: '$88.88', color: 'text-emerald-600' },
-    { actual: 10, cost: 5, own: 2, lottery: 10, profit: -7, display: '-$7.00', color: 'text-red-600' },
-    { actual: 0, cost: 0, own: 0, lottery: 0, profit: 0, display: '$0.00', color: 'text-emerald-600' }
-  ])('shows daily profit including administrator usage and lottery payouts ($display)', async ({ actual, cost, own, lottery, profit, display, color }) => {
+    { actual: 315.88, cost: 202, own: 20, lottery: 0, fee: 5.32584, profit: 88.55416, display: '$88.55', color: 'text-emerald-600' },
+    { actual: 315.88, cost: 202, own: 20, lottery: 5, fee: 5.32584, profit: 83.55416, display: '$83.55', color: 'text-emerald-600' },
+    { actual: 10, cost: 5, own: 2, lottery: 10, fee: 0.144, profit: -7.144, display: '-$7.14', color: 'text-red-600' },
+    { actual: 0, cost: 0, own: 0, lottery: 0, fee: 0, profit: 0, display: '$0.00', color: 'text-emerald-600' },
+    { actual: 251.93, cost: 136.25, own: 3.61, lottery: 0, fee: 4.46976, profit: 107.60024, display: '$107.60', color: 'text-emerald-600' }
+  ])('shows daily profit including withdrawal fees ($display)', async ({ actual, cost, own, lottery, fee, profit, display, color }) => {
     getSnapshotV2.mockResolvedValueOnce({
-      stats: { ...createDashboardStats(), today_actual_cost: actual, today_account_cost: cost, today_admin_actual_cost: own, today_lottery_cost: lottery, today_profit: profit },
+      stats: { ...createDashboardStats(), today_actual_cost: actual, today_account_cost: cost, today_admin_actual_cost: own, today_lottery_cost: lottery, today_withdrawal_fee: fee, today_profit: profit },
       trend: [], models: []
     })
     const wrapper = mount(DashboardView, {
@@ -192,12 +193,29 @@ describe('admin DashboardView', () => {
     expect(breakdown).toContain(`admin.dashboard.accountCost $${cost.toFixed(2)}`)
     expect(breakdown).toContain(`admin.dashboard.adminSelfUsage $${own.toFixed(2)}`)
     expect(breakdown).toContain(`admin.dashboard.lotteryCost $${lottery.toFixed(2)}`)
+    expect(breakdown).toContain(`admin.dashboard.withdrawalFee $${fee.toFixed(2)}`)
     wrapper.unmount()
   })
 
   it('hides profit until the backend provides lottery payouts', async () => {
     getSnapshotV2.mockResolvedValueOnce({
-      stats: { ...createDashboardStats(), today_admin_actual_cost: 20, today_profit: 93.88 },
+      stats: { ...createDashboardStats(), today_admin_actual_cost: 20, today_withdrawal_fee: 5.32584, today_profit: 88.55416 },
+      trend: [], models: []
+    })
+    const wrapper = mount(DashboardView, {
+      global: { stubs: {
+        AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true,
+        Icon: true, DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+      } }
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="today-profit"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('hides profit until the backend provides withdrawal fees', async () => {
+    getSnapshotV2.mockResolvedValueOnce({
+      stats: { ...createDashboardStats(), today_admin_actual_cost: 20, today_lottery_cost: 5, today_profit: 88.88 },
       trend: [], models: []
     })
     const wrapper = mount(DashboardView, {
