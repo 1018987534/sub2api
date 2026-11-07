@@ -92,6 +92,9 @@ func (r *usageLogRepository) GetDashboardStats(ctx context.Context) (*DashboardS
 	if err := r.fillDashboardLotteryStats(ctx, stats, todayStart); err != nil {
 		return nil, err
 	}
+	if err := r.fillDashboardQQRewardStats(ctx, stats, todayStart); err != nil {
+		return nil, err
+	}
 
 	rpm, tpm, err := r.getPerformanceStats(ctx, 0)
 	if err != nil {
@@ -123,6 +126,9 @@ func (r *usageLogRepository) GetDashboardStatsWithRange(ctx context.Context, sta
 	if err := r.fillDashboardLotteryStats(ctx, stats, todayStart); err != nil {
 		return nil, err
 	}
+	if err := r.fillDashboardQQRewardStats(ctx, stats, todayStart); err != nil {
+		return nil, err
+	}
 
 	rpm, tpm, err := r.getPerformanceStats(ctx, 0)
 	if err != nil {
@@ -143,6 +149,18 @@ func (r *usageLogRepository) fillDashboardLotteryStats(ctx context.Context, stat
 		WHERE created_at >= $1 AND created_at < $2
 	`
 	return scanSingleRow(ctx, r.sql, query, []any{todayStart, todayStart.AddDate(0, 0, 1)}, &stats.TodayLotteryCost)
+}
+
+// QQ rewards become paid atomically with the newcomer balance or invitation
+// quota credit. Invitation credits also have affiliate ledger rows; counting
+// only this reward ledger avoids deducting the same payout twice.
+func (r *usageLogRepository) fillDashboardQQRewardStats(ctx context.Context, stats *DashboardStats, todayStart time.Time) error {
+	const query = `
+		SELECT COALESCE(SUM(amount), 0)
+		FROM qq_activity_rewards
+		WHERE status = 'paid' AND paid_at >= $1 AND paid_at < $2
+	`
+	return scanSingleRow(ctx, r.sql, query, []any{todayStart, todayStart.AddDate(0, 0, 1)}, &stats.TodayQQRewardCost)
 }
 
 func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats *DashboardStats, todayUTC, now time.Time) error {

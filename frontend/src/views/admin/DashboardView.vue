@@ -217,7 +217,7 @@
         </div>
 
         <section
-          v-if="stats.today_profit != null && stats.today_lottery_cost != null && stats.today_withdrawal_fee != null && stats.today_server_cost_usd != null"
+          v-if="stats.today_profit != null && stats.today_lottery_cost != null && stats.today_qq_reward_cost != null && stats.today_withdrawal_fee != null && stats.today_server_cost_usd != null"
           class="card p-4"
           :aria-label="t('admin.dashboard.profitStats')"
           :title="t('admin.dashboard.profitFormula')"
@@ -242,6 +242,7 @@
               − {{ t('admin.dashboard.accountCost') }} {{ formatProfit(stats.today_account_cost) }}
               − {{ t('admin.dashboard.adminSelfUsage') }} {{ formatProfit(stats.today_admin_actual_cost) }}
               − {{ t('admin.dashboard.lotteryCost') }} {{ formatProfit(stats.today_lottery_cost) }}
+              − {{ t('admin.dashboard.qqRewardCost') }} {{ formatProfit(stats.today_qq_reward_cost) }}
               − {{ t('admin.dashboard.withdrawalFee') }} {{ formatProfit(stats.today_withdrawal_fee) }}
               − {{ t('admin.dashboard.dailyServerCost') }} {{ formatProfit(stats.today_server_cost_usd) }}
             </p>

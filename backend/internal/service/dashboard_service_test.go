@@ -435,17 +435,21 @@ func TestDashboardService_ProfitAllowsLossAndNoSelfUsage(t *testing.T) {
 		cost    float64
 		own     float64
 		lottery float64
+		qq      float64
 		fee     float64
 		want    float64
 	}{
-		{"loss", 10, 12, 3, 0, 0.126, -5.126},
-		{"no self usage", 315.88, 202, 0, 0, 5.68584, 108.19416},
-		{"empty day", 0, 0, 0, 0, 0, 0},
-		{"lottery payout", 315.88, 202, 20, 5, 5.32584, 83.55416},
-		{"lottery creates loss", 10, 5, 2, 10, 0.144, -7.144},
-		{"administrator only", 20, 8, 20, 0, 0, -8},
-		{"administrator exceeds total", 10, 5, 12, 0, 0, -7},
-		{"screenshot", 251.93, 136.25, 3.61, 0, 4.46976, 107.60024},
+		{"loss", 10, 12, 3, 0, 0, 0.126, -5.126},
+		{"no self usage", 315.88, 202, 0, 0, 0, 5.68584, 108.19416},
+		{"empty day", 0, 0, 0, 0, 0, 0, 0},
+		{"lottery payout", 315.88, 202, 20, 5, 0, 5.32584, 83.55416},
+		{"lottery creates loss", 10, 5, 2, 10, 0, 0.144, -7.144},
+		{"QQ newcomer and invitation payouts", 315.88, 202, 20, 5, 4, 5.32584, 79.55416},
+		{"QQ creates loss", 10, 5, 2, 0, 4, 0.144, -1.144},
+		{"QQ on empty revenue day", 0, 0, 0, 0, 4, 0, -4},
+		{"administrator only", 20, 8, 20, 0, 0, 0, -8},
+		{"administrator exceeds total", 10, 5, 12, 0, 0, 0, -7},
+		{"screenshot", 251.93, 136.25, 3.61, 0, 0, 4.46976, 107.60024},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &dashboardProfitRepoStub{usage: map[int64]*usagestats.BatchUserUsageStats{}}
@@ -453,10 +457,12 @@ func TestDashboardService_ProfitAllowsLossAndNoSelfUsage(t *testing.T) {
 				repo.usage[7] = &usagestats.BatchUserUsageStats{TodayActualCost: tc.own}
 			}
 			svc := NewDashboardService(repo, nil, nil, nil, nil)
-			profit, err := svc.GetDashboardProfitStats(context.Background(), 7, &usagestats.DashboardStats{TodayActualCost: tc.actual, TodayAccountCost: tc.cost, TodayLotteryCost: tc.lottery})
+			stats := &usagestats.DashboardStats{TodayActualCost: tc.actual, TodayAccountCost: tc.cost, TodayLotteryCost: tc.lottery, TodayQQRewardCost: tc.qq}
+			profit, err := svc.GetDashboardProfitStats(context.Background(), 7, stats)
 			require.NoError(t, err)
 			require.InDelta(t, tc.fee, profit.TodayWithdrawalFee, 1e-9)
 			require.InDelta(t, tc.want, profit.TodayProfit, 1e-9)
+			require.Equal(t, tc.qq, stats.TodayQQRewardCost, "shared reward statistics must stay unchanged")
 		})
 	}
 }
@@ -480,7 +486,7 @@ func TestDashboardService_ProfitDeductsMonthlyServerCost(t *testing.T) {
 		7: {UserID: 7, TodayActualCost: 3.61},
 	}}
 	svc := NewDashboardService(repo, nil, nil, nil, settingsService)
-	stats := &usagestats.DashboardStats{TodayActualCost: 251.93, TodayAccountCost: 136.25}
+	stats := &usagestats.DashboardStats{TodayActualCost: 251.93, TodayAccountCost: 136.25, TodayLotteryCost: 5, TodayQQRewardCost: 4}
 	for _, monthly := range []float64{600, 6000, 0} {
 		saved, err := settingsService.UpdateDashboardProfitSettings(ctx, monthly)
 		require.NoError(t, err)
@@ -488,7 +494,7 @@ func TestDashboardService_ProfitDeductsMonthlyServerCost(t *testing.T) {
 		require.NoError(t, err)
 		require.InDelta(t, saved.DailyServerCostUSD, profit.TodayServerCostUSD, 1e-9)
 		require.InDelta(t, 4.46976, profit.TodayWithdrawalFee, 1e-9, "server expense must not change the withdrawal fee base")
-		require.InDelta(t, 107.60024-saved.DailyServerCostUSD, profit.TodayProfit, 1e-9)
+		require.InDelta(t, 98.60024-saved.DailyServerCostUSD, profit.TodayProfit, 1e-9)
 		require.Equal(t, 251.93, stats.TodayActualCost)
 	}
 	settingsRepo.getErr = errors.New("server expense unavailable")
