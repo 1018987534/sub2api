@@ -186,6 +186,7 @@ export default {
     lotteryPrizeBadge: 'Win',
     lotteryWon: 'You won a prize. View your winnings',
     profile: 'Profile',
+    feedback: 'Feedback',
     support: 'Support',
     supportInbox: 'Support Inbox',
     supportUnread: 'New support message',

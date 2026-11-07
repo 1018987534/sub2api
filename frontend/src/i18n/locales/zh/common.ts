@@ -186,6 +186,7 @@ export default {
     lotteryPrizeBadge: '奖',
     lotteryWon: '您已中奖，查看中奖记录',
     profile: '个人资料',
+    feedback: '意见箱',
     support: '在线客服',
     supportInbox: '客服收件箱',
     supportUnread: '有新的客服消息',
