@@ -152,10 +152,10 @@ func (s *DashboardService) GetDashboardProfitStats(ctx context.Context, adminID 
 	}
 	profit.TodayServerCostUSD = settings.DailyServerCostUSD
 	// Administrator self usage does not generate withdrawable revenue. Upstream
-	// costs and lottery payouts do not reduce the withdrawal fee base.
+	// costs and lottery or QQ reward payouts do not reduce the withdrawal fee base.
 	withdrawableRevenue := math.Max(0, stats.TodayActualCost-profit.TodayAdminActualCost)
 	profit.TodayWithdrawalFee = withdrawableRevenue * dashboardWithdrawalFeeRate
-	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost - profit.TodayWithdrawalFee - profit.TodayServerCostUSD
+	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost - stats.TodayQQRewardCost - profit.TodayWithdrawalFee - profit.TodayServerCostUSD
 	return profit, nil
 }
 

@@ -67,10 +67,11 @@ type DashboardStats struct {
 	TodayCacheCreationTokens int64   `json:"today_cache_creation_tokens"`
 	TodayCacheReadTokens     int64   `json:"today_cache_read_tokens"`
 	TodayTokens              int64   `json:"today_tokens"`
-	TodayCost                float64 `json:"today_cost"`         // 今日标准计费
-	TodayActualCost          float64 `json:"today_actual_cost"`  // 今日实际扣除
-	TodayAccountCost         float64 `json:"today_account_cost"` // 今日账号成本
-	TodayLotteryCost         float64 `json:"today_lottery_cost"` // 今日已到账抽奖奖金
+	TodayCost                float64 `json:"today_cost"`           // 今日标准计费
+	TodayActualCost          float64 `json:"today_actual_cost"`    // 今日实际扣除
+	TodayAccountCost         float64 `json:"today_account_cost"`   // 今日账号成本
+	TodayLotteryCost         float64 `json:"today_lottery_cost"`   // 今日已到账抽奖奖金
+	TodayQQRewardCost        float64 `json:"today_qq_reward_cost"` // 今日已到账 QQ 新人和邀请奖励
 
 	// 系统运行统计
 	AverageDurationMs float64 `json:"average_duration_ms"` // 平均响应时间
