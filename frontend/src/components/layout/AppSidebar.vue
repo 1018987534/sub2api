@@ -961,6 +961,7 @@ const adminNavItems = computed((): NavItem[] => {
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/plugins', label: t('nav.plugins'), icon: PluginIcon, featureFlag: flagPluginManagement },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
+    { path: '/admin/feedback', label: t('nav.feedback'), icon: FeedbackIcon },
     { path: '/admin/support', label: t('nav.supportInbox'), icon: CustomerSupportIcon },
     { path: '/admin/qq-activity', label: t('nav.qqActivityManagement'), icon: UsersIcon },
     { path: '/admin/lottery', label: t('nav.lotteryManagement'), icon: GiftIcon, hideInSimpleMode: true },

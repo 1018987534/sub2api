@@ -8,7 +8,6 @@
 
       <div v-if="submitted" role="status" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
         {{ t('feedback.success') }}
-        <RouterLink to="/support" class="ml-1 font-medium underline">{{ t('feedback.openSupport') }}</RouterLink>
       </div>
 
       <div class="grid gap-6 lg:grid-cols-3">
@@ -40,9 +39,8 @@
 
         <aside class="space-y-5">
           <section class="card p-5">
-            <h2 class="font-semibold text-gray-900 dark:text-white">{{ t('feedback.followUpTitle') }}</h2>
-            <p class="mt-2 text-sm leading-6 text-gray-500 dark:text-dark-400">{{ t('feedback.followUpDescription') }}</p>
-            <RouterLink to="/support" class="btn btn-secondary mt-4 w-full">{{ t('feedback.openSupport') }}</RouterLink>
+            <h2 class="font-semibold text-gray-900 dark:text-white">{{ t('feedback.viewOnlyTitle') }}</h2>
+            <p class="mt-2 text-sm leading-6 text-gray-500 dark:text-dark-400">{{ t('feedback.viewOnlyDescription') }}</p>
           </section>
           <section class="rounded-xl bg-gray-50 p-5 dark:bg-dark-800/60">
             <h2 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('feedback.tipsTitle') }}</h2>
@@ -59,10 +57,9 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import supportChatAPI from '@/api/supportChat'
+import feedbackAPI from '@/api/feedback'
 
 const { t } = useI18n()
 const category = ref<'problem' | 'suggestion' | 'other'>('problem')
@@ -71,6 +68,7 @@ const details = ref('')
 const sending = ref(false)
 const submitted = ref(false)
 const error = ref('')
+let pendingSubmission: { fingerprint: string; key: string } | undefined
 const categories = computed(() => [
   { value: 'problem', label: t('feedback.categories.problem') },
   { value: 'suggestion', label: t('feedback.categories.suggestion') },
@@ -91,14 +89,18 @@ async function submit() {
     error.value = t('feedback.tooLong')
     return
   }
-  const label = categories.value.find(option => option.value === category.value)!.label
-  const message = `【${t('feedback.messageLabel')} · ${label}】${title}\n\n${content}`
+  const input = { category: category.value, subject: title, content }
+  const fingerprint = JSON.stringify(input)
+  if (pendingSubmission?.fingerprint !== fingerprint) {
+    pendingSubmission = { fingerprint, key: crypto.randomUUID() }
+  }
   sending.value = true
   try {
-    await supportChatAPI.send(message)
+    await feedbackAPI.create(input, pendingSubmission.key)
     subject.value = ''
     details.value = ''
     submitted.value = true
+    pendingSubmission = undefined
   } catch (err: unknown) {
     const message = (err as { message?: string } | null)?.message
     error.value = message || t('feedback.sendFailed')
