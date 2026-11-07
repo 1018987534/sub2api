@@ -23,7 +23,7 @@ type dashboardProfitHandlerRepo struct {
 }
 
 func (r *dashboardProfitHandlerRepo) GetDashboardStats(context.Context) (*usagestats.DashboardStats, error) {
-	return &usagestats.DashboardStats{TodayActualCost: 315.88, TodayAccountCost: 202}, nil
+	return &usagestats.DashboardStats{TodayActualCost: 315.88, TodayAccountCost: 202, TodayLotteryCost: 5}, nil
 }
 
 func (r *dashboardProfitHandlerRepo) GetBatchUserUsageStats(_ context.Context, ids []int64, _, _ time.Time) (map[int64]*usagestats.BatchUserUsageStats, error) {
@@ -65,12 +65,16 @@ func TestDashboardHandler_ProfitSnapshotCacheIsolatedByAuthenticatedAdmin(t *tes
 	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
 	var body struct {
 		Data struct {
-			Stats usagestats.DashboardProfitStats `json:"stats"`
+			Stats struct {
+				usagestats.DashboardStats
+				usagestats.DashboardProfitStats
+			} `json:"stats"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &body))
 	require.Equal(t, 20.0, body.Data.Stats.TodayAdminActualCost)
-	require.InDelta(t, 93.88, body.Data.Stats.TodayProfit, 1e-9)
+	require.Equal(t, 5.0, body.Data.Stats.TodayLotteryCost)
+	require.InDelta(t, 88.88, body.Data.Stats.TodayProfit, 1e-9)
 	require.Equal(t, "miss", first.Header().Get("X-Snapshot-Cache"))
 	require.Equal(t, http.StatusNotModified, request(first.Header().Get("ETag")).Code)
 	require.Equal(t, 1, repo.calls)
@@ -80,7 +84,8 @@ func TestDashboardHandler_ProfitSnapshotCacheIsolatedByAuthenticatedAdmin(t *tes
 	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
 	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &body))
 	require.Equal(t, 30.0, body.Data.Stats.TodayAdminActualCost)
-	require.InDelta(t, 83.88, body.Data.Stats.TodayProfit, 1e-9)
+	require.Equal(t, 5.0, body.Data.Stats.TodayLotteryCost)
+	require.InDelta(t, 78.88, body.Data.Stats.TodayProfit, 1e-9)
 	require.NotEqual(t, first.Header().Get("ETag"), second.Header().Get("ETag"))
 	require.Equal(t, 2, repo.calls)
 }
@@ -97,6 +102,7 @@ func TestDashboardHandler_ProfitStatsAndFailureHandling(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.Contains(t, rec.Body.String(), `"today_admin_actual_cost":20`)
 		require.Contains(t, rec.Body.String(), `"today_account_cost":202`)
+		require.Contains(t, rec.Body.String(), `"today_lottery_cost":5`)
 
 		adminID = 0
 		rec = httptest.NewRecorder()

@@ -217,7 +217,7 @@
         </div>
 
         <section
-          v-if="stats.today_profit != null"
+          v-if="stats.today_profit != null && stats.today_lottery_cost != null"
           class="card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
           :aria-label="t('admin.dashboard.profitStats')"
           :title="t('admin.dashboard.profitFormula')"
@@ -240,6 +240,7 @@
             {{ t('admin.dashboard.actual') }} {{ formatProfit(stats.today_actual_cost) }}
             − {{ t('admin.dashboard.accountCost') }} {{ formatProfit(stats.today_account_cost) }}
             − {{ t('admin.dashboard.adminSelfUsage') }} {{ formatProfit(stats.today_admin_actual_cost) }}
+            − {{ t('admin.dashboard.lotteryCost') }} {{ formatProfit(stats.today_lottery_cost) }}
           </p>
         </section>
 

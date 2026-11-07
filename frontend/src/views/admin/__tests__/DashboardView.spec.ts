@@ -169,12 +169,13 @@ describe('admin DashboardView', () => {
   })
 
   it.each([
-    { actual: 315.88, cost: 202, own: 20, profit: 93.88, display: '$93.88', color: 'text-emerald-600' },
-    { actual: 10, cost: 12, own: 3, profit: -5, display: '-$5.00', color: 'text-red-600' },
-    { actual: 0, cost: 0, own: 0, profit: 0, display: '$0.00', color: 'text-emerald-600' }
-  ])('shows daily profit and the current administrator deduction ($display)', async ({ actual, cost, own, profit, display, color }) => {
+    { actual: 315.88, cost: 202, own: 20, lottery: 0, profit: 93.88, display: '$93.88', color: 'text-emerald-600' },
+    { actual: 315.88, cost: 202, own: 20, lottery: 5, profit: 88.88, display: '$88.88', color: 'text-emerald-600' },
+    { actual: 10, cost: 5, own: 2, lottery: 10, profit: -7, display: '-$7.00', color: 'text-red-600' },
+    { actual: 0, cost: 0, own: 0, lottery: 0, profit: 0, display: '$0.00', color: 'text-emerald-600' }
+  ])('shows daily profit including administrator usage and lottery payouts ($display)', async ({ actual, cost, own, lottery, profit, display, color }) => {
     getSnapshotV2.mockResolvedValueOnce({
-      stats: { ...createDashboardStats(), today_actual_cost: actual, today_account_cost: cost, today_admin_actual_cost: own, today_profit: profit },
+      stats: { ...createDashboardStats(), today_actual_cost: actual, today_account_cost: cost, today_admin_actual_cost: own, today_lottery_cost: lottery, today_profit: profit },
       trend: [], models: []
     })
     const wrapper = mount(DashboardView, {
@@ -190,10 +191,15 @@ describe('admin DashboardView', () => {
     expect(breakdown).toContain(`admin.dashboard.actual $${actual.toFixed(2)}`)
     expect(breakdown).toContain(`admin.dashboard.accountCost $${cost.toFixed(2)}`)
     expect(breakdown).toContain(`admin.dashboard.adminSelfUsage $${own.toFixed(2)}`)
+    expect(breakdown).toContain(`admin.dashboard.lotteryCost $${lottery.toFixed(2)}`)
     wrapper.unmount()
   })
 
-  it('hides profit until the backend provides the administrator deduction', async () => {
+  it('hides profit until the backend provides lottery payouts', async () => {
+    getSnapshotV2.mockResolvedValueOnce({
+      stats: { ...createDashboardStats(), today_admin_actual_cost: 20, today_profit: 93.88 },
+      trend: [], models: []
+    })
     const wrapper = mount(DashboardView, {
       global: { stubs: {
         AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true,

@@ -138,6 +138,7 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		"today_cost":                  stats.TodayCost,       // 今日标准计费
 		"today_actual_cost":           stats.TodayActualCost, // 今日实际扣除
 		"today_account_cost":          stats.TodayAccountCost,
+		"today_lottery_cost":          stats.TodayLotteryCost,
 		"today_admin_actual_cost":     profit.TodayAdminActualCost,
 		"today_profit":                profit.TodayProfit,
 
