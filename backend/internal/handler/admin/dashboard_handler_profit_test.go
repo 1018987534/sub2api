@@ -33,9 +33,13 @@ func (r *dashboardProfitHandlerRepo) GetBatchUserUsageStats(_ context.Context, i
 	}, r.err
 }
 
-func newDashboardProfitRouter(repo *dashboardProfitHandlerRepo, adminID *int64) *gin.Engine {
+func newDashboardProfitRouter(repo *dashboardProfitHandlerRepo, adminID *int64, settings ...*service.SettingService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	handler := NewDashboardHandler(service.NewDashboardService(repo, nil, nil, nil), nil)
+	var settingService *service.SettingService
+	if len(settings) > 0 {
+		settingService = settings[0]
+	}
+	handler := NewDashboardHandler(service.NewDashboardService(repo, nil, nil, nil, settingService), nil)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		if *adminID > 0 {
@@ -105,6 +109,7 @@ func TestDashboardHandler_ProfitStatsAndFailureHandling(t *testing.T) {
 		require.Contains(t, rec.Body.String(), `"today_admin_actual_cost":20`)
 		require.Contains(t, rec.Body.String(), `"today_account_cost":202`)
 		require.Contains(t, rec.Body.String(), `"today_lottery_cost":5`)
+		require.Contains(t, rec.Body.String(), `"today_server_cost_usd":0`)
 		var body struct {
 			Data struct {
 				Stats *usagestats.DashboardProfitStats `json:"stats"`
@@ -134,4 +139,52 @@ func TestDashboardHandler_ProfitStatsAndFailureHandling(t *testing.T) {
 		require.Equal(t, http.StatusInternalServerError, rec.Code)
 		require.NotContains(t, rec.Body.String(), `"today_profit"`)
 	}
+}
+
+func TestDashboardHandler_ProfitServerCostSaveRefreshesSnapshotImmediately(t *testing.T) {
+	resetDashboardReadCachesForTest()
+	t.Cleanup(resetDashboardReadCachesForTest)
+	settingsRepo := &dashboardProfitHandlerSettingsRepo{}
+	settingsService := service.NewSettingService(settingsRepo, nil)
+	adminID := int64(2)
+	router := newDashboardProfitRouter(&dashboardProfitHandlerRepo{}, &adminID, settingsService)
+	settingsHandler := NewSettingHandler(settingsService, nil, nil, nil, nil, nil, nil)
+	router.PUT("/settings/dashboard-profit", settingsHandler.UpdateDashboardProfitSettings)
+	request := func(etag string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/snapshot?include_trend=false&include_model_stats=false", nil)
+		req.Header.Set("If-None-Match", etag)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	first := request("")
+	require.Equal(t, http.StatusOK, first.Code)
+	require.Equal(t, http.StatusNotModified, request(first.Header().Get("ETag")).Code)
+	updated := dashboardProfitSettingsRequest(router, http.MethodPut, `{"monthly_server_cost_usd":600}`)
+	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+	var saved struct {
+		Data service.DashboardProfitSettings `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(updated.Body.Bytes(), &saved))
+	second := request(first.Header().Get("ETag"))
+	require.Equal(t, http.StatusOK, second.Code)
+	require.Equal(t, "miss", second.Header().Get("X-Snapshot-Cache"))
+	var body struct {
+		Data struct {
+			Stats usagestats.DashboardProfitStats `json:"stats"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &body))
+	require.InDelta(t, saved.Data.DailyServerCostUSD, body.Data.Stats.TodayServerCostUSD, 1e-9)
+	require.InDelta(t, 83.55416-saved.Data.DailyServerCostUSD, body.Data.Stats.TodayProfit, 1e-9)
+	require.NotEqual(t, first.Header().Get("ETag"), second.Header().Get("ETag"))
+	cleared := dashboardProfitSettingsRequest(router, http.MethodPut, `{"monthly_server_cost_usd":0}`)
+	require.Equal(t, http.StatusOK, cleared.Code)
+	third := request(second.Header().Get("ETag"))
+	require.Equal(t, http.StatusOK, third.Code)
+	require.NoError(t, json.Unmarshal(third.Body.Bytes(), &body))
+	require.Zero(t, body.Data.Stats.TodayServerCostUSD)
+	require.InDelta(t, 83.55416, body.Data.Stats.TodayProfit, 1e-9)
+	settingsRepo.getErr = errors.New("settings unavailable")
+	require.Equal(t, http.StatusInternalServerError, request("").Code, "must not serve cached profit with an unknown server expense")
 }

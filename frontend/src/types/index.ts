@@ -2096,12 +2096,14 @@ export interface DashboardStats {
   today_actual_cost: number // 今日实际扣除
   today_account_cost: number // 今日账号成本
 
-  // 利润：实际扣费减账号成本、当前管理员自用扣费、今日已到账抽奖奖金和提现手续费。
+  // 利润：实际扣费减账号成本、当前管理员自用扣费、今日已到账抽奖奖金、提现手续费和服务器日成本。
   // 提现手续费按扣除管理员自用后的实际扣费计提 1.8%，计费基数最低为零。
   // 旧版本后端不提供这些字段时，不展示尚未计算的利润。
   today_admin_actual_cost?: number
   today_lottery_cost?: number
   today_withdrawal_fee?: number
+  // 手动保存的月服务器费用，按业务时区当月实际天数分摊，不提前按日舍入。
+  today_server_cost_usd?: number
   today_profit?: number
 
   // 系统运行统计

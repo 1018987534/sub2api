@@ -54,27 +54,29 @@ type dashboardSnapshotV2Filters struct {
 }
 
 type dashboardSnapshotV2CacheKey struct {
-	AdminID               int64  `json:"admin_id"`
-	StartTime             string `json:"start_time"`
-	EndTime               string `json:"end_time"`
-	Granularity           string `json:"granularity"`
-	UserID                int64  `json:"user_id"`
-	APIKeyID              int64  `json:"api_key_id"`
-	AccountID             int64  `json:"account_id"`
-	GroupID               int64  `json:"group_id"`
-	Model                 string `json:"model"`
-	InstanceID            string `json:"instance_id"`
-	RequestType           *int16 `json:"request_type"`
-	Stream                *bool  `json:"stream"`
-	NativeCompactionV2    *bool  `json:"native_compaction_v2"`
-	BillingType           *int8  `json:"billing_type"`
-	UpstreamModelMismatch *bool  `json:"upstream_model_mismatch"`
-	IncludeStats          bool   `json:"include_stats"`
-	IncludeTrend          bool   `json:"include_trend"`
-	IncludeModels         bool   `json:"include_models"`
-	IncludeGroups         bool   `json:"include_groups"`
-	IncludeUsersTrend     bool   `json:"include_users_trend"`
-	UsersTrendLimit       int    `json:"users_trend_limit"`
+	MonthlyServerCostUSD  float64 `json:"monthly_server_cost_usd"`
+	ServerCostMonthDays   int     `json:"server_cost_month_days"`
+	AdminID               int64   `json:"admin_id"`
+	StartTime             string  `json:"start_time"`
+	EndTime               string  `json:"end_time"`
+	Granularity           string  `json:"granularity"`
+	UserID                int64   `json:"user_id"`
+	APIKeyID              int64   `json:"api_key_id"`
+	AccountID             int64   `json:"account_id"`
+	GroupID               int64   `json:"group_id"`
+	Model                 string  `json:"model"`
+	InstanceID            string  `json:"instance_id"`
+	RequestType           *int16  `json:"request_type"`
+	Stream                *bool   `json:"stream"`
+	NativeCompactionV2    *bool   `json:"native_compaction_v2"`
+	BillingType           *int8   `json:"billing_type"`
+	UpstreamModelMismatch *bool   `json:"upstream_model_mismatch"`
+	IncludeStats          bool    `json:"include_stats"`
+	IncludeTrend          bool    `json:"include_trend"`
+	IncludeModels         bool    `json:"include_models"`
+	IncludeGroups         bool    `json:"include_groups"`
+	IncludeUsersTrend     bool    `json:"include_users_trend"`
+	UsersTrendLimit       int     `json:"users_trend_limit"`
 }
 
 func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
@@ -101,6 +103,7 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
+	var profitSettings service.DashboardProfitSettings
 	if includeStats {
 		subject, ok := middleware.GetAuthSubjectFromContext(c)
 		if !ok || subject.UserID <= 0 {
@@ -108,9 +111,17 @@ func (h *DashboardHandler) GetSnapshotV2(c *gin.Context) {
 			return
 		}
 		filters.AdminID = subject.UserID
+		settings, err := h.dashboardService.GetDashboardProfitSettings(c.Request.Context())
+		if err != nil {
+			response.Error(c, 500, "Failed to get dashboard profit settings")
+			return
+		}
+		profitSettings = *settings
 	}
 
 	keyRaw, _ := json.Marshal(dashboardSnapshotV2CacheKey{
+		MonthlyServerCostUSD:  profitSettings.MonthlyServerCostUSD,
+		ServerCostMonthDays:   profitSettings.MonthDays,
 		AdminID:               filters.AdminID,
 		StartTime:             startTime.UTC().Format(time.RFC3339),
 		EndTime:               endTime.UTC().Format(time.RFC3339),

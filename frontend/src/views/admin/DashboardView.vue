@@ -217,32 +217,36 @@
         </div>
 
         <section
-          v-if="stats.today_profit != null && stats.today_lottery_cost != null && stats.today_withdrawal_fee != null"
-          class="card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+          v-if="stats.today_profit != null && stats.today_lottery_cost != null && stats.today_withdrawal_fee != null && stats.today_server_cost_usd != null"
+          class="card p-4"
           :aria-label="t('admin.dashboard.profitStats')"
           :title="t('admin.dashboard.profitFormula')"
         >
-          <div>
-            <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
-              {{ t('admin.dashboard.todayProfit') }}
-            </p>
-            <p
-              class="mt-1 text-xl font-bold tabular-nums"
-              :class="stats.today_profit < 0
-                ? 'text-red-600 dark:text-red-400'
-                : 'text-emerald-600 dark:text-emerald-400'"
-              data-testid="today-profit"
-            >
-              {{ formatProfit(stats.today_profit) }}
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
+                {{ t('admin.dashboard.todayProfit') }}
+              </p>
+              <p
+                class="mt-1 text-xl font-bold tabular-nums"
+                :class="stats.today_profit < 0
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-emerald-600 dark:text-emerald-400'"
+                data-testid="today-profit"
+              >
+                {{ formatProfit(stats.today_profit) }}
+              </p>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="today-profit-breakdown">
+              {{ t('admin.dashboard.actual') }} {{ formatProfit(stats.today_actual_cost) }}
+              − {{ t('admin.dashboard.accountCost') }} {{ formatProfit(stats.today_account_cost) }}
+              − {{ t('admin.dashboard.adminSelfUsage') }} {{ formatProfit(stats.today_admin_actual_cost) }}
+              − {{ t('admin.dashboard.lotteryCost') }} {{ formatProfit(stats.today_lottery_cost) }}
+              − {{ t('admin.dashboard.withdrawalFee') }} {{ formatProfit(stats.today_withdrawal_fee) }}
+              − {{ t('admin.dashboard.dailyServerCost') }} {{ formatProfit(stats.today_server_cost_usd) }}
             </p>
           </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="today-profit-breakdown">
-            {{ t('admin.dashboard.actual') }} {{ formatProfit(stats.today_actual_cost) }}
-            − {{ t('admin.dashboard.accountCost') }} {{ formatProfit(stats.today_account_cost) }}
-            − {{ t('admin.dashboard.adminSelfUsage') }} {{ formatProfit(stats.today_admin_actual_cost) }}
-            − {{ t('admin.dashboard.lotteryCost') }} {{ formatProfit(stats.today_lottery_cost) }}
-            − {{ t('admin.dashboard.withdrawalFee') }} {{ formatProfit(stats.today_withdrawal_fee) }}
-          </p>
+          <DashboardServerCostControl @saved="loadDashboardSnapshot(true)" />
         </section>
 
         <section class="border-y border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800/40" data-testid="first-token-latency-panel">
@@ -578,6 +582,7 @@ import Select from '@/components/common/Select.vue'
 import TotalDurationCircuitBreakerControl from '@/components/admin/TotalDurationCircuitBreakerControl.vue'
 import FastPoolPriorityControl from '@/components/admin/FastPoolPriorityControl.vue'
 import FastPoolThresholdControl from '@/components/admin/FastPoolThresholdControl.vue'
+import DashboardServerCostControl from '@/components/admin/DashboardServerCostControl.vue'
 import type { FastPoolPrioritySettings } from '@/api/admin/settings'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
