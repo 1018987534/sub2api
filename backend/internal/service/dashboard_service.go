@@ -130,33 +130,43 @@ func (s *DashboardService) GetDashboardStats(ctx context.Context) (*usagestats.D
 }
 
 // GetDashboardProfitStats keeps administrator-specific usage out of the shared
-// dashboard cache. Only today's profit is calculated because historical user
-// logs may have expired while the global dashboard aggregates are retained.
+// dashboard cache. The current month query also supplies today's self usage.
 func (s *DashboardService) GetDashboardProfitStats(ctx context.Context, adminID int64, stats *usagestats.DashboardStats) (*usagestats.DashboardProfitStats, error) {
 	if adminID <= 0 || stats == nil {
 		return nil, errors.New("dashboard profit requires an authenticated administrator and statistics")
 	}
 
-	now := time.Now().UTC()
-	usage, err := s.GetBatchUserUsageStats(ctx, []int64{adminID}, timezone.Today(), now)
+	now := timezone.Now()
+	usage, err := s.GetBatchUserUsageStats(ctx, []int64{adminID}, timezone.StartOfMonth(now), now.UTC())
 	if err != nil {
 		return nil, fmt.Errorf("get administrator self usage: %w", err)
 	}
 	profit := &usagestats.DashboardProfitStats{}
 	if own := usage[adminID]; own != nil {
 		profit.TodayAdminActualCost = own.TodayActualCost
+		profit.MonthAdminActualCost = own.TotalActualCost
 	}
 	settings, err := s.GetDashboardProfitSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
+	settings = dashboardProfitSettingsForMonth(settings.MonthlyServerCostUSD, now)
 	profit.TodayServerCostUSD = settings.DailyServerCostUSD
 	// Administrator self usage does not generate withdrawable revenue. Upstream
 	// costs and lottery or QQ reward payouts do not reduce the withdrawal fee base.
 	withdrawableRevenue := math.Max(0, stats.TodayActualCost-profit.TodayAdminActualCost)
 	profit.TodayWithdrawalFee = withdrawableRevenue * dashboardWithdrawalFeeRate
 	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost - stats.TodayQQRewardCost - profit.TodayWithdrawalFee - profit.TodayServerCostUSD
+	fillDashboardMonthProfit(stats, profit, settings.DailyServerCostUSD, now)
 	return profit, nil
+}
+
+func fillDashboardMonthProfit(stats *usagestats.DashboardStats, profit *usagestats.DashboardProfitStats, dailyServerCost float64, at time.Time) {
+	// Charge the saved monthly server expense through today, including today,
+	// using calendar days rather than elapsed hours (which vary with DST).
+	profit.MonthServerCostUSD = dailyServerCost * float64(at.Day())
+	profit.MonthWithdrawalFee = math.Max(0, stats.MonthActualCost-profit.MonthAdminActualCost) * dashboardWithdrawalFeeRate
+	profit.MonthProfit = stats.MonthActualCost - stats.MonthAccountCost - profit.MonthAdminActualCost - stats.MonthLotteryCost - stats.MonthQQRewardCost - profit.MonthWithdrawalFee - profit.MonthServerCostUSD
 }
 
 func (s *DashboardService) GetDashboardProfitSettings(ctx context.Context) (*DashboardProfitSettings, error) {

@@ -108,3 +108,68 @@ func TestUsageLogRepository_DashboardQQRewardCostDoesNotHideLedgerErrors(t *test
 	require.ErrorIs(t, repo.fillDashboardQQRewardStats(context.Background(), &DashboardStats{}, start), want)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestUsageLogRepository_DashboardMonthStatsUsesLocalMonthAndBothSources(t *testing.T) {
+	for _, tc := range []struct {
+		name, zone string
+		at         time.Time
+		first, end string
+	}{
+		{"Shanghai", "Asia/Shanghai", time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC), "2026-11-01", "2026-11-09"},
+		{"DST day", "America/New_York", time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC), "2026-03-01", "2026-03-09"},
+		{"local month boundary", "Asia/Shanghai", time.Date(2026, 10, 31, 16, 0, 0, 0, time.UTC), "2026-11-01", "2026-11-02"},
+	} {
+		for _, aggregated := range []bool{true, false} {
+			t.Run(tc.name+map[bool]string{true: " aggregated", false: " raw"}[aggregated], func(t *testing.T) {
+				loc, err := time.LoadLocation(tc.zone)
+				require.NoError(t, err)
+				local := tc.at.In(loc)
+				today := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
+				first, err := time.ParseInLocation("2006-01-02", tc.first, loc)
+				require.NoError(t, err)
+				end, err := time.ParseInLocation("2006-01-02", tc.end, loc)
+				require.NoError(t, err)
+				db, mock := newSQLMock(t)
+				if aggregated {
+					mock.ExpectQuery(`(?s)SUM\(actual_cost\).*SUM\(account_cost\).*FROM usage_dashboard_daily WHERE bucket_date >= \$1::date AND bucket_date < \$2::date`).WithArgs(tc.first, tc.end).WillReturnRows(sqlmock.NewRows([]string{"actual", "cost"}).AddRow(1000, 600))
+				} else {
+					mock.ExpectQuery(`(?s)SUM\(actual_cost\).*COALESCE\(account_stats_cost, total_cost\).*COALESCE\(account_rate_multiplier, 1\).*FROM usage_logs WHERE created_at >= \$1 AND created_at < \$2`).WithArgs(first, end).WillReturnRows(sqlmock.NewRows([]string{"actual", "cost"}).AddRow(1000, 600))
+				}
+				mock.ExpectQuery(`(?s)FROM lottery_balance_ledger.*WHERE created_at >= \$1 AND created_at < \$2`).WithArgs(first, end).WillReturnRows(sqlmock.NewRows([]string{"amount"}).AddRow(10))
+				mock.ExpectQuery(`(?s)FROM qq_activity_rewards.*WHERE status = 'paid' AND paid_at >= \$1 AND paid_at < \$2`).WithArgs(first, end).WillReturnRows(sqlmock.NewRows([]string{"amount"}).AddRow(20))
+				stats := &DashboardStats{TodayActualCost: 315.88}
+				require.NoError(t, (&usageLogRepository{sql: db}).fillDashboardMonthStats(context.Background(), stats, today, aggregated))
+				require.Equal(t, 1000.0, stats.MonthActualCost)
+				require.Equal(t, 600.0, stats.MonthAccountCost)
+				require.Equal(t, 10.0, stats.MonthLotteryCost)
+				require.Equal(t, 20.0, stats.MonthQQRewardCost)
+				require.Equal(t, 315.88, stats.TodayActualCost)
+				require.NoError(t, mock.ExpectationsWereMet())
+			})
+		}
+	}
+}
+
+func TestUsageLogRepository_DashboardMonthStatsDoesNotHideErrors(t *testing.T) {
+	for _, source := range []string{"usage", "lottery", "QQ"} {
+		t.Run(source, func(t *testing.T) {
+			db, mock := newSQLMock(t)
+			want := errors.New(source + " unavailable")
+			usage := mock.ExpectQuery(`FROM usage_dashboard_daily`)
+			if source == "usage" {
+				usage.WillReturnError(want)
+			} else {
+				usage.WillReturnRows(sqlmock.NewRows([]string{"actual", "cost"}).AddRow(0, 0))
+				lottery := mock.ExpectQuery(`FROM lottery_balance_ledger`)
+				if source == "lottery" {
+					lottery.WillReturnError(want)
+				} else {
+					lottery.WillReturnRows(sqlmock.NewRows([]string{"amount"}).AddRow(0))
+					mock.ExpectQuery(`FROM qq_activity_rewards`).WillReturnError(want)
+				}
+			}
+			require.ErrorIs(t, (&usageLogRepository{sql: db}).fillDashboardMonthStats(context.Background(), &DashboardStats{}, time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC), true), want)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}

@@ -420,9 +420,10 @@ func TestDashboardService_ProfitExcludesCurrentAdminActualCost(t *testing.T) {
 	profit, err := svc.GetDashboardProfitStats(context.Background(), 7, stats)
 	require.NoError(t, err)
 	require.Equal(t, []int64{7}, repo.ids)
-	require.Equal(t, timezone.Today(), repo.start)
+	require.Equal(t, timezone.StartOfMonth(timezone.Now()), repo.start)
 	require.WithinRange(t, repo.end, before, time.Now().UTC())
 	require.Equal(t, 20.0, profit.TodayAdminActualCost)
+	require.Equal(t, 9999.0, profit.MonthAdminActualCost)
 	require.InDelta(t, 5.32584, profit.TodayWithdrawalFee, 1e-9)
 	require.InDelta(t, 88.55416, profit.TodayProfit, 1e-9)
 	require.Equal(t, 315.88, stats.TodayActualCost, "shared dashboard statistics must stay unchanged")
@@ -495,9 +496,72 @@ func TestDashboardService_ProfitDeductsMonthlyServerCost(t *testing.T) {
 		require.InDelta(t, saved.DailyServerCostUSD, profit.TodayServerCostUSD, 1e-9)
 		require.InDelta(t, 4.46976, profit.TodayWithdrawalFee, 1e-9, "server expense must not change the withdrawal fee base")
 		require.InDelta(t, 98.60024-saved.DailyServerCostUSD, profit.TodayProfit, 1e-9)
+		require.InDelta(t, saved.DailyServerCostUSD*float64(timezone.Now().Day()), profit.MonthServerCostUSD, 1e-9)
 		require.Equal(t, 251.93, stats.TodayActualCost)
 	}
 	settingsRepo.getErr = errors.New("server expense unavailable")
 	_, err := svc.GetDashboardProfitStats(ctx, 7, stats)
 	require.ErrorContains(t, err, "server expense unavailable")
+}
+
+func TestDashboardService_MonthProfitUsesMonthTotals(t *testing.T) {
+	repo := &dashboardProfitRepoStub{usage: map[int64]*usagestats.BatchUserUsageStats{
+		7: {TodayActualCost: 20, TotalActualCost: 100},
+	}}
+	stats := &usagestats.DashboardStats{
+		TodayActualCost: 315.88, TodayAccountCost: 202, TodayLotteryCost: 5, TodayQQRewardCost: 4,
+		MonthActualCost: 1000, MonthAccountCost: 600, MonthLotteryCost: 10, MonthQQRewardCost: 20,
+	}
+	profit, err := NewDashboardService(repo, nil, nil, nil, nil).GetDashboardProfitStats(context.Background(), 7, stats)
+	require.NoError(t, err)
+	require.Equal(t, timezone.StartOfMonth(timezone.Now()), repo.start)
+	require.Equal(t, 100.0, profit.MonthAdminActualCost)
+	require.InDelta(t, 16.2, profit.MonthWithdrawalFee, 1e-9)
+	require.InDelta(t, 253.8, profit.MonthProfit, 1e-9)
+	require.InDelta(t, 79.55416, profit.TodayProfit, 1e-9)
+	require.Equal(t, 1000.0, stats.MonthActualCost, "administrator profit must not mutate shared statistics")
+}
+
+func TestDashboardService_MonthServerCostUsesCalendarDaysThroughToday(t *testing.T) {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name string
+		at   time.Time
+		want float64
+	}{
+		{"first day", time.Date(2026, 12, 1, 0, 0, 0, 0, loc), 600.0 / 31},
+		{"eighth day", time.Date(2026, 11, 8, 0, 0, 0, 0, loc), 160},
+		{"short month", time.Date(2026, 2, 7, 12, 0, 0, 0, loc), 150},
+		{"leap month end", time.Date(2028, 2, 29, 23, 59, 0, 0, loc), 600},
+		{"local month boundary", time.Date(2026, 10, 31, 16, 0, 0, 0, time.UTC).In(loc), 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := dashboardProfitSettingsForMonth(600, tc.at)
+			profit := &usagestats.DashboardProfitStats{MonthAdminActualCost: 100}
+			stats := &usagestats.DashboardStats{MonthActualCost: 1000, MonthAccountCost: 600, MonthLotteryCost: 10, MonthQQRewardCost: 20}
+			fillDashboardMonthProfit(stats, profit, settings.DailyServerCostUSD, tc.at)
+			require.InDelta(t, tc.want, profit.MonthServerCostUSD, 1e-9)
+			require.InDelta(t, 253.8-tc.want, profit.MonthProfit, 1e-9)
+			require.InDelta(t, 16.2, profit.MonthWithdrawalFee, 1e-9)
+		})
+	}
+}
+
+func TestDashboardService_MonthProfitAllowsLossAndClampsFee(t *testing.T) {
+	for _, tc := range []struct {
+		name                                       string
+		actual, cost, own, qq, wantFee, wantProfit float64
+	}{
+		{"loss", 10, 12, 3, 4, 0.126, -9.126},
+		{"empty month", 0, 0, 0, 0, 0, 0},
+		{"administrator exceeds total", 10, 5, 12, 0, 0, -7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			profit := &usagestats.DashboardProfitStats{MonthAdminActualCost: tc.own}
+			fillDashboardMonthProfit(&usagestats.DashboardStats{MonthActualCost: tc.actual, MonthAccountCost: tc.cost, MonthQQRewardCost: tc.qq}, profit, 0, time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
+			require.InDelta(t, tc.wantFee, profit.MonthWithdrawalFee, 1e-9)
+			require.InDelta(t, tc.wantProfit, profit.MonthProfit, 1e-9)
+		})
+	}
 }

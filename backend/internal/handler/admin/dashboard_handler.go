@@ -145,6 +145,16 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		"today_server_cost_usd":       profit.TodayServerCostUSD,
 		"today_profit":                profit.TodayProfit,
 
+		// 本月累计利润及成本
+		"month_actual_cost":       stats.MonthActualCost,
+		"month_account_cost":      stats.MonthAccountCost,
+		"month_lottery_cost":      stats.MonthLotteryCost,
+		"month_qq_reward_cost":    stats.MonthQQRewardCost,
+		"month_admin_actual_cost": profit.MonthAdminActualCost,
+		"month_withdrawal_fee":    profit.MonthWithdrawalFee,
+		"month_server_cost_usd":   profit.MonthServerCostUSD,
+		"month_profit":            profit.MonthProfit,
+
 		// 系统运行统计
 		"average_duration_ms": stats.AverageDurationMs,
 		"uptime":              uptime,
