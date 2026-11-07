@@ -35,8 +35,8 @@ func (s *Store) reconcile(ctx context.Context, tx *sql.Tx, qq string, c Config) 
 	var userID int64
 	var status string
 	var registered time.Time
-	var baseline bool
-	err := tx.QueryRowContext(ctx, `SELECT b.user_id,u.status,u.created_at,EXISTS(SELECT 1 FROM qq_activity_baseline_users x WHERE x.user_id=u.id OR lower(btrim(x.email))=lower(btrim(u.email))) FROM qq_activity_bindings b JOIN users u ON u.id=b.user_id AND u.deleted_at IS NULL WHERE b.qq=$1 AND b.status='active'`, qq).Scan(&userID, &status, &registered, &baseline)
+	var baseline, firstBinding bool
+	err := tx.QueryRowContext(ctx, `SELECT b.user_id,u.status,u.created_at,EXISTS(SELECT 1 FROM qq_activity_baseline_users x WHERE x.user_id=u.id OR lower(btrim(x.email))=lower(btrim(u.email))),EXISTS(SELECT 1 FROM qq_activity_first_bindings f WHERE f.qq=b.qq AND f.user_id=b.user_id AND f.closed_at IS NULL) FROM qq_activity_bindings b JOIN users u ON u.id=b.user_id AND u.deleted_at IS NULL WHERE b.qq=$1 AND b.status='active'`, qq).Scan(&userID, &status, &registered, &baseline, &firstBinding)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -51,7 +51,7 @@ func (s *Store) reconcile(ctx context.Context, tx *sql.Tx, qq string, c Config) 
 		return err
 	}
 	canQualify := WithinCampaign(c, time.Now()) && (c.Status == "active" || c.Status == "paused")
-	if canQualify && inGroup && NewcomerQualifies(baseline || legacy, c.StartedAt != nil && joined.After(*c.StartedAt), c.StartedAt != nil && registered.After(*c.StartedAt), level, robot) {
+	if canQualify && firstBinding && inGroup && NewcomerQualifies(baseline || legacy, c.StartedAt != nil && joined.After(*c.StartedAt), c.StartedAt != nil && registered.After(*c.StartedAt), level, robot) {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_rewards(kind,recipient_qq,recipient_user_id,subject_qq,subject_user_id) VALUES('newcomer',$1,$2,$1,$2) ON CONFLICT DO NOTHING`, qq, userID); err != nil {
 			return err
 		}
@@ -59,7 +59,8 @@ func (s *Store) reconcile(ctx context.Context, tx *sql.Tx, qq string, c Config) 
 	var inviter, evidenceType, evidenceKey string
 	var qualified sql.NullTime
 	var inviteJoined time.Time
-	err = tx.QueryRowContext(ctx, `SELECT inviter_qq,evidence_type,evidence_key,qualified_at,joined_at FROM qq_activity_invitations WHERE invitee_qq=$1 FOR UPDATE`, qq).Scan(&inviter, &evidenceType, &evidenceKey, &qualified, &inviteJoined)
+	var inviterUser, originalInvitee sql.NullInt64
+	err = tx.QueryRowContext(ctx, `SELECT inviter_qq,evidence_type,evidence_key,qualified_at,joined_at,inviter_user_id,invitee_user_id FROM qq_activity_invitations WHERE invitee_qq=$1 FOR UPDATE`, qq).Scan(&inviter, &evidenceType, &evidenceKey, &qualified, &inviteJoined, &inviterUser, &originalInvitee)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -67,14 +68,21 @@ func (s *Store) reconcile(ctx context.Context, tx *sql.Tx, qq string, c Config) 
 		return err
 	}
 	evidence := ValidQQ(inviter) && evidenceKey != "" && (evidenceType == "direct_invite_pinned" || evidenceType == "admin_verified")
-	var inviterUser sql.NullInt64
-	if ValidQQ(inviter) {
-		e := tx.QueryRowContext(ctx, `SELECT user_id FROM qq_activity_bindings WHERE qq=$1 AND status='active'`, inviter).Scan(&inviterUser)
+	if originalInvitee.Valid && originalInvitee.Int64 != userID {
+		return nil // A replacement account cannot rewrite the original subject.
+	}
+	if ValidQQ(inviter) && !inviterUser.Valid {
+		e := tx.QueryRowContext(ctx, `SELECT user_id FROM qq_activity_binding_history WHERE qq=$1 ORDER BY CASE WHEN bound_at<=$2 THEN 0 ELSE 1 END,CASE WHEN bound_at<=$2 THEN bound_at END DESC,bound_at,id LIMIT 1`, inviter, inviteJoined).Scan(&inviterUser)
 		if e != nil && !errors.Is(e, sql.ErrNoRows) {
 			return e
 		}
 	}
 	self := inviter == qq || (inviterUser.Valid && inviterUser.Int64 == userID)
+	var crossed bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_activity_binding_history a JOIN qq_activity_binding_history b ON a.user_id=b.user_id OR (a.email_digest<>'' AND a.email_digest=b.email_digest) WHERE a.qq=$1 AND b.qq=$2)`, inviter, qq).Scan(&crossed); err != nil {
+		return err
+	}
+	self = self || crossed
 	var newcomerStatus sql.NullString
 	err = tx.QueryRowContext(ctx, `SELECT status FROM qq_activity_rewards WHERE kind='newcomer' AND subject_qq=$1 AND subject_user_id=$2`, qq, userID).Scan(&newcomerStatus)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -111,7 +119,7 @@ func (s *Store) reconcile(ctx context.Context, tx *sql.Tx, qq string, c Config) 
 	if (invitationQualifies || qualified.Valid) && newcomerStatus.String != "paid" {
 		state, reason = "awaiting_newcomer", "invitee_newcomer_unpaid"
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE qq_activity_invitations SET invitee_user_id=$1,status=CASE WHEN status='paid' THEN status ELSE $2 END,reason=$3,updated_at=NOW() WHERE invitee_qq=$4`, userID, state, reason, qq)
+	_, err = tx.ExecContext(ctx, `UPDATE qq_activity_invitations SET invitee_user_id=COALESCE(invitee_user_id,$1),inviter_user_id=COALESCE(inviter_user_id,$5),status=CASE WHEN status='paid' THEN status ELSE $2 END,reason=CASE WHEN status='paid' THEN reason ELSE $3 END,updated_at=NOW() WHERE invitee_qq=$4`, userID, state, reason, qq, inviterUser)
 	return err
 }
 
@@ -119,7 +127,13 @@ func (s *Store) reconcile(ctx context.Context, tx *sql.Tx, qq string, c Config) 
 // paid newcomer reward. Both stages share one transaction, including notices.
 // Paused campaigns retain rows; late inviter bindings may settle after the end.
 func (s *Store) settle(ctx context.Context, tx *sql.Tx, c Config) ([]int64, error) {
-	if _, err := tx.ExecContext(ctx, `UPDATE qq_activity_rewards r SET recipient_user_id=b.user_id FROM qq_activity_bindings b WHERE r.recipient_qq=b.qq AND b.status='active' AND r.status='pending' AND r.recipient_user_id IS NULL`); err != nil {
+	if _, err := tx.ExecContext(ctx, `WITH candidates AS (
+		SELECT r.id,(SELECT h.user_id FROM qq_activity_binding_history h WHERE h.qq=r.recipient_qq ORDER BY CASE WHEN h.bound_at<=r.qualified_at THEN 0 ELSE 1 END,CASE WHEN h.bound_at<=r.qualified_at THEN h.bound_at END DESC,h.bound_at,h.id LIMIT 1) AS user_id
+		FROM qq_activity_rewards r WHERE r.status='pending' AND r.recipient_user_id IS NULL)
+		UPDATE qq_activity_rewards r SET recipient_user_id=c.user_id FROM candidates c
+		WHERE r.id=c.id AND c.user_id IS NOT NULL AND (r.kind<>'invitation' OR (c.user_id<>r.subject_user_id AND NOT EXISTS(
+		SELECT 1 FROM qq_activity_binding_history a JOIN qq_activity_binding_history b ON a.user_id=b.user_id OR (a.email_digest<>'' AND a.email_digest=b.email_digest)
+		WHERE a.qq=r.recipient_qq AND b.qq=r.subject_qq)))`); err != nil {
 		return nil, err
 	}
 	if c.Status != "active" && c.Status != "ended" {
@@ -152,7 +166,7 @@ func (s *Store) settleKind(ctx context.Context, tx *sql.Tx, kind string) ([]int6
 	}
 	// Separate batches prevent blocked invitations (or disabled newcomers)
 	// from occupying the limit and starving payable rewards.
-	rows, err := tx.QueryContext(ctx, `SELECT r.id,r.kind,r.recipient_qq,b.user_id,r.subject_qq,r.subject_user_id FROM qq_activity_rewards r JOIN qq_activity_bindings b ON b.qq=r.recipient_qq AND b.status='active' AND b.user_id=r.recipient_user_id JOIN users u ON u.id=b.user_id AND u.deleted_at IS NULL AND u.status='active' WHERE r.status='pending' AND r.kind=$1`+gate+` ORDER BY b.user_id,r.id LIMIT 100 FOR UPDATE OF r`, kind)
+	rows, err := tx.QueryContext(ctx, `SELECT r.id,r.kind,r.recipient_qq,r.recipient_user_id,r.subject_qq,r.subject_user_id FROM qq_activity_rewards r JOIN users u ON u.id=r.recipient_user_id AND u.deleted_at IS NULL AND u.status='active' WHERE r.status='pending' AND r.kind=$1 AND NOT EXISTS(SELECT 1 FROM qq_activity_bindings b WHERE b.qq=r.recipient_qq AND b.user_id=r.recipient_user_id AND b.status='locked')`+gate+` ORDER BY r.recipient_user_id,r.id LIMIT 100 FOR UPDATE OF r`, kind)
 	if err != nil {
 		return nil, err
 	}

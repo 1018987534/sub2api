@@ -241,6 +241,8 @@ func (h *QQActivityHandler) Bridge(c *gin.Context) {
 		Activate  bool                       `json:"activate"`
 		ID        int64                      `json:"id"`
 		Delivered bool                       `json:"delivered"`
+		Private   qqactivity.PrivateEvent    `json:"private"`
+		QQ        string                     `json:"qq"`
 	}
 	if c.ShouldBindJSON(&req) != nil {
 		response.BadRequest(c, "Invalid bridge payload")
@@ -252,6 +254,16 @@ func (h *QQActivityHandler) Bridge(c *gin.Context) {
 		err = h.store.Initialize(c.Request.Context(), req.Groups, req.Activate)
 	case "event":
 		err = h.store.Process(c.Request.Context(), req.Event)
+	case "private":
+		var send func(context.Context, string, string) error
+		if h.emailService != nil {
+			send = func(ctx context.Context, email, code string) error {
+				return h.emailService.SendEmail(ctx, email, "[小红豆] QQ 私信绑定验证码", fmt.Sprintf("<p>你正在通过管理员 Nono 的 QQ 私信，将当前 QQ 群成员身份关联到本官网账号。</p><p>验证码：<strong>%s</strong></p><p>10 分钟内有效。请仅在你主动发起绑定的 Nono 私信会话中提交，不要发到群里。更换绑定还需在私信中最终确认；此操作不会修改官网注册邮箱、登录信息或转移余额。若非本人操作，请忽略本邮件。</p>", code))
+			}
+		}
+		err = h.store.ProcessPrivate(c.Request.Context(), req.Private, send)
+	case "friend":
+		err = h.store.FriendAdded(c.Request.Context(), req.QQ)
 	case "tick":
 		err = h.store.Tick(c.Request.Context())
 	case "status":

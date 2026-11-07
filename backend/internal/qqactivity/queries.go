@@ -13,8 +13,8 @@ func summaryForQQ(ctx context.Context, q queryer, qq string, c Config) (s Summar
 	var userID int64
 	var email, status string
 	var registered time.Time
-	var baseline bool
-	err = q.QueryRowContext(ctx, `SELECT b.user_id,u.email,u.status,u.created_at,EXISTS(SELECT 1 FROM qq_activity_baseline_users x WHERE x.user_id=u.id OR lower(btrim(x.email))=lower(btrim(u.email))) FROM qq_activity_bindings b JOIN users u ON u.id=b.user_id AND u.deleted_at IS NULL WHERE b.qq=$1`, qq).Scan(&userID, &email, &status, &registered, &baseline)
+	var baseline, firstBinding bool
+	err = q.QueryRowContext(ctx, `SELECT b.user_id,u.email,u.status,u.created_at,EXISTS(SELECT 1 FROM qq_activity_baseline_users x WHERE x.user_id=u.id OR lower(btrim(x.email))=lower(btrim(u.email))),EXISTS(SELECT 1 FROM qq_activity_first_bindings f WHERE f.qq=b.qq AND f.user_id=b.user_id AND f.closed_at IS NULL) FROM qq_activity_bindings b JOIN users u ON u.id=b.user_id AND u.deleted_at IS NULL WHERE b.qq=$1`, qq).Scan(&userID, &email, &status, &registered, &baseline, &firstBinding)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return s, err
 	}
@@ -27,7 +27,7 @@ func summaryForQQ(ctx context.Context, q queryer, qq string, c Config) (s Summar
 		if e != nil {
 			return s, e
 		}
-		if status == "active" && !baseline && !legacy && c.StartedAt != nil && registered.After(*c.StartedAt) && level == nil {
+		if firstBinding && status == "active" && !baseline && !legacy && c.StartedAt != nil && registered.After(*c.StartedAt) && level == nil {
 			s.WelcomeStatus = "verifying"
 			s.WelcomeText = "本次体验额度领取资格正在核验，暂未发放。系统会继续处理，你也可以稍后发送「绑定状态」查询。"
 		}
@@ -38,7 +38,7 @@ func summaryForQQ(ctx context.Context, q queryer, qq string, c Config) (s Summar
 		if c.Status == "ended" {
 			s.WelcomeText = NotEligible
 		}
-		rows, e := q.QueryContext(ctx, `SELECT r.id,r.kind,r.amount::double precision,r.status,r.paid_at FROM qq_activity_rewards r WHERE r.recipient_qq=$1 AND (r.kind<>'invitation' OR r.status='paid' OR `+invitationNewcomerPaid+`) ORDER BY r.id DESC LIMIT 100`, qq)
+		rows, e := q.QueryContext(ctx, `SELECT r.id,r.kind,r.amount::double precision,r.status,r.paid_at FROM qq_activity_rewards r WHERE r.recipient_user_id=$2 AND r.recipient_qq=$1 AND (r.kind<>'invitation' OR r.status='paid' OR `+invitationNewcomerPaid+`) ORDER BY r.id DESC LIMIT 100`, qq, userID)
 		if e != nil {
 			return s, e
 		}
@@ -64,7 +64,7 @@ func summaryForQQ(ctx context.Context, q queryer, qq string, c Config) (s Summar
 			return s, e
 		}
 	}
-	err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(r.amount) FILTER(WHERE r.status='paid'),0)::double precision,COALESCE(SUM(r.amount) FILTER(WHERE r.status='pending' AND r.recipient_user_id IS NOT NULL),0)::double precision,COALESCE(SUM(r.amount) FILTER(WHERE r.status='pending' AND r.recipient_user_id IS NULL),0)::double precision FROM qq_activity_rewards r WHERE r.kind='invitation' AND r.recipient_qq=$1 AND (r.status='paid' OR `+invitationNewcomerPaid+`)`, qq).Scan(&s.InvitationPaid, &s.InvitationPending, &s.PendingInviterBinding)
+	err = q.QueryRowContext(ctx, `SELECT COALESCE(SUM(r.amount) FILTER(WHERE r.status='paid'),0)::double precision,COALESCE(SUM(r.amount) FILTER(WHERE r.status='pending' AND r.recipient_user_id IS NOT NULL),0)::double precision,COALESCE(SUM(r.amount) FILTER(WHERE r.status='pending' AND r.recipient_user_id IS NULL),0)::double precision FROM qq_activity_rewards r WHERE r.kind='invitation' AND r.recipient_qq=$1 AND (r.recipient_user_id=$2 OR r.recipient_user_id IS NULL) AND (r.status='paid' OR `+invitationNewcomerPaid+`)`, qq, userID).Scan(&s.InvitationPaid, &s.InvitationPending, &s.PendingInviterBinding)
 	return
 }
 func (s *Store) UserSummary(ctx context.Context, userID int64) (Summary, error) {
@@ -74,13 +74,39 @@ func (s *Store) UserSummary(ctx context.Context, userID int64) (Summary, error) 
 	}
 	var qq string
 	err = s.db.QueryRowContext(ctx, `SELECT qq FROM qq_activity_bindings WHERE user_id=$1`, userID).Scan(&qq)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Summary{Config: c, Account: "—", WelcomeStatus: "not_bound", WelcomeText: "注册 QQ 邮箱会自动匹配；其他邮箱或主动解绑后，请从右上角 QQ 绑定入口验证本人 QQ 邮箱。", Rewards: []Reward{}}, nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Summary{}, err
 	}
-	return summaryForQQ(ctx, s.db, qq, c)
+	view := Summary{Config: c, Account: "—", WelcomeStatus: "not_bound", WelcomeText: "私信管理员 Nono 输入【绑定】，可验证任意官网注册邮箱后绑定。曾绑定过的 QQ 或官网账号不会重新获得新人资格。", Rewards: []Reward{}}
+	if qq != "" {
+		view, err = summaryForQQ(ctx, s.db, qq, c)
+		if err != nil {
+			return view, err
+		}
+	}
+	// The website view belongs to the logged-in user, including rewards paid
+	// under a former QQ association. A new binding cannot inherit another
+	// website account's receipts through the current QQ identity.
+	view.Rewards = []Reward{}
+	rows, err := s.db.QueryContext(ctx, `SELECT r.id,r.kind,r.amount::double precision,r.status,r.paid_at FROM qq_activity_rewards r WHERE r.recipient_user_id=$1 AND (r.kind<>'invitation' OR r.status='paid' OR `+invitationNewcomerPaid+`) ORDER BY r.id DESC LIMIT 100`, userID)
+	if err != nil {
+		return view, err
+	}
+	for rows.Next() {
+		var r Reward
+		if err = rows.Scan(&r.ID, &r.Kind, &r.Amount, &r.Status, &r.PaidAt); err != nil {
+			rows.Close()
+			return view, err
+		}
+		view.Rewards = append(view.Rewards, r)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return view, err
+	}
+	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(r.amount) FILTER(WHERE r.status='paid'),0)::double precision,COALESCE(SUM(r.amount) FILTER(WHERE r.status='pending'),0)::double precision FROM qq_activity_rewards r WHERE r.kind='invitation' AND r.recipient_user_id=$1 AND (r.status='paid' OR `+invitationNewcomerPaid+`)`, userID).Scan(&view.InvitationPaid, &view.InvitationPending)
+	return view, err
 }
 
 type AdminMember struct {
@@ -280,7 +306,7 @@ func (s *Store) VerifyInvitation(ctx context.Context, actor, invitee, inviter, g
 		if !WithinCampaign(c, time.Now()) {
 			return errors.New("当前不能新增本期邀请奖励资格。")
 		}
-		if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_invitations SET inviter_qq=$1,evidence_type='admin_verified',evidence_key=$2,updated_at=NOW() WHERE invitee_qq=$3`, inviter, Hash(evidence), invitee); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_invitations SET inviter_qq=$1,inviter_user_id=COALESCE(inviter_user_id,(SELECT user_id FROM qq_activity_bindings WHERE qq=$1 AND status='active')),evidence_type='admin_verified',evidence_key=$2,updated_at=NOW() WHERE invitee_qq=$3`, inviter, Hash(evidence), invitee); err != nil {
 			return err
 		}
 		if err = audit(ctx, tx, actor, "verify_invitation", invitee, map[string]any{"inviter": inviter, "evidence": MaskText(evidence)}); err != nil {

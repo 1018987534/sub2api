@@ -72,6 +72,9 @@ func autoBindingFixtureAt(t *testing.T, mail bool) (*sql.DB, *Store) {
 		files = append(files, "251_qq_activity_email_binding.sql")
 	}
 	files = append(files, "252_qq_activity_binding_display.sql")
+	if mail {
+		files = append(files, "254_qq_activity_private_binding.sql")
+	}
 	for _, file := range files {
 		data, e := migrations.FS.ReadFile(file)
 		if e != nil {
@@ -152,6 +155,13 @@ func TestPostgresHistoricalBindingsSurviveEmailMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := migrations.FS.ReadFile("251_qq_activity_email_binding.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(b)); err != nil {
+		t.Fatal(err)
+	}
+	b, err = migrations.FS.ReadFile("254_qq_activity_private_binding.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

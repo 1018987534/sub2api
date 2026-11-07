@@ -20,7 +20,8 @@ describe('verified QQ mailbox form', () => {
     expect(view.text()).toContain('自定义提示')
     expect(view.find('b').exists()).toBe(false)
     await view.setProps({ intro: '', note: '' })
-    expect(view.findAll('p')).toHaveLength(0)
+    expect(view.text()).toContain('私信管理员 Nono')
+    expect(view.text()).not.toContain('自定义提示')
     expect(view.get('input[name="qq-email"]').exists()).toBe(true)
   })
 

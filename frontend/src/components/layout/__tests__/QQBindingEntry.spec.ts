@@ -27,6 +27,15 @@ afterEach(() => { view?.unmount(); view = undefined })
 describe('header QQ binding status and unbinding', () => {
   const config = () => ({ status: 'active', binding_display: { group_number: '87654321', activity_title: '本月活动', activity_text: '第一行\n第二行 <script>alert(1)</script>', binding_intro: '自定义绑定说明', binding_note: '自定义底部提示' } })
 
+  it('displays the member QQ identity independently from mailbox copy', async () => {
+    api.binding.mockResolvedValue({ ...bound, qq: '12345678' })
+    const w = render(); await flushPromises()
+    await w.get('button').trigger('click'); await flushPromises()
+    expect(w.text()).toContain('已绑定 QQ：12345678')
+    expect(w.text()).toContain('更换绑定请私信管理员 Nono')
+    expect(w.text()).not.toContain('12****78@qq.com')
+  })
+
   it('refreshes persisted copy when opening and renders activity text safely for bound users', async () => {
     const state = config()
     api.binding.mockImplementation(async () => ({ ...bound, config: structuredClone(state) }))

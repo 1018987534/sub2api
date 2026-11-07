@@ -46,6 +46,7 @@ export interface QQClaim {
 }
 export interface QQBindingStatus {
   bound: boolean
+  qq?: string
   qq_email?: string
   config?: QQActivityConfig
 }

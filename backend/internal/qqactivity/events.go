@@ -81,13 +81,17 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 				inviter, source, key = e.InviterQQ, e.EvidenceType, e.EvidenceKey
 			}
 			// Later joins cannot replace even an unqualified first attribution.
-			_, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_invitations(invitee_qq,inviter_qq,group_id,evidence_type,evidence_key,joined_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(invitee_qq) DO NOTHING`, e.QQ, inviter, e.GroupID, source, key, joined)
+			_, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_invitations(invitee_qq,inviter_qq,group_id,evidence_type,evidence_key,joined_at,inviter_user_id) VALUES($1,$2,$3,$4,$5,$6,COALESCE((SELECT user_id FROM qq_activity_bindings WHERE qq=$2 AND status='active'),(SELECT user_id FROM qq_activity_binding_history WHERE qq=$2 AND bound_at<=$6 ORDER BY bound_at DESC,id DESC LIMIT 1))) ON CONFLICT(invitee_qq) DO NOTHING`, e.QQ, inviter, e.GroupID, source, key, joined)
 			if err != nil {
 				return err
 			}
 		}
 		var beforeBound bool
 		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_activity_bindings WHERE qq=$1)`, e.QQ).Scan(&beforeBound); err != nil {
+			return err
+		}
+		var previouslyBound bool
+		if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_activity_ever_bound WHERE identity_kind='qq' AND identity_key=$1)`, e.QQ).Scan(&previouslyBound); err != nil {
 			return err
 		}
 		reply := ""
@@ -111,7 +115,10 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 							return err
 						}
 					case "unmatched", "needs_verification":
-						reply = Prompt("M01", map[string]string{"qq_email_mask": MaskEmail(e.QQ + "@qq.com"), "site_url": SiteURL})
+						reply = "尚未绑定，私信管理员 Nono 输入【绑定】即可绑定官网账号。"
+						if e.Kind == "join" && !knownMember && !previouslyBound {
+							reply = Prompt("M01", nil)
+						}
 					case "ambiguous":
 						reply = Prompt("M04", map[string]string{"case_no": Hash(e.GroupID + ":" + e.QQ)[:12]})
 					case "conflict":
@@ -145,9 +152,11 @@ func (s *Store) Process(ctx context.Context, e Event) error {
 					reply += "\n请登录官网，从右上角 QQ 绑定入口完成绑定，系统随后发放已确认的邀请奖励，邀请人本人不限等级。"
 				}
 			case "解绑", "更换绑定":
-				reply = "请登录官网，在右上角 QQ 绑定入口自行取消绑定。解绑会保留历史和领奖记录，重新绑定不会重复发放奖励。"
+				reply = "更换绑定请私信管理员 Nono 输入【绑定】，按提示验证新账号邮箱。取消绑定可在官网 QQ 绑定入口操作；历史和领奖记录始终保留。"
 			case "绑定":
-				if reply == "" {
+				if e.Code != "" {
+					reply = Prompt("M08", nil)
+				} else if reply == "" {
 					reply = renderBinding(summary, beforeBound)
 				}
 			default:
@@ -173,7 +182,7 @@ func renderBinding(s Summary, already bool) string {
 		id = "B08"
 	}
 	if !s.Bound {
-		return "尚未绑定。请登录官网，从右上角 QQ 绑定入口验证本人 QQ 邮箱。"
+		return "尚未绑定，私信管理员 Nono 输入【绑定】即可绑定官网账号。"
 	}
 	return Prompt(id, map[string]string{"account_mask": s.Account})
 }
@@ -184,7 +193,7 @@ func renderSummary(s Summary) string {
 	}
 	text := fmt.Sprintf("绑定状态：%s\n官网账号：%s\n详情：%s/qq-activity", status, s.Account, SiteURL)
 	if !s.Bound {
-		text += "\n请登录官网，从右上角 QQ 绑定入口验证本人 QQ 邮箱。"
+		text += "\n私信管理员 Nono 输入【绑定】，可验证任意官网注册邮箱后绑定。"
 	}
 	return text
 }
@@ -197,6 +206,9 @@ func (s *Store) Tick(ctx context.Context) error {
 			return err
 		}
 		if err = s.autoBindMembers(ctx, tx, c); err != nil {
+			return err
+		}
+		if err = recoverPrivateSessions(ctx, tx); err != nil {
 			return err
 		}
 		changed, err = s.settle(ctx, tx, c)
@@ -227,7 +239,7 @@ func (s *Store) LevelChecks(ctx context.Context) ([]Event, error) {
 }
 
 func (s *Store) Outbox(ctx context.Context) ([]Outbox, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,group_id,qq,text,dedup_key LIKE 'reward:%' FROM qq_activity_outbox WHERE delivered_at IS NULL AND (attempts<8 OR dedup_key LIKE 'reward:%') AND next_attempt_at<=NOW() ORDER BY id LIMIT 20`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,group_id,qq,text,dedup_key LIKE 'reward:%',scope FROM qq_activity_outbox WHERE delivered_at IS NULL AND (attempts<8 OR dedup_key LIKE 'reward:%') AND next_attempt_at<=NOW() ORDER BY id LIMIT 20`)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +247,7 @@ func (s *Store) Outbox(ctx context.Context) ([]Outbox, error) {
 	result := []Outbox{}
 	for rows.Next() {
 		var m Outbox
-		if err = rows.Scan(&m.ID, &m.GroupID, &m.QQ, &m.Text, &m.Reward); err != nil {
+		if err = rows.Scan(&m.ID, &m.GroupID, &m.QQ, &m.Text, &m.Reward, &m.Scope); err != nil {
 			return nil, err
 		}
 		m.Text = MaskText(m.Text)

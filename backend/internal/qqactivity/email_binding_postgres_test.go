@@ -233,7 +233,7 @@ func TestPostgresQQEmailBinding(t *testing.T) {
 		if err = db.QueryRow("SELECT text FROM qq_activity_outbox WHERE dedup_key='event:query'").Scan(&prompt); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(prompt, "验证本人 QQ 邮箱") || strings.Contains(prompt, "修改用户名") {
+		if !strings.Contains(prompt, "私信管理员 Nono") || strings.Contains(prompt, "修改用户名") {
 			t.Fatalf("wrong unbound guidance: %s", prompt)
 		}
 		v, code := mailChallenge(t, s, id, "12345678")
