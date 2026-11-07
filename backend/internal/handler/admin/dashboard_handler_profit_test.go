@@ -74,7 +74,8 @@ func TestDashboardHandler_ProfitSnapshotCacheIsolatedByAuthenticatedAdmin(t *tes
 	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &body))
 	require.Equal(t, 20.0, body.Data.Stats.TodayAdminActualCost)
 	require.Equal(t, 5.0, body.Data.Stats.TodayLotteryCost)
-	require.InDelta(t, 88.88, body.Data.Stats.TodayProfit, 1e-9)
+	require.InDelta(t, 5.32584, body.Data.Stats.TodayWithdrawalFee, 1e-9)
+	require.InDelta(t, 83.55416, body.Data.Stats.TodayProfit, 1e-9)
 	require.Equal(t, "miss", first.Header().Get("X-Snapshot-Cache"))
 	require.Equal(t, http.StatusNotModified, request(first.Header().Get("ETag")).Code)
 	require.Equal(t, 1, repo.calls)
@@ -85,7 +86,8 @@ func TestDashboardHandler_ProfitSnapshotCacheIsolatedByAuthenticatedAdmin(t *tes
 	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &body))
 	require.Equal(t, 30.0, body.Data.Stats.TodayAdminActualCost)
 	require.Equal(t, 5.0, body.Data.Stats.TodayLotteryCost)
-	require.InDelta(t, 78.88, body.Data.Stats.TodayProfit, 1e-9)
+	require.InDelta(t, 5.14584, body.Data.Stats.TodayWithdrawalFee, 1e-9)
+	require.InDelta(t, 73.73416, body.Data.Stats.TodayProfit, 1e-9)
 	require.NotEqual(t, first.Header().Get("ETag"), second.Header().Get("ETag"))
 	require.Equal(t, 2, repo.calls)
 }
@@ -103,6 +105,19 @@ func TestDashboardHandler_ProfitStatsAndFailureHandling(t *testing.T) {
 		require.Contains(t, rec.Body.String(), `"today_admin_actual_cost":20`)
 		require.Contains(t, rec.Body.String(), `"today_account_cost":202`)
 		require.Contains(t, rec.Body.String(), `"today_lottery_cost":5`)
+		var body struct {
+			Data struct {
+				Stats *usagestats.DashboardProfitStats `json:"stats"`
+				usagestats.DashboardProfitStats
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		profit := body.Data.DashboardProfitStats
+		if body.Data.Stats != nil {
+			profit = *body.Data.Stats
+		}
+		require.InDelta(t, 5.32584, profit.TodayWithdrawalFee, 1e-9)
+		require.InDelta(t, 83.55416, profit.TodayProfit, 1e-9)
 
 		adminID = 0
 		rec = httptest.NewRecorder()

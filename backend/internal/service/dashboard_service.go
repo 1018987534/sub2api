@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -18,6 +19,7 @@ const (
 	defaultDashboardStatsFreshTTL       = 15 * time.Second
 	defaultDashboardStatsCacheTTL       = 30 * time.Second
 	defaultDashboardStatsRefreshTimeout = 30 * time.Second
+	dashboardWithdrawalFeeRate          = 0.018
 )
 
 // ErrDashboardStatsCacheMiss 标记仪表盘缓存未命中。
@@ -142,7 +144,11 @@ func (s *DashboardService) GetDashboardProfitStats(ctx context.Context, adminID 
 	if own := usage[adminID]; own != nil {
 		profit.TodayAdminActualCost = own.TodayActualCost
 	}
-	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost
+	// Administrator self usage does not generate withdrawable revenue. Upstream
+	// costs and lottery payouts do not reduce the withdrawal fee base.
+	withdrawableRevenue := math.Max(0, stats.TodayActualCost-profit.TodayAdminActualCost)
+	profit.TodayWithdrawalFee = withdrawableRevenue * dashboardWithdrawalFeeRate
+	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost - profit.TodayWithdrawalFee
 	return profit, nil
 }
 
