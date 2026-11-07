@@ -22,6 +22,7 @@ var (
 
 type BindingStatus struct {
 	Bound   bool    `json:"bound"`
+	QQ      string  `json:"qq,omitempty"`
 	QQEmail string  `json:"qq_email,omitempty"`
 	Config  *Config `json:"config,omitempty"`
 }
@@ -63,6 +64,7 @@ func (s *Store) BindingStatus(ctx context.Context, userID int64) (BindingStatus,
 		return BindingStatus{}, err
 	}
 	view.Bound = true
+	view.QQ = qq
 	view.QQEmail = MaskEmail(qq + "@qq.com")
 	return view, nil
 }
@@ -87,6 +89,9 @@ func (s *Store) Unbind(ctx context.Context, userID int64) error {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_mail_codes SET invalidated_at=NOW() WHERE user_id=$1 AND consumed_at IS NULL AND invalidated_at IS NULL`, userID); err != nil {
+			return err
+		}
+		if _, err = tx.ExecContext(ctx, `DELETE FROM qq_activity_private_sessions WHERE qq=$1`, qq); err != nil {
 			return err
 		}
 		return audit(ctx, tx, fmt.Sprintf("user:%d", userID), "unbind", qq, map[string]bool{"history_retained": true, "rewards_retained": true})
@@ -210,7 +215,7 @@ func (s *Store) VerifyBindingEmail(ctx context.Context, userID int64, input, cha
 			if !owned {
 				return ErrBindingCode
 			}
-			view = BindingStatus{Bound: true, QQEmail: MaskEmail(qq + "@qq.com")}
+			view = BindingStatus{Bound: true, QQ: qq, QQEmail: MaskEmail(qq + "@qq.com")}
 			return nil
 		}
 		if !sent.Valid || invalid.Valid || !expires.After(time.Now()) || attempts >= 5 {
@@ -258,7 +263,7 @@ func (s *Store) VerifyBindingEmail(ctx context.Context, userID int64, input, cha
 				return err
 			}
 		}
-		view = BindingStatus{Bound: true, QQEmail: MaskEmail(qq + "@qq.com")}
+		view = BindingStatus{Bound: true, QQ: qq, QQEmail: MaskEmail(qq + "@qq.com")}
 		return nil
 	})
 	if err == nil {

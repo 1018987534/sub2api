@@ -84,6 +84,7 @@ type Outbox struct {
 	QQ      string `json:"qq"`
 	Text    string `json:"text"`
 	Reward  bool   `json:"reward"`
+	Scope   string `json:"scope"`
 }
 type Candidate struct {
 	ID     int64

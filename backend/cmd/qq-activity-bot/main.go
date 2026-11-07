@@ -54,6 +54,8 @@ type bot struct {
 }
 type rawEvent struct {
 	PostType      string          `json:"post_type"`
+	RequestType   string          `json:"request_type"`
+	Flag          string          `json:"flag"`
 	MessageType   string          `json:"message_type"`
 	NoticeType    string          `json:"notice_type"`
 	SubType       string          `json:"sub_type"`
@@ -264,6 +266,23 @@ func (b *bot) record(raw []byte) error {
 		b.mu.Unlock()
 		return nil
 	}
+	if !qqactivity.ValidQQ(e.UserID.String()) || b.robot(e.UserID.String()) {
+		return nil
+	}
+	if e.PostType == "message" && e.MessageType == "private" {
+		return b.recordPrivate(e, raw)
+	}
+	if (e.PostType == "request" && e.RequestType == "friend") || (e.PostType == "notice" && e.NoticeType == "friend_add") {
+		if e.PostType == "request" && (e.Flag == "" || len(e.Flag) > 1024) {
+			return nil
+		}
+		e.Message, e.RawMessage = nil, ""
+		data, err := json.Marshal(e)
+		if err != nil {
+			return err
+		}
+		return atomicWrite(filepath.Join(b.cfg.StateDir, "incoming", fmt.Sprintf("%020d-%s.json", e.Time, hash(data))), data)
+	}
 	if !b.configuredGroup(e.GroupID.String()) || !qqactivity.ValidQQ(e.UserID.String()) || b.robot(e.UserID.String()) {
 		return nil
 	}
@@ -280,6 +299,15 @@ func (b *bot) record(raw []byte) error {
 			}
 			b.cooldown[key] = time.Now()
 		}
+		if code != "" {
+			// A mistakenly pasted OTP/email is never kept in the group spool.
+			e.Message, e.RawMessage = nil, "绑定 invalid"
+			var err error
+			raw, err = json.Marshal(e)
+			if err != nil {
+				return err
+			}
+		}
 	} else if e.PostType != "notice" || (e.NoticeType != "group_increase" && e.NoticeType != "group_decrease") {
 		return nil
 	}
@@ -294,9 +322,15 @@ func (b *bot) consume(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
+	if filepath.Ext(path) == ".private" {
+		return b.consumePrivate(ctx, path, raw)
+	}
 	var e rawEvent
 	if err = decode(raw, &e); err != nil {
 		return err
+	}
+	if e.RequestType == "friend" || e.NoticeType == "friend_add" {
+		return b.consumeFriend(ctx, path, e)
 	}
 	event := qqactivity.Event{ID: hash(raw), GroupID: e.GroupID.String(), QQ: e.UserID.String(), Time: e.Time}
 	if e.NoticeType == "group_decrease" {
@@ -388,6 +422,12 @@ func (b *bot) outputs(ctx context.Context) error {
 		return err
 	}
 	for _, m := range messages {
+		if m.Scope == "private" {
+			if err := b.outputPrivate(ctx, m); err != nil {
+				return err
+			}
+			continue
+		}
 		if !b.configuredGroup(m.GroupID) {
 			continue
 		}
@@ -405,7 +445,11 @@ func (b *bot) outputs(ctx context.Context) error {
 		if !inGroup {
 			recipient = map[string]any{"type": "text", "data": map[string]string{"text": qqactivity.MaskEmail(m.QQ+"@qq.com") + "："}}
 		}
-		params := map[string]any{"group_id": m.GroupID, "message": []any{recipient, map[string]any{"type": "text", "data": map[string]string{"text": " " + qqactivity.MaskText(m.Text)}}}}
+		segments := []any{recipient, map[string]any{"type": "text", "data": map[string]string{"text": " " + qqactivity.MaskText(m.Text)}}}
+		if inGroup && strings.HasPrefix(m.Text, "欢迎入群，") {
+			segments = []any{map[string]any{"type": "text", "data": map[string]string{"text": "欢迎入群 "}}, recipient, map[string]any{"type": "text", "data": map[string]string{"text": "，" + strings.TrimPrefix(m.Text, "欢迎入群，")}}}
+		}
+		params := map[string]any{"group_id": m.GroupID, "message": segments}
 		var receipt struct {
 			MessageID json.Number `json:"message_id"`
 		}
@@ -476,15 +520,28 @@ func (b *bot) worker(ctx context.Context) {
 				if err != nil {
 					return
 				}
+				privateEntries, err := filepath.Glob(filepath.Join(b.cfg.StateDir, "incoming", "*.private"))
+				if err != nil {
+					return
+				}
+				entries = append(entries, privateEntries...)
 				sort.Strings(entries)
-				for i, p := range entries {
-					if i >= 30 {
+				queueOK := true
+				processed := 0
+				for _, p := range entries {
+					if info, e := os.Stat(p); e == nil && info.ModTime().After(time.Now()) {
+						continue
+					}
+					if processed >= 30 {
 						break
 					}
+					processed++
 					if err = b.consume(operation, p); err != nil {
 						log.Print("queued activity event deferred")
-						b.heartbeatFile(false)
-						return
+						queueOK = false
+						retry := time.Now().Add(time.Minute)
+						_ = os.Chtimes(p, retry, retry)
+						continue
 					}
 				}
 				if err = b.bridge(operation, "tick", nil, nil); err != nil {
@@ -502,7 +559,7 @@ func (b *bot) worker(ctx context.Context) {
 					b.heartbeatFile(false)
 					return
 				}
-				b.heartbeatFile(true)
+				b.heartbeatFile(queueOK)
 			}()
 		}
 	}

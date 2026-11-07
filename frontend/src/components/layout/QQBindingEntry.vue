@@ -14,6 +14,7 @@ const confirmUnbind = ref(false)
 const unbinding = ref(false)
 const notice = ref('')
 const label = computed(() => status.value?.bound ? 'QQ 已绑定' : loading.value ? 'QQ 查询中' : error.value ? 'QQ 状态重试' : 'QQ 未绑定')
+const boundIdentity = computed(() => status.value?.qq || status.value?.qq_email || '')
 let timer: ReturnType<typeof setInterval> | undefined
 let disposed = false
 let revision = 0
@@ -37,7 +38,7 @@ async function unbind() {
   try {
     setStatus(await qqActivityAPI.unbind())
     confirmUnbind.value = false
-    notice.value = '已取消绑定。历史和领奖记录已保留，重新绑定需验证 QQ 邮箱。'
+    notice.value = '已取消绑定。历史和领奖记录已保留，重新绑定可私信 Nono 输入【绑定】。'
     window.dispatchEvent(new Event('qq-binding-changed'))
   } catch { error.value = '取消绑定未完成，请稍后重试；若绑定受限，请联系管理员。' }
   finally { unbinding.value = false }
@@ -61,7 +62,7 @@ onBeforeUnmount(() => {
     type="button"
     data-testid="qq-binding-entry"
     :aria-label="label"
-    :title="status?.bound ? `QQ 已绑定：${status.qq_email}` : '查看绑定状态或验证 QQ 邮箱'"
+    :title="status?.bound ? `QQ 已绑定：${boundIdentity}` : '查看绑定状态或验证 QQ 邮箱'"
     class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium transition-colors hover:bg-gray-100 dark:hover:bg-dark-800 sm:px-2.5 sm:text-sm"
     :class="status?.bound ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'"
     @click="open"
@@ -73,8 +74,8 @@ onBeforeUnmount(() => {
     <QQActivityNotice v-if="status?.config" :config="status.config" class="mb-4" />
     <p v-if="notice" role="status" class="mb-4 text-sm text-emerald-600">{{ notice }}</p>
     <div v-if="status?.bound" class="space-y-3">
-      <p class="font-medium text-emerald-600">已绑定 QQ：{{ status.qq_email }}</p>
-      <p class="text-sm text-gray-500">已有绑定继续有效，无需重复验证。</p>
+      <p class="font-medium text-emerald-600">已绑定 QQ：{{ boundIdentity }}</p>
+      <p class="text-sm text-gray-500">已有绑定继续有效。更换绑定请私信管理员 Nono 输入【绑定】，按提示验证新账号邮箱；余额和已确认奖励仍归原账号。</p>
       <div v-if="confirmUnbind" class="space-y-3 rounded-lg bg-amber-50 p-3 dark:bg-amber-950/20">
         <p class="text-sm">确认取消当前 QQ 绑定？解绑后停止自动匹配，历史和领奖记录保留，重新绑定不会重复发放新人奖励。</p>
         <button class="btn btn-danger" :disabled="unbinding" @click="unbind">{{ unbinding ? '处理中…' : '确认取消绑定' }}</button>

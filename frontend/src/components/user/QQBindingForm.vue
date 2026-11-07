@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { qqActivityAPI, type QQBindingStatus, type QQEmailChallenge } from '@/api/qqActivity'
 
 withDefaults(defineProps<{ intro?: string; note?: string }>(), {
-  intro: '注册 QQ 邮箱能匹配到群成员时会自动绑定，已有绑定继续有效。使用其他邮箱注册的，请在此验证本人 QQ 邮箱。',
-  note: '每个 QQ 只能关联一个官网账号。注册邮箱保持不变，修改个人资料中的用户名不再用于绑定。',
+  intro: '注册 QQ 邮箱匹配到群成员时仍会自动绑定。任意注册邮箱、自定义 QQ 邮箱或更换绑定，请私信管理员 Nono 输入【绑定】。本页保留数字 QQ 邮箱验证。',
+  note: '每个 QQ 只能关联一个官网账号，注册邮箱保持不变。曾绑定过的 QQ 或官网账号不会重新获得新人资格，换绑不会转移余额或已确认奖励。',
 })
 const emit = defineEmits<{ verified: [status: QQBindingStatus] }>()
 const email = ref('')
@@ -56,6 +56,7 @@ onBeforeUnmount(() => { disposed = true; clearInterval(timer) })
 
 <template>
   <form class="space-y-4" @submit.prevent="verify">
+    <p class="text-sm text-gray-600 dark:text-dark-300">其他邮箱或更换绑定：私信管理员 Nono，发送【绑定】，按提示验证官网注册邮箱；验证码只在该私信中填写。</p>
     <p v-if="intro" class="whitespace-pre-line break-words text-sm text-gray-500 dark:text-dark-400">{{ intro }}</p>
     <label class="block space-y-2 text-sm">
       <span class="font-medium">QQ 邮箱</span>
