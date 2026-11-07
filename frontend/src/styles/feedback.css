@@ -1,0 +1,98 @@
+.feedback-page {
+  --feedback-paper: #fffefa;
+  --feedback-line: #e8e1d7;
+  --feedback-halo: #f9e7df;
+  --feedback-hero: #faf1e9;
+  --feedback-ink: #a44943;
+  --feedback-soft-ink: #c29380;
+  --feedback-note: #f7f5ef;
+  --feedback-rule: #e9e7df;
+}
+
+.dark .feedback-page {
+  --feedback-paper: #17212d;
+  --feedback-line: #36414b;
+  --feedback-halo: #3e3030;
+  --feedback-hero: #2b282c;
+  --feedback-ink: #f0aaa0;
+  --feedback-soft-ink: #aa8277;
+  --feedback-note: #1b2531;
+  --feedback-rule: #303b47;
+}
+
+.feedback-hero {
+  border: 1px solid var(--feedback-line);
+  border-radius: 20px;
+  background: linear-gradient(110deg, var(--feedback-hero), var(--feedback-paper) 80%);
+}
+
+.feedback-letter {
+  overflow: hidden;
+  border: 1px solid var(--feedback-line);
+  border-radius: 18px;
+  background: var(--feedback-paper);
+  box-shadow: 0 4px 16px rgb(60 45 30 / 3%);
+}
+
+.feedback-letter::before {
+  display: block;
+  height: 5px;
+  background: repeating-linear-gradient(135deg, #df9586 0 14px, transparent 14px 25px, #83b6a9 25px 39px, transparent 39px 50px);
+  content: '';
+}
+
+.feedback-postmark {
+  display: flex;
+  min-width: 64px;
+  height: 46px;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--feedback-soft-ink);
+  border-radius: 8px;
+  color: var(--feedback-ink);
+  font-size: 11px;
+  letter-spacing: 1px;
+  transform: rotate(-6deg);
+}
+
+.feedback-input {
+  border-color: var(--feedback-line);
+  background-color: transparent;
+}
+
+.feedback-writing {
+  min-height: 150px;
+  background-image: repeating-linear-gradient(transparent 0 25px, var(--feedback-rule) 25px 26px);
+  background-position: 0 12px;
+  line-height: 26px;
+}
+
+.feedback-submit {
+  border-color: #bc514b;
+  background: #bc514b;
+  color: #fff;
+}
+
+.feedback-submit:hover:not(:disabled) {
+  border-color: #a7423d;
+  background: #a7423d;
+}
+
+.feedback-submit:focus-visible {
+  outline: 2px solid var(--feedback-ink);
+  outline-offset: 3px;
+}
+
+.feedback-note {
+  border: 1px dashed var(--feedback-line);
+  border-radius: 16px;
+  background: var(--feedback-note);
+}
+
+.feedback-ink {
+  color: var(--feedback-ink);
+}
+
+.feedback-divider {
+  border-color: var(--feedback-line);
+}
