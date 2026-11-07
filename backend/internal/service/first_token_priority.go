@@ -385,8 +385,8 @@ func (s *SettingService) FirstTokenPriorityEnabled(ctx context.Context) bool {
 }
 
 // firstTokenPriorityOrder returns every candidate. The fast pool retains the
-// caller's low-rate order, optionally refined by cache rate above 80% within
-// that pool according to the shared fast-pool priority setting.
+// caller's low-rate order, refined by the selected strategy and an optional
+// cache-rate priority threshold within that pool.
 // The slow pool uses normal total duration. When an adaptive probe is due,
 // a shared lease promotes exactly one account across all gateway instances.
 func firstTokenPriorityOrder(ctx context.Context, candidates []*Account, cache FirstTokenLatencyStatsCache) []int64 {
@@ -457,12 +457,7 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 			fastPoolEnd++
 		}
 		if fastPoolEnd > 1 {
-			switch cacheStatsService.fastPoolPriorityMode(ctx) {
-			case FastPoolPriorityLatency:
-				orderFastPoolByLatency(ctx, baseline[:fastPoolEnd], stats, cacheStatsService)
-			case FastPoolPriorityIntelligence:
-				orderFastPoolByCacheRate(ctx, baseline[:fastPoolEnd], cacheStatsService)
-			}
+			orderFastPool(ctx, baseline[:fastPoolEnd], stats, cacheStatsService.fastPoolPrioritySettings(ctx), cacheStatsService)
 		}
 	}
 	ordered := append(baseline, fallbackAccountIDs...)
@@ -495,57 +490,45 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 	return ordered
 }
 
-// orderFastPoolByCacheRate refines the caller's upstream-rate order only when
-// the supplied candidates belong to the fast pool. Unknown/failed statistics have no priority;
-// equal cache rates and measured rates at or below 80% retain the caller order.
-func orderFastPoolByCacheRate(ctx context.Context, accountIDs []int64, cacheStatsService *RateLimitService) {
+// orderFastPool first promotes measured cache rates meeting the optional
+// inclusive threshold. Both tiers then follow the selected strategy, with
+// ties retaining the caller's low-rate order. Unknown cache rates never qualify.
+func orderFastPool(ctx context.Context, accountIDs []int64, latencyStats map[int64]FirstTokenLatencyStats, settings *FastPoolPrioritySettings, cacheStatsService *RateLimitService) {
 	if len(accountIDs) <= 1 {
 		return
 	}
-	stats := cacheStatsService.loadAccountCacheStatsCached(ctx, accountIDs)
 	rates := make(map[int64]float64, len(accountIDs))
-	for _, accountID := range accountIDs {
-		entry := stats[accountID]
-		if !entry.available || entry.stats.CacheRateDenominator <= 0 {
-			continue
-		}
-		rate := float64(entry.stats.CacheReadTokens) / float64(entry.stats.CacheRateDenominator)
-		if rate > 0.8 {
-			rates[accountID] = rate
+	if settings.Mode == FastPoolPriorityIntelligence || settings.CacheRateThresholdPercent != nil {
+		stats := cacheStatsService.loadAccountCacheStatsCached(ctx, accountIDs)
+		for _, accountID := range accountIDs {
+			entry := stats[accountID]
+			if entry.available && entry.stats.CacheRateDenominator > 0 {
+				rates[accountID] = float64(entry.stats.CacheReadTokens) / float64(entry.stats.CacheRateDenominator)
+			}
 		}
 	}
 	sort.SliceStable(accountIDs, func(i, j int) bool {
-		return rates[accountIDs[i]] > rates[accountIDs[j]]
-	})
-}
-
-// orderFastPoolByLatency keeps the existing cache-rate fast-pool admission
-// rule, then orders accounts above the 80% cache threshold by measured
-// normal total duration. Accounts at or below the threshold retain the
-// cache-rate mode fallback order (the existing low-rate order).
-func orderFastPoolByLatency(ctx context.Context, accountIDs []int64, latencyStats map[int64]FirstTokenLatencyStats, cacheStatsService *RateLimitService) {
-	if len(accountIDs) <= 1 {
-		return
-	}
-	orderFastPoolByCacheRate(ctx, accountIDs, cacheStatsService)
-	cacheStats := cacheStatsService.loadAccountCacheStatsCached(ctx, accountIDs)
-	highCacheEnd := 0
-	for _, accountID := range accountIDs {
-		entry := cacheStats[accountID]
-		if !entry.available || entry.stats.CacheRateDenominator <= 0 || float64(entry.stats.CacheReadTokens)/float64(entry.stats.CacheRateDenominator) <= 0.8 {
-			break
+		leftID, rightID := accountIDs[i], accountIDs[j]
+		leftRate, leftKnown := rates[leftID]
+		rightRate, rightKnown := rates[rightID]
+		if threshold := settings.CacheRateThresholdPercent; threshold != nil {
+			leftPriority := leftKnown && leftRate >= *threshold/100
+			rightPriority := rightKnown && rightRate >= *threshold/100
+			if leftPriority != rightPriority {
+				return leftPriority
+			}
 		}
-		highCacheEnd++
-	}
-	if highCacheEnd <= 1 {
-		return
-	}
-	sort.SliceStable(accountIDs[:highCacheEnd], func(i, j int) bool {
-		left, right := latencyStats[accountIDs[i]], latencyStats[accountIDs[j]]
-		if left.PredictedMS != right.PredictedMS {
-			return left.PredictedMS < right.PredictedMS
+		switch settings.Mode {
+		case FastPoolPriorityIntelligence:
+			if leftKnown != rightKnown {
+				return leftKnown
+			}
+			return leftRate > rightRate
+		case FastPoolPriorityLatency:
+			return latencyStats[leftID].PredictedMS < latencyStats[rightID].PredictedMS
+		default:
+			return false
 		}
-		return accountIDs[i] < accountIDs[j]
 	})
 }
 
