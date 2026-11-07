@@ -30,16 +30,16 @@ func TestFirstTokenPriorityAllFastCacheRateOrder(t *testing.T) {
 			want: []int64{3, 2, 1},
 		},
 		{
-			name: "at or below eighty retains upstream rate order",
+			name: "unset threshold sorts even below eighty by cache rate",
 			stats: map[int64]AccountCacheStats{
 				1: {CacheReadTokens: 50, CacheRateDenominator: 100},
 				2: {CacheReadTokens: 80, CacheRateDenominator: 100},
 				3: {CacheReadTokens: 79, CacheRateDenominator: 100},
 			},
-			want: []int64{1, 2, 3},
+			want: []int64{2, 3, 1},
 		},
 		{
-			name: "only strictly above eighty is promoted",
+			name: "small cache rate differences retain cache ordering",
 			stats: map[int64]AccountCacheStats{
 				1: {CacheReadTokens: 80, CacheRateDenominator: 100},
 				2: {CacheReadTokens: 80001, CacheRateDenominator: 100000},
@@ -57,13 +57,13 @@ func TestFirstTokenPriorityAllFastCacheRateOrder(t *testing.T) {
 			want: []int64{1, 2, 3},
 		},
 		{
-			name: "lower cache tail still uses upstream rate",
+			name: "lower cache tail also follows cache mode",
 			stats: map[int64]AccountCacheStats{
 				1: {CacheReadTokens: 5, CacheRateDenominator: 100},
 				2: {CacheReadTokens: 79, CacheRateDenominator: 100},
 				3: {CacheReadTokens: 95, CacheRateDenominator: 100},
 			},
-			want: []int64{3, 1, 2},
+			want: []int64{3, 2, 1},
 		},
 		{
 			name: "uncalculable rate is not treated as one hundred percent",
@@ -110,14 +110,14 @@ func TestFirstTokenPriorityAllFastCacheRateOrder(t *testing.T) {
 			want:         []int64{2, 1, 3},
 		},
 		{
-			name: "mixed pools below eighty still rank fast accounts by upstream rate",
+			name: "mixed pools below eighty still rank fast accounts by cache rate",
 			stats: map[int64]AccountCacheStats{
 				1: {CacheReadTokens: 50, CacheRateDenominator: 100},
 				2: {CacheReadTokens: 80, CacheRateDenominator: 100},
 				3: {CacheReadTokens: 99, CacheRateDenominator: 100},
 			},
 			slowID: 3,
-			want:   []int64{1, 2, 3},
+			want:   []int64{2, 1, 3},
 		},
 	}
 	for _, tt := range tests {

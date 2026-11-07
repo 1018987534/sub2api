@@ -1748,6 +1748,7 @@ export type FastPoolPriorityMode = "intelligence" | "latency" | "rate";
 
 export interface FastPoolPrioritySettings {
   mode: FastPoolPriorityMode;
+  cache_rate_threshold_percent: number | null;
 }
 
 export async function getFastPoolPrioritySettings(): Promise<FastPoolPrioritySettings> {
@@ -1759,10 +1760,11 @@ export async function getFastPoolPrioritySettings(): Promise<FastPoolPrioritySet
 
 export async function updateFastPoolPrioritySettings(
   mode: FastPoolPriorityMode,
+  cacheRateThresholdPercent: number | null,
 ): Promise<FastPoolPrioritySettings> {
   const { data } = await apiClient.put<FastPoolPrioritySettings>(
     "/admin/settings/fast-pool-priority",
-    { mode },
+    { mode, cache_rate_threshold_percent: cacheRateThresholdPercent },
   );
   return data;
 }

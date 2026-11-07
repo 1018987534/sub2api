@@ -281,7 +281,7 @@
           </div>
           <TotalDurationCircuitBreakerControl />
           <FastPoolThresholdControl />
-          <FastPoolPriorityControl @change="fastPoolPriorityMode = $event" />
+          <FastPoolPriorityControl @change="fastPoolPrioritySettings = $event" />
           <div v-if="firstTokenLoading" class="flex min-h-32 items-center justify-center border-t border-gray-100 dark:border-dark-700">
             <LoadingSpinner size="md" />
           </div>
@@ -577,7 +577,7 @@ import Select from '@/components/common/Select.vue'
 import TotalDurationCircuitBreakerControl from '@/components/admin/TotalDurationCircuitBreakerControl.vue'
 import FastPoolPriorityControl from '@/components/admin/FastPoolPriorityControl.vue'
 import FastPoolThresholdControl from '@/components/admin/FastPoolThresholdControl.vue'
-import type { FastPoolPriorityMode } from '@/api/admin/settings'
+import type { FastPoolPrioritySettings } from '@/api/admin/settings'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
@@ -618,7 +618,7 @@ const rankingError = ref(false)
 const firstTokenLoading = ref(false)
 const firstTokenError = ref(false)
 const firstTokenMetrics = ref<AccountFirstTokenLatencyMetric[]>([])
-const fastPoolPriorityMode = ref<FastPoolPriorityMode>('intelligence')
+const fastPoolPrioritySettings = ref<FastPoolPrioritySettings>({ mode: 'intelligence', cache_rate_threshold_percent: 80 })
 const firstTokenGroupFilter = ref<string | number>('all')
 const firstTokenManualProbeLoading = ref<Set<number>>(new Set())
 let firstTokenRefreshInFlight = false
@@ -658,28 +658,23 @@ const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
     section.metrics.sort((left, right) => {
       if (left.is_fast_pool !== right.is_fast_pool) return left.is_fast_pool ? -1 : 1
       if (left.is_fast_pool && right.is_fast_pool) {
-        if (fastPoolPriorityMode.value === 'intelligence') {
-          const priorityCacheRate = (metric: AccountFirstTokenLatencyMetric) =>
-            metric.cache_rate_denominator > 0 && metric.cache_rate != null && metric.cache_rate > 0.8
-              ? metric.cache_rate : 0
-          const cacheDifference = priorityCacheRate(right) - priorityCacheRate(left)
+        const measuredCacheRate = (metric: AccountFirstTokenLatencyMetric) =>
+          metric.cache_rate_denominator > 0 && metric.cache_rate != null ? metric.cache_rate : -1
+        const leftCacheRate = measuredCacheRate(left)
+        const rightCacheRate = measuredCacheRate(right)
+        const threshold = fastPoolPrioritySettings.value.cache_rate_threshold_percent
+        if (threshold !== null) {
+          const leftPriority = leftCacheRate >= threshold / 100
+          const rightPriority = rightCacheRate >= threshold / 100
+          if (leftPriority !== rightPriority) return leftPriority ? -1 : 1
+        }
+        if (fastPoolPrioritySettings.value.mode === 'intelligence') {
+          const cacheDifference = rightCacheRate - leftCacheRate
           if (cacheDifference !== 0) return cacheDifference
-        } else if (fastPoolPriorityMode.value === 'latency') {
-          const priorityCacheRate = (metric: AccountFirstTokenLatencyMetric) =>
-            metric.cache_rate_denominator > 0 && metric.cache_rate != null && metric.cache_rate > 0.8
-              ? metric.cache_rate : 0
-          const leftCacheRate = priorityCacheRate(left)
-          const rightCacheRate = priorityCacheRate(right)
-          const leftHighCache = leftCacheRate > 0
-          const rightHighCache = rightCacheRate > 0
-          if (leftHighCache !== rightHighCache) return leftHighCache ? -1 : 1
-          if (leftHighCache && rightHighCache) {
-            const leftDuration = left.normal_total_ms ?? left.predicted_ms
-            const rightDuration = right.normal_total_ms ?? right.predicted_ms
-            if (leftDuration !== rightDuration) return leftDuration - rightDuration
-          } else if (leftCacheRate !== rightCacheRate) {
-            return rightCacheRate - leftCacheRate
-          }
+        } else if (fastPoolPrioritySettings.value.mode === 'latency') {
+          const leftDuration = left.normal_total_ms ?? left.predicted_ms
+          const rightDuration = right.normal_total_ms ?? right.predicted_ms
+          if (leftDuration !== rightDuration) return leftDuration - rightDuration
         }
         const leftRate = left.scheduling_rate_multiplier ?? Number.POSITIVE_INFINITY
         const rightRate = right.scheduling_rate_multiplier ?? Number.POSITIVE_INFINITY
