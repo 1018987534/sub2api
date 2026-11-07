@@ -188,6 +188,69 @@ func TestTotalLatencyStatsCacheThirtyThreeSecondBoundaryDoesNotExitFastPool(t *t
 	require.Zero(t, stats[accountID].SlowStreak)
 }
 
+func TestTotalLatencyStatsCacheAppliesConfigurablePoolThresholds(t *testing.T) {
+	for _, scenario := range []struct {
+		name                                  string
+		enterSeconds, exitSeconds, durationMS int
+		initialFast, wantFast                 bool
+		initialStreak                         int
+	}{
+		{"enter at lowered boundary", 28, 31, 28000, false, true, 0},
+		{"do not enter above lowered boundary", 28, 31, 28001, false, false, 0},
+		{"enter above old fixed threshold", 32, 35, 31000, false, true, 0},
+		{"exit below old fixed threshold", 28, 31, 32000, true, false, 0},
+		{"stay fast at exit boundary", 28, 31, 31000, true, true, 0},
+		{"retain fast in hysteresis band", 28, 31, 30000, true, true, 0},
+		{"retain slow in hysteresis band", 28, 31, 30000, false, false, 0},
+		{"changed thresholds reset old confirmation streak", 28, 31, 27000, false, true, 2},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			_, rdb, cache := newTotalLatencyTestCache(t)
+			ctx := context.Background()
+			const accountID int64 = 281
+			statsKey := fmt.Sprintf("%s%d", totalLatencyStatsPrefix, accountID)
+			samplesKey := fmt.Sprintf("%s%d", totalLatencySamplesPrefix, accountID)
+			nowMS := time.Now().UnixMilli()
+			fast := "0"
+			if scenario.initialFast {
+				fast = "1"
+			}
+			require.NoError(t, rdb.HSet(ctx, statsKey, "is_fast", fast, "updated_at_ms", nowMS,
+				"enter_fast_streak", scenario.initialStreak, "exit_slow_streak", 0).Err())
+			for i := 0; i < 19; i++ {
+				require.NoError(t, rdb.ZAdd(ctx, samplesKey, redis.Z{Score: float64(nowMS), Member: fmt.Sprintf("%d:seed-%d:%d", nowMS, i, scenario.durationMS)}).Err())
+			}
+			policy := service.DefaultTotalDurationLatencyPolicy()
+			policy.FastPoolEnterThreshold = time.Duration(scenario.enterSeconds) * time.Second
+			policy.FastPoolExitThreshold = time.Duration(scenario.exitSeconds) * time.Second
+			for i := 1; i <= 3; i++ {
+				require.NoError(t, cache.RecordSampleWithPolicy(ctx, accountID, fmt.Sprintf("custom-%d", i), scenario.durationMS, policy))
+				stats, err := cache.GetStatsBatch(ctx, []int64{accountID})
+				require.NoError(t, err)
+				want := scenario.initialFast
+				if i == 3 {
+					want = scenario.wantFast
+				}
+				require.Equal(t, want, stats[accountID].ReliableFast, "sample %d", i)
+			}
+		})
+	}
+}
+
+func TestTotalLatencyStatsCacheDimensionAdapterUsesConfiguredThresholds(t *testing.T) {
+	_, _, cache := newTotalLatencyTestCache(t)
+	policy := service.DefaultTotalDurationLatencyPolicy()
+	policy.FastPoolEnterThreshold, policy.FastPoolExitThreshold = 32*time.Second, 35*time.Second
+	cache.ConfigureTotalDurationLatencyPolicy(policy)
+	dimension := service.TotalDurationLatencyDimension{AccountID: 282}
+	for i := 0; i < 22; i++ {
+		require.NoError(t, cache.RecordSampleForDimension(context.Background(), dimension, fmt.Sprintf("dimension-%d", i), 31000))
+	}
+	stats, err := cache.GetStatsBatchForDimensions(context.Background(), []service.TotalDurationLatencyDimension{dimension})
+	require.NoError(t, err)
+	require.True(t, stats[dimension].ReliableFast)
+}
+
 func TestTotalLatencyStatsCacheRecentMinutePlusSamplesDoNotResetHistory(t *testing.T) {
 	mr, _, cache := newTotalLatencyTestCache(t)
 	ctx := context.Background()

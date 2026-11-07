@@ -78,21 +78,34 @@ type TotalDurationLatencyMetric struct {
 }
 
 type TotalDurationLatencyPolicy struct {
-	CircuitBreakThreshold time.Duration
-	CircuitBreakCount     int
-	CircuitBreakWindow    time.Duration
+	FastPoolEnterThreshold time.Duration
+	FastPoolExitThreshold  time.Duration
+	CircuitBreakThreshold  time.Duration
+	CircuitBreakCount      int
+	CircuitBreakWindow     time.Duration
 }
 
 func DefaultTotalDurationLatencyPolicy() TotalDurationLatencyPolicy {
 	return TotalDurationLatencyPolicy{
-		CircuitBreakThreshold: 3 * time.Minute,
-		CircuitBreakCount:     16, // Trip after more than 15 qualifying requests.
-		CircuitBreakWindow:    30 * time.Minute,
+		FastPoolEnterThreshold: 30 * time.Second,
+		FastPoolExitThreshold:  33 * time.Second,
+		CircuitBreakThreshold:  3 * time.Minute,
+		CircuitBreakCount:      16, // Trip after more than 15 qualifying requests.
+		CircuitBreakWindow:     30 * time.Minute,
 	}
 }
 
 func NormalizeTotalDurationLatencyPolicy(policy TotalDurationLatencyPolicy) TotalDurationLatencyPolicy {
 	defaults := DefaultTotalDurationLatencyPolicy()
+	if policy.FastPoolEnterThreshold <= 0 {
+		policy.FastPoolEnterThreshold = defaults.FastPoolEnterThreshold
+	}
+	if policy.FastPoolExitThreshold <= 0 {
+		policy.FastPoolExitThreshold = defaults.FastPoolExitThreshold
+	}
+	if policy.FastPoolExitThreshold < policy.FastPoolEnterThreshold {
+		policy.FastPoolExitThreshold = policy.FastPoolEnterThreshold
+	}
 	if policy.CircuitBreakThreshold <= 0 {
 		policy.CircuitBreakThreshold = defaults.CircuitBreakThreshold
 	}

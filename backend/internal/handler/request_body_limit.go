@@ -38,6 +38,22 @@ func buildBodyTooLargeMessage(limit int64) string {
 	return fmt.Sprintf("Request body too large, limit is %s", formatBodyLimit(limit))
 }
 
+// Keep already buffered image bodies on their existing memory reservation.
+// Wrapping PrereadBody would hide its zero-copy path and charge the body again.
+func readRequestBodyWithLimit(c *gin.Context, maxBytes int64) ([]byte, error) {
+	if _, preread := c.Request.Body.(*pkghttputil.PrereadBody); !preread {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+	}
+	body, err := pkghttputil.ReadRequestBodyWithPrealloc(c.Request)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > maxBytes {
+		return nil, &http.MaxBytesError{Limit: maxBytes}
+	}
+	return body, nil
+}
+
 func readLenientJSONRequestBodyWithPrealloc(req *http.Request, cfg *config.Config) ([]byte, error) {
 	return pkghttputil.ReadLenientJSONRequestBodyWithPrealloc(req, gatewayMaxBodySize(cfg))
 }

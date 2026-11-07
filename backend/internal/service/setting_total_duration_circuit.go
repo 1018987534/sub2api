@@ -75,6 +75,12 @@ func (s *SettingService) GetTotalDurationLatencyPolicy(ctx context.Context) (Tot
 	if found {
 		policy.CircuitBreakWindow = time.Duration(stored) * time.Second
 	}
+	thresholds, err := s.GetFastPoolThresholdSettings(dbCtx)
+	if err != nil {
+		return policy, err
+	}
+	policy.FastPoolEnterThreshold = time.Duration(thresholds.EnterSeconds) * time.Second
+	policy.FastPoolExitThreshold = time.Duration(thresholds.ExitSeconds) * time.Second
 	return policy, nil
 }
 
