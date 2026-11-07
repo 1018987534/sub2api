@@ -21,8 +21,6 @@ const totalLatencyDimensionStatsPrefix = "scheduler:total_duration:dimension:acc
 const totalLatencyDimensionSamplesPrefix = "scheduler:total_duration:dimension:samples:"
 const totalLatencyDimensionProbePrefix = "scheduler:total_duration:dimension:probe:"
 const totalLatencyDimensionManualProbePrefix = "scheduler:total_duration:dimension:manual_probe:"
-const totalLatencyFastThresholdMS = 30_000
-const totalLatencySlowThresholdMS = 33_000
 
 // Each completed, billable stream updates one timestamped 24-hour window and
 // atomically derives the scheduling score. The score is the 10%-90% trimmed
@@ -113,6 +111,14 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 	local is_fast = tonumber(redis.call('HGET', stats_key, 'is_fast')) or 0
 	local enter_fast_streak = tonumber(redis.call('HGET', stats_key, 'enter_fast_streak')) or 0
 	local exit_slow_streak = tonumber(redis.call('HGET', stats_key, 'exit_slow_streak')) or 0
+	-- A new rule starts a fresh confirmation streak; keep the current pool
+	-- until three aggregates qualify under the new thresholds.
+	local previous_fast_threshold = tonumber(redis.call('HGET', stats_key, 'fast_threshold_ms')) or 30000
+	local previous_slow_threshold = tonumber(redis.call('HGET', stats_key, 'slow_threshold_ms')) or 33000
+	if previous_fast_threshold ~= fast_threshold_ms or previous_slow_threshold ~= slow_threshold_ms then
+		enter_fast_streak = 0
+		exit_slow_streak = 0
+	end
 	if not old_updated or now_ms - old_updated > primary_window_ms then
 		is_fast = 0
 		enter_fast_streak = 0
@@ -183,6 +189,7 @@ var totalLatencyStatsRecordScript = redis.NewScript(`
 			'score_version', '5')
 	end
 
+	redis.call('HSET', stats_key, 'fast_threshold_ms', tostring(fast_threshold_ms), 'slow_threshold_ms', tostring(slow_threshold_ms))
 	redis.call('EXPIRE', stats_key, stats_ttl_seconds)
 	redis.call('DEL', probe_key)
 	-- A stream already in flight when the admin clicked is not the requested
@@ -306,8 +313,8 @@ func (c *firstTokenLatencyStatsCache) RecordSampleWithPolicy(ctx context.Context
 		20,
 		int64((6*time.Hour)/time.Millisecond),
 		int64((24*time.Hour)/time.Millisecond),
-		totalLatencyFastThresholdMS,
-		totalLatencySlowThresholdMS,
+		policy.FastPoolEnterThreshold.Milliseconds(),
+		policy.FastPoolExitThreshold.Milliseconds(),
 		3,
 		int64(policy.CircuitBreakThreshold/time.Millisecond),
 		policy.CircuitBreakCount,
@@ -342,7 +349,7 @@ func (c *firstTokenLatencyStatsCache) RecordSampleForDimension(ctx context.Conte
 		[]string{statsKey, samplesKey, dedupeKey, probeKey, manualProbeKey},
 		durationMs, int(statsTTL.Seconds()), int(dedupeTTL.Seconds()), 20,
 		int64((6*time.Hour)/time.Millisecond), int64((24*time.Hour)/time.Millisecond),
-		totalLatencyFastThresholdMS, totalLatencySlowThresholdMS, 3,
+		policy.FastPoolEnterThreshold.Milliseconds(), policy.FastPoolExitThreshold.Milliseconds(), 3,
 		int64(policy.CircuitBreakThreshold/time.Millisecond), policy.CircuitBreakCount,
 		int64(policy.CircuitBreakWindow/time.Millisecond), requestID).Result(); err != nil {
 		return fmt.Errorf("record dimension total-duration stats: %w", err)

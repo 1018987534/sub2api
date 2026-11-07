@@ -613,6 +613,8 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpA
 		adminSettings.PUT("/total-duration-circuit-breaker", h.Admin.Setting.UpdateTotalDurationCircuitBreakerSettings)
 		adminSettings.GET("/fast-pool-priority", h.Admin.Setting.GetFastPoolPrioritySettings)
 		adminSettings.PUT("/fast-pool-priority", h.Admin.Setting.UpdateFastPoolPrioritySettings)
+		adminSettings.GET("/fast-pool-thresholds", h.Admin.Setting.GetFastPoolThresholdSettings)
+		adminSettings.PUT("/fast-pool-thresholds", h.Admin.Setting.UpdateFastPoolThresholdSettings)
 		adminSettings.POST("/test-smtp", h.Admin.Setting.TestSMTPConnection)
 		adminSettings.POST("/send-test-email", h.Admin.Setting.SendTestEmail)
 		adminSettings.GET("/email-templates", h.Admin.Setting.ListEmailTemplates)

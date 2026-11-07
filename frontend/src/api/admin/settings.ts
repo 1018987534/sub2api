@@ -1767,7 +1767,31 @@ export async function updateFastPoolPrioritySettings(
   return data;
 }
 
+export interface FastPoolThresholdSettings {
+  enter_seconds: number;
+  exit_seconds: number;
+}
+
+export async function getFastPoolThresholdSettings(): Promise<FastPoolThresholdSettings> {
+  const { data } = await apiClient.get<FastPoolThresholdSettings>(
+    "/admin/settings/fast-pool-thresholds",
+  );
+  return data;
+}
+
+export async function updateFastPoolThresholdSettings(
+  settings: FastPoolThresholdSettings,
+): Promise<FastPoolThresholdSettings> {
+  const { data } = await apiClient.put<FastPoolThresholdSettings>(
+    "/admin/settings/fast-pool-thresholds",
+    settings,
+  );
+  return data;
+}
+
 export const settingsAPI = {
+  getFastPoolThresholdSettings,
+  updateFastPoolThresholdSettings,
   getFastPoolPrioritySettings,
   updateFastPoolPrioritySettings,
   getTotalDurationCircuitBreakerSettings,

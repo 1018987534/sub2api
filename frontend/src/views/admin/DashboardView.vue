@@ -280,6 +280,7 @@
             </div>
           </div>
           <TotalDurationCircuitBreakerControl />
+          <FastPoolThresholdControl />
           <FastPoolPriorityControl @change="fastPoolPriorityMode = $event" />
           <div v-if="firstTokenLoading" class="flex min-h-32 items-center justify-center border-t border-gray-100 dark:border-dark-700">
             <LoadingSpinner size="md" />
@@ -575,6 +576,7 @@ import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'
 import TotalDurationCircuitBreakerControl from '@/components/admin/TotalDurationCircuitBreakerControl.vue'
 import FastPoolPriorityControl from '@/components/admin/FastPoolPriorityControl.vue'
+import FastPoolThresholdControl from '@/components/admin/FastPoolThresholdControl.vue'
 import type { FastPoolPriorityMode } from '@/api/admin/settings'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
