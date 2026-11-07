@@ -7,6 +7,7 @@ import batchImage from './batchImage'
 import admin from './admin'
 import misc from './misc'
 import imageStudio from './imageStudio'
+import feedback from './feedback'
 
 export default {
   adminAccessKeys,
@@ -18,4 +19,5 @@ export default {
   admin,
   ...misc,
   ...imageStudio,
+  feedback,
 }

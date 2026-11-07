@@ -343,6 +343,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/feedback',
+    name: 'Feedback',
+    component: () => import('@/views/user/FeedbackView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Feedback',
+      titleKey: 'feedback.title',
+      descriptionKey: 'feedback.description'
+    }
+  },
+  {
     path: '/support',
     name: 'SupportChat',
     component: () => import('@/views/user/SupportChatView.vue'),

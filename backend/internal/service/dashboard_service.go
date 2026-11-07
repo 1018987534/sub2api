@@ -142,7 +142,7 @@ func (s *DashboardService) GetDashboardProfitStats(ctx context.Context, adminID 
 	if own := usage[adminID]; own != nil {
 		profit.TodayAdminActualCost = own.TodayActualCost
 	}
-	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost
+	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost
 	return profit, nil
 }
 

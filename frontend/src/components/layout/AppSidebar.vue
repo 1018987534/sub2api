@@ -646,6 +646,10 @@ const TicketIcon = {
     )
 }
 
+const FeedbackIcon = {
+  render: () => h(Icon, { name: 'chat', size: 'md' }),
+}
+
 const CustomerSupportIcon = {
   render: () =>
     h(
@@ -892,6 +896,7 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
     { path: '/lottery', label: t('nav.lottery'), icon: GiftIcon, hideInSimpleMode: true, featureFlag: flagLottery },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
+    { path: '/feedback', label: t('nav.feedback'), icon: FeedbackIcon },
     { path: '/support', label: t('nav.support'), icon: CustomerSupportIcon },
     { path: '/image-studio', label: t('nav.imageStudio'), icon: AIImageIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({

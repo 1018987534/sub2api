@@ -429,15 +429,18 @@ func TestDashboardService_ProfitExcludesCurrentAdminActualCost(t *testing.T) {
 
 func TestDashboardService_ProfitAllowsLossAndNoSelfUsage(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		actual float64
-		cost   float64
-		own    float64
-		want   float64
+		name    string
+		actual  float64
+		cost    float64
+		own     float64
+		lottery float64
+		want    float64
 	}{
-		{"loss", 10, 12, 3, -5},
-		{"no self usage", 315.88, 202, 0, 113.88},
-		{"empty day", 0, 0, 0, 0},
+		{"loss", 10, 12, 3, 0, -5},
+		{"no self usage", 315.88, 202, 0, 0, 113.88},
+		{"empty day", 0, 0, 0, 0, 0},
+		{"lottery payout", 315.88, 202, 20, 5, 88.88},
+		{"lottery creates loss", 10, 5, 2, 10, -7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &dashboardProfitRepoStub{usage: map[int64]*usagestats.BatchUserUsageStats{}}
@@ -445,7 +448,7 @@ func TestDashboardService_ProfitAllowsLossAndNoSelfUsage(t *testing.T) {
 				repo.usage[7] = &usagestats.BatchUserUsageStats{TodayActualCost: tc.own}
 			}
 			svc := NewDashboardService(repo, nil, nil, nil)
-			profit, err := svc.GetDashboardProfitStats(context.Background(), 7, &usagestats.DashboardStats{TodayActualCost: tc.actual, TodayAccountCost: tc.cost})
+			profit, err := svc.GetDashboardProfitStats(context.Background(), 7, &usagestats.DashboardStats{TodayActualCost: tc.actual, TodayAccountCost: tc.cost, TodayLotteryCost: tc.lottery})
 			require.NoError(t, err)
 			require.InDelta(t, tc.want, profit.TodayProfit, 1e-9)
 		})

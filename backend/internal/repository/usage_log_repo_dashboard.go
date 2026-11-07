@@ -89,6 +89,9 @@ func (r *usageLogRepository) GetDashboardStats(ctx context.Context) (*DashboardS
 	if err := r.fillDashboardUsageStatsAggregated(ctx, stats, todayStart, now); err != nil {
 		return nil, err
 	}
+	if err := r.fillDashboardLotteryStats(ctx, stats, todayStart); err != nil {
+		return nil, err
+	}
 
 	rpm, tpm, err := r.getPerformanceStats(ctx, 0)
 	if err != nil {
@@ -117,6 +120,9 @@ func (r *usageLogRepository) GetDashboardStatsWithRange(ctx context.Context, sta
 	if err := r.fillDashboardUsageStatsFromUsageLogs(ctx, stats, startUTC, endUTC, todayStart, now); err != nil {
 		return nil, err
 	}
+	if err := r.fillDashboardLotteryStats(ctx, stats, todayStart); err != nil {
+		return nil, err
+	}
 
 	rpm, tpm, err := r.getPerformanceStats(ctx, 0)
 	if err != nil {
@@ -126,6 +132,17 @@ func (r *usageLogRepository) GetDashboardStatsWithRange(ctx context.Context, sta
 	stats.Tpm = tpm
 
 	return stats, nil
+}
+
+// Lottery ledger entries are committed atomically with the balance credit.
+// Pending rounds, actors and rolled-back awards never create committed payouts.
+func (r *usageLogRepository) fillDashboardLotteryStats(ctx context.Context, stats *DashboardStats, todayStart time.Time) error {
+	const query = `
+		SELECT COALESCE(SUM(amount), 0)
+		FROM lottery_balance_ledger
+		WHERE created_at >= $1 AND created_at < $2
+	`
+	return scanSingleRow(ctx, r.sql, query, []any{todayStart, todayStart.AddDate(0, 0, 1)}, &stats.TodayLotteryCost)
 }
 
 func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats *DashboardStats, todayUTC, now time.Time) error {
