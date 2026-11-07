@@ -609,6 +609,8 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpA
 		adminSettings.GET("", h.Admin.Setting.GetSettings)
 		adminSettings.GET("/sidebar", h.Admin.Setting.GetSidebarSettings)
 		adminSettings.PUT("", h.Admin.Setting.UpdateSettings)
+		adminSettings.GET("/dashboard-profit", h.Admin.Setting.GetDashboardProfitSettings)
+		adminSettings.PUT("/dashboard-profit", h.Admin.Setting.UpdateDashboardProfitSettings)
 		adminSettings.GET("/total-duration-circuit-breaker", h.Admin.Setting.GetTotalDurationCircuitBreakerSettings)
 		adminSettings.PUT("/total-duration-circuit-breaker", h.Admin.Setting.UpdateTotalDurationCircuitBreakerSettings)
 		adminSettings.GET("/fast-pool-priority", h.Admin.Setting.GetFastPoolPrioritySettings)

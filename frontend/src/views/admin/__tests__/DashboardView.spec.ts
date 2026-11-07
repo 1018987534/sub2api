@@ -5,7 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { AccountFirstTokenLatencyMetric, DashboardStats } from '@/types'
 import DashboardView from '../DashboardView.vue'
 
-const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings, showSuccess, showError } = vi.hoisted(() => ({
+const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings, getDashboardProfitSettings, updateDashboardProfitSettings, showSuccess, showError } = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
   getUserUsageTrend: vi.fn(),
   getUserSpendingRanking: vi.fn(),
@@ -14,6 +14,8 @@ const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenL
   getTotalDurationCircuitBreakerSettings: vi.fn(),
   getFastPoolPrioritySettings: vi.fn(),
   updateFastPoolPrioritySettings: vi.fn(),
+  getDashboardProfitSettings: vi.fn(),
+  updateDashboardProfitSettings: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn()
 }))
@@ -30,7 +32,7 @@ vi.mock('@/api/admin', () => ({
       getUserSpendingRanking
     },
     accounts: { getFirstTokenLatencies, requestFirstTokenManualProbe },
-    settings: { getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings }
+    settings: { getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings, getDashboardProfitSettings, updateDashboardProfitSettings }
   }
 }))
 
@@ -96,6 +98,7 @@ const createDashboardStats = (): DashboardStats => ({
   today_cost: 0,
   today_actual_cost: 0,
   today_account_cost: 0,
+  today_server_cost_usd: 0,
   average_duration_ms: 0,
   uptime: 0,
   rpm: 0,
@@ -142,6 +145,10 @@ describe('admin DashboardView', () => {
     getFastPoolPrioritySettings.mockResolvedValue({ mode: 'intelligence', cache_rate_threshold_percent: null })
     updateFastPoolPrioritySettings.mockReset()
     updateFastPoolPrioritySettings.mockImplementation(async (mode: string, cache_rate_threshold_percent: number | null) => ({ mode, cache_rate_threshold_percent }))
+    getDashboardProfitSettings.mockReset()
+    getDashboardProfitSettings.mockResolvedValue({ monthly_server_cost_usd: 0, daily_server_cost_usd: 0, month_days: 30 })
+    updateDashboardProfitSettings.mockReset()
+    updateDashboardProfitSettings.mockImplementation(async (monthly: number) => ({ monthly_server_cost_usd: monthly, daily_server_cost_usd: monthly / 30, month_days: 30 }))
     showSuccess.mockReset()
     showError.mockReset()
 
@@ -173,10 +180,11 @@ describe('admin DashboardView', () => {
     { actual: 315.88, cost: 202, own: 20, lottery: 5, fee: 5.32584, profit: 83.55416, display: '$83.55', color: 'text-emerald-600' },
     { actual: 10, cost: 5, own: 2, lottery: 10, fee: 0.144, profit: -7.144, display: '-$7.14', color: 'text-red-600' },
     { actual: 0, cost: 0, own: 0, lottery: 0, fee: 0, profit: 0, display: '$0.00', color: 'text-emerald-600' },
-    { actual: 251.93, cost: 136.25, own: 3.61, lottery: 0, fee: 4.46976, profit: 107.60024, display: '$107.60', color: 'text-emerald-600' }
-  ])('shows daily profit including withdrawal fees ($display)', async ({ actual, cost, own, lottery, fee, profit, display, color }) => {
+    { actual: 251.93, cost: 136.25, own: 3.61, lottery: 0, fee: 4.46976, profit: 107.60024, display: '$107.60', color: 'text-emerald-600' },
+    { actual: 251.93, cost: 136.25, own: 3.61, lottery: 0, fee: 4.46976, serverCost: 20, profit: 87.60024, display: '$87.60', color: 'text-emerald-600' }
+  ])('shows daily profit including withdrawal fees and server cost ($display)', async ({ actual, cost, own, lottery, fee, serverCost = 0, profit, display, color }) => {
     getSnapshotV2.mockResolvedValueOnce({
-      stats: { ...createDashboardStats(), today_actual_cost: actual, today_account_cost: cost, today_admin_actual_cost: own, today_lottery_cost: lottery, today_withdrawal_fee: fee, today_profit: profit },
+      stats: { ...createDashboardStats(), today_actual_cost: actual, today_account_cost: cost, today_admin_actual_cost: own, today_lottery_cost: lottery, today_withdrawal_fee: fee, today_server_cost_usd: serverCost, today_profit: profit },
       trend: [], models: []
     })
     const wrapper = mount(DashboardView, {
@@ -194,6 +202,7 @@ describe('admin DashboardView', () => {
     expect(breakdown).toContain(`admin.dashboard.adminSelfUsage $${own.toFixed(2)}`)
     expect(breakdown).toContain(`admin.dashboard.lotteryCost $${lottery.toFixed(2)}`)
     expect(breakdown).toContain(`admin.dashboard.withdrawalFee $${fee.toFixed(2)}`)
+    expect(breakdown).toContain(`admin.dashboard.dailyServerCost $${serverCost.toFixed(2)}`)
     wrapper.unmount()
   })
 
@@ -223,6 +232,45 @@ describe('admin DashboardView', () => {
         AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true,
         Icon: true, DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
       } }
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="today-profit"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('refreshes profit immediately after the monthly server expense is saved', async () => {
+    getSnapshotV2.mockResolvedValueOnce({
+      stats: { ...createDashboardStats(), today_admin_actual_cost: 3.61, today_lottery_cost: 0, today_withdrawal_fee: 4.46976, today_profit: 107.60024 },
+      trend: [], models: []
+    })
+    const wrapper = mount(DashboardView, {
+      global: { stubs: {
+        AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true,
+        Icon: true, DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+      } }
+    })
+    await flushPromises()
+    getSnapshotV2.mockResolvedValueOnce({
+      stats: { ...createDashboardStats(), today_admin_actual_cost: 3.61, today_lottery_cost: 0, today_withdrawal_fee: 4.46976, today_server_cost_usd: 20, today_profit: 87.60024 },
+      trend: [], models: []
+    })
+    await wrapper.get('[data-testid="monthly-server-cost"]').setValue('600')
+    await wrapper.get('[data-testid="server-cost-form"]').trigger('submit')
+    await flushPromises()
+    expect(updateDashboardProfitSettings).toHaveBeenCalledWith(600)
+    expect(getSnapshotV2).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-testid="today-profit"]').text()).toBe('$87.60')
+    expect(wrapper.get('[data-testid="today-profit-breakdown"]').text()).toContain('admin.dashboard.dailyServerCost $20.00')
+    wrapper.unmount()
+  })
+
+  it('hides profit until the backend provides daily server cost', async () => {
+    getSnapshotV2.mockResolvedValueOnce({
+      stats: { ...createDashboardStats(), today_server_cost_usd: undefined, today_lottery_cost: 0, today_withdrawal_fee: 0, today_profit: 0 },
+      trend: [], models: []
+    })
+    const wrapper = mount(DashboardView, {
+      global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true, DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true } }
     })
     await flushPromises()
     expect(wrapper.find('[data-testid="today-profit"]').exists()).toBe(false)

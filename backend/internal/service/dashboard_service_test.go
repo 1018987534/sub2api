@@ -173,7 +173,7 @@ func TestDashboardService_CacheHitFresh(t *testing.T) {
 			Enabled: true,
 		},
 	}
-	svc := NewDashboardService(repo, aggRepo, cache, cfg)
+	svc := NewDashboardService(repo, aggRepo, cache, cfg, nil)
 
 	got, err := svc.GetDashboardStats(context.Background())
 	require.NoError(t, err)
@@ -202,7 +202,7 @@ func TestDashboardService_CacheMiss_StoresCache(t *testing.T) {
 			Enabled: true,
 		},
 	}
-	svc := NewDashboardService(repo, aggRepo, cache, cfg)
+	svc := NewDashboardService(repo, aggRepo, cache, cfg, nil)
 
 	got, err := svc.GetDashboardStats(context.Background())
 	require.NoError(t, err)
@@ -234,7 +234,7 @@ func TestDashboardService_CacheDisabled_SkipsCache(t *testing.T) {
 			Enabled: true,
 		},
 	}
-	svc := NewDashboardService(repo, aggRepo, cache, cfg)
+	svc := NewDashboardService(repo, aggRepo, cache, cfg, nil)
 
 	got, err := svc.GetDashboardStats(context.Background())
 	require.NoError(t, err)
@@ -274,7 +274,7 @@ func TestDashboardService_CacheHitStale_TriggersAsyncRefresh(t *testing.T) {
 			Enabled: true,
 		},
 	}
-	svc := NewDashboardService(repo, aggRepo, cache, cfg)
+	svc := NewDashboardService(repo, aggRepo, cache, cfg, nil)
 
 	got, err := svc.GetDashboardStats(context.Background())
 	require.NoError(t, err)
@@ -305,7 +305,7 @@ func TestDashboardService_CacheParseError_EvictsAndRefetches(t *testing.T) {
 			Enabled: true,
 		},
 	}
-	svc := NewDashboardService(repo, aggRepo, cache, cfg)
+	svc := NewDashboardService(repo, aggRepo, cache, cfg, nil)
 
 	got, err := svc.GetDashboardStats(context.Background())
 	require.NoError(t, err)
@@ -328,7 +328,7 @@ func TestDashboardService_CacheParseError_RepoFailure(t *testing.T) {
 			Enabled: true,
 		},
 	}
-	svc := NewDashboardService(repo, aggRepo, cache, cfg)
+	svc := NewDashboardService(repo, aggRepo, cache, cfg, nil)
 
 	_, err := svc.GetDashboardStats(context.Background())
 	require.Error(t, err)
@@ -340,7 +340,7 @@ func TestDashboardService_StatsUpdatedAtEpochWhenMissing(t *testing.T) {
 	repo := &usageRepoStub{stats: stats}
 	aggRepo := &dashboardAggregationRepoStub{watermark: time.Unix(0, 0).UTC()}
 	cfg := &config.Config{Dashboard: config.DashboardCacheConfig{Enabled: false}}
-	svc := NewDashboardService(repo, aggRepo, nil, cfg)
+	svc := NewDashboardService(repo, aggRepo, nil, cfg, nil)
 
 	got, err := svc.GetDashboardStats(context.Background())
 	require.NoError(t, err)
@@ -361,7 +361,7 @@ func TestDashboardService_StatsStaleFalseWhenFresh(t *testing.T) {
 			LookbackSeconds: 120,
 		},
 	}
-	svc := NewDashboardService(repo, aggRepo, nil, cfg)
+	svc := NewDashboardService(repo, aggRepo, nil, cfg, nil)
 
 	got, err := svc.GetDashboardStats(context.Background())
 	require.NoError(t, err)
@@ -384,7 +384,7 @@ func TestDashboardService_AggDisabled_UsesUsageLogsFallback(t *testing.T) {
 			},
 		},
 	}
-	svc := NewDashboardService(repo, nil, nil, cfg)
+	svc := NewDashboardService(repo, nil, nil, cfg, nil)
 
 	got, err := svc.GetDashboardStats(context.Background())
 	require.NoError(t, err)
@@ -415,7 +415,7 @@ func TestDashboardService_ProfitExcludesCurrentAdminActualCost(t *testing.T) {
 		7: {UserID: 7, TodayActualCost: 20, TotalActualCost: 9999},
 		8: {UserID: 8, TodayActualCost: 100},
 	}}
-	svc := NewDashboardService(repo, nil, nil, nil)
+	svc := NewDashboardService(repo, nil, nil, nil, nil)
 	before := time.Now().UTC()
 	profit, err := svc.GetDashboardProfitStats(context.Background(), 7, stats)
 	require.NoError(t, err)
@@ -452,7 +452,7 @@ func TestDashboardService_ProfitAllowsLossAndNoSelfUsage(t *testing.T) {
 			if tc.own != 0 {
 				repo.usage[7] = &usagestats.BatchUserUsageStats{TodayActualCost: tc.own}
 			}
-			svc := NewDashboardService(repo, nil, nil, nil)
+			svc := NewDashboardService(repo, nil, nil, nil, nil)
 			profit, err := svc.GetDashboardProfitStats(context.Background(), 7, &usagestats.DashboardStats{TodayActualCost: tc.actual, TodayAccountCost: tc.cost, TodayLotteryCost: tc.lottery})
 			require.NoError(t, err)
 			require.InDelta(t, tc.fee, profit.TodayWithdrawalFee, 1e-9)
@@ -463,11 +463,35 @@ func TestDashboardService_ProfitAllowsLossAndNoSelfUsage(t *testing.T) {
 
 func TestDashboardService_ProfitFailsWhenSelfUsageUnavailable(t *testing.T) {
 	repo := &dashboardProfitRepoStub{err: errors.New("usage database unavailable")}
-	svc := NewDashboardService(repo, nil, nil, nil)
+	svc := NewDashboardService(repo, nil, nil, nil, nil)
 	_, err := svc.GetDashboardProfitStats(context.Background(), 7, &usagestats.DashboardStats{})
 	require.ErrorContains(t, err, "usage database unavailable")
 	_, err = svc.GetDashboardProfitStats(context.Background(), 0, &usagestats.DashboardStats{})
 	require.ErrorContains(t, err, "authenticated administrator")
 	_, err = svc.GetDashboardProfitStats(context.Background(), 7, nil)
 	require.ErrorContains(t, err, "statistics")
+}
+
+func TestDashboardService_ProfitDeductsMonthlyServerCost(t *testing.T) {
+	ctx := context.Background()
+	settingsRepo := &dashboardProfitSettingsRepo{}
+	settingsService := NewSettingService(settingsRepo, nil)
+	repo := &dashboardProfitRepoStub{usage: map[int64]*usagestats.BatchUserUsageStats{
+		7: {UserID: 7, TodayActualCost: 3.61},
+	}}
+	svc := NewDashboardService(repo, nil, nil, nil, settingsService)
+	stats := &usagestats.DashboardStats{TodayActualCost: 251.93, TodayAccountCost: 136.25}
+	for _, monthly := range []float64{600, 6000, 0} {
+		saved, err := settingsService.UpdateDashboardProfitSettings(ctx, monthly)
+		require.NoError(t, err)
+		profit, err := svc.GetDashboardProfitStats(ctx, 7, stats)
+		require.NoError(t, err)
+		require.InDelta(t, saved.DailyServerCostUSD, profit.TodayServerCostUSD, 1e-9)
+		require.InDelta(t, 4.46976, profit.TodayWithdrawalFee, 1e-9, "server expense must not change the withdrawal fee base")
+		require.InDelta(t, 107.60024-saved.DailyServerCostUSD, profit.TodayProfit, 1e-9)
+		require.Equal(t, 251.93, stats.TodayActualCost)
+	}
+	settingsRepo.getErr = errors.New("server expense unavailable")
+	_, err := svc.GetDashboardProfitStats(ctx, 7, stats)
+	require.ErrorContains(t, err, "server expense unavailable")
 }

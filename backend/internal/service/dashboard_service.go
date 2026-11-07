@@ -46,6 +46,7 @@ type DashboardService struct {
 	usageRepo      UsageLogRepository
 	aggRepo        DashboardAggregationRepository
 	cache          DashboardStatsCache
+	settingService *SettingService
 	cacheFreshTTL  time.Duration
 	cacheTTL       time.Duration
 	refreshTimeout time.Duration
@@ -56,7 +57,7 @@ type DashboardService struct {
 	aggUsageDays   int
 }
 
-func NewDashboardService(usageRepo UsageLogRepository, aggRepo DashboardAggregationRepository, cache DashboardStatsCache, cfg *config.Config) *DashboardService {
+func NewDashboardService(usageRepo UsageLogRepository, aggRepo DashboardAggregationRepository, cache DashboardStatsCache, cfg *config.Config, settingService *SettingService) *DashboardService {
 	freshTTL := defaultDashboardStatsFreshTTL
 	cacheTTL := defaultDashboardStatsCacheTTL
 	refreshTimeout := defaultDashboardStatsRefreshTimeout
@@ -95,6 +96,7 @@ func NewDashboardService(usageRepo UsageLogRepository, aggRepo DashboardAggregat
 		usageRepo:      usageRepo,
 		aggRepo:        aggRepo,
 		cache:          cache,
+		settingService: settingService,
 		cacheFreshTTL:  freshTTL,
 		cacheTTL:       cacheTTL,
 		refreshTimeout: refreshTimeout,
@@ -144,12 +146,21 @@ func (s *DashboardService) GetDashboardProfitStats(ctx context.Context, adminID 
 	if own := usage[adminID]; own != nil {
 		profit.TodayAdminActualCost = own.TodayActualCost
 	}
+	settings, err := s.GetDashboardProfitSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	profit.TodayServerCostUSD = settings.DailyServerCostUSD
 	// Administrator self usage does not generate withdrawable revenue. Upstream
 	// costs and lottery payouts do not reduce the withdrawal fee base.
 	withdrawableRevenue := math.Max(0, stats.TodayActualCost-profit.TodayAdminActualCost)
 	profit.TodayWithdrawalFee = withdrawableRevenue * dashboardWithdrawalFeeRate
-	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost - profit.TodayWithdrawalFee
+	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost - profit.TodayWithdrawalFee - profit.TodayServerCostUSD
 	return profit, nil
+}
+
+func (s *DashboardService) GetDashboardProfitSettings(ctx context.Context) (*DashboardProfitSettings, error) {
+	return s.settingService.GetDashboardProfitSettings(ctx)
 }
 
 func (s *DashboardService) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) ([]usagestats.TrendDataPoint, error) {

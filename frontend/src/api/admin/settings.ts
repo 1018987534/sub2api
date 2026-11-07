@@ -1791,7 +1791,27 @@ export async function updateFastPoolThresholdSettings(
   return data;
 }
 
+export interface DashboardProfitSettings {
+  monthly_server_cost_usd: number;
+  daily_server_cost_usd: number;
+  month_days: number;
+}
+
+export async function getDashboardProfitSettings(): Promise<DashboardProfitSettings> {
+  const { data } = await apiClient.get<DashboardProfitSettings>("/admin/settings/dashboard-profit");
+  return data;
+}
+
+export async function updateDashboardProfitSettings(monthlyServerCostUSD: number): Promise<DashboardProfitSettings> {
+  const { data } = await apiClient.put<DashboardProfitSettings>("/admin/settings/dashboard-profit", {
+    monthly_server_cost_usd: monthlyServerCostUSD,
+  });
+  return data;
+}
+
 export const settingsAPI = {
+  getDashboardProfitSettings,
+  updateDashboardProfitSettings,
   getFastPoolThresholdSettings,
   updateFastPoolThresholdSettings,
   getFastPoolPrioritySettings,
