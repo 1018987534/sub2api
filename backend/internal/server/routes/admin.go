@@ -134,8 +134,13 @@ func RegisterAdminRoutes(
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
 		registerSupportChatRoutes(admin, h)
+		registerFeedbackRoutes(admin, h)
 		registerLotteryRoutes(admin, h)
 	}
+}
+
+func registerFeedbackRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	admin.GET("/feedback", h.Feedback.AdminList)
 }
 
 func registerLotteryRoutes(admin *gin.RouterGroup, h *handler.Handlers) {

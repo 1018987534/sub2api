@@ -70,6 +70,7 @@ type Handlers struct {
 	AsyncImage       *AsyncImageHandler
 	BatchImage       *BatchImageHandler
 	SupportChat      *SupportChatHandler
+	Feedback         *FeedbackHandler
 	Lottery          *LotteryHandler
 	QQActivity       *QQActivityHandler
 }

@@ -206,6 +206,7 @@ func ProvideHandlers(
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
 	supportChatHandler *SupportChatHandler,
+	feedbackHandler *FeedbackHandler,
 	lotteryHandler *LotteryHandler,
 	qqActivityHandler *QQActivityHandler,
 	_ *service.IdempotencyCoordinator,
@@ -236,6 +237,7 @@ func ProvideHandlers(
 		AsyncImage:       asyncImageHandler,
 		BatchImage:       batchImageHandler,
 		SupportChat:      supportChatHandler,
+		Feedback:         feedbackHandler,
 		Lottery:          lotteryHandler,
 		QQActivity:       qqActivityHandler,
 	}
@@ -255,6 +257,7 @@ var ProviderSet = wire.NewSet(
 	NewChannelMonitorV2Handler,
 	NewIntelligenceHandler,
 	NewSupportChatHandler,
+	NewFeedbackHandler,
 	NewLotteryHandler,
 	NewQQActivityHandler,
 	ProvideGatewayHandler,
