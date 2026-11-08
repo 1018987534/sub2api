@@ -583,3 +583,18 @@ func TestSetOpenAIFastPolicySettings_Validation(t *testing.T) {
 	require.Equal(t, BetaPolicyActionPass, got.Rules[1].Action)
 	require.Equal(t, OpenAIFastPolicyActionForcePriority, got.Rules[2].Action)
 }
+
+func TestOpenAIFastPolicySettings_BillingFollowRequestPersists(t *testing.T) {
+	repo := &openAIFastPolicyRepoStub{values: map[string]string{}}
+	svc := NewSettingService(repo, &config.Config{})
+	settings, err := svc.GetOpenAIFastPolicySettings(context.Background())
+	require.NoError(t, err)
+	require.False(t, settings.BillingFollowRequest)
+	for _, enabled := range []bool{true, false} {
+		settings.BillingFollowRequest = enabled
+		require.NoError(t, svc.SetOpenAIFastPolicySettings(context.Background(), settings))
+		stored, err := svc.GetOpenAIFastPolicySettings(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, enabled, stored.BillingFollowRequest)
+	}
+}

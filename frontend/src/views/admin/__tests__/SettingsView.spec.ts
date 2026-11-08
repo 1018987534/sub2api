@@ -1566,6 +1566,49 @@ describe("admin SettingsView payment visible method controls", () => {
     }));
   });
 
+  it("loads and saves the global billing tier switch without changing routing rules", async () => {
+    const rules = [{ service_tier: "priority", action: "pass", scope: "all" }];
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_fast_policy_settings: { billing_follow_request: true, rules },
+    });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const toggle = wrapper.get('[data-testid="openai-billing-follow-request"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(true);
+    await toggle.setValue(false);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      openai_fast_policy_settings: expect.objectContaining({
+        billing_follow_request: false,
+        rules: [expect.objectContaining(rules[0])],
+      }),
+    }));
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+    await toggle.setValue(true);
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings.mock.calls.at(-1)?.[0].openai_fast_policy_settings.billing_follow_request).toBe(true);
+  });
+
+  it("defaults the billing switch off for older settings and preserves unloaded settings", async () => {
+    getSettings.mockResolvedValueOnce({ ...baseSettingsResponse, openai_fast_policy_settings: { rules: [] } });
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    expect((wrapper.get('[data-testid="openai-billing-follow-request"]').element as HTMLInputElement).checked).toBe(false);
+    wrapper.unmount();
+    const unloaded = mountView();
+    await flushPromises();
+    await openGatewayTab(unloaded);
+    expect(unloaded.get('[data-testid="openai-billing-follow-request"]').attributes("disabled")).toBeDefined();
+    await unloaded.find("form").trigger("submit.prevent");
+    await flushPromises();
+    expect(updateSettings.mock.calls.at(-1)?.[0]).not.toHaveProperty("openai_fast_policy_settings");
+  });
+
   it("summarizes target and other-model actions, then switches to all models", async () => {
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
