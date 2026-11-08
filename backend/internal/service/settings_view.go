@@ -729,7 +729,9 @@ type OpenAIFastPolicyRule struct {
 
 // OpenAIFastPolicySettings OpenAI fast 策略配置
 type OpenAIFastPolicySettings struct {
-	Rules []OpenAIFastPolicyRule `json:"rules"`
+	// BillingFollowRequest keeps billing and usage display on the final outbound tier.
+	BillingFollowRequest bool                   `json:"billing_follow_request"`
+	Rules                []OpenAIFastPolicyRule `json:"rules"`
 }
 
 // DefaultOpenAIFastPolicySettings 返回默认的 OpenAI fast 策略配置。

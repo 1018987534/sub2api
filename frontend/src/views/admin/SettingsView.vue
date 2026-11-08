@@ -1315,6 +1315,22 @@
               </p>
             </div>
             <div class="space-y-5 p-6">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <p id="openai-billing-follow-request-label" class="font-medium text-gray-900 dark:text-white">
+                    {{ t("admin.settings.openaiFastPolicy.billingFollowRequest") }}
+                  </p>
+                  <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    {{ t("admin.settings.openaiFastPolicy.billingFollowRequestHint") }}
+                  </p>
+                </div>
+                <Toggle
+                  v-model="openaiFastPolicyForm.billing_follow_request"
+                  :disabled="!openaiFastPolicyLoaded"
+                  aria-labelledby="openai-billing-follow-request-label"
+                  data-testid="openai-billing-follow-request"
+                />
+              </div>
               <!-- Empty state -->
               <div
                 v-if="openaiFastPolicyForm.rules.length === 0"
@@ -9650,6 +9666,7 @@ const betaPolicyForm = reactive({
 
 // OpenAI Fast/Flex Policy 状态
 const openaiFastPolicyForm = reactive({
+  billing_follow_request: false,
   rules: [] as OpenAIFastPolicyRule[],
 });
 // 标记 openai_fast_policy_settings 是否已成功从后端加载，
@@ -11608,6 +11625,8 @@ async function loadSettings() {
       settings.openai_fast_policy_settings &&
       Array.isArray(settings.openai_fast_policy_settings.rules)
     ) {
+      openaiFastPolicyForm.billing_follow_request =
+        settings.openai_fast_policy_settings.billing_follow_request === true;
       openaiFastPolicyForm.rules =
         settings.openai_fast_policy_settings.rules.map((rule) => ({
           ...rule,
@@ -12216,6 +12235,7 @@ async function saveSettings() {
     // 否则省略整个字段，让后端保留既有规则（含默认值）。
     if (openaiFastPolicyLoaded.value) {
       payload.openai_fast_policy_settings = {
+        billing_follow_request: openaiFastPolicyForm.billing_follow_request,
         rules: openaiFastPolicyForm.rules.map((rule) => {
           const whitelist = (rule.model_whitelist || [])
             .map((p) => p.trim())
@@ -12320,6 +12340,8 @@ async function saveSettings() {
       updated.openai_fast_policy_settings &&
       Array.isArray(updated.openai_fast_policy_settings.rules)
     ) {
+      openaiFastPolicyForm.billing_follow_request =
+        updated.openai_fast_policy_settings.billing_follow_request === true;
       openaiFastPolicyForm.rules =
         updated.openai_fast_policy_settings.rules.map((rule) => ({
           ...rule,

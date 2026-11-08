@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -97,6 +99,31 @@ func ApplyOpenAIServiceTierBillingResolution(account *Account, result *OpenAIFor
 		result.ServiceTier = &billing
 	}
 	return resolution
+}
+
+// resolveServiceTierBilling applies the global billing policy before calculating
+// charges and persisting the same service tier for usage display.
+func (s *OpenAIGatewayService) resolveServiceTierBilling(ctx context.Context, account *Account, result *OpenAIForwardResult) (ServiceTierBillingResolution, error) {
+	if result == nil || account == nil || !account.IsOpenAI() {
+		return ApplyOpenAIServiceTierBillingResolution(account, result), nil
+	}
+	settings := openAIFastPolicySettingsFromContext(ctx)
+	if settings == nil && s.settingService != nil {
+		var err error
+		settings, err = s.settingService.GetOpenAIFastPolicySettings(ctx)
+		if err != nil {
+			return ServiceTierBillingResolution{}, fmt.Errorf("get service tier billing policy: %w", err)
+		}
+	}
+	if settings != nil && settings.BillingFollowRequest {
+		requested := normalizeBillingServiceTier(optionalStringValue(result.ServiceTier))
+		return ServiceTierBillingResolution{
+			Requested: requested,
+			Observed:  normalizeBillingServiceTier(result.UpstreamResponseServiceTier),
+			Billing:   requested,
+		}, nil
+	}
+	return ApplyOpenAIServiceTierBillingResolution(account, result), nil
 }
 
 // ApplyForwardServiceTierBillingResolution is the ForwardResult counterpart of
