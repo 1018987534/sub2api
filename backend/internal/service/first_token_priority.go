@@ -323,7 +323,8 @@ func firstTokenLatencyMetricGroups(account *Account, cacheStats AccountCacheStat
 		if includeGroup(group) {
 			eligible := IntelligenceProtectionGroupEligible(group)
 			blocked := eligible && intelligenceAccountBlocked(account, &groupID, now)
-			groups = append(groups, AccountFirstTokenLatencyGroup{GroupID: groupID, GroupName: group.Name, IntelligenceBlocked: blocked, IntelligenceExempt: eligible && intelligenceIsolationActive(account, now) && !blocked})
+			exempt := eligible && intelligenceIsolationActive(account, now) && !blocked && containsInt64(intelligenceAllowedGroups(account), groupID)
+			groups = append(groups, AccountFirstTokenLatencyGroup{GroupID: groupID, GroupName: group.Name, IntelligenceBlocked: blocked, IntelligenceExempt: exempt})
 		}
 	}
 	sort.Slice(groups, func(i, j int) bool { return groups[i].GroupID < groups[j].GroupID })

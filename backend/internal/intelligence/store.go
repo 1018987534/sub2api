@@ -239,6 +239,17 @@ func (s *SQLStore) Prune(ctx context.Context) error {
 // ReconcileLegacyProtection recalculates legacy pauses and persistent group
 // exceptions from existing check history. It never generates a probe.
 func (s *SQLStore) ReconcileLegacyProtection(ctx context.Context) error {
+	return s.reconcileProtection(ctx, false)
+}
+
+// ReconcileProtectionScopes catches groups newly included by a rename while an
+// account is already isolated. Reuse the attributed check and the scheduler's
+// alternative-account filters instead of creating another paid probe.
+func (s *SQLStore) ReconcileProtectionScopes(ctx context.Context) error {
+	return s.reconcileProtection(ctx, true)
+}
+
+func (s *SQLStore) reconcileProtection(ctx context.Context, changedScopesOnly bool) error {
 	if s.Protect == nil {
 		return nil
 	}
@@ -250,11 +261,19 @@ func (s *SQLStore) ReconcileLegacyProtection(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('intelligence_account_protection'))`); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT a.id,r.status,r.config_snapshot FROM accounts a
+	query := `SELECT a.id,r.status,r.config_snapshot FROM accounts a
  JOIN LATERAL (SELECT status,config_snapshot FROM intelligence_check_runs
  WHERE account_id=a.id AND protection_eligible ORDER BY id DESC LIMIT 1) r ON TRUE
- WHERE (a.temp_unschedulable_until>NOW() AND a.temp_unschedulable_reason LIKE 'intelligence:%')
- OR a.extra->'intelligence_recovery_required'='true'::jsonb`)
+ WHERE ((a.temp_unschedulable_until>NOW() AND a.temp_unschedulable_reason LIKE 'intelligence:%')
+ OR a.extra->'intelligence_recovery_required'='true'::jsonb)`
+	if changedScopesOnly {
+		query += ` AND a.deleted_at IS NULL AND EXISTS (
+ SELECT 1 FROM account_groups ag JOIN groups g ON g.id=ag.group_id
+ WHERE ag.account_id=a.id AND g.deleted_at IS NULL
+ AND g.platform='openai' AND g.status='active' AND POSITION('不降智' IN g.name)>0
+ AND NOT COALESCE(a.extra->'intelligence_protected_groups' @> jsonb_build_array(g.id),false))`
+	}
+	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return err
 	}
