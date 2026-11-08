@@ -2353,7 +2353,7 @@ func TestOpenAIResponses_APIKeyPassthroughPool5xxRetriesThenExhaustsMaxSwitches(
 	require.Equal(t, "Upstream service temporarily unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.message").String())
 }
 
-func TestOpenAIResponses_PassthroughModelNotFoundDoesNotSwitchAccount(t *testing.T) {
+func TestOpenAIResponses_PassthroughModelNotFoundSwitchesAccountsBeforeExhaustion(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	groupID := int64(4203)
 	accounts := []service.Account{
@@ -2428,10 +2428,10 @@ func TestOpenAIResponses_PassthroughModelNotFoundDoesNotSwitchAccount(t *testing
 
 	h.Responses(c)
 
-	require.Equal(t, []int64{9910}, upstream.calls())
+	require.Equal(t, []int64{9910, 9911}, upstream.calls())
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
-	require.Contains(t, rec.Body.String(), "Upstream request failed")
-	require.NotContains(t, rec.Body.String(), "unknown provider")
+	require.Equal(t, "model_not_found", gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
+	require.Contains(t, rec.Body.String(), "unknown provider")
 }
 
 func TestOpenAIResponses_APIKeyPassthroughPoolAuthFailureRetriesThenSwitchesToHealthyAccount(t *testing.T) {
