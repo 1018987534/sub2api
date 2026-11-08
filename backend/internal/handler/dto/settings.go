@@ -543,8 +543,8 @@ type OpenAIFastPolicyRule struct {
 
 // OpenAIFastPolicySettings OpenAI fast 策略配置 DTO
 type OpenAIFastPolicySettings struct {
-	BillingFollowRequest bool                   `json:"billing_follow_request"`
-	Rules                []OpenAIFastPolicyRule `json:"rules"`
+	BillingFollowUpstreamTier bool                   `json:"billing_follow_upstream_tier"`
+	Rules                     []OpenAIFastPolicyRule `json:"rules"`
 }
 
 // EmailTemplateEventOption 描述可编辑的通知邮件事件。

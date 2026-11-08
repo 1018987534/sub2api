@@ -454,7 +454,7 @@ func openaiFastPolicySettingsToDTO(s *service.OpenAIFastPolicySettings) *dto.Ope
 	for i, r := range s.Rules {
 		rules[i] = dto.OpenAIFastPolicyRule(r)
 	}
-	return &dto.OpenAIFastPolicySettings{BillingFollowRequest: s.BillingFollowRequest, Rules: rules}
+	return &dto.OpenAIFastPolicySettings{BillingFollowUpstreamTier: s.BillingFollowUpstreamTier, Rules: rules}
 }
 
 // openaiFastPolicySettingsFromDTO converts dto -> service for OpenAI fast policy.
@@ -476,7 +476,7 @@ func openaiFastPolicySettingsFromDTO(s *dto.OpenAIFastPolicySettings) *service.O
 		}
 		rules[i].ServiceTier = tier
 	}
-	return &service.OpenAIFastPolicySettings{BillingFollowRequest: s.BillingFollowRequest, Rules: rules}
+	return &service.OpenAIFastPolicySettings{BillingFollowUpstreamTier: s.BillingFollowUpstreamTier, Rules: rules}
 }
 
 func loginAgreementDocumentsToDTO(items []service.LoginAgreementDocument) []dto.LoginAgreementDocument {

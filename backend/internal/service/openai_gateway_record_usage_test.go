@@ -3299,7 +3299,7 @@ func TestOpenAIGatewayServiceRecordUsage_ServiceTierNeverRaisedByUpstreamRespons
 	require.InDelta(t, baseCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_GlobalBillingFollowsRequest(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_GlobalBillingUsesUpstreamReportedTier(t *testing.T) {
 	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken} {
 		t.Run(accountType, func(t *testing.T) {
 			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
@@ -3309,10 +3309,14 @@ func TestOpenAIGatewayServiceRecordUsage_GlobalBillingFollowsRequest(t *testing.
 			svc.settingService = NewSettingService(settingsRepo, svc.cfg)
 			tokens := UsageTokens{InputTokens: 291, OutputTokens: 38, CacheReadTokens: 221696}
 			for _, enabled := range []bool{false, true, false} {
-				require.NoError(t, svc.settingService.SetOpenAIFastPolicySettings(context.Background(), &OpenAIFastPolicySettings{BillingFollowRequest: enabled}))
-				for _, test := range []struct{ requested, observed string }{
-					{"priority", "default"}, {"priority", "flex"}, {"fast", "default"}, {"ultrafast", "priority"},
-					{"", "priority"}, {"default", "priority"}, {"default", "flex"}, {"flex", "default"},
+				require.NoError(t, svc.settingService.SetOpenAIFastPolicySettings(context.Background(), &OpenAIFastPolicySettings{BillingFollowUpstreamTier: enabled}))
+				for _, test := range []struct{ requested, observed, enabledTier string }{
+					{"priority", "default", "default"}, {"priority", "flex", "flex"},
+					{"fast", "default", "default"}, {"ultrafast", "priority", "priority"},
+					{"", "priority", "priority"}, {"default", "priority", "priority"},
+					{"default", "flex", "flex"}, {"flex", "default", "default"},
+					{"priority", "", "default"}, {"priority", "unknown", "default"},
+					{"priority", "fast", "priority"}, {"priority", "priority", "priority"},
 				} {
 					var sentTier *string
 					if test.requested != "" {
@@ -3323,9 +3327,9 @@ func TestOpenAIGatewayServiceRecordUsage_GlobalBillingFollowsRequest(t *testing.
 					account := &Account{ID: 12469, Platform: PlatformOpenAI, Type: accountType}
 					err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{Result: result, APIKey: &APIKey{ID: 1017}, User: &User{ID: 2017}, Account: account})
 					require.NoError(t, err)
-					wantTier := test.requested
-					if !enabled {
-						wantTier = ResolveOpenAIServiceTierBilling(account, test.requested, test.observed).Billing
+					wantTier := ResolveOpenAIServiceTierBilling(account, test.requested, test.observed).Billing
+					if enabled {
+						wantTier = test.enabledTier
 					}
 					require.Equal(t, wantTier, optionalStringValue(usageRepo.lastLog.ServiceTier))
 					require.Equal(t, wantTier, billingRepo.lastCmd.ServiceTier)
@@ -3344,12 +3348,12 @@ func TestOpenAIGatewayServiceRecordUsage_GlobalBillingFollowsRequest(t *testing.
 func TestOpenAIGatewayServiceRecordUsage_GlobalBillingUsesWSSnapshot(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
-	ctx := withOpenAIFastPolicyContext(context.Background(), &OpenAIFastPolicySettings{BillingFollowRequest: true})
+	ctx := withOpenAIFastPolicyContext(context.Background(), &OpenAIFastPolicySettings{BillingFollowUpstreamTier: true})
 	tier := "priority"
 	err := svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{RequestID: "ws-tier-snapshot", ServiceTier: &tier, UpstreamResponseServiceTier: "default", Model: "gpt-6.1-sol", Usage: OpenAIUsage{InputTokens: 291, OutputTokens: 38}, Duration: time.Second, OpenAIWSMode: true},
 		APIKey: &APIKey{ID: 1}, User: &User{ID: 1}, Account: &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
 	})
 	require.NoError(t, err)
-	require.Equal(t, "priority", optionalStringValue(usageRepo.lastLog.ServiceTier))
+	require.Equal(t, "default", optionalStringValue(usageRepo.lastLog.ServiceTier), "default response must select base pricing in reconciliation mode")
 }

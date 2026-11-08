@@ -62,11 +62,34 @@ func serviceTierCostRank(tier string) (rank int, known bool) {
 	}
 }
 
-// ResolveOpenAIServiceTierBilling applies the response-tier contract for the
-// selected credential. Public OpenAI API responses declare the actual tier and
-// may lower billing. The private ChatGPT Codex endpoint does not: it commonly
-// reports default for effective Fast turns, so OAuth-like credentials retain
-// the final outbound tier while still exposing the observed value.
+// resolveUpstreamReportedServiceTier uses a recognized upstream response tier.
+// Missing or unknown declarations select Standard instead of inferring Fast
+// from the outbound request. The request tier remains available for auditing.
+func resolveUpstreamReportedServiceTier(requested, observed string) ServiceTierBillingResolution {
+	requested = normalizeBillingServiceTier(requested)
+	observed = normalizeBillingServiceTier(observed)
+	billing := "default"
+	switch observed {
+	case "priority", "fast":
+		billing = OpenAIFastTierPriority
+	case "flex", "ultrafast":
+		billing = observed
+	}
+	requestedRank, _ := serviceTierCostRank(requested)
+	billingRank, _ := serviceTierCostRank(billing)
+	return ServiceTierBillingResolution{
+		Requested:  requested,
+		Observed:   observed,
+		Billing:    billing,
+		Downgraded: billingRank < requestedRank,
+	}
+}
+
+// ResolveOpenAIServiceTierBilling applies the existing response-tier contract
+// for the selected credential. Public OpenAI API responses may lower billing.
+// The private ChatGPT Codex endpoint keeps its established default-echo
+// exception here; the opt-in global reconciliation mode uses the stricter
+// resolveUpstreamReportedServiceTier path above.
 func ResolveOpenAIServiceTierBilling(account *Account, requested, observed string) ServiceTierBillingResolution {
 	if account != nil && account.IsOpenAIOAuthLike() && codexOAuthResponseTierIsNonAuthoritative(observed) {
 		return ServiceTierBillingResolution{
@@ -115,13 +138,14 @@ func (s *OpenAIGatewayService) resolveServiceTierBilling(ctx context.Context, ac
 			return ServiceTierBillingResolution{}, fmt.Errorf("get service tier billing policy: %w", err)
 		}
 	}
-	if settings != nil && settings.BillingFollowRequest {
-		requested := normalizeBillingServiceTier(optionalStringValue(result.ServiceTier))
-		return ServiceTierBillingResolution{
-			Requested: requested,
-			Observed:  normalizeBillingServiceTier(result.UpstreamResponseServiceTier),
-			Billing:   requested,
-		}, nil
+	if settings != nil && settings.BillingFollowUpstreamTier {
+		resolution := resolveUpstreamReportedServiceTier(
+			optionalStringValue(result.ServiceTier),
+			result.UpstreamResponseServiceTier,
+		)
+		billing := resolution.Billing
+		result.ServiceTier = &billing
+		return resolution, nil
 	}
 	return ApplyOpenAIServiceTierBillingResolution(account, result), nil
 }

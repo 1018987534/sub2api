@@ -1610,7 +1610,7 @@ export interface OpenAIFastPolicyRule {
  * OpenAI fast/flex policy settings interface.
  */
 export interface OpenAIFastPolicySettings {
-  billing_follow_request?: boolean;
+  billing_follow_upstream_tier?: boolean;
   rules: OpenAIFastPolicyRule[];
 }
 

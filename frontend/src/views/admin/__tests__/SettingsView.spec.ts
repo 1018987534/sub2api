@@ -238,6 +238,8 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.upstreamBillingProbe.saved": "上游倍率自动探测设置已保存",
     "admin.settings.upstreamBillingProbe.saveFailed": "保存上游倍率自动探测设置失败",
     "admin.settings.openaiFastPolicy.summaryTargetModels": "目标模型",
+    "admin.settings.openaiFastPolicy.billingFollowUpstreamTier": "按上游返回档位计费",
+    "admin.settings.openaiFastPolicy.billingFollowUpstreamTierHint": "返回 Fast/priority 按 Fast，返回 default 或无信号按标准。",
     "admin.settings.openaiFastPolicy.summaryAllModels": "全部模型",
     "admin.settings.openaiFastPolicy.summaryOtherModels": "其他模型",
     "admin.settings.openaiFastPolicy.summaryAction.filter": "过滤",
@@ -1570,19 +1572,20 @@ describe("admin SettingsView payment visible method controls", () => {
     const rules = [{ service_tier: "priority", action: "pass", scope: "all" }];
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
-      openai_fast_policy_settings: { billing_follow_request: true, rules },
+      openai_fast_policy_settings: { billing_follow_upstream_tier: true, rules },
     });
     const wrapper = mountView();
     await flushPromises();
     await openGatewayTab(wrapper);
-    const toggle = wrapper.get('[data-testid="openai-billing-follow-request"]');
+    const toggle = wrapper.get('[data-testid="openai-billing-follow-upstream-tier"]');
+    expect(wrapper.text()).toContain("按上游返回档位计费");
     expect((toggle.element as HTMLInputElement).checked).toBe(true);
     await toggle.setValue(false);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
     expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
       openai_fast_policy_settings: expect.objectContaining({
-        billing_follow_request: false,
+        billing_follow_upstream_tier: false,
         rules: [expect.objectContaining(rules[0])],
       }),
     }));
@@ -1590,7 +1593,7 @@ describe("admin SettingsView payment visible method controls", () => {
     await toggle.setValue(true);
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
-    expect(updateSettings.mock.calls.at(-1)?.[0].openai_fast_policy_settings.billing_follow_request).toBe(true);
+    expect(updateSettings.mock.calls.at(-1)?.[0].openai_fast_policy_settings.billing_follow_upstream_tier).toBe(true);
   });
 
   it("defaults the billing switch off for older settings and preserves unloaded settings", async () => {
@@ -1598,12 +1601,12 @@ describe("admin SettingsView payment visible method controls", () => {
     const wrapper = mountView();
     await flushPromises();
     await openGatewayTab(wrapper);
-    expect((wrapper.get('[data-testid="openai-billing-follow-request"]').element as HTMLInputElement).checked).toBe(false);
+    expect((wrapper.get('[data-testid="openai-billing-follow-upstream-tier"]').element as HTMLInputElement).checked).toBe(false);
     wrapper.unmount();
     const unloaded = mountView();
     await flushPromises();
     await openGatewayTab(unloaded);
-    expect(unloaded.get('[data-testid="openai-billing-follow-request"]').attributes("disabled")).toBeDefined();
+    expect(unloaded.get('[data-testid="openai-billing-follow-upstream-tier"]').attributes("disabled")).toBeDefined();
     await unloaded.find("form").trigger("submit.prevent");
     await flushPromises();
     expect(updateSettings.mock.calls.at(-1)?.[0]).not.toHaveProperty("openai_fast_policy_settings");
