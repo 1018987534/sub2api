@@ -145,6 +145,7 @@ func (s *OpenAIGatewayService) resolveServiceTierBilling(ctx context.Context, ac
 		)
 		billing := resolution.Billing
 		result.ServiceTier = &billing
+		logServiceTierBillingResolution(ctx, account, result, resolution)
 		return resolution, nil
 	}
 	return ApplyOpenAIServiceTierBillingResolution(account, result), nil

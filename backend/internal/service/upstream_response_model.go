@@ -33,9 +33,11 @@ type upstreamResponseModelObserver struct {
 	// firstTier holds the first non-terminal tier declaration; it is discarded
 	// when later non-terminal declarations disagree. terminalTier comes from a
 	// terminal event and always wins.
-	firstTier         string
-	firstTierConflict bool
-	terminalTier      string
+	firstTier               string
+	firstTierConflict       bool
+	terminalTier            string
+	tierAudit               func(upstreamServiceTierAudit)
+	firstUntypedTierAudited bool
 }
 
 func (o *upstreamResponseModelObserver) Observe(model string, terminal bool) {
@@ -72,6 +74,7 @@ func (o *upstreamResponseModelObserver) ObserveOpenAI(payload []byte, eventType 
 	model := firstValidTrimmedGJSONString(payload, "response.model", "model")
 	terminal := isUpstreamResponseModelTerminalEvent(eventType)
 	o.Observe(model, terminal)
+	o.auditOpenAIServiceTier(payload, eventType, model != "", terminal)
 	// Every payload that declares a service tier also declares a model, so
 	// model-free delta frames skip the extra lookups entirely.
 	if model == "" {
@@ -188,6 +191,9 @@ func (o *upstreamResponseModelObserver) Conflict() bool {
 func beginUpstreamResponseModelObservation(c *gin.Context) *upstreamResponseModelObserver {
 	observer := &upstreamResponseModelObserver{}
 	if c != nil {
+		if c.Request != nil {
+			observer.tierAudit = serviceTierAuditLogger(c.Request.Context())
+		}
 		c.Set(upstreamResponseModelObserverContextKey, observer)
 	}
 	return observer
