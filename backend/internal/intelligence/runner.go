@@ -49,20 +49,7 @@ func (r *Runner) Start() {
 			case <-tick.C:
 				ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
 				if r.Enabled == nil || r.Enabled(ctx) {
-					if !legacyReconciled {
-						if reconciler, ok := r.Store.(interface{ ReconcileLegacyProtection(context.Context) error }); ok {
-							reconcileCtx, done := context.WithTimeout(r.ctx, 30*time.Second)
-							err := reconciler.ReconcileLegacyProtection(reconcileCtx)
-							done()
-							if err != nil {
-								slog.Warn("intelligence legacy pause reconciliation failed", "error", err)
-							} else {
-								legacyReconciled = true
-							}
-						} else {
-							legacyReconciled = true
-						}
-					}
+					legacyReconciled = r.reconcileProtection(r.ctx, legacyReconciled)
 					for i := 0; i < cap(r.slots); i++ {
 						if err := r.launch(ctx, 0, false); err != nil {
 							if !errors.Is(err, ErrConflict) && ctx.Err() == nil {
@@ -83,6 +70,25 @@ func (r *Runner) Start() {
 		}
 	}()
 }
+func (r *Runner) reconcileProtection(ctx context.Context, legacyReconciled bool) bool {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if !legacyReconciled {
+		if reconciler, ok := r.Store.(interface{ ReconcileLegacyProtection(context.Context) error }); ok {
+			if err := reconciler.ReconcileLegacyProtection(ctx); err != nil {
+				slog.Warn("intelligence legacy pause reconciliation failed", "error", err)
+				return false
+			}
+		}
+	}
+	if reconciler, ok := r.Store.(interface{ ReconcileProtectionScopes(context.Context) error }); ok {
+		if err := reconciler.ReconcileProtectionScopes(ctx); err != nil {
+			slog.Warn("intelligence protection scope reconciliation failed", "error", err)
+		}
+	}
+	return true
+}
+
 func (r *Runner) RunNow(ctx context.Context, groupID int64) error {
 	if groupID <= 0 {
 		return ErrInvalid
