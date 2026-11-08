@@ -320,11 +320,11 @@ func TestOpenAIFastPolicySettingsFromDTO_NormalizesServiceTier(t *testing.T) {
 	})
 }
 
-func TestOpenAIFastPolicySettings_BillingFollowRequestDTORoundTrip(t *testing.T) {
+func TestOpenAIFastPolicySettings_BillingFollowUpstreamTierDTORoundTrip(t *testing.T) {
 	for _, enabled := range []bool{true, false} {
-		input := &dto.OpenAIFastPolicySettings{BillingFollowRequest: enabled, Rules: []dto.OpenAIFastPolicyRule{{ServiceTier: "priority", Action: "pass", Scope: "all"}}}
+		input := &dto.OpenAIFastPolicySettings{BillingFollowUpstreamTier: enabled, Rules: []dto.OpenAIFastPolicyRule{{ServiceTier: "priority", Action: "pass", Scope: "all"}}}
 		stored := openaiFastPolicySettingsFromDTO(input)
-		require.Equal(t, enabled, stored.BillingFollowRequest)
+		require.Equal(t, enabled, stored.BillingFollowUpstreamTier)
 		require.Equal(t, input, openaiFastPolicySettingsToDTO(stored))
 	}
 }

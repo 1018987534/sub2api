@@ -1317,18 +1317,18 @@
             <div class="space-y-5 p-6">
               <div class="flex items-center justify-between gap-4">
                 <div>
-                  <p id="openai-billing-follow-request-label" class="font-medium text-gray-900 dark:text-white">
-                    {{ t("admin.settings.openaiFastPolicy.billingFollowRequest") }}
+                  <p id="openai-billing-follow-upstream-tier-label" class="font-medium text-gray-900 dark:text-white">
+                    {{ t("admin.settings.openaiFastPolicy.billingFollowUpstreamTier") }}
                   </p>
                   <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                    {{ t("admin.settings.openaiFastPolicy.billingFollowRequestHint") }}
+                    {{ t("admin.settings.openaiFastPolicy.billingFollowUpstreamTierHint") }}
                   </p>
                 </div>
                 <Toggle
-                  v-model="openaiFastPolicyForm.billing_follow_request"
+                  v-model="openaiFastPolicyForm.billing_follow_upstream_tier"
                   :disabled="!openaiFastPolicyLoaded"
-                  aria-labelledby="openai-billing-follow-request-label"
-                  data-testid="openai-billing-follow-request"
+                  aria-labelledby="openai-billing-follow-upstream-tier-label"
+                  data-testid="openai-billing-follow-upstream-tier"
                 />
               </div>
               <!-- Empty state -->
@@ -9666,7 +9666,7 @@ const betaPolicyForm = reactive({
 
 // OpenAI Fast/Flex Policy 状态
 const openaiFastPolicyForm = reactive({
-  billing_follow_request: false,
+  billing_follow_upstream_tier: false,
   rules: [] as OpenAIFastPolicyRule[],
 });
 // 标记 openai_fast_policy_settings 是否已成功从后端加载，
@@ -11625,8 +11625,8 @@ async function loadSettings() {
       settings.openai_fast_policy_settings &&
       Array.isArray(settings.openai_fast_policy_settings.rules)
     ) {
-      openaiFastPolicyForm.billing_follow_request =
-        settings.openai_fast_policy_settings.billing_follow_request === true;
+      openaiFastPolicyForm.billing_follow_upstream_tier =
+        settings.openai_fast_policy_settings.billing_follow_upstream_tier === true;
       openaiFastPolicyForm.rules =
         settings.openai_fast_policy_settings.rules.map((rule) => ({
           ...rule,
@@ -12235,7 +12235,7 @@ async function saveSettings() {
     // 否则省略整个字段，让后端保留既有规则（含默认值）。
     if (openaiFastPolicyLoaded.value) {
       payload.openai_fast_policy_settings = {
-        billing_follow_request: openaiFastPolicyForm.billing_follow_request,
+        billing_follow_upstream_tier: openaiFastPolicyForm.billing_follow_upstream_tier,
         rules: openaiFastPolicyForm.rules.map((rule) => {
           const whitelist = (rule.model_whitelist || [])
             .map((p) => p.trim())
@@ -12340,8 +12340,8 @@ async function saveSettings() {
       updated.openai_fast_policy_settings &&
       Array.isArray(updated.openai_fast_policy_settings.rules)
     ) {
-      openaiFastPolicyForm.billing_follow_request =
-        updated.openai_fast_policy_settings.billing_follow_request === true;
+      openaiFastPolicyForm.billing_follow_upstream_tier =
+        updated.openai_fast_policy_settings.billing_follow_upstream_tier === true;
       openaiFastPolicyForm.rules =
         updated.openai_fast_policy_settings.rules.map((rule) => ({
           ...rule,

@@ -39,6 +39,32 @@ func TestResolveBillingServiceTier(t *testing.T) {
 	}
 }
 
+func TestResolveUpstreamReportedServiceTier(t *testing.T) {
+	tests := []struct {
+		name      string
+		requested string
+		observed  string
+		billing   string
+	}{
+		{name: "fast confirmed", requested: "priority", observed: "priority", billing: "priority"},
+		{name: "fast alias normalized", requested: "default", observed: " FAST ", billing: "priority"},
+		{name: "fast downgraded by upstream", requested: "priority", observed: "default", billing: "default"},
+		{name: "upstream upgrades request", requested: "default", observed: "priority", billing: "priority"},
+		{name: "missing response uses base", requested: "priority", observed: "", billing: "default"},
+		{name: "unknown response uses base", requested: "priority", observed: "turbo", billing: "default"},
+		{name: "standard alias uses base", requested: "priority", observed: "standard", billing: "default"},
+		{name: "auto is no processing confirmation", requested: "priority", observed: "auto", billing: "default"},
+		{name: "explicit flex retained", requested: "priority", observed: "flex", billing: "flex"},
+		{name: "explicit ultrafast retained", requested: "ultrafast", observed: "ultrafast", billing: "ultrafast"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveUpstreamReportedServiceTier(tt.requested, tt.observed)
+			require.Equal(t, tt.billing, got.Billing)
+		})
+	}
+}
+
 func TestApplyServiceTierBillingResolutionOnlyRewritesDowngrades(t *testing.T) {
 	t.Run("codex exception only covers OpenAI default", func(t *testing.T) {
 		require.True(t, codexOAuthResponseTierIsNonAuthoritative("default"))
