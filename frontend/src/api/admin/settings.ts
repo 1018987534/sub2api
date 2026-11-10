@@ -1793,6 +1793,7 @@ export async function updateFastPoolThresholdSettings(
 }
 
 export interface DashboardProfitSettings {
+  withdrawal_fee_rate_percent: number;
   monthly_server_cost_usd: number;
   daily_server_cost_usd: number;
   month_days: number;
@@ -1803,10 +1804,10 @@ export async function getDashboardProfitSettings(): Promise<DashboardProfitSetti
   return data;
 }
 
-export async function updateDashboardProfitSettings(monthlyServerCostUSD: number): Promise<DashboardProfitSettings> {
-  const { data } = await apiClient.put<DashboardProfitSettings>("/admin/settings/dashboard-profit", {
-    monthly_server_cost_usd: monthlyServerCostUSD,
-  });
+export type DashboardProfitSettingsUpdate = Partial<Pick<DashboardProfitSettings, 'monthly_server_cost_usd' | 'withdrawal_fee_rate_percent'>>;
+
+export async function updateDashboardProfitSettings(settings: DashboardProfitSettingsUpdate): Promise<DashboardProfitSettings> {
+  const { data } = await apiClient.put<DashboardProfitSettings>("/admin/settings/dashboard-profit", settings);
   return data;
 }
 

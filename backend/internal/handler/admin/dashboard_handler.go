@@ -142,6 +142,7 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		"today_qq_reward_cost":        stats.TodayQQRewardCost,
 		"today_admin_actual_cost":     profit.TodayAdminActualCost,
 		"today_withdrawal_fee":        profit.TodayWithdrawalFee,
+		"withdrawal_fee_rate_percent": profit.WithdrawalFeeRatePercent,
 		"today_server_cost_usd":       profit.TodayServerCostUSD,
 		"today_profit":                profit.TodayProfit,
 

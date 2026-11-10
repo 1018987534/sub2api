@@ -17,6 +17,23 @@
         data-testid="monthly-server-cost"
       />
       <span>{{ t('admin.dashboard.serverCostUnit') }}</span>
+      <label for="dashboard-withdrawal-fee-rate" class="font-medium text-gray-700 dark:text-gray-200">
+        {{ t('admin.dashboard.withdrawalFeeRate') }}
+      </label>
+      <input
+        id="dashboard-withdrawal-fee-rate"
+        v-model.number="withdrawalFeeRate"
+        type="number"
+        min="0"
+        max="100"
+        step="0.01"
+        class="input w-24 py-1.5 text-sm"
+        :disabled="saving"
+        :aria-invalid="!validRate"
+        aria-describedby="dashboard-withdrawal-fee-hint"
+        data-testid="withdrawal-fee-rate"
+      />
+      <span>%</span>
       <button type="submit" class="btn btn-secondary py-1.5 text-xs" :disabled="!canSave" data-testid="save-server-cost">
         {{ t(saving ? 'common.saving' : 'common.save') }}
       </button>
@@ -25,6 +42,12 @@
       </span>
       <span v-else class="text-red-600 dark:text-red-400" role="alert">
         {{ t('admin.dashboard.serverCostInvalid') }}
+      </span>
+      <span v-if="validRate" id="dashboard-withdrawal-fee-hint" class="text-gray-500 dark:text-gray-400">
+        {{ t('admin.dashboard.withdrawalFeeRateHint') }}
+      </span>
+      <span v-else class="text-red-600 dark:text-red-400" role="alert">
+        {{ t('admin.dashboard.withdrawalFeeRateInvalid') }}
       </span>
     </form>
     <div v-else-if="loadError" class="flex items-center gap-2 text-red-600 dark:text-red-400" role="alert">
@@ -46,12 +69,17 @@ const emit = defineEmits<{ saved: [settings: DashboardProfitSettings] }>()
 const { t } = useI18n()
 const appStore = useAppStore()
 const monthlyCost = ref<number | string>(0)
+const withdrawalFeeRate = ref<number | string>(1.8)
 const savedSettings = ref<DashboardProfitSettings | null>(null)
 const saving = ref(false)
 const loadError = ref(false)
 const amount = computed(() => Number(monthlyCost.value))
 const validAmount = computed(() => monthlyCost.value !== '' && Number.isFinite(amount.value) && amount.value >= 0)
-const canSave = computed(() => savedSettings.value !== null && validAmount.value && !saving.value && amount.value !== savedSettings.value.monthly_server_cost_usd)
+const rate = computed(() => Number(withdrawalFeeRate.value))
+const validRate = computed(() => withdrawalFeeRate.value !== '' && Number.isFinite(rate.value) && rate.value >= 0 && rate.value <= 100)
+const canSave = computed(() => savedSettings.value !== null && validAmount.value && validRate.value && !saving.value && (
+  amount.value !== savedSettings.value.monthly_server_cost_usd || rate.value !== (savedSettings.value.withdrawal_fee_rate_percent ?? 1.8)
+))
 const dailyPreview = computed(() => new Intl.NumberFormat('en-US', {
   style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2
 }).format(amount.value / (savedSettings.value?.month_days || 1)))
@@ -59,6 +87,7 @@ const dailyPreview = computed(() => new Intl.NumberFormat('en-US', {
 const applySettings = (settings: DashboardProfitSettings) => {
   savedSettings.value = settings
   monthlyCost.value = settings.monthly_server_cost_usd
+  withdrawalFeeRate.value = settings.withdrawal_fee_rate_percent ?? 1.8
 }
 
 const load = async () => {
@@ -74,7 +103,10 @@ const save = async () => {
   if (!canSave.value) return
   saving.value = true
   try {
-    const settings = await adminAPI.settings.updateDashboardProfitSettings(amount.value)
+    const update: { monthly_server_cost_usd?: number; withdrawal_fee_rate_percent?: number } = {}
+    if (amount.value !== savedSettings.value?.monthly_server_cost_usd) update.monthly_server_cost_usd = amount.value
+    if (rate.value !== (savedSettings.value?.withdrawal_fee_rate_percent ?? 1.8)) update.withdrawal_fee_rate_percent = rate.value
+    const settings = await adminAPI.settings.updateDashboardProfitSettings(update)
     applySettings(settings)
     emit('saved', settings)
     appStore.showSuccess(t('admin.dashboard.serverCostSaved'))

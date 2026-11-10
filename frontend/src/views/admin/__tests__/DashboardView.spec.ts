@@ -4,6 +4,9 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import type { AccountFirstTokenLatencyMetric, DashboardStats } from '@/types'
 import DashboardView from '../DashboardView.vue'
+import type { DashboardProfitSettingsUpdate } from '@/api/admin/settings'
+
+const { translate } = vi.hoisted(() => ({ translate: vi.fn((key: string) => key) }))
 
 const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings, getDashboardProfitSettings, updateDashboardProfitSettings, showSuccess, showError } = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
@@ -54,7 +57,7 @@ vi.mock('vue-i18n', async () => {
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key
+      t: translate
     })
   }
 })
@@ -133,6 +136,7 @@ const createFirstTokenMetric = (
 
 describe('admin DashboardView', () => {
   beforeEach(() => {
+    translate.mockClear()
     setActivePinia(createPinia())
 
     getSnapshotV2.mockReset()
@@ -147,9 +151,14 @@ describe('admin DashboardView', () => {
     updateFastPoolPrioritySettings.mockReset()
     updateFastPoolPrioritySettings.mockImplementation(async (mode: string, cache_rate_threshold_percent: number | null) => ({ mode, cache_rate_threshold_percent }))
     getDashboardProfitSettings.mockReset()
-    getDashboardProfitSettings.mockResolvedValue({ monthly_server_cost_usd: 0, daily_server_cost_usd: 0, month_days: 30 })
+    getDashboardProfitSettings.mockResolvedValue({ monthly_server_cost_usd: 0, daily_server_cost_usd: 0, month_days: 30, withdrawal_fee_rate_percent: 1.8 })
     updateDashboardProfitSettings.mockReset()
-    updateDashboardProfitSettings.mockImplementation(async (monthly: number) => ({ monthly_server_cost_usd: monthly, daily_server_cost_usd: monthly / 30, month_days: 30 }))
+    updateDashboardProfitSettings.mockImplementation(async (update: DashboardProfitSettingsUpdate) => ({
+      monthly_server_cost_usd: update.monthly_server_cost_usd ?? 0,
+      daily_server_cost_usd: (update.monthly_server_cost_usd ?? 0) / 30,
+      month_days: 30,
+      withdrawal_fee_rate_percent: update.withdrawal_fee_rate_percent ?? 1.8
+    }))
     showSuccess.mockReset()
     showError.mockReset()
 
@@ -327,12 +336,40 @@ describe('admin DashboardView', () => {
     await wrapper.get('[data-testid="monthly-server-cost"]').setValue('600')
     await wrapper.get('[data-testid="server-cost-form"]').trigger('submit')
     await flushPromises()
-    expect(updateDashboardProfitSettings).toHaveBeenCalledWith(600)
+    expect(updateDashboardProfitSettings).toHaveBeenCalledWith({ monthly_server_cost_usd: 600 })
     expect(getSnapshotV2).toHaveBeenCalledTimes(2)
     expect(wrapper.get('[data-testid="today-profit"]').text()).toBe('$87.60')
     expect(wrapper.get('[data-testid="today-profit-breakdown"]').text()).toContain('admin.dashboard.dailyServerCost $20.00')
     expect(wrapper.get('[data-testid="month-profit"]').text()).toBe('$93.80')
     expect(wrapper.get('[data-testid="month-profit-breakdown"]').text()).toContain('admin.dashboard.monthServerCost $160.00')
+    wrapper.unmount()
+  })
+
+  it.each([
+    { rate: 3.2, fee: 9.46816, monthFee: 28.8, profit: 75.41184, monthProfit: 241.2, todayDisplay: '$75.41', monthDisplay: '$241.20' },
+    { rate: 0, fee: 0, monthFee: 0, profit: 84.88, monthProfit: 270, todayDisplay: '$84.88', monthDisplay: '$270.00' }
+  ])('refreshes daily/monthly profit and labels after saving a $rate percent fee', async ({ rate, fee, monthFee, profit, monthProfit, todayDisplay, monthDisplay }) => {
+    const initial = { ...createDashboardStats(), today_actual_cost: 315.88, today_account_cost: 202,
+      today_admin_actual_cost: 20, today_lottery_cost: 5, today_qq_reward_cost: 4, today_withdrawal_fee: 5.32584, today_profit: 79.55416,
+      month_actual_cost: 1000, month_account_cost: 600, month_admin_actual_cost: 100, month_lottery_cost: 10, month_qq_reward_cost: 20,
+      month_withdrawal_fee: 16.2, month_server_cost_usd: 0, month_profit: 253.8, withdrawal_fee_rate_percent: 1.8 }
+    getSnapshotV2.mockResolvedValueOnce({ stats: initial, trend: [], models: [] })
+    const wrapper = mount(DashboardView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true,
+      DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+    } } })
+    await flushPromises()
+    getSnapshotV2.mockResolvedValueOnce({ stats: { ...initial, withdrawal_fee_rate_percent: rate,
+      today_withdrawal_fee: fee, month_withdrawal_fee: monthFee, today_profit: profit, month_profit: monthProfit }, trend: [], models: [] })
+    await wrapper.get('[data-testid="withdrawal-fee-rate"]').setValue(String(rate))
+    await wrapper.get('[data-testid="server-cost-form"]').trigger('submit')
+    await flushPromises()
+    expect(updateDashboardProfitSettings).toHaveBeenCalledWith({ withdrawal_fee_rate_percent: rate })
+    expect(getSnapshotV2).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-testid="today-profit"]').text()).toBe(todayDisplay)
+    expect(wrapper.get('[data-testid="month-profit"]').text()).toBe(monthDisplay)
+    expect(translate).toHaveBeenCalledWith('admin.dashboard.withdrawalFee', { rate })
+    expect(translate).toHaveBeenCalledWith('admin.dashboard.profitFormula', { rate })
     wrapper.unmount()
   })
 
