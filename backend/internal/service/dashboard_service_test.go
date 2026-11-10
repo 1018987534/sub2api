@@ -489,7 +489,7 @@ func TestDashboardService_ProfitDeductsMonthlyServerCost(t *testing.T) {
 	svc := NewDashboardService(repo, nil, nil, nil, settingsService)
 	stats := &usagestats.DashboardStats{TodayActualCost: 251.93, TodayAccountCost: 136.25, TodayLotteryCost: 5, TodayQQRewardCost: 4}
 	for _, monthly := range []float64{600, 6000, 0} {
-		saved, err := settingsService.UpdateDashboardProfitSettings(ctx, monthly)
+		saved, err := settingsService.UpdateDashboardProfitSettings(ctx, dashboardProfitMonthlyUpdate(monthly))
 		require.NoError(t, err)
 		profit, err := svc.GetDashboardProfitStats(ctx, 7, stats)
 		require.NoError(t, err)
@@ -540,7 +540,7 @@ func TestDashboardService_MonthServerCostUsesCalendarDaysThroughToday(t *testing
 			settings := dashboardProfitSettingsForMonth(600, tc.at)
 			profit := &usagestats.DashboardProfitStats{MonthAdminActualCost: 100}
 			stats := &usagestats.DashboardStats{MonthActualCost: 1000, MonthAccountCost: 600, MonthLotteryCost: 10, MonthQQRewardCost: 20}
-			fillDashboardMonthProfit(stats, profit, settings.DailyServerCostUSD, tc.at)
+			fillDashboardMonthProfit(stats, profit, settings.DailyServerCostUSD, defaultDashboardWithdrawalFeeRatePercent, tc.at)
 			require.InDelta(t, tc.want, profit.MonthServerCostUSD, 1e-9)
 			require.InDelta(t, 253.8-tc.want, profit.MonthProfit, 1e-9)
 			require.InDelta(t, 16.2, profit.MonthWithdrawalFee, 1e-9)
@@ -559,9 +559,43 @@ func TestDashboardService_MonthProfitAllowsLossAndClampsFee(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			profit := &usagestats.DashboardProfitStats{MonthAdminActualCost: tc.own}
-			fillDashboardMonthProfit(&usagestats.DashboardStats{MonthActualCost: tc.actual, MonthAccountCost: tc.cost, MonthQQRewardCost: tc.qq}, profit, 0, time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
+			fillDashboardMonthProfit(&usagestats.DashboardStats{MonthActualCost: tc.actual, MonthAccountCost: tc.cost, MonthQQRewardCost: tc.qq}, profit, 0, defaultDashboardWithdrawalFeeRatePercent, time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
 			require.InDelta(t, tc.wantFee, profit.MonthWithdrawalFee, 1e-9)
 			require.InDelta(t, tc.wantProfit, profit.MonthProfit, 1e-9)
 		})
 	}
+}
+
+func TestDashboardService_ProfitUsesSavedWithdrawalFeeForTodayAndMonth(t *testing.T) {
+	ctx := context.Background()
+	settingsRepo := &dashboardProfitSettingsRepo{}
+	settingsService := NewSettingService(settingsRepo, nil)
+	repo := &dashboardProfitRepoStub{usage: map[int64]*usagestats.BatchUserUsageStats{7: {TodayActualCost: 20, TotalActualCost: 100}}}
+	stats := &usagestats.DashboardStats{
+		TodayActualCost: 315.88, TodayAccountCost: 202, TodayLotteryCost: 5, TodayQQRewardCost: 4,
+		MonthActualCost: 1000, MonthAccountCost: 600, MonthLotteryCost: 10, MonthQQRewardCost: 20,
+	}
+	for _, tc := range []struct{ rate, todayFee, monthFee, todayProfit, monthProfit float64 }{
+		{1.8, 5.32584, 16.2, 79.55416, 253.8},
+		{3.2, 9.46816, 28.8, 75.41184, 241.2},
+		{0, 0, 0, 84.88, 270},
+		{100, 295.88, 900, -211, -630},
+	} {
+		_, err := settingsService.UpdateDashboardProfitSettings(ctx, DashboardProfitSettingsUpdate{WithdrawalFeeRatePercent: &tc.rate})
+		require.NoError(t, err)
+		// A fresh service must read the persisted setting without cached defaults.
+		svc := NewDashboardService(repo, nil, nil, nil, NewSettingService(settingsRepo, nil))
+		profit, err := svc.GetDashboardProfitStats(ctx, 7, stats)
+		require.NoError(t, err)
+		require.Equal(t, tc.rate, profit.WithdrawalFeeRatePercent)
+		require.InDelta(t, tc.todayFee, profit.TodayWithdrawalFee, 1e-9)
+		require.InDelta(t, tc.monthFee, profit.MonthWithdrawalFee, 1e-9)
+		require.InDelta(t, tc.todayProfit, profit.TodayProfit, 1e-9)
+		require.InDelta(t, tc.monthProfit, profit.MonthProfit, 1e-9)
+	}
+	stats.TodayActualCost, stats.MonthActualCost = 10, 50
+	profit, err := NewDashboardService(repo, nil, nil, nil, settingsService).GetDashboardProfitStats(ctx, 7, stats)
+	require.NoError(t, err)
+	require.Zero(t, profit.TodayWithdrawalFee)
+	require.Zero(t, profit.MonthWithdrawalFee)
 }

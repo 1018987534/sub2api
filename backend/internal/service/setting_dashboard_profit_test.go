@@ -18,6 +18,10 @@ type dashboardProfitSettingsRepo struct {
 	writes int
 }
 
+func dashboardProfitMonthlyUpdate(monthly float64) DashboardProfitSettingsUpdate {
+	return DashboardProfitSettingsUpdate{MonthlyServerCostUSD: &monthly}
+}
+
 func (r *dashboardProfitSettingsRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
 	values := make(map[string]string)
 	for _, key := range keys {
@@ -71,8 +75,9 @@ func TestDashboardProfitSettingsPersistsAndZeroDisables(t *testing.T) {
 	initial, err := control.GetDashboardProfitSettings(ctx)
 	require.NoError(t, err)
 	require.Zero(t, initial.MonthlyServerCostUSD)
+	require.Equal(t, 1.8, initial.WithdrawalFeeRatePercent)
 	for _, monthly := range []float64{600, 620.5, 0} {
-		saved, err := control.UpdateDashboardProfitSettings(ctx, monthly)
+		saved, err := control.UpdateDashboardProfitSettings(ctx, dashboardProfitMonthlyUpdate(monthly))
 		require.NoError(t, err)
 		reloaded, err := NewSettingService(repo, nil).GetDashboardProfitSettings(ctx)
 		require.NoError(t, err)
@@ -88,7 +93,7 @@ func TestDashboardProfitSettingsRejectsInvalidAmountsAndStorageFailures(t *testi
 	repo := &dashboardProfitSettingsRepo{values: map[string]string{SettingKeyDashboardMonthlyServerCostUSD: "600"}}
 	svc := NewSettingService(repo, nil)
 	for _, amount := range []float64{-1, math.NaN(), math.Inf(1), math.Inf(-1)} {
-		_, err := svc.UpdateDashboardProfitSettings(ctx, amount)
+		_, err := svc.UpdateDashboardProfitSettings(ctx, dashboardProfitMonthlyUpdate(amount))
 		require.Error(t, err)
 	}
 	require.Zero(t, repo.writes)
@@ -101,6 +106,47 @@ func TestDashboardProfitSettingsRejectsInvalidAmountsAndStorageFailures(t *testi
 	_, err := svc.GetDashboardProfitSettings(ctx)
 	require.ErrorContains(t, err, "read unavailable")
 	repo.setErr = errors.New("write unavailable")
-	_, err = svc.UpdateDashboardProfitSettings(ctx, 100)
+	_, err = svc.UpdateDashboardProfitSettings(ctx, dashboardProfitMonthlyUpdate(100))
 	require.ErrorContains(t, err, "write unavailable")
+}
+
+func TestDashboardProfitSettingsWithdrawalFeePersistsAndPreservesOtherFields(t *testing.T) {
+	ctx := context.Background()
+	repo := &dashboardProfitSettingsRepo{}
+	svc := NewSettingService(repo, nil)
+	monthly, rate := 600.0, 3.2
+	_, err := svc.UpdateDashboardProfitSettings(ctx, DashboardProfitSettingsUpdate{MonthlyServerCostUSD: &monthly, WithdrawalFeeRatePercent: &rate})
+	require.NoError(t, err)
+	for _, rate := range []float64{3.2, 0, 100} {
+		saved, err := svc.UpdateDashboardProfitSettings(ctx, DashboardProfitSettingsUpdate{WithdrawalFeeRatePercent: &rate})
+		require.NoError(t, err)
+		require.Equal(t, monthly, saved.MonthlyServerCostUSD)
+		reloaded, err := NewSettingService(repo, nil).GetDashboardProfitSettings(ctx)
+		require.NoError(t, err)
+		require.Equal(t, saved, reloaded)
+		require.Equal(t, rate, reloaded.WithdrawalFeeRatePercent)
+	}
+	saved, err := svc.UpdateDashboardProfitSettings(ctx, dashboardProfitMonthlyUpdate(620))
+	require.NoError(t, err)
+	require.Equal(t, 100.0, saved.WithdrawalFeeRatePercent)
+	require.Equal(t, 620.0, saved.MonthlyServerCostUSD)
+}
+
+func TestDashboardProfitSettingsRejectsInvalidWithdrawalRatesWithoutWriting(t *testing.T) {
+	repo := &dashboardProfitSettingsRepo{values: map[string]string{SettingKeyDashboardWithdrawalFeeRatePercent: "3.2"}}
+	svc := NewSettingService(repo, nil)
+	for _, rate := range []float64{-0.01, 100.01, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		monthly := 600.0
+		_, err := svc.UpdateDashboardProfitSettings(context.Background(), DashboardProfitSettingsUpdate{MonthlyServerCostUSD: &monthly, WithdrawalFeeRatePercent: &rate})
+		require.Error(t, err)
+	}
+	_, err := svc.UpdateDashboardProfitSettings(context.Background(), DashboardProfitSettingsUpdate{})
+	require.Error(t, err)
+	require.Zero(t, repo.writes)
+	require.Equal(t, "3.2", repo.values[SettingKeyDashboardWithdrawalFeeRatePercent])
+	for _, stored := range []string{"-1", "100.01", "NaN", "+Inf", "invalid"} {
+		repo.values[SettingKeyDashboardWithdrawalFeeRatePercent] = stored
+		_, err := svc.GetDashboardProfitSettings(context.Background())
+		require.ErrorContains(t, err, "withdrawal fee rate")
+	}
 }

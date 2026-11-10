@@ -90,14 +90,15 @@ type DashboardStats struct {
 // DashboardProfitStats excludes the current administrator's own billed usage
 // from revenue. Account cost already includes the upstream cost of that usage.
 type DashboardProfitStats struct {
-	TodayAdminActualCost float64 `json:"today_admin_actual_cost"`
-	TodayWithdrawalFee   float64 `json:"today_withdrawal_fee"`
-	TodayServerCostUSD   float64 `json:"today_server_cost_usd"`
-	TodayProfit          float64 `json:"today_profit"`
-	MonthAdminActualCost float64 `json:"month_admin_actual_cost"`
-	MonthWithdrawalFee   float64 `json:"month_withdrawal_fee"`
-	MonthServerCostUSD   float64 `json:"month_server_cost_usd"`
-	MonthProfit          float64 `json:"month_profit"`
+	WithdrawalFeeRatePercent float64 `json:"withdrawal_fee_rate_percent"`
+	TodayAdminActualCost     float64 `json:"today_admin_actual_cost"`
+	TodayWithdrawalFee       float64 `json:"today_withdrawal_fee"`
+	TodayServerCostUSD       float64 `json:"today_server_cost_usd"`
+	TodayProfit              float64 `json:"today_profit"`
+	MonthAdminActualCost     float64 `json:"month_admin_actual_cost"`
+	MonthWithdrawalFee       float64 `json:"month_withdrawal_fee"`
+	MonthServerCostUSD       float64 `json:"month_server_cost_usd"`
+	MonthProfit              float64 `json:"month_profit"`
 }
 
 // TrendDataPoint represents a single point in trend data

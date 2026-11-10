@@ -19,7 +19,6 @@ const (
 	defaultDashboardStatsFreshTTL       = 15 * time.Second
 	defaultDashboardStatsCacheTTL       = 30 * time.Second
 	defaultDashboardStatsRefreshTimeout = 30 * time.Second
-	dashboardWithdrawalFeeRate          = 0.018
 )
 
 // ErrDashboardStatsCacheMiss 标记仪表盘缓存未命中。
@@ -150,22 +149,23 @@ func (s *DashboardService) GetDashboardProfitStats(ctx context.Context, adminID 
 	if err != nil {
 		return nil, err
 	}
-	settings = dashboardProfitSettingsForMonth(settings.MonthlyServerCostUSD, now)
+	settings.DailyServerCostUSD = dashboardProfitSettingsForMonth(settings.MonthlyServerCostUSD, now).DailyServerCostUSD
+	profit.WithdrawalFeeRatePercent = settings.WithdrawalFeeRatePercent
 	profit.TodayServerCostUSD = settings.DailyServerCostUSD
 	// Administrator self usage does not generate withdrawable revenue. Upstream
 	// costs and lottery or QQ reward payouts do not reduce the withdrawal fee base.
 	withdrawableRevenue := math.Max(0, stats.TodayActualCost-profit.TodayAdminActualCost)
-	profit.TodayWithdrawalFee = withdrawableRevenue * dashboardWithdrawalFeeRate
+	profit.TodayWithdrawalFee = withdrawableRevenue * settings.WithdrawalFeeRatePercent / 100
 	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost - stats.TodayQQRewardCost - profit.TodayWithdrawalFee - profit.TodayServerCostUSD
-	fillDashboardMonthProfit(stats, profit, settings.DailyServerCostUSD, now)
+	fillDashboardMonthProfit(stats, profit, settings.DailyServerCostUSD, settings.WithdrawalFeeRatePercent, now)
 	return profit, nil
 }
 
-func fillDashboardMonthProfit(stats *usagestats.DashboardStats, profit *usagestats.DashboardProfitStats, dailyServerCost float64, at time.Time) {
+func fillDashboardMonthProfit(stats *usagestats.DashboardStats, profit *usagestats.DashboardProfitStats, dailyServerCost, withdrawalFeeRatePercent float64, at time.Time) {
 	// Charge the saved monthly server expense through today, including today,
 	// using calendar days rather than elapsed hours (which vary with DST).
 	profit.MonthServerCostUSD = dailyServerCost * float64(at.Day())
-	profit.MonthWithdrawalFee = math.Max(0, stats.MonthActualCost-profit.MonthAdminActualCost) * dashboardWithdrawalFeeRate
+	profit.MonthWithdrawalFee = math.Max(0, stats.MonthActualCost-profit.MonthAdminActualCost) * withdrawalFeeRatePercent / 100
 	profit.MonthProfit = stats.MonthActualCost - stats.MonthAccountCost - profit.MonthAdminActualCost - stats.MonthLotteryCost - stats.MonthQQRewardCost - profit.MonthWithdrawalFee - profit.MonthServerCostUSD
 }
 
