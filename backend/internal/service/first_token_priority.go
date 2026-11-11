@@ -492,7 +492,7 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 }
 
 // orderFastPool first promotes measured cache rates meeting the optional
-// inclusive threshold. Both tiers then follow the selected strategy, with
+// inclusive threshold. Each tier then follows its own selected strategy, with
 // ties retaining the caller's low-rate order. Unknown cache rates never qualify.
 func orderFastPool(ctx context.Context, accountIDs []int64, latencyStats map[int64]FirstTokenLatencyStats, settings *FastPoolPrioritySettings, cacheStatsService *RateLimitService) {
 	if len(accountIDs) <= 1 {
@@ -512,14 +512,21 @@ func orderFastPool(ctx context.Context, accountIDs []int64, latencyStats map[int
 		leftID, rightID := accountIDs[i], accountIDs[j]
 		leftRate, leftKnown := rates[leftID]
 		rightRate, rightKnown := rates[rightID]
+		mode := settings.Mode
 		if threshold := settings.CacheRateThresholdPercent; threshold != nil {
 			leftPriority := leftKnown && leftRate >= *threshold/100
 			rightPriority := rightKnown && rightRate >= *threshold/100
 			if leftPriority != rightPriority {
 				return leftPriority
 			}
+			if !leftPriority {
+				mode = settings.BelowThresholdMode
+				if mode == "" {
+					mode = FastPoolPriorityIntelligence
+				}
+			}
 		}
-		switch settings.Mode {
+		switch mode {
 		case FastPoolPriorityIntelligence:
 			if leftKnown != rightKnown {
 				return leftKnown

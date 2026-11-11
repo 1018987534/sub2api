@@ -54,6 +54,7 @@ func TestFastPoolPrioritySettingsDefaultsValidationAndReadFailures(t *testing.T)
 			want = FastPoolPriorityRate
 		}
 		require.Equal(t, want, got.Mode)
+		require.Equal(t, FastPoolPriorityIntelligence, got.BelowThresholdMode)
 		require.Equal(t, floatPtr(80), got.CacheRateThresholdPercent)
 	}
 	repo.values = nil
@@ -79,7 +80,7 @@ func TestFastPoolPrioritySettingsPersistsAcrossRunningInstances(t *testing.T) {
 	control := NewSettingService(repo, nil)
 	gateway := NewSettingService(repo, nil)
 	for _, mode := range []FastPoolPriorityMode{FastPoolPriorityRate, FastPoolPriorityLatency, FastPoolPriorityIntelligence} {
-		saved, err := control.UpdateFastPoolPrioritySettings(ctx, mode, nil)
+		saved, err := control.UpdateFastPoolPrioritySettings(ctx, mode, nil, FastPoolPriorityIntelligence)
 		require.NoError(t, err)
 		require.Equal(t, mode, saved.Mode)
 		readback, err := gateway.GetFastPoolPrioritySettings(ctx)
@@ -90,12 +91,12 @@ func TestFastPoolPrioritySettingsPersistsAcrossRunningInstances(t *testing.T) {
 		require.Equal(t, saved, reloaded)
 	}
 	for _, mode := range []FastPoolPriorityMode{"", "cache", " rate"} {
-		_, err := control.UpdateFastPoolPrioritySettings(ctx, mode, nil)
+		_, err := control.UpdateFastPoolPrioritySettings(ctx, mode, nil, FastPoolPriorityIntelligence)
 		require.Error(t, err)
 	}
 	require.Equal(t, 3, repo.writes)
 	repo.setErr = errors.New("write failed")
-	_, err := control.UpdateFastPoolPrioritySettings(ctx, FastPoolPriorityRate, nil)
+	_, err := control.UpdateFastPoolPrioritySettings(ctx, FastPoolPriorityRate, nil, FastPoolPriorityIntelligence)
 	require.Error(t, err)
 	require.Equal(t, string(FastPoolPriorityIntelligence), repo.values[SettingKeyFastPoolPriorityMode])
 }
@@ -105,7 +106,7 @@ func TestFastPoolPriorityThresholdPersistenceValidationAndClear(t *testing.T) {
 	repo := &fastPoolPrioritySettingsRepo{}
 	control, gateway := NewSettingService(repo, nil), NewSettingService(repo, nil)
 	for _, threshold := range []*float64{floatPtr(0), floatPtr(80), floatPtr(80.25), floatPtr(100), nil} {
-		saved, err := control.UpdateFastPoolPrioritySettings(ctx, FastPoolPriorityRate, threshold)
+		saved, err := control.UpdateFastPoolPrioritySettings(ctx, FastPoolPriorityRate, threshold, FastPoolPriorityIntelligence)
 		require.NoError(t, err)
 		readback, err := gateway.GetFastPoolPrioritySettings(ctx)
 		require.NoError(t, err)
@@ -115,7 +116,7 @@ func TestFastPoolPriorityThresholdPersistenceValidationAndClear(t *testing.T) {
 	require.Empty(t, repo.values[SettingKeyFastPoolPriorityCacheRateThresholdPercent])
 	writes := repo.writes
 	for _, invalid := range []float64{-1, 100.01, math.NaN(), math.Inf(1)} {
-		_, err := control.UpdateFastPoolPrioritySettings(ctx, FastPoolPriorityRate, &invalid)
+		_, err := control.UpdateFastPoolPrioritySettings(ctx, FastPoolPriorityRate, &invalid, FastPoolPriorityIntelligence)
 		require.Error(t, err)
 	}
 	require.Equal(t, writes, repo.writes)
@@ -173,17 +174,22 @@ func TestFastPoolPrioritySavedModeChangesNewSelectionsAndKeepsSlowTail(t *testin
 		mode      FastPoolPriorityMode
 		threshold *float64
 		want      []int64
+		belowMode FastPoolPriorityMode
 	}{
-		{FastPoolPriorityIntelligence, nil, []int64{3, 2, 1, 4}},
-		{FastPoolPriorityLatency, nil, []int64{2, 1, 3, 4}},
-		{FastPoolPriorityRate, nil, []int64{1, 2, 3, 4}},
-		{FastPoolPriorityRate, floatPtr(90), []int64{2, 3, 1, 4}},
-		{FastPoolPriorityRate, floatPtr(95), []int64{3, 1, 2, 4}},
-		{FastPoolPriorityLatency, floatPtr(90), []int64{2, 3, 1, 4}},
-		{FastPoolPriorityRate, nil, []int64{1, 2, 3, 4}},
-		{FastPoolPriorityIntelligence, nil, []int64{3, 2, 1, 4}},
+		{FastPoolPriorityIntelligence, nil, []int64{3, 2, 1, 4}, FastPoolPriorityIntelligence},
+		{FastPoolPriorityLatency, nil, []int64{2, 1, 3, 4}, FastPoolPriorityIntelligence},
+		{FastPoolPriorityRate, nil, []int64{1, 2, 3, 4}, FastPoolPriorityIntelligence},
+		{FastPoolPriorityRate, floatPtr(90), []int64{2, 3, 1, 4}, FastPoolPriorityIntelligence},
+		{FastPoolPriorityRate, floatPtr(95), []int64{3, 2, 1, 4}, FastPoolPriorityIntelligence},
+		{FastPoolPriorityLatency, floatPtr(90), []int64{2, 3, 1, 4}, FastPoolPriorityIntelligence},
+		{FastPoolPriorityRate, nil, []int64{1, 2, 3, 4}, FastPoolPriorityIntelligence},
+		{FastPoolPriorityIntelligence, nil, []int64{3, 2, 1, 4}, FastPoolPriorityIntelligence},
+		{FastPoolPriorityRate, floatPtr(100), []int64{3, 2, 1, 4}, FastPoolPriorityIntelligence},
+		{FastPoolPriorityRate, floatPtr(100), []int64{1, 2, 3, 4}, FastPoolPriorityRate},
+		{FastPoolPriorityRate, floatPtr(100), []int64{2, 1, 3, 4}, FastPoolPriorityLatency},
+		{FastPoolPriorityLatency, floatPtr(95), []int64{3, 1, 2, 4}, FastPoolPriorityRate},
 	} {
-		_, err := control.UpdateFastPoolPrioritySettings(ctx, scenario.mode, scenario.threshold)
+		_, err := control.UpdateFastPoolPrioritySettings(ctx, scenario.mode, scenario.threshold, scenario.belowMode)
 		require.NoError(t, err)
 		for _, gateway := range gateways {
 			selection, _, err := gateway.SelectAccountWithScheduler(ctx, &groupID, "", "", "gpt-6.1-sol", nil, OpenAIUpstreamTransportAny, false)
@@ -217,16 +223,16 @@ func TestFastPoolPriorityOptionalThresholdAndModeOrder(t *testing.T) {
 	}{
 		{"unset uses rate only", FastPoolPriorityRate, nil, false, nil, []int64{1, 2, 3}},
 		{"rate includes exact threshold", FastPoolPriorityRate, floatPtr(80), false, nil, []int64{2, 3, 1}},
-		{"rate threshold can be raised", FastPoolPriorityRate, floatPtr(90), false, nil, []int64{3, 1, 2}},
-		{"hundred with no matches retains rate", FastPoolPriorityRate, floatPtr(100), false, nil, []int64{1, 2, 3}},
+		{"rate threshold can be raised", FastPoolPriorityRate, floatPtr(90), false, nil, []int64{3, 2, 1}},
+		{"all below threshold default to cache", FastPoolPriorityRate, floatPtr(100), false, nil, []int64{3, 2, 1}},
 		{"zero is configured", FastPoolPriorityRate, floatPtr(0), true, nil, []int64{2, 3, 1}},
 		{"unset uses latency only", FastPoolPriorityLatency, nil, false, nil, []int64{1, 3, 2}},
 		{"latency prioritizes exact threshold then duration", FastPoolPriorityLatency, floatPtr(80), false, nil, []int64{3, 2, 1}},
-		{"latency sorts both tiers", FastPoolPriorityLatency, floatPtr(90), false, nil, []int64{3, 1, 2}},
+		{"latency applies only above threshold", FastPoolPriorityLatency, floatPtr(90), false, nil, []int64{3, 2, 1}},
 		{"cache mode sorts all measured rates", FastPoolPriorityIntelligence, nil, false, nil, []int64{3, 2, 1}},
 		{"unknown samples never qualify", FastPoolPriorityRate, floatPtr(80), true, nil, []int64{2, 3, 1}},
 		{"read failure retains rate", FastPoolPriorityRate, floatPtr(80), false, errors.New("unavailable"), []int64{1, 2, 3}},
-		{"read failure still uses latency", FastPoolPriorityLatency, floatPtr(80), false, errors.New("unavailable"), []int64{1, 3, 2}},
+		{"read failure leaves unknown low tier stable", FastPoolPriorityLatency, floatPtr(80), false, errors.New("unavailable"), []int64{1, 2, 3}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ids := []int64{1, 2, 3}
@@ -239,5 +245,54 @@ func TestFastPoolPriorityOptionalThresholdAndModeOrder(t *testing.T) {
 			orderFastPool(context.Background(), ids, latency, &FastPoolPrioritySettings{Mode: tc.mode, CacheRateThresholdPercent: tc.threshold}, svc)
 			require.Equal(t, tc.want, ids)
 		})
+	}
+}
+
+func TestFastPoolBelowThresholdSettingsPersistenceAndValidation(t *testing.T) {
+	ctx := context.Background()
+	repo := &fastPoolPrioritySettingsRepo{}
+	control, gateway := NewSettingService(repo, nil), NewSettingService(repo, nil)
+	for _, mode := range []FastPoolPriorityMode{FastPoolPriorityRate, FastPoolPriorityLatency, FastPoolPriorityIntelligence} {
+		saved, err := control.UpdateFastPoolPrioritySettings(ctx, FastPoolPriorityRate, floatPtr(80), mode)
+		require.NoError(t, err)
+		readback, err := gateway.GetFastPoolPrioritySettings(ctx)
+		require.NoError(t, err)
+		require.Equal(t, saved, readback)
+		require.Equal(t, mode, readback.BelowThresholdMode)
+	}
+	writes := repo.writes
+	for _, mode := range []FastPoolPriorityMode{"", "cache", " rate"} {
+		_, err := control.UpdateFastPoolPrioritySettings(ctx, FastPoolPriorityRate, floatPtr(80), mode)
+		require.Error(t, err)
+	}
+	require.Equal(t, writes, repo.writes)
+	repo.values[SettingKeyFastPoolPriorityBelowThresholdMode] = "invalid"
+	_, err := gateway.GetFastPoolPrioritySettings(ctx)
+	require.Error(t, err)
+	require.Equal(t, FastPoolPriorityIntelligence, (&RateLimitService{settingService: gateway}).fastPoolPrioritySettings(ctx).BelowThresholdMode)
+}
+
+func TestFastPoolIndependentTierStrategies(t *testing.T) {
+	for _, high := range []FastPoolPriorityMode{FastPoolPriorityRate, FastPoolPriorityLatency, FastPoolPriorityIntelligence} {
+		for _, low := range []FastPoolPriorityMode{FastPoolPriorityRate, FastPoolPriorityLatency, FastPoolPriorityIntelligence} {
+			t.Run(string(high)+"/"+string(low), func(t *testing.T) {
+				ids := []int64{1, 2, 3, 4, 5}
+				rates := map[int64]AccountCacheStats{}
+				latency := map[int64]FirstTokenLatencyStats{}
+				for i, rate := range []int64{80, 90, 60, 75, 65} {
+					id := int64(i + 1)
+					rates[id] = AccountCacheStats{CacheReadTokens: rate, CacheRateDenominator: 100}
+					latency[id] = FirstTokenLatencyStats{PredictedMS: float64(6000 - i*1000)}
+				}
+				svc := &RateLimitService{usageRepo: cacheRateProviderStub{stats: rates}}
+				orderFastPool(context.Background(), ids, latency, &FastPoolPrioritySettings{Mode: high, BelowThresholdMode: low, CacheRateThresholdPercent: floatPtr(80)}, svc)
+				upper := []int64{1, 2}
+				if high != FastPoolPriorityRate {
+					upper = []int64{2, 1}
+				}
+				lower := map[FastPoolPriorityMode][]int64{FastPoolPriorityRate: {3, 4, 5}, FastPoolPriorityLatency: {5, 4, 3}, FastPoolPriorityIntelligence: {4, 5, 3}}[low]
+				require.Equal(t, append(upper, lower...), ids)
+			})
+		}
 	}
 }

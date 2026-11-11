@@ -149,7 +149,7 @@ describe('admin DashboardView', () => {
     getFastPoolPrioritySettings.mockReset()
     getFastPoolPrioritySettings.mockResolvedValue({ mode: 'intelligence', cache_rate_threshold_percent: null })
     updateFastPoolPrioritySettings.mockReset()
-    updateFastPoolPrioritySettings.mockImplementation(async (mode: string, cache_rate_threshold_percent: number | null) => ({ mode, cache_rate_threshold_percent }))
+    updateFastPoolPrioritySettings.mockImplementation(async (mode: string, cache_rate_threshold_percent: number | null, below_threshold_mode: string) => ({ mode, cache_rate_threshold_percent, below_threshold_mode }))
     getDashboardProfitSettings.mockReset()
     getDashboardProfitSettings.mockResolvedValue({ monthly_server_cost_usd: 0, daily_server_cost_usd: 0, month_days: 30, withdrawal_fee_rate_percent: 1.8 })
     updateDashboardProfitSettings.mockReset()
@@ -429,13 +429,13 @@ describe('admin DashboardView', () => {
     await wrapper.get('[data-testid="fast-pool-priority-mode"]').setValue('latency')
     await wrapper.get('[data-testid="fast-pool-priority-control"] form').trigger('submit')
     await flushPromises()
-    expect(updateFastPoolPrioritySettings).toHaveBeenCalledWith('latency', null)
+    expect(updateFastPoolPrioritySettings).toHaveBeenCalledWith('latency', null, 'intelligence')
     expect(rows()[0]).toContain('cheap-fast')
     await wrapper.get('[data-testid="fast-pool-priority-mode"]').setValue('rate')
     expect(rows()[0]).toContain('cheap-fast')
     await wrapper.get('[data-testid="fast-pool-priority-control"] form').trigger('submit')
     await flushPromises()
-    expect(updateFastPoolPrioritySettings).toHaveBeenCalledWith('rate', null)
+    expect(updateFastPoolPrioritySettings).toHaveBeenCalledWith('rate', null, 'intelligence')
     expect(rows()[0]).toContain('cheap-fast')
     expect(rows()[3]).toContain('slow-high-cache')
     wrapper.unmount()
@@ -443,11 +443,14 @@ describe('admin DashboardView', () => {
 
   it.each([
     { mode: 'rate', threshold: 80, expected: ['exact', 'higher', 'lower', 'unknown', 'slow'] },
-    { mode: 'latency', threshold: 80, expected: ['higher', 'exact', 'unknown', 'lower', 'slow'] },
-    { mode: 'rate', threshold: 90, expected: ['higher', 'lower', 'exact', 'unknown', 'slow'] },
-    { mode: 'latency', threshold: null, expected: ['unknown', 'lower', 'higher', 'exact', 'slow'] }
-  ])('uses the saved $mode percentage tier ($threshold) and restores normal order when cleared', async ({ mode, threshold, expected }) => {
-    getFastPoolPrioritySettings.mockResolvedValueOnce({ mode, cache_rate_threshold_percent: threshold })
+    { mode: 'latency', threshold: 80, expected: ['higher', 'exact', 'lower', 'unknown', 'slow'] },
+    { mode: 'rate', threshold: 90, expected: ['higher', 'exact', 'lower', 'unknown', 'slow'] },
+    { mode: 'latency', threshold: null, expected: ['unknown', 'lower', 'higher', 'exact', 'slow'] },
+    { mode: 'rate', threshold: 90, belowMode: 'rate', expected: ['higher', 'lower', 'exact', 'unknown', 'slow'] },
+    { mode: 'rate', threshold: 90, belowMode: 'latency', expected: ['higher', 'unknown', 'lower', 'exact', 'slow'] },
+    { mode: 'rate', threshold: 100, expected: ['higher', 'exact', 'lower', 'unknown', 'slow'] }
+  ])('uses the saved $mode percentage tier ($threshold) and restores normal order when cleared', async ({ mode, threshold, expected, belowMode = 'intelligence' }) => {
+    getFastPoolPrioritySettings.mockResolvedValueOnce({ mode, cache_rate_threshold_percent: threshold, below_threshold_mode: belowMode })
     getFirstTokenLatencies.mockResolvedValueOnce({ items: [
       createFirstTokenMetric({ account_id: 1, account_name: 'lower', scheduling_rate_multiplier: 0.05, cache_rate: 0.79999, predicted_ms: 1000, normal_total_ms: 1000 }),
       createFirstTokenMetric({ account_id: 2, account_name: 'exact', scheduling_rate_multiplier: 0.1, cache_rate: 0.8, predicted_ms: 9000, normal_total_ms: 9000 }),
@@ -467,7 +470,7 @@ describe('admin DashboardView', () => {
       expected.forEach((name, index) => expect(rows()[index]).toContain(name))
       await wrapper.get('[data-testid="fast-pool-priority-control"] form').trigger('submit')
       await flushPromises()
-      expect(updateFastPoolPrioritySettings).toHaveBeenCalledWith(mode, null)
+      expect(updateFastPoolPrioritySettings).toHaveBeenCalledWith(mode, null, belowMode)
       expect(rows()[0]).toContain(mode === 'rate' ? 'lower' : 'unknown')
       expect(rows()[4]).toContain('slow')
     }

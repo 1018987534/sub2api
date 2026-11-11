@@ -2,7 +2,7 @@
   <div class="border-t border-gray-100 px-4 py-3 text-xs dark:border-dark-700" data-testid="fast-pool-priority-control">
     <form v-if="savedSettings" class="flex flex-wrap items-center gap-2" @submit.prevent="save">
       <label for="fast-pool-priority-mode" class="font-medium text-gray-700 dark:text-gray-200">
-        {{ t('admin.dashboard.fastPoolPriorityLabel') }}
+        {{ t(threshold === null ? 'admin.dashboard.fastPoolPriorityLabel' : 'admin.dashboard.fastPoolAboveThresholdPriorityLabel') }}
       </label>
       <select
         id="fast-pool-priority-mode"
@@ -34,6 +34,21 @@
         data-testid="fast-pool-cache-rate-threshold"
       />
       <span>%</span>
+      <label for="fast-pool-below-threshold-mode" class="font-medium text-gray-700 dark:text-gray-200">
+        {{ t('admin.dashboard.fastPoolBelowThresholdPriorityLabel') }}
+      </label>
+      <select
+        id="fast-pool-below-threshold-mode"
+        v-model="belowThresholdMode"
+        class="input w-auto py-1.5 text-sm"
+        :disabled="saving || threshold === null"
+        aria-describedby="fast-pool-cache-rate-threshold-hint"
+        data-testid="fast-pool-below-threshold-mode"
+      >
+        <option value="intelligence">{{ t('admin.dashboard.fastPoolCacheRatePriority') }}</option>
+        <option value="latency">{{ t('admin.dashboard.fastPoolLatencyPriority') }}</option>
+        <option value="rate">{{ t('admin.dashboard.fastPoolRatePriority') }}</option>
+      </select>
       <button type="submit" class="btn btn-secondary py-1.5 text-xs" :disabled="!canSave" data-testid="save-fast-pool-priority">
         {{ t(saving ? 'common.saving' : 'common.save') }}
       </button>
@@ -66,6 +81,7 @@ const emit = defineEmits<{ change: [settings: FastPoolPrioritySettings] }>()
 const { t } = useI18n()
 const appStore = useAppStore()
 const mode = ref<FastPoolPriorityMode>('intelligence')
+const belowThresholdMode = ref<FastPoolPriorityMode>('intelligence')
 const thresholdPercent = ref<number | string>(80)
 const savedSettings = ref<FastPoolPrioritySettings | null>(null)
 const saving = ref(false)
@@ -73,12 +89,13 @@ const loadError = ref(false)
 const threshold = computed(() => thresholdPercent.value === '' ? null : Number(thresholdPercent.value))
 const thresholdValid = computed(() => threshold.value === null || (Number.isFinite(threshold.value) && threshold.value >= 0 && threshold.value <= 100))
 const canSave = computed(() => savedSettings.value !== null && thresholdValid.value && !saving.value && (
-  mode.value !== savedSettings.value.mode || threshold.value !== savedSettings.value.cache_rate_threshold_percent
+  mode.value !== savedSettings.value.mode || belowThresholdMode.value !== savedSettings.value.below_threshold_mode || threshold.value !== savedSettings.value.cache_rate_threshold_percent
 ))
 
 const applySettings = (settings: FastPoolPrioritySettings) => {
-  const saved = { ...settings, cache_rate_threshold_percent: settings.cache_rate_threshold_percent === undefined ? 80 : settings.cache_rate_threshold_percent }
+  const saved = { ...settings, below_threshold_mode: settings.below_threshold_mode ?? 'intelligence', cache_rate_threshold_percent: settings.cache_rate_threshold_percent === undefined ? 80 : settings.cache_rate_threshold_percent }
   mode.value = saved.mode
+  belowThresholdMode.value = saved.below_threshold_mode
   thresholdPercent.value = saved.cache_rate_threshold_percent ?? ''
   savedSettings.value = saved
   emit('change', saved)
@@ -98,7 +115,7 @@ const save = async () => {
   if (!canSave.value) return
   saving.value = true
   try {
-    const settings = await adminAPI.settings.updateFastPoolPrioritySettings(mode.value, threshold.value)
+    const settings = await adminAPI.settings.updateFastPoolPrioritySettings(mode.value, threshold.value, belowThresholdMode.value)
     applySettings(settings)
     appStore.showSuccess(t('admin.dashboard.fastPoolPrioritySaved'))
   } catch {

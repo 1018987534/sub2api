@@ -86,6 +86,7 @@ func TestFastPoolPrioritySettingsHandlerPersistsAndReadsBack(t *testing.T) {
 	initial := fastPoolPriorityRequest(router, http.MethodGet, "")
 	require.Equal(t, http.StatusOK, initial.Code)
 	require.Contains(t, initial.Body.String(), `"mode":"intelligence"`)
+	require.Contains(t, initial.Body.String(), `"below_threshold_mode":"intelligence"`)
 	require.Contains(t, initial.Body.String(), `"cache_rate_threshold_percent":80`)
 	for _, mode := range []string{"rate", "latency", "intelligence"} {
 		updated := fastPoolPriorityRequest(router, http.MethodPut, `{"mode":"`+mode+`"}`)
@@ -115,4 +116,23 @@ func TestFastPoolPrioritySettingsHandlerReportsStorageFailures(t *testing.T) {
 	require.Equal(t, "intelligence", repo.value)
 	repo.getErr = errors.New("read failed")
 	require.Equal(t, http.StatusInternalServerError, fastPoolPriorityRequest(router, http.MethodGet, "").Code)
+}
+
+func TestFastPoolPrioritySettingsHandlerIndependentBelowThresholdMode(t *testing.T) {
+	repo := &totalDurationCircuitHandlerRepo{}
+	for _, mode := range []string{"rate", "latency", "intelligence"} {
+		body := `{"mode":"rate","cache_rate_threshold_percent":80,"below_threshold_mode":"` + mode + `"}`
+		updated := fastPoolPriorityRequest(fastPoolPriorityTestRouter(repo), http.MethodPut, body)
+		require.Equal(t, http.StatusOK, updated.Code)
+		readback := fastPoolPriorityRequest(fastPoolPriorityTestRouter(repo), http.MethodGet, "")
+		require.Contains(t, readback.Body.String(), `"below_threshold_mode":"`+mode+`"`)
+		// A pre-upgrade client must preserve the independently saved strategy.
+		legacy := fastPoolPriorityRequest(fastPoolPriorityTestRouter(repo), http.MethodPut, `{"mode":"latency","cache_rate_threshold_percent":90}`)
+		require.Equal(t, http.StatusOK, legacy.Code)
+		require.Equal(t, mode, repo.values[service.SettingKeyFastPoolPriorityBelowThresholdMode])
+	}
+	for _, value := range []string{`"cache"`, `""`, `1`, `" rate"`} {
+		result := fastPoolPriorityRequest(fastPoolPriorityTestRouter(repo), http.MethodPut, `{"mode":"rate","below_threshold_mode":`+value+`}`)
+		require.Equal(t, http.StatusBadRequest, result.Code)
+	}
 }
