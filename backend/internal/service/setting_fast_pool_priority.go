@@ -14,6 +14,7 @@ import (
 
 const (
 	SettingKeyFastPoolPriorityMode                      = "fast_pool_priority_mode"
+	SettingKeyFastPoolPriorityBelowThresholdMode        = "fast_pool_priority_below_threshold_mode"
 	SettingKeyFastPoolPriorityCacheRateThresholdPercent = "fast_pool_priority_cache_rate_threshold_percent"
 )
 
@@ -27,6 +28,7 @@ const (
 
 type FastPoolPrioritySettings struct {
 	Mode                      FastPoolPriorityMode `json:"mode"`
+	BelowThresholdMode        FastPoolPriorityMode `json:"below_threshold_mode"`
 	CacheRateThresholdPercent *float64             `json:"cache_rate_threshold_percent"`
 }
 
@@ -40,7 +42,7 @@ func validFastPoolCacheRateThreshold(percent float64) bool {
 
 func defaultFastPoolPrioritySettings() *FastPoolPrioritySettings {
 	threshold := 80.0
-	return &FastPoolPrioritySettings{Mode: FastPoolPriorityIntelligence, CacheRateThresholdPercent: &threshold}
+	return &FastPoolPrioritySettings{Mode: FastPoolPriorityIntelligence, BelowThresholdMode: FastPoolPriorityIntelligence, CacheRateThresholdPercent: &threshold}
 }
 
 // Read shared storage for each new ordering decision so all running gateways
@@ -52,7 +54,7 @@ func (s *SettingService) GetFastPoolPrioritySettings(ctx context.Context) (*Fast
 	}
 	dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	values, err := s.settingRepo.GetMultiple(dbCtx, []string{SettingKeyFastPoolPriorityMode, SettingKeyFastPoolPriorityCacheRateThresholdPercent})
+	values, err := s.settingRepo.GetMultiple(dbCtx, []string{SettingKeyFastPoolPriorityMode, SettingKeyFastPoolPriorityBelowThresholdMode, SettingKeyFastPoolPriorityCacheRateThresholdPercent})
 	if err != nil {
 		return nil, fmt.Errorf("get fast-pool priority settings: %w", err)
 	}
@@ -61,6 +63,12 @@ func (s *SettingService) GetFastPoolPrioritySettings(ctx context.Context) (*Fast
 			return nil, fmt.Errorf("invalid stored fast-pool priority mode")
 		}
 		settings.Mode = mode
+	}
+	if mode := FastPoolPriorityMode(strings.TrimSpace(values[SettingKeyFastPoolPriorityBelowThresholdMode])); mode != "" {
+		if !validFastPoolPriorityMode(mode) {
+			return nil, fmt.Errorf("invalid stored fast-pool below-threshold priority mode")
+		}
+		settings.BelowThresholdMode = mode
 	}
 	if value, configured := values[SettingKeyFastPoolPriorityCacheRateThresholdPercent]; configured {
 		settings.CacheRateThresholdPercent = nil
@@ -75,9 +83,12 @@ func (s *SettingService) GetFastPoolPrioritySettings(ctx context.Context) (*Fast
 	return settings, nil
 }
 
-func (s *SettingService) UpdateFastPoolPrioritySettings(ctx context.Context, mode FastPoolPriorityMode, cacheRateThresholdPercent *float64) (*FastPoolPrioritySettings, error) {
+func (s *SettingService) UpdateFastPoolPrioritySettings(ctx context.Context, mode FastPoolPriorityMode, cacheRateThresholdPercent *float64, belowThresholdMode FastPoolPriorityMode) (*FastPoolPrioritySettings, error) {
 	if !validFastPoolPriorityMode(mode) {
 		return nil, infraerrors.BadRequest("FAST_POOL_PRIORITY_MODE_INVALID", "mode must be intelligence, latency, or rate")
+	}
+	if !validFastPoolPriorityMode(belowThresholdMode) {
+		return nil, infraerrors.BadRequest("FAST_POOL_BELOW_THRESHOLD_MODE_INVALID", "below_threshold_mode must be intelligence, latency, or rate")
 	}
 	if cacheRateThresholdPercent != nil && !validFastPoolCacheRateThreshold(*cacheRateThresholdPercent) {
 		return nil, infraerrors.BadRequest("FAST_POOL_CACHE_RATE_THRESHOLD_INVALID", "cache_rate_threshold_percent must be null or a percentage from 0 to 100")
@@ -89,14 +100,15 @@ func (s *SettingService) UpdateFastPoolPrioritySettings(ctx context.Context, mod
 	if cacheRateThresholdPercent != nil {
 		threshold = strconv.FormatFloat(*cacheRateThresholdPercent, 'f', -1, 64)
 	}
-	// Save and read the mode and optional threshold as one shared snapshot.
+	// Save both strategies and the optional threshold as one shared snapshot.
 	if err := s.settingRepo.SetMultiple(ctx, map[string]string{
 		SettingKeyFastPoolPriorityMode:                      string(mode),
+		SettingKeyFastPoolPriorityBelowThresholdMode:        string(belowThresholdMode),
 		SettingKeyFastPoolPriorityCacheRateThresholdPercent: threshold,
 	}); err != nil {
 		return nil, fmt.Errorf("save fast-pool priority settings: %w", err)
 	}
-	return &FastPoolPrioritySettings{Mode: mode, CacheRateThresholdPercent: cacheRateThresholdPercent}, nil
+	return &FastPoolPrioritySettings{Mode: mode, BelowThresholdMode: belowThresholdMode, CacheRateThresholdPercent: cacheRateThresholdPercent}, nil
 }
 
 func (s *RateLimitService) fastPoolPrioritySettings(ctx context.Context) *FastPoolPrioritySettings {

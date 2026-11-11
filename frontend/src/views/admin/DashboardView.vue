@@ -654,7 +654,7 @@ const rankingError = ref(false)
 const firstTokenLoading = ref(false)
 const firstTokenError = ref(false)
 const firstTokenMetrics = ref<AccountFirstTokenLatencyMetric[]>([])
-const fastPoolPrioritySettings = ref<FastPoolPrioritySettings>({ mode: 'intelligence', cache_rate_threshold_percent: 80 })
+const fastPoolPrioritySettings = ref<FastPoolPrioritySettings>({ mode: 'intelligence', below_threshold_mode: 'intelligence', cache_rate_threshold_percent: 80 })
 const firstTokenGroupFilter = ref<string | number>('all')
 const firstTokenManualProbeLoading = ref<Set<number>>(new Set())
 let firstTokenRefreshInFlight = false
@@ -699,15 +699,17 @@ const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
         const leftCacheRate = measuredCacheRate(left)
         const rightCacheRate = measuredCacheRate(right)
         const threshold = fastPoolPrioritySettings.value.cache_rate_threshold_percent
+        let mode = fastPoolPrioritySettings.value.mode
         if (threshold !== null) {
           const leftPriority = leftCacheRate >= threshold / 100
           const rightPriority = rightCacheRate >= threshold / 100
           if (leftPriority !== rightPriority) return leftPriority ? -1 : 1
+          if (!leftPriority) mode = fastPoolPrioritySettings.value.below_threshold_mode
         }
-        if (fastPoolPrioritySettings.value.mode === 'intelligence') {
+        if (mode === 'intelligence') {
           const cacheDifference = rightCacheRate - leftCacheRate
           if (cacheDifference !== 0) return cacheDifference
-        } else if (fastPoolPrioritySettings.value.mode === 'latency') {
+        } else if (mode === 'latency') {
           const leftDuration = left.normal_total_ms ?? left.predicted_ms
           const rightDuration = right.normal_total_ms ?? right.predicted_ms
           if (leftDuration !== rightDuration) return leftDuration - rightDuration
