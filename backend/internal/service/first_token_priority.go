@@ -63,35 +63,37 @@ func firstTokenProbeAllowedForNewScheduling(eligible bool, stickyAccountID, stic
 }
 
 type AccountFirstTokenLatencyMetric struct {
-	AccountID                int64                           `json:"account_id"`
-	AccountName              string                          `json:"account_name"`
-	RequestedModel           string                          `json:"requested_model,omitempty"`
-	ReasoningEffort          string                          `json:"reasoning_effort,omitempty"`
-	PredictedMS              float64                         `json:"predicted_ms"`
-	NormalTotalMS            float64                         `json:"normal_total_ms"`
-	P50MS                    float64                         `json:"p50_ms"`
-	P90MS                    float64                         `json:"p90_ms"`
-	HasPrediction            bool                            `json:"has_prediction"`
-	IsFastPool               bool                            `json:"is_fast_pool"`
-	CircuitBroken            bool                            `json:"circuit_broken"`
-	SchedulingRateMultiplier *float64                        `json:"scheduling_rate_multiplier"`
-	Groups                   []AccountFirstTokenLatencyGroup `json:"groups"`
-	SampleCount              int64                           `json:"sample_count"`
-	WindowHours              int                             `json:"window_hours"`
-	UpdatedAt                time.Time                       `json:"updated_at"`
-	SlowStreak               int                             `json:"slow_streak"`
-	RecoveryFastStreak       int                             `json:"recovery_fast_streak"`
-	ProbeIntervalSeconds     int64                           `json:"probe_interval_seconds"`
-	CacheRate                *float64                        `json:"cache_rate"`
-	CacheReadTokens          int64                           `json:"cache_read_tokens"`
-	CacheRateDenominator     int64                           `json:"cache_rate_denominator"`
+	AccountID                    int64                           `json:"account_id"`
+	AccountName                  string                          `json:"account_name"`
+	RequestedModel               string                          `json:"requested_model,omitempty"`
+	ReasoningEffort              string                          `json:"reasoning_effort,omitempty"`
+	PredictedMS                  float64                         `json:"predicted_ms"`
+	NormalTotalMS                float64                         `json:"normal_total_ms"`
+	P50MS                        float64                         `json:"p50_ms"`
+	P90MS                        float64                         `json:"p90_ms"`
+	HasPrediction                bool                            `json:"has_prediction"`
+	IsFastPool                   bool                            `json:"is_fast_pool"`
+	CircuitBroken                bool                            `json:"circuit_broken"`
+	SchedulingRateMultiplier     *float64                        `json:"scheduling_rate_multiplier"`
+	EffectiveInputRateMultiplier *float64                        `json:"effective_input_rate_multiplier"`
+	Groups                       []AccountFirstTokenLatencyGroup `json:"groups"`
+	SampleCount                  int64                           `json:"sample_count"`
+	WindowHours                  int                             `json:"window_hours"`
+	UpdatedAt                    time.Time                       `json:"updated_at"`
+	SlowStreak                   int                             `json:"slow_streak"`
+	RecoveryFastStreak           int                             `json:"recovery_fast_streak"`
+	ProbeIntervalSeconds         int64                           `json:"probe_interval_seconds"`
+	CacheRate                    *float64                        `json:"cache_rate"`
+	CacheReadTokens              int64                           `json:"cache_read_tokens"`
+	CacheRateDenominator         int64                           `json:"cache_rate_denominator"`
 }
 
 type AccountFirstTokenLatencyGroup struct {
-	GroupID             int64  `json:"group_id"`
-	GroupName           string `json:"group_name"`
-	IntelligenceBlocked bool   `json:"intelligence_blocked,omitempty"`
-	IntelligenceExempt  bool   `json:"intelligence_exempt,omitempty"`
+	GroupID                  int64  `json:"group_id"`
+	GroupName                string `json:"group_name"`
+	IntelligenceBlocked      bool   `json:"intelligence_blocked,omitempty"`
+	IntelligenceExempt       bool   `json:"intelligence_exempt,omitempty"`
+	CostEffectivenessEnabled bool   `json:"cost_effectiveness_enabled"`
 }
 
 // AccountCacheRateMinContextTokens excludes short, often one-off requests from
@@ -215,6 +217,7 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 		}{account: accountByID[account.ID], stat: stats[account.ID]})
 	}
 	metrics := make([]AccountFirstTokenLatencyMetric, 0, len(inputs))
+	prioritySettings := s.fastPoolPrioritySettings(ctx)
 	for _, input := range inputs {
 		account := input.account
 		if strings.EqualFold(strings.TrimSpace(account.Name), firstTokenLatencyHiddenAccount) {
@@ -224,6 +227,13 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 		groups, belongsToSchedulableGroup := firstTokenLatencyMetricGroups(account, accountCache, now)
 		if !belongsToSchedulableGroup {
 			continue
+		}
+		for i := range groups {
+			if prioritySettings.CostEffectivenessEnabled(groups[i].GroupID) {
+				groups[i].CostEffectivenessEnabled = true
+				groups[i].IntelligenceBlocked = intelligenceIsolationActive(account, now)
+				groups[i].IntelligenceExempt = false
+			}
 		}
 		stat := input.stat
 		hasPrediction := stat.PredictedMS > 0
@@ -236,26 +246,27 @@ func (s *RateLimitService) AccountFirstTokenLatencyMetrics(ctx context.Context, 
 			cacheRate = float64(accountCache.CacheReadTokens) / float64(accountCache.CacheRateDenominator)
 		}
 		metrics = append(metrics, AccountFirstTokenLatencyMetric{
-			AccountID:                account.ID,
-			AccountName:              account.Name,
-			PredictedMS:              stat.PredictedMS,
-			NormalTotalMS:            stat.PredictedMS,
-			P50MS:                    stat.P50MS,
-			P90MS:                    stat.P90MS,
-			HasPrediction:            hasPrediction,
-			IsFastPool:               firstTokenPriorityStatsFast(stat, now),
-			CircuitBroken:            stat.CircuitBroken,
-			SchedulingRateMultiplier: schedulingRateMultiplier,
-			Groups:                   groups,
-			SampleCount:              stat.SampleCount,
-			WindowHours:              stat.WindowHours,
-			UpdatedAt:                stat.UpdatedAt,
-			SlowStreak:               stat.SlowStreak,
-			RecoveryFastStreak:       stat.RecoveryFastStreak,
-			ProbeIntervalSeconds:     int64(firstTokenPriorityProbeInterval(stat, fastestMS).Seconds()),
-			CacheRate:                &cacheRate,
-			CacheReadTokens:          accountCache.CacheReadTokens,
-			CacheRateDenominator:     accountCache.CacheRateDenominator,
+			AccountID:                    account.ID,
+			AccountName:                  account.Name,
+			PredictedMS:                  stat.PredictedMS,
+			NormalTotalMS:                stat.PredictedMS,
+			P50MS:                        stat.P50MS,
+			P90MS:                        stat.P90MS,
+			HasPrediction:                hasPrediction,
+			IsFastPool:                   firstTokenPriorityStatsFast(stat, now),
+			CircuitBroken:                stat.CircuitBroken,
+			SchedulingRateMultiplier:     schedulingRateMultiplier,
+			EffectiveInputRateMultiplier: effectiveInputRateMultiplier(schedulingRateMultiplier, accountCache),
+			Groups:                       groups,
+			SampleCount:                  stat.SampleCount,
+			WindowHours:                  stat.WindowHours,
+			UpdatedAt:                    stat.UpdatedAt,
+			SlowStreak:                   stat.SlowStreak,
+			RecoveryFastStreak:           stat.RecoveryFastStreak,
+			ProbeIntervalSeconds:         int64(firstTokenPriorityProbeInterval(stat, fastestMS).Seconds()),
+			CacheRate:                    &cacheRate,
+			CacheReadTokens:              accountCache.CacheReadTokens,
+			CacheRateDenominator:         accountCache.CacheRateDenominator,
 		})
 	}
 	sort.SliceStable(metrics, func(i, j int) bool {
@@ -457,8 +468,12 @@ func firstTokenPriorityOrderWithProbeOptionsForRequest(
 			}
 			fastPoolEnd++
 		}
-		if fastPoolEnd > 1 {
-			orderFastPool(ctx, baseline[:fastPoolEnd], stats, cacheStatsService.fastPoolPrioritySettings(ctx), cacheStatsService)
+		settings := cacheStatsService.fastPoolPrioritySettings(ctx)
+		if settings.CostEffectivenessEnabled(firstTokenSchedulingGroupID(ctx, req)) {
+			orderCostEffectivePool(ctx, baseline[:fastPoolEnd], candidates, stats, cacheStatsService, now)
+			orderCostEffectivePool(ctx, baseline[fastPoolEnd:], candidates, stats, cacheStatsService, now)
+		} else if fastPoolEnd > 1 {
+			orderFastPool(ctx, baseline[:fastPoolEnd], stats, settings, cacheStatsService)
 		}
 	}
 	ordered := append(baseline, fallbackAccountIDs...)

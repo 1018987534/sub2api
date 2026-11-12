@@ -769,12 +769,13 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 				}
 			}
 			allowProbe := firstTokenProbeAllowedForNewScheduling(firstTokenProbeEligible(ctx), stickyAccountID, 0)
-			ranks := firstTokenPriorityRanksWithProbeOptions(
+			ranks := firstTokenPriorityRanksWithProbeOptionsForRequest(
 				ctx,
 				accounts,
 				s.rateLimitService.firstTokenLatencyStatsCache,
 				allowProbe,
 				allowProbe,
+				&OpenAIAccountScheduleRequest{GroupID: groupID},
 				s.rateLimitService,
 			)
 			sort.SliceStable(baseline, func(i, j int) bool {

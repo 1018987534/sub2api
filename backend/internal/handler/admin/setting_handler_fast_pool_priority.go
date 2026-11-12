@@ -19,12 +19,31 @@ func (h *SettingHandler) GetFastPoolPrioritySettings(c *gin.Context) {
 
 func (h *SettingHandler) UpdateFastPoolPrioritySettings(c *gin.Context) {
 	var req struct {
-		Mode                      service.FastPoolPriorityMode  `json:"mode" binding:"required,oneof=intelligence latency rate"`
+		Mode                      service.FastPoolPriorityMode  `json:"mode" binding:"omitempty,oneof=intelligence latency rate"`
 		BelowThresholdMode        *service.FastPoolPriorityMode `json:"below_threshold_mode" binding:"omitempty,oneof=intelligence latency rate"`
 		CacheRateThresholdPercent json.RawMessage               `json:"cache_rate_threshold_percent"`
+		GroupID                   *int64                        `json:"group_id"`
+		CostEffectivenessEnabled  *bool                         `json:"cost_effectiveness_enabled"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "mode and below_threshold_mode must be intelligence, latency, or rate")
+		return
+	}
+	if req.GroupID != nil {
+		if req.CostEffectivenessEnabled == nil || req.Mode != "" || req.BelowThresholdMode != nil || len(req.CacheRateThresholdPercent) != 0 {
+			response.BadRequest(c, "a group override requires cost_effectiveness_enabled and cannot change global strategies")
+			return
+		}
+		settings, err := h.settingService.UpdateFastPoolCostEffectivenessGroup(c.Request.Context(), *req.GroupID, *req.CostEffectivenessEnabled)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, settings)
+		return
+	}
+	if req.CostEffectivenessEnabled != nil {
+		response.BadRequest(c, "group_id is required for a group override")
 		return
 	}
 	var threshold *float64

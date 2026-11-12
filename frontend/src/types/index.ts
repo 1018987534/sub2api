@@ -962,6 +962,7 @@ export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
 export interface AccountFirstTokenLatencyGroup {
   intelligence_blocked?: boolean
   intelligence_exempt?: boolean
+  cost_effectiveness_enabled?: boolean
   group_id: number
   group_name: string
 }
@@ -979,6 +980,7 @@ export interface AccountFirstTokenLatencyMetric {
   is_fast_pool: boolean
   circuit_broken?: boolean
   scheduling_rate_multiplier: number | null
+  effective_input_rate_multiplier?: number | null
   groups: AccountFirstTokenLatencyGroup[]
   sample_count: number
   window_hours?: number

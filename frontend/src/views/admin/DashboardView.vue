@@ -291,6 +291,9 @@
               <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.dashboard.firstTokenCacheRateDescription') }}
               </p>
+              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.dashboard.firstTokenEffectiveInputRateHint') }}
+              </p>
             </div>
             <div class="flex w-full items-center gap-2 sm:w-auto">
               <div class="min-w-0 flex-1 sm:w-52 sm:flex-none" data-testid="first-token-group-filter">
@@ -332,6 +335,19 @@
                 <div class="min-w-0">
                   <h3 class="truncate text-sm font-semibold text-gray-900 dark:text-white" :title="group.name">{{ group.name }}</h3>
                   <span v-if="group.id > 0" class="text-xs text-gray-400">#{{ group.id }}</span>
+                  <button
+                    v-if="group.id > 0 && group.name.includes('不降智')"
+                    type="button"
+                    class="ml-2 rounded border border-gray-200 px-2 py-1 text-xs dark:border-dark-600"
+                    :class="group.costEffectivenessEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-500 dark:text-gray-400'"
+                    :aria-pressed="group.costEffectivenessEnabled"
+                    :disabled="firstTokenGroupSettingsSaving"
+                    :title="t('admin.dashboard.firstTokenGroupCostPriorityHint')"
+                    data-testid="first-token-group-cost-priority"
+                    @click="toggleGroupCostEffectiveness(group)"
+                  >
+                    {{ t(group.costEffectivenessEnabled ? 'admin.dashboard.firstTokenGroupCostPriority' : 'admin.dashboard.firstTokenGroupGlobalPriority') }}
+                  </button>
                 </div>
                 <span class="shrink-0 text-xs tabular-nums text-gray-500 dark:text-gray-400">
                   {{ t('admin.dashboard.firstTokenPoolCounts', { total: group.metrics.length - group.pausedCount, fast: group.fastCount, slow: group.slowCount }) }}
@@ -389,6 +405,12 @@
                       </dd>
                     </div>
                     <div>
+                      <dt class="text-gray-400" :title="t('admin.dashboard.firstTokenEffectiveInputRateHint')">{{ t('admin.dashboard.firstTokenEffectiveInputRate') }}</dt>
+                      <dd class="mt-0.5 font-mono text-sm font-semibold text-emerald-600 dark:text-emerald-400" data-testid="first-token-effective-input-rate">
+                        {{ formatEffectiveInputRate(metric) }}
+                      </dd>
+                    </div>
+                    <div>
                       <dt class="text-gray-400">{{ t('admin.dashboard.firstTokenSamples') }}</dt>
                       <dd class="mt-0.5 text-gray-700 dark:text-gray-300">{{ metric.sample_count }} / {{ metric.window_hours || 6 }}h</dd>
                     </div>
@@ -396,18 +418,19 @@
                 </div>
               </div>
               <div class="hidden overflow-x-auto md:block">
-                <table class="min-w-[900px] w-full table-fixed text-left text-sm">
+                <table class="min-w-[1060px] w-full table-fixed text-left text-sm">
                   <thead class="text-xs text-gray-500 dark:text-gray-400">
                     <tr>
-                      <th class="w-[17%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
-                      <th class="w-[12%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
-                      <th class="w-[15%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenPercentiles') }}</th>
-                      <th class="w-[11%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenPool') }}</th>
-                      <th class="w-[10%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenSchedulingRate') }}</th>
-                      <th class="w-[10%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenCacheRate') }}</th>
-                      <th class="w-[10%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenSamples') }}</th>
-                      <th class="w-[9%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
-                      <th class="w-[6%] px-3 py-2 text-center font-medium">{{ t('admin.dashboard.firstTokenActions') }}</th>
+                      <th class="w-[16%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenAccount') }}</th>
+                      <th class="w-[10%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenPrediction') }}</th>
+                      <th class="w-[14%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenPercentiles') }}</th>
+                      <th class="w-[10%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenPool') }}</th>
+                      <th class="w-[9%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenSchedulingRate') }}</th>
+                      <th class="w-[8%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenCacheRate') }}</th>
+                      <th class="w-[11%] px-3 py-2 font-medium" :title="t('admin.dashboard.firstTokenEffectiveInputRateHint')">{{ t('admin.dashboard.firstTokenEffectiveInputRate') }}</th>
+                      <th class="w-[9%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenSamples') }}</th>
+                      <th class="w-[8%] px-3 py-2 font-medium">{{ t('admin.dashboard.firstTokenUpdated') }}</th>
+                      <th class="w-[5%] px-3 py-2 text-center font-medium">{{ t('admin.dashboard.firstTokenActions') }}</th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-gray-100 dark:divide-dark-700">
@@ -433,6 +456,9 @@
                       </td>
                       <td class="px-3 py-2.5 font-mono font-semibold text-cyan-600 dark:text-cyan-400" data-testid="first-token-cache-rate">
                         {{ formatCacheRate(metric.cache_rate) }}
+                      </td>
+                      <td class="px-3 py-2.5 font-mono font-semibold text-emerald-600 dark:text-emerald-400" data-testid="first-token-effective-input-rate">
+                        {{ formatEffectiveInputRate(metric) }}
                       </td>
                       <td class="px-3 py-2.5 text-gray-700 dark:text-gray-300">{{ metric.sample_count }} / {{ metric.window_hours || 6 }}h</td>
                       <td class="px-3 py-2.5 text-xs text-gray-500 dark:text-gray-400">{{ metric.has_prediction ? formatFirstTokenUpdatedAt(metric.updated_at) : '-' }}</td>
@@ -657,6 +683,7 @@ const firstTokenMetrics = ref<AccountFirstTokenLatencyMetric[]>([])
 const fastPoolPrioritySettings = ref<FastPoolPrioritySettings>({ mode: 'intelligence', below_threshold_mode: 'intelligence', cache_rate_threshold_percent: 80 })
 const firstTokenGroupFilter = ref<string | number>('all')
 const firstTokenManualProbeLoading = ref<Set<number>>(new Set())
+const firstTokenGroupSettingsSaving = ref(false)
 let firstTokenRefreshInFlight = false
 let firstTokenRefreshTimer: ReturnType<typeof setInterval> | null = null
 
@@ -667,6 +694,7 @@ interface FirstTokenGroupSection {
   fastCount: number
   slowCount: number
   pausedCount: number
+  costEffectivenessEnabled: boolean
 }
 
 const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
@@ -677,7 +705,7 @@ const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
       : [{ group_id: 0, group_name: t('admin.dashboard.firstTokenUngrouped') }]
     for (const group of groups) {
       const name = group.group_name || `#${group.group_id}`
-      const section = sections.get(group.group_id) ?? { id: group.group_id, name, metrics: [], fastCount: 0, slowCount: 0, pausedCount: 0 }
+      const section = sections.get(group.group_id) ?? { id: group.group_id, name, metrics: [], fastCount: 0, slowCount: 0, pausedCount: 0, costEffectivenessEnabled: group.cost_effectiveness_enabled ?? fastPoolPrioritySettings.value.cost_effectiveness_group_ids?.includes(group.group_id) ?? false }
       section.metrics.push({ ...metric, intelligence_blocked: group.intelligence_blocked, intelligence_exempt: group.intelligence_exempt })
       if (group.intelligence_blocked) section.pausedCount += 1
       else if (metric.is_fast_pool) section.fastCount += 1
@@ -692,8 +720,25 @@ const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
   })
   for (const section of sorted) {
     section.metrics.sort((left, right) => {
+      if (section.costEffectivenessEnabled && !!left.intelligence_blocked !== !!right.intelligence_blocked) return left.intelligence_blocked ? 1 : -1
       if (left.is_fast_pool !== right.is_fast_pool) return left.is_fast_pool ? -1 : 1
-      if (left.is_fast_pool && right.is_fast_pool) {
+      if (section.costEffectivenessEnabled) {
+        const leftCost = effectiveInputRate(left)
+        const rightCost = effectiveInputRate(right)
+        if ((leftCost === null) !== (rightCost === null)) return leftCost === null ? 1 : -1
+        if (leftCost !== null && rightCost !== null && leftCost !== rightCost) return leftCost - rightCost
+        if (leftCost !== null && rightCost !== null) {
+          const duration = totalDurationScore(left) - totalDurationScore(right)
+          return duration || left.account_id - right.account_id
+        }
+        if (left.is_fast_pool && right.is_fast_pool) {
+          const rateDifference = (left.scheduling_rate_multiplier ?? Infinity) - (right.scheduling_rate_multiplier ?? Infinity)
+          if (Number.isFinite(rateDifference) && rateDifference !== 0) return rateDifference
+          if (left.scheduling_rate_multiplier == null && right.scheduling_rate_multiplier != null) return 1
+          if (right.scheduling_rate_multiplier == null && left.scheduling_rate_multiplier != null) return -1
+        }
+      }
+      if (!section.costEffectivenessEnabled && left.is_fast_pool && right.is_fast_pool) {
         const measuredCacheRate = (metric: AccountFirstTokenLatencyMetric) =>
           metric.cache_rate_denominator > 0 && metric.cache_rate != null ? metric.cache_rate : -1
         const leftCacheRate = measuredCacheRate(left)
@@ -725,6 +770,20 @@ const firstTokenGroupSections = computed<FirstTokenGroupSection[]>(() => {
   }
   return sorted
 })
+
+const toggleGroupCostEffectiveness = async (group: FirstTokenGroupSection) => {
+  if (firstTokenGroupSettingsSaving.value) return
+  firstTokenGroupSettingsSaving.value = true
+  try {
+    fastPoolPrioritySettings.value = await adminAPI.settings.updateGroupCostEffectiveness(group.id, !group.costEffectivenessEnabled)
+    await loadFirstTokenLatencies(true)
+    appStore.showSuccess(t('admin.dashboard.fastPoolPrioritySaved'))
+  } catch {
+    appStore.showError(t('admin.dashboard.fastPoolPrioritySaveFailed'))
+  } finally {
+    firstTokenGroupSettingsSaving.value = false
+  }
+}
 
 const firstTokenGroupOptions = computed(() => [
   { value: 'all', label: t('admin.dashboard.firstTokenAllGroups') },
@@ -1007,6 +1066,17 @@ const formatDuration = (ms: number): string => {
 const formatCacheRate = (rate: number | null | undefined): string => {
   if (rate == null || !Number.isFinite(rate)) return '100.0%'
   return `${(rate * 100).toFixed(1)}%`
+}
+
+const effectiveInputRate = (metric: AccountFirstTokenLatencyMetric): number | null => {
+  const cost = metric.effective_input_rate_multiplier
+  return metric.cache_rate_denominator > 0 && cost != null && Number.isFinite(cost) && cost >= 0 ? cost : null
+}
+
+const formatEffectiveInputRate = (metric: AccountFirstTokenLatencyMetric): string => {
+  const cost = effectiveInputRate(metric)
+  if (cost === null) return t('admin.dashboard.firstTokenEffectiveInputRatePending')
+  return `${new Intl.NumberFormat('en-US', { maximumSignificantDigits: 4, useGrouping: false }).format(cost)}x`
 }
 
 const formatFirstTokenUpdatedAt = (value: string): string => {

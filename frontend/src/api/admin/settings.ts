@@ -1751,6 +1751,18 @@ export interface FastPoolPrioritySettings {
   mode: FastPoolPriorityMode;
   below_threshold_mode: FastPoolPriorityMode;
   cache_rate_threshold_percent: number | null;
+  cost_effectiveness_group_ids?: number[];
+}
+
+export async function updateGroupCostEffectiveness(
+  groupId: number,
+  enabled: boolean,
+): Promise<FastPoolPrioritySettings> {
+  const { data } = await apiClient.put<FastPoolPrioritySettings>(
+    "/admin/settings/fast-pool-priority",
+    { group_id: groupId, cost_effectiveness_enabled: enabled },
+  );
+  return data;
 }
 
 export async function getFastPoolPrioritySettings(): Promise<FastPoolPrioritySettings> {
@@ -1820,6 +1832,7 @@ export const settingsAPI = {
   updateFastPoolThresholdSettings,
   getFastPoolPrioritySettings,
   updateFastPoolPrioritySettings,
+  updateGroupCostEffectiveness,
   getTotalDurationCircuitBreakerSettings,
   updateTotalDurationCircuitBreakerSettings,
   getSettings,
