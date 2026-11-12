@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ const (
 	SettingKeyFastPoolPriorityMode                      = "fast_pool_priority_mode"
 	SettingKeyFastPoolPriorityBelowThresholdMode        = "fast_pool_priority_below_threshold_mode"
 	SettingKeyFastPoolPriorityCacheRateThresholdPercent = "fast_pool_priority_cache_rate_threshold_percent"
+	SettingKeyFastPoolCostEffectivenessGroupIDs         = "fast_pool_cost_effectiveness_group_ids"
 )
 
 type FastPoolPriorityMode string
@@ -30,6 +33,19 @@ type FastPoolPrioritySettings struct {
 	Mode                      FastPoolPriorityMode `json:"mode"`
 	BelowThresholdMode        FastPoolPriorityMode `json:"below_threshold_mode"`
 	CacheRateThresholdPercent *float64             `json:"cache_rate_threshold_percent"`
+	CostEffectivenessGroupIDs []int64              `json:"cost_effectiveness_group_ids"`
+}
+
+func (s *FastPoolPrioritySettings) CostEffectivenessEnabled(groupID int64) bool {
+	if s == nil || groupID <= 0 {
+		return false
+	}
+	for _, id := range s.CostEffectivenessGroupIDs {
+		if id == groupID {
+			return true
+		}
+	}
+	return false
 }
 
 func validFastPoolPriorityMode(mode FastPoolPriorityMode) bool {
@@ -42,7 +58,7 @@ func validFastPoolCacheRateThreshold(percent float64) bool {
 
 func defaultFastPoolPrioritySettings() *FastPoolPrioritySettings {
 	threshold := 80.0
-	return &FastPoolPrioritySettings{Mode: FastPoolPriorityIntelligence, BelowThresholdMode: FastPoolPriorityIntelligence, CacheRateThresholdPercent: &threshold}
+	return &FastPoolPrioritySettings{Mode: FastPoolPriorityIntelligence, BelowThresholdMode: FastPoolPriorityIntelligence, CacheRateThresholdPercent: &threshold, CostEffectivenessGroupIDs: []int64{}}
 }
 
 // Read shared storage for each new ordering decision so all running gateways
@@ -54,7 +70,7 @@ func (s *SettingService) GetFastPoolPrioritySettings(ctx context.Context) (*Fast
 	}
 	dbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	values, err := s.settingRepo.GetMultiple(dbCtx, []string{SettingKeyFastPoolPriorityMode, SettingKeyFastPoolPriorityBelowThresholdMode, SettingKeyFastPoolPriorityCacheRateThresholdPercent})
+	values, err := s.settingRepo.GetMultiple(dbCtx, []string{SettingKeyFastPoolPriorityMode, SettingKeyFastPoolPriorityBelowThresholdMode, SettingKeyFastPoolPriorityCacheRateThresholdPercent, SettingKeyFastPoolCostEffectivenessGroupIDs})
 	if err != nil {
 		return nil, fmt.Errorf("get fast-pool priority settings: %w", err)
 	}
@@ -80,6 +96,52 @@ func (s *SettingService) GetFastPoolPrioritySettings(ctx context.Context) (*Fast
 			settings.CacheRateThresholdPercent = &percent
 		}
 	}
+	if value := strings.TrimSpace(values[SettingKeyFastPoolCostEffectivenessGroupIDs]); value != "" {
+		if err := json.Unmarshal([]byte(value), &settings.CostEffectivenessGroupIDs); err != nil {
+			return nil, fmt.Errorf("invalid stored cost-effectiveness group IDs: %w", err)
+		}
+		for _, id := range settings.CostEffectivenessGroupIDs {
+			if id <= 0 {
+				return nil, fmt.Errorf("invalid stored cost-effectiveness group ID")
+			}
+		}
+	}
+	return settings, nil
+}
+
+// A group override changes only its own membership in the opt-in list. Global
+// cache tiers and strategies remain untouched, including saves from old clients.
+func (s *SettingService) UpdateFastPoolCostEffectivenessGroup(ctx context.Context, groupID int64, enabled bool) (*FastPoolPrioritySettings, error) {
+	if groupID <= 0 {
+		return nil, infraerrors.BadRequest("FAST_POOL_GROUP_INVALID", "group_id must be positive")
+	}
+	if s == nil || s.settingRepo == nil {
+		return nil, fmt.Errorf("fast-pool priority settings storage is unavailable")
+	}
+	settings, err := s.GetFastPoolPrioritySettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(settings.CostEffectivenessGroupIDs)+1)
+	seen := map[int64]bool{}
+	for _, id := range settings.CostEffectivenessGroupIDs {
+		if id != groupID && !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+	if enabled {
+		ids = append(ids, groupID)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.settingRepo.SetMultiple(ctx, map[string]string{SettingKeyFastPoolCostEffectivenessGroupIDs: string(raw)}); err != nil {
+		return nil, fmt.Errorf("save cost-effectiveness group override: %w", err)
+	}
+	settings.CostEffectivenessGroupIDs = ids
 	return settings, nil
 }
 
@@ -108,7 +170,7 @@ func (s *SettingService) UpdateFastPoolPrioritySettings(ctx context.Context, mod
 	}); err != nil {
 		return nil, fmt.Errorf("save fast-pool priority settings: %w", err)
 	}
-	return &FastPoolPrioritySettings{Mode: mode, BelowThresholdMode: belowThresholdMode, CacheRateThresholdPercent: cacheRateThresholdPercent}, nil
+	return s.GetFastPoolPrioritySettings(ctx)
 }
 
 func (s *RateLimitService) fastPoolPrioritySettings(ctx context.Context) *FastPoolPrioritySettings {

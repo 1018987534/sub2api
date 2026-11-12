@@ -8,7 +8,7 @@ import type { DashboardProfitSettingsUpdate } from '@/api/admin/settings'
 
 const { translate } = vi.hoisted(() => ({ translate: vi.fn((key: string) => key) }))
 
-const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings, getDashboardProfitSettings, updateDashboardProfitSettings, showSuccess, showError } = vi.hoisted(() => ({
+const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenLatencies, requestFirstTokenManualProbe, getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings, updateGroupCostEffectiveness, getDashboardProfitSettings, updateDashboardProfitSettings, showSuccess, showError } = vi.hoisted(() => ({
   getSnapshotV2: vi.fn(),
   getUserUsageTrend: vi.fn(),
   getUserSpendingRanking: vi.fn(),
@@ -17,6 +17,7 @@ const { getSnapshotV2, getUserUsageTrend, getUserSpendingRanking, getFirstTokenL
   getTotalDurationCircuitBreakerSettings: vi.fn(),
   getFastPoolPrioritySettings: vi.fn(),
   updateFastPoolPrioritySettings: vi.fn(),
+  updateGroupCostEffectiveness: vi.fn(),
   getDashboardProfitSettings: vi.fn(),
   updateDashboardProfitSettings: vi.fn(),
   showSuccess: vi.fn(),
@@ -35,7 +36,7 @@ vi.mock('@/api/admin', () => ({
       getUserSpendingRanking
     },
     accounts: { getFirstTokenLatencies, requestFirstTokenManualProbe },
-    settings: { getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings, getDashboardProfitSettings, updateDashboardProfitSettings }
+    settings: { getTotalDurationCircuitBreakerSettings, getFastPoolPrioritySettings, updateFastPoolPrioritySettings, updateGroupCostEffectiveness, getDashboardProfitSettings, updateDashboardProfitSettings }
   }
 }))
 
@@ -150,6 +151,8 @@ describe('admin DashboardView', () => {
     getFastPoolPrioritySettings.mockResolvedValue({ mode: 'intelligence', cache_rate_threshold_percent: null })
     updateFastPoolPrioritySettings.mockReset()
     updateFastPoolPrioritySettings.mockImplementation(async (mode: string, cache_rate_threshold_percent: number | null, below_threshold_mode: string) => ({ mode, cache_rate_threshold_percent, below_threshold_mode }))
+    updateGroupCostEffectiveness.mockReset()
+    updateGroupCostEffectiveness.mockImplementation(async (groupId: number, enabled: boolean) => ({ mode: 'intelligence', below_threshold_mode: 'intelligence', cache_rate_threshold_percent: 80, cost_effectiveness_group_ids: enabled ? [groupId] : [] }))
     getDashboardProfitSettings.mockReset()
     getDashboardProfitSettings.mockResolvedValue({ monthly_server_cost_usd: 0, daily_server_cost_usd: 0, month_days: 30, withdrawal_fee_rate_percent: 1.8 })
     updateDashboardProfitSettings.mockReset()
@@ -475,6 +478,53 @@ describe('admin DashboardView', () => {
       expect(rows()[4]).toContain('slow')
     }
     wrapper.unmount()
+  })
+
+  it('shows upstream cost estimates and scopes value ordering to the opted-in group', async () => {
+    getFastPoolPrioritySettings.mockResolvedValue({ mode: 'intelligence', below_threshold_mode: 'intelligence', cache_rate_threshold_percent: 80, cost_effectiveness_group_ids: [103] })
+    const groups = [{ group_id: 103, group_name: '测试不降智' }, { group_id: 999, group_name: '其他不降智' }]
+    const items = [
+      createFirstTokenMetric({ account_id: 1, account_name: 'cheap-upstream', scheduling_rate_multiplier: .03, cache_rate: .8, effective_input_rate_multiplier: .0084, groups }),
+      createFirstTokenMetric({ account_id: 2, account_name: 'high-cache', scheduling_rate_multiplier: .1, cache_rate: .95, effective_input_rate_multiplier: .0145, groups }),
+      createFirstTokenMetric({ account_id: 3, account_name: 'cheap-slow', scheduling_rate_multiplier: .001, cache_rate: .99, effective_input_rate_multiplier: .000109, is_fast_pool: false, groups }),
+      createFirstTokenMetric({ account_id: 4, account_name: 'cheap-paused', effective_input_rate_multiplier: .0001, groups: [{ group_id: 103, group_name: '测试不降智', intelligence_blocked: true }] })
+    ]
+    getFirstTokenLatencies.mockResolvedValue({ items, total: items.length })
+    const wrapper = mount(DashboardView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true, DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true, Line: true } } })
+    await flushPromises()
+    const sections = wrapper.findAll('[data-testid="first-token-group-section"]')
+    const target = sections.find(s => s.text().includes('测试不降智'))!
+    const other = sections.find(s => s.text().includes('其他不降智'))!
+    const targetRows = target.findAll('[data-testid="first-token-latency-row"]')
+    ;['cheap-upstream', 'high-cache', 'cheap-slow', 'cheap-paused'].forEach((name,index) => expect(targetRows[index].text()).toContain(name))
+    ;['high-cache', 'cheap-upstream', 'cheap-slow'].forEach((name,index) => expect(other.findAll('[data-testid="first-token-latency-row"]')[index].text()).toContain(name))
+    expect(targetRows[0].get('[data-testid="first-token-effective-input-rate"]').text()).toBe('0.0084x')
+    expect(target.get('[data-testid="first-token-mobile-row"] [data-testid="first-token-effective-input-rate"]').text()).toBe('0.0084x')
+    expect(target.get('[data-testid="first-token-group-cost-priority"]').attributes('aria-pressed')).toBe('true')
+    await target.get('[data-testid="first-token-group-cost-priority"]').trigger('click')
+    await flushPromises()
+    expect(updateGroupCostEffectiveness).toHaveBeenCalledWith(103, false)
+    expect(updateFastPoolPrioritySettings).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps unmeasured costs pending and refreshes the displayed upstream estimate', async () => {
+    vi.useFakeTimers()
+    const first = createFirstTokenMetric({ effective_input_rate_multiplier: .0084 })
+    const unknown = createFirstTokenMetric({ account_id: 43, cache_rate: 1, cache_rate_denominator: 0, effective_input_rate_multiplier: null })
+    getFirstTokenLatencies.mockResolvedValueOnce({ items: [first, unknown], total: 2 }).mockResolvedValue({ items: [{ ...first, effective_input_rate_multiplier: .0056 }, unknown], total: 2 })
+    const wrapper = mount(DashboardView, { global: { stubs: { AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true, DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true, Line: true } } })
+    try {
+      await flushPromises()
+      const values = () => wrapper.findAll('[data-testid="first-token-latency-row"] [data-testid="first-token-effective-input-rate"]').map(cell => cell.text())
+      expect(values()).toEqual(['0.0084x', 'admin.dashboard.firstTokenEffectiveInputRatePending'])
+      await vi.advanceTimersByTimeAsync(30_000)
+      await flushPromises()
+      expect(values()).toEqual(['0.0056x', 'admin.dashboard.firstTokenEffectiveInputRatePending'])
+    } finally {
+      wrapper.unmount()
+      vi.useRealTimers()
+    }
   })
 
   it('uses today as default dashboard range', async () => {

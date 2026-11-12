@@ -136,3 +136,24 @@ func TestFastPoolPrioritySettingsHandlerIndependentBelowThresholdMode(t *testing
 		require.Equal(t, http.StatusBadRequest, result.Code)
 	}
 }
+
+func TestFastPoolPrioritySettingsHandlerGroupOverrideDoesNotChangeGlobal(t *testing.T) {
+	repo := &totalDurationCircuitHandlerRepo{values: map[string]string{
+		service.SettingKeyFastPoolPriorityMode:                      "latency",
+		service.SettingKeyFastPoolPriorityBelowThresholdMode:        "rate",
+		service.SettingKeyFastPoolPriorityCacheRateThresholdPercent: "88",
+	}}
+	router := fastPoolPriorityTestRouter(repo)
+	updated := fastPoolPriorityRequest(router, http.MethodPut, `{"group_id":103,"cost_effectiveness_enabled":true}`)
+	require.Equal(t, http.StatusOK, updated.Code, updated.Body.String())
+	require.Contains(t, updated.Body.String(), `"cost_effectiveness_group_ids":[103]`)
+	require.Equal(t, "latency", repo.values[service.SettingKeyFastPoolPriorityMode])
+	require.Equal(t, "rate", repo.values[service.SettingKeyFastPoolPriorityBelowThresholdMode])
+	require.Equal(t, "88", repo.values[service.SettingKeyFastPoolPriorityCacheRateThresholdPercent])
+	for _, body := range []string{`{"group_id":0,"cost_effectiveness_enabled":true}`, `{"group_id":103}`, `{"group_id":103,"cost_effectiveness_enabled":true,"mode":"rate"}`, `{"cost_effectiveness_enabled":true}`} {
+		require.Equal(t, http.StatusBadRequest, fastPoolPriorityRequest(router, http.MethodPut, body).Code)
+	}
+	removed := fastPoolPriorityRequest(router, http.MethodPut, `{"group_id":103,"cost_effectiveness_enabled":false}`)
+	require.Equal(t, http.StatusOK, removed.Code)
+	require.Contains(t, removed.Body.String(), `"cost_effectiveness_group_ids":[]`)
+}

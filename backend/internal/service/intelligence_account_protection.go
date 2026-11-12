@@ -93,6 +93,12 @@ func (s *OpenAIGatewayService) intelligenceAccountBlockedForGroup(ctx context.Co
 	if account == nil || groupID == nil || !intelligenceIsolationActive(account, now) {
 		return false
 	}
+	// Newly added memberships may not occur in an older isolation snapshot.
+	// A cost-priority group never admits a paused account or a sole-account
+	// exemption, regardless of how attractive the calculated cost is.
+	if s != nil && s.rateLimitService != nil && s.rateLimitService.fastPoolPrioritySettings(ctx).CostEffectivenessEnabled(*groupID) {
+		return true
+	}
 	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && group != nil && group.ID == *groupID {
 		return IntelligenceProtectionGroupEligible(group) && intelligenceAccountBlocked(account, groupID, now)
 	}
@@ -175,6 +181,7 @@ func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Co
 		return false, err
 	}
 	now := time.Now()
+	prioritySettings := s.rateLimitService.fastPoolPrioritySettings(ctx)
 	allowed := []int64{}
 	protected := []int64{}
 	restricted := 0
@@ -184,6 +191,10 @@ func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Co
 			continue
 		}
 		protected = append(protected, candidateGroup.ID)
+		if prioritySettings.CostEffectivenessEnabled(candidateGroup.ID) {
+			restricted++
+			continue
+		}
 		alternative, err := s.intelligenceGroupHasAlternative(ctx, candidateGroup, accountID, model, userID)
 		if err != nil {
 			return false, err
