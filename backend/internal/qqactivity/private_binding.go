@@ -269,6 +269,7 @@ func (s *Store) ProcessPrivate(ctx context.Context, e PrivateEvent, send func(co
 				return reply("是否绑定官网账号：" + MaskEmail(email) + "？请在 10 分钟内回复【确认】发送邮箱验证码，或回复【取消】。验证码将发送到该官网账号的注册邮箱，收到后只在本私信中填写。")
 			}
 			if p.step == "email" {
+				p.expires = time.Now().Add(10 * time.Minute)
 				if err = savePrivateSession(ctx, tx, e.QQ, &p); err != nil {
 					return err
 				}
