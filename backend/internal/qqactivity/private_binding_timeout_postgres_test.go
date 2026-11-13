@@ -110,6 +110,24 @@ func TestPostgresPrivateTimeoutConfirmationWindow(t *testing.T) {
 	}
 }
 
+func TestPostgresPrivateTimeoutEmailPromptWindow(t *testing.T) {
+	db, s := privateFixture(t)
+	c := privateMember(t, db, s, "12345001")
+	c.send(t, "绑定")
+	invitationSQL(t, db, `UPDATE qq_activity_private_sessions SET expires_at=NOW()+INTERVAL '30 seconds'`)
+	before := time.Now()
+	reply := privateTimeoutReply(t, c, c.send(t, "邮箱填错了"))
+	var expires time.Time
+	if err := db.QueryRow(`SELECT expires_at FROM qq_activity_private_sessions WHERE qq=$1`, c.qq).Scan(&expires); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reply, "10 分钟") || expires.Before(before.Add(10*time.Minute)) || expires.After(time.Now().Add(10*time.Minute)) {
+		t.Error("email prompt deadline does not give the promised ten minutes")
+	}
+	autoCount(t, db, `SELECT COUNT(*) FROM qq_activity_private_mail_sends`, 0)
+	autoCount(t, db, `SELECT COUNT(*) FROM qq_activity_bindings`, 0)
+}
+
 func TestPostgresPrivateTimeoutFreshEmailRestarts(t *testing.T) {
 	db, s := privateFixture(t)
 	_ = autoAdd(t, db, "member@163.com", "")
