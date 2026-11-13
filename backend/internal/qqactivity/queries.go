@@ -173,7 +173,13 @@ func (s *Store) AdminReport(ctx context.Context) (r AdminReport, err error) {
 	if err != nil {
 		return
 	}
-	rows, err = s.db.QueryContext(ctx, `SELECT invitee_qq,inviter_qq,group_id,evidence_type,status,reason FROM qq_activity_invitations ORDER BY updated_at DESC LIMIT 500`)
+	// Keep QQ evidence immutable, but display the actual reward recipient when
+	// the website relationship selected a different inviter.
+	rows, err = s.db.QueryContext(ctx, `SELECT i.invitee_qq,COALESCE(r.recipient_qq,i.inviter_qq),i.group_id,
+		CASE WHEN r.recipient_user_id IS NOT NULL AND r.recipient_user_id IS DISTINCT FROM i.inviter_user_id THEN 'website_affiliate' ELSE i.evidence_type END,
+		i.status,i.reason FROM qq_activity_invitations i
+		LEFT JOIN qq_activity_rewards r ON r.kind='invitation' AND r.subject_qq=i.invitee_qq AND r.subject_user_id=i.invitee_user_id
+		ORDER BY i.updated_at DESC LIMIT 500`)
 	if err != nil {
 		return
 	}
