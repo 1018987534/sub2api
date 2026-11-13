@@ -197,11 +197,13 @@ func (s *Store) ProcessPrivate(ctx context.Context, e PrivateEvent, send func(co
 			}
 			return reply("绑定状态已发生变化，本次操作已取消。请重新发送【绑定】。")
 		}
-		if err == nil && !p.expires.After(time.Now()) && text != "绑定" && text != "更换绑定" {
+		_, emailInput := privateEmail(text)
+		continuing := text == "确认" || text == "确认绑定" || text == "重发" || text == "更换" || text == "确认更换" || text == "是" || codePattern.MatchString(text)
+		if (errors.Is(err, sql.ErrNoRows) && continuing) || (err == nil && !p.expires.After(time.Now()) && text != "绑定" && text != "更换绑定" && !emailInput) {
 			if err = clear(); err != nil {
 				return err
 			}
-			return reply("本次操作已过期，原有绑定保持不变。请重新发送【绑定】。")
+			return reply("本次绑定操作已过期或结束。请重新发送官网注册邮箱，或发送【绑定】重新开始。原有绑定保持不变。")
 		}
 		if errors.Is(err, sql.ErrNoRows) || !p.expires.After(time.Now()) || text == "绑定" || text == "更换绑定" {
 			p = privateSession{step: "email", original: current, originalBound: boundAt, expires: time.Now().Add(10 * time.Minute)}
@@ -218,10 +220,11 @@ func (s *Store) ProcessPrivate(ctx context.Context, e PrivateEvent, send func(co
 				return reply("如需更换，请回复【更换】；保留当前绑定请回复【取消】。")
 			}
 			p.step = "email"
+			p.expires = time.Now().Add(10 * time.Minute)
 			if err = savePrivateSession(ctx, tx, e.QQ, &p); err != nil {
 				return err
 			}
-			return reply("请发送要绑定的官网账号完整注册邮箱。支持自定义 QQ 邮箱、Gmail、163 等；原有绑定在全部确认完成前继续有效。")
+			return reply("请在 10 分钟内发送要绑定的官网账号完整注册邮箱。支持自定义 QQ 邮箱、Gmail、163 等；原有绑定在全部确认完成前继续有效。")
 		}
 		if p.step == "email" || p.step == "confirm_email" {
 			if email, ok := privateEmail(text); ok {
@@ -253,6 +256,7 @@ func (s *Store) ProcessPrivate(ctx context.Context, e PrivateEvent, send func(co
 					return reply("当前已绑定该官网账号，无需重复验证。")
 				}
 				p.target, p.email, p.step = sql.NullInt64{Int64: id, Valid: true}, email, "confirm_email"
+				p.expires = time.Now().Add(10 * time.Minute)
 				if err = privateTarget(ctx, tx, e.QQ, &p); err != nil {
 					if errors.Is(err, ErrBindingConflict) {
 						return reply("该官网账号当前无法绑定或已关联其他 QQ，请先由原绑定方解除关联，或联系管理员。")
@@ -262,13 +266,13 @@ func (s *Store) ProcessPrivate(ctx context.Context, e PrivateEvent, send func(co
 				if err = savePrivateSession(ctx, tx, e.QQ, &p); err != nil {
 					return err
 				}
-				return reply("是否绑定官网账号：" + MaskEmail(email) + "？回复【确认】发送邮箱验证码，或回复【取消】。验证码将发送到该官网账号的注册邮箱，收到后只在本私信中填写。")
+				return reply("是否绑定官网账号：" + MaskEmail(email) + "？请在 10 分钟内回复【确认】发送邮箱验证码，或回复【取消】。验证码将发送到该官网账号的注册邮箱，收到后只在本私信中填写。")
 			}
 			if p.step == "email" {
 				if err = savePrivateSession(ctx, tx, e.QQ, &p); err != nil {
 					return err
 				}
-				return reply("请发送要绑定的官网账号完整注册邮箱，支持任意邮箱。QQ 身份以当前私信账号为准，无需修改官网账号资料。随时回复【取消】退出。")
+				return reply("请在 10 分钟内发送要绑定的官网账号完整注册邮箱，支持任意邮箱。QQ 身份以当前私信账号为准，无需修改官网账号资料。回复【取消】退出。")
 			}
 		}
 		if p.step == "confirm_email" || p.step == "sending_code" || (p.step == "verify_code" && text == "重发") {
