@@ -148,6 +148,16 @@ func (s *Store) ProcessPrivate(ctx context.Context, e PrivateEvent, send func(co
 			return err
 		}
 		text := strings.TrimSpace(e.Text)
+		var p privateSession
+		err = tx.QueryRowContext(ctx, `SELECT step,target_user_id,target_email,original_user_id,original_bound_at,challenge,code_hash,attempts,sent_at,expires_at,updated_at FROM qq_activity_private_sessions WHERE qq=$1 FOR UPDATE`, e.QQ).Scan(&p.step, &p.target, &p.email, &p.original, &p.originalBound, &p.challenge, &p.codeHash, &p.attempts, &p.sent, &p.expires, &p.updated)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		hasSession := err == nil
+		// Ordinary private chat must not start or revive a binding conversation.
+		if text != "绑定" && (!hasSession || !p.expires.After(time.Now())) {
+			return nil
+		}
 		if text == "取消" {
 			if err = clear(); err != nil {
 				return err
@@ -186,26 +196,13 @@ func (s *Store) ProcessPrivate(ctx context.Context, e PrivateEvent, send func(co
 			}
 			return reply("当前绑定已被管理员锁定，请联系管理员核验，原有绑定保持不变。")
 		}
-		var p privateSession
-		err = tx.QueryRowContext(ctx, `SELECT step,target_user_id,target_email,original_user_id,original_bound_at,challenge,code_hash,attempts,sent_at,expires_at,updated_at FROM qq_activity_private_sessions WHERE qq=$1 FOR UPDATE`, e.QQ).Scan(&p.step, &p.target, &p.email, &p.original, &p.originalBound, &p.challenge, &p.codeHash, &p.attempts, &p.sent, &p.expires, &p.updated)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if err == nil && (current != p.original || boundAt != p.originalBound) {
+		if hasSession && (current != p.original || boundAt != p.originalBound) {
 			if err = clear(); err != nil {
 				return err
 			}
 			return reply("绑定状态已发生变化，本次操作已取消。请重新发送【绑定】。")
 		}
-		_, emailInput := privateEmail(text)
-		continuing := text == "确认" || text == "确认绑定" || text == "重发" || text == "更换" || text == "确认更换" || text == "是" || codePattern.MatchString(text)
-		if (errors.Is(err, sql.ErrNoRows) && continuing) || (err == nil && !p.expires.After(time.Now()) && text != "绑定" && text != "更换绑定" && !emailInput) {
-			if err = clear(); err != nil {
-				return err
-			}
-			return reply("本次绑定操作已过期或结束。请重新发送官网注册邮箱，或发送【绑定】重新开始。原有绑定保持不变。")
-		}
-		if errors.Is(err, sql.ErrNoRows) || !p.expires.After(time.Now()) || text == "绑定" || text == "更换绑定" {
+		if text == "绑定" {
 			p = privateSession{step: "email", original: current, originalBound: boundAt, expires: time.Now().Add(10 * time.Minute)}
 			if current.Valid {
 				p.step = "confirm_change"
