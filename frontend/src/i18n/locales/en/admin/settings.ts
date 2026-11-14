@@ -1135,7 +1135,7 @@ export default {
         packetLossProtection: 'Sustained packet loss protection',
         packetLossProtectionHint: 'Lightweight connectivity checks run every 2 seconds, with immediate confirmation after a connection failure, timeout or server error. Two failures or sustained severe packet loss pause new requests; existing requests continue. If all regular nodes are paused, use healthy zero-weight standbys first, then try randomly selected nodes if no standby is available.',
         packetLossCooldown: 'Packet loss pause (minutes)',
-        packetLossCooldownHint: '1–120 minutes, default 5. Changes apply to the next pause. Resume after the deadline and three successful probe rounds; sustained severe loss renews the pause.',
+        packetLossCooldownHint: '1–120 minutes, default 5. Changes apply to the next pause. Probes continue while paused; three successful connectivity and packet-loss probe rounds resume routing early without waiting for the deadline. Unhealthy nodes remain paused.',
         packetLossCooldownError: 'Packet loss pause must be an integer from 1 to 120',
         packetLossUntil: 'Paused until {time}',
         packetLossStates: {

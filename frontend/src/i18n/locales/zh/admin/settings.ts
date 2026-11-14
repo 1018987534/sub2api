@@ -1129,7 +1129,7 @@ export default {
         packetLossProtection: '连续丢包自动保护',
         packetLossProtectionHint: '每 2 秒轻量检查节点连通性，首次连接失败、超时或服务异常立即复核；两次失败或持续严重丢包时暂停新请求，现有请求继续执行。所有常规节点暂停时优先使用健康的零权重节点；没有可用备用时随机选择节点继续尝试。',
         packetLossCooldown: '丢包暂停时长（分钟）',
-        packetLossCooldownHint: '1–120 分钟，默认 5 分钟；修改应用于下次暂停。到期且连续三轮探测成功后恢复，持续严重丢包会再次暂停。',
+        packetLossCooldownHint: '1–120 分钟，默认 5 分钟；修改应用于下次暂停。暂停期间持续探测，连续三轮连通性与丢包探测确认正常后提前恢复，无需等满暂停时长；仍异常则继续暂停。',
         packetLossCooldownError: '丢包暂停时长必须为 1–120 的整数',
         packetLossUntil: '暂停截止 {time}',
         packetLossStates: {

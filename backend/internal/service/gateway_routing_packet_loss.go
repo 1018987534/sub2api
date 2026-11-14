@@ -220,7 +220,13 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 		if pause.OriginProbe {
 			recovered = signal.OriginRecovered && !(signal.Fresh && signal.Severe)
 		}
-		if paused && !now.Before(until) && recovered {
+		// Fresh successful ICMP and origin probe rounds can end a pause early.
+		// Both must be newer than the failure, so cached pre-pause success cannot
+		// restore traffic while a long administrator-configured cooldown runs.
+		confirmedRecovery := signal.Fresh && signal.Recovered &&
+			signal.SampleAt.After(pause.SampleAt) && signal.OriginRecovered &&
+			signal.OriginSampleAt.After(pause.SampleAt)
+		if paused && recovered && (!now.Before(until) || confirmedRecovery) {
 			paused = false
 		}
 		if (signal.Fresh && signal.Severe) || signal.OriginUnhealthy {
