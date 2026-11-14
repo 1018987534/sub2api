@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -126,9 +127,19 @@ func probeGatewayOrigin(client *http.Client, origin string) bool {
 		return false
 	}
 	defer response.Body.Close()
-	_, err = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
-	// Production origins intentionally reject non-Cloudflare callers at Nginx.
-	// A prompt 4xx still proves TCP/TLS/HTTP connectivity; it is not packet loss.
-	// Keep transport failures, timeouts and 5xx responses eligible for confirmation.
-	return err == nil && response.StatusCode >= http.StatusOK && response.StatusCode < http.StatusInternalServerError
+	if response.StatusCode != http.StatusOK {
+		return false
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4097))
+	if err != nil || len(body) > 4096 {
+		return false
+	}
+	var readiness struct {
+		Status string            `json:"status"`
+		Checks map[string]string `json:"checks"`
+	}
+	// Nginx connectivity alone cannot establish database/Redis readiness.
+	// The control host must be allowed through the origin's /health/ready ACL.
+	return json.Unmarshal(body, &readiness) == nil && readiness.Status == "ready" &&
+		readiness.Checks["database"] == "ok" && readiness.Checks["redis"] == "ok"
 }

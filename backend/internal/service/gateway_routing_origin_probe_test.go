@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -10,6 +11,38 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
 )
+
+func writeGatewayReadyResponse(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"ready","checks":{"database":"ok","redis":"ok"}}`))
+}
+
+func TestGatewayOriginProbeRequiresSharedStateReady(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		ready  bool
+	}{
+		{"ready", http.StatusOK, `{"status":"ready","checks":{"database":"ok","redis":"ok"}}`, true},
+		{"nginx access denied", http.StatusForbidden, `<html>Forbidden</html>`, false},
+		{"empty success", http.StatusOK, "", false},
+		{"redis unavailable", http.StatusOK, `{"status":"ready","checks":{"database":"ok","redis":"unavailable"}}`, false},
+		{"database unavailable", http.StatusServiceUnavailable, `{"status":"not_ready","checks":{"database":"unavailable","redis":"ok"}}`, false},
+		{"not ready", http.StatusOK, `{"status":"not_ready","checks":{"database":"ok","redis":"ok"}}`, false},
+		{"invalid JSON", http.StatusOK, `<html>OK</html>`, false},
+		{"redirect", http.StatusFound, `{"status":"ready","checks":{"database":"ok","redis":"ok"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			require.Equal(t, tc.ready, probeGatewayOrigin(server.Client(), server.URL))
+		})
+	}
+}
 
 func TestGatewayOriginProbeConfirmsOnlyFailures(t *testing.T) {
 	for _, scenario := range []string{"healthy", "access denied", "transient", "failed"} {
@@ -22,10 +55,13 @@ func TestGatewayOriginProbeConfirmsOnlyFailures(t *testing.T) {
 				n := calls.Add(1)
 				if scenario == "access denied" {
 					w.WriteHeader(http.StatusForbidden)
+					return
 				}
 				if scenario == "failed" || (scenario == "transient" && n == 1) {
 					w.WriteHeader(http.StatusServiceUnavailable)
+					return
 				}
+				writeGatewayReadyResponse(w)
 			}))
 			defer server.Close()
 			svc := NewSettingService(newGatewayRoutingRepoStub(), &config.Config{})
@@ -33,8 +69,8 @@ func TestGatewayOriginProbeConfirmsOnlyFailures(t *testing.T) {
 			settings.Nodes = []GatewayRoutingNodeSettings{{ID: "standby", Origin: server.URL, TargetWeight: 0}}
 			svc.refreshGatewayOriginProbes(settings, "fixture", nil)
 			probe := svc.gatewayRoutingOriginProbeCache.nodes["standby"]
-			require.Equal(t, scenario == "failed", probe.Failed)
-			if scenario == "healthy" || scenario == "access denied" {
+			require.Equal(t, scenario == "failed" || scenario == "access denied", probe.Failed)
+			if scenario == "healthy" {
 				require.EqualValues(t, 1, calls.Load())
 			} else {
 				require.EqualValues(t, 2, calls.Load())
@@ -50,6 +86,7 @@ func TestGatewayOriginProbeDoesNotBlockOrMultiplyCustomerPolls(t *testing.T) {
 		calls.Add(1)
 		entered <- struct{}{}
 		<-release
+		writeGatewayReadyResponse(w)
 	}))
 	defer server.Close()
 	svc := NewSettingService(newGatewayRoutingRepoStub(), &config.Config{})
@@ -90,7 +127,9 @@ func TestGatewayOriginProbeDoesNotBlockOrMultiplyCustomerPolls(t *testing.T) {
 }
 
 func TestGatewayOriginProbeRecoveryFreshnessAndSettings(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeGatewayReadyResponse(w)
+	}))
 	defer server.Close()
 	svc := NewSettingService(newGatewayRoutingRepoStub(), &config.Config{})
 	settings := packetLossSettings()
@@ -107,7 +146,9 @@ func TestGatewayOriginProbeRecoveryFreshnessAndSettings(t *testing.T) {
 	settings.PacketLossProtectionEnabled = false
 	require.Empty(t, svc.gatewayRoutingProbeSignals(settings, nil, time.Now()))
 	// A changed origin cannot inherit the previous origin's recovery streak.
-	changed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	changed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeGatewayReadyResponse(w)
+	}))
 	defer changed.Close()
 	settings.Nodes[0].Origin = changed.URL
 	settings.PacketLossProtectionEnabled = true
@@ -119,6 +160,61 @@ func TestGatewayOriginProbeRecoveryFreshnessAndSettings(t *testing.T) {
 		defer svc.gatewayRoutingOriginProbeMu.Unlock()
 		return !svc.gatewayRoutingOriginProbeInFlight
 	}, 3*time.Second, 5*time.Millisecond)
+}
+
+func TestGatewayOriginProbePauseThenAutomaticallyRecovers(t *testing.T) {
+	var ready atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !ready.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		writeGatewayReadyResponse(w)
+	}))
+	defer server.Close()
+	repo := newGatewayRoutingRepoStub()
+	svc := NewSettingService(repo, &config.Config{})
+	settings := packetLossSettings()
+	settings.PacketLossCooldownMinutes = 60
+	settings.Nodes[0].Origin = server.URL
+	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeGatewayReadyResponse(w)
+	}))
+	defer peer.Close()
+	settings.Nodes[1].Origin = peer.URL
+	key := settings.MonitorURL
+	for _, node := range settings.Nodes {
+		key += "|" + node.ID + "|" + node.Origin
+	}
+	apply := func() *GatewayRoutingRuntime {
+		now := time.Now().UTC()
+		icmp := map[string]gatewayPacketLossSignal{
+			"yt":   {Fresh: true, Recovered: true, SampleAt: now},
+			"peer": {Fresh: true, Recovered: true, SampleAt: now},
+		}
+		runtime := packetLossRuntime(settings)
+		svc.applyGatewayPacketLossProtection(context.Background(), settings, runtime,
+			svc.gatewayRoutingProbeSignals(settings, icmp, now), now)
+		return runtime
+	}
+	svc.refreshGatewayOriginProbes(settings, key, nil)
+	runtime := apply()
+	require.Zero(t, runtime.Nodes[0].EffectiveWeight)
+	deadline := *runtime.Nodes[0].PacketLossPausedUntil
+	ready.Store(true)
+	for round := 1; round <= 3; round++ {
+		svc.refreshGatewayOriginProbes(settings, key, svc.gatewayRoutingOriginProbeCache)
+		runtime = apply()
+		if round < 3 {
+			require.Zero(t, runtime.Nodes[0].EffectiveWeight)
+			require.NotNil(t, runtime.Nodes[0].PacketLossPausedUntil)
+		} else {
+			require.Equal(t, 70, runtime.Nodes[0].EffectiveWeight)
+			require.Nil(t, runtime.Nodes[0].PacketLossPausedUntil)
+			require.Equal(t, "{}", repo.values[gatewayPacketLossStateKey])
+		}
+	}
+	require.True(t, time.Now().Before(deadline), "three actual readiness rounds recover before the one-hour deadline")
 }
 
 func TestGatewayOriginProbeTimeoutIsBoundedAndConfirmed(t *testing.T) {
