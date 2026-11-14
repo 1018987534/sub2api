@@ -59,7 +59,7 @@ func autoBindingFixtureAt(t *testing.T, mail bool) (*sql.DB, *Store) {
 	queries := []string{
 		"CREATE TABLE users(id BIGSERIAL PRIMARY KEY,email TEXT NOT NULL,username TEXT DEFAULT '',status TEXT DEFAULT 'active',balance NUMERIC(20,8) DEFAULT 0,created_at TIMESTAMPTZ DEFAULT clock_timestamp(),updated_at TIMESTAMPTZ DEFAULT NOW(),deleted_at TIMESTAMPTZ)",
 		"CREATE TABLE auth_identities(user_id BIGINT,provider_type TEXT,provider_subject TEXT,verified_at TIMESTAMPTZ,metadata JSONB)",
-		"CREATE TABLE user_affiliates(user_id BIGINT PRIMARY KEY,aff_code TEXT UNIQUE,aff_quota NUMERIC(20,8) DEFAULT 0,aff_history_quota NUMERIC(20,8) DEFAULT 0,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())",
+		"CREATE TABLE user_affiliates(user_id BIGINT PRIMARY KEY,inviter_id BIGINT,aff_code TEXT UNIQUE,aff_quota NUMERIC(20,8) DEFAULT 0,aff_history_quota NUMERIC(20,8) DEFAULT 0,created_at TIMESTAMPTZ DEFAULT NOW(),updated_at TIMESTAMPTZ DEFAULT NOW())",
 		"CREATE TABLE user_affiliate_ledger(id BIGSERIAL PRIMARY KEY,user_id BIGINT,action TEXT,amount NUMERIC(20,8),source_user_id BIGINT)",
 	}
 	for _, q := range queries {

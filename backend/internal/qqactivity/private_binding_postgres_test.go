@@ -93,6 +93,7 @@ func TestPostgresPrivateFirstBinding(t *testing.T) {
 			db, s := privateFixture(t)
 			id := autoAdd(t, db, email, "unchanged-profile")
 			c := privateMember(t, db, s, "12345001")
+			c.send(t, "绑定")
 			c.send(t, " "+strings.ToUpper(email)+" ")
 			autoCount(t, db, `SELECT COUNT(*) FROM qq_activity_bindings`, 0)
 			if c.sends != 0 {

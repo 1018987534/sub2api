@@ -123,6 +123,99 @@ func (s *Store) reconcile(ctx context.Context, tx *sql.Tx, qq string, c Config) 
 	return err
 }
 
+// resolvePaidInvitations selects one recipient after the matching newcomer was
+// credited. Website relationships take precedence and require an active QQ
+// binding; only an absent website inviter permits the original QQ fallback.
+// Keep the first QQ evidence intact and never rewrite an already paid reward.
+func resolvePaidInvitations(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `SELECT n.subject_qq,n.subject_user_id,i.inviter_qq,i.inviter_user_id,i.evidence_type,i.evidence_key,i.joined_at,a.inviter_id,COALESCE(b.qq,'')
+		FROM qq_activity_rewards n
+		JOIN qq_activity_invitations i ON i.invitee_qq=n.subject_qq AND (i.invitee_user_id IS NULL OR i.invitee_user_id=n.subject_user_id)
+		LEFT JOIN user_affiliates a ON a.user_id=n.subject_user_id
+		LEFT JOIN qq_activity_bindings b ON b.user_id=a.inviter_id AND b.status='active'
+		WHERE n.kind='newcomer' AND n.status='paid' AND i.status<>'paid'
+		AND NOT EXISTS(SELECT 1 FROM qq_activity_rewards r WHERE r.kind='invitation' AND r.status='paid' AND (r.subject_qq=n.subject_qq OR r.subject_user_id=n.subject_user_id))
+		ORDER BY n.id`)
+	if err != nil {
+		return err
+	}
+	type invitation struct {
+		qq, inviter, evidenceType, evidenceKey, websiteQQ string
+		userID                                            int64
+		inviterUser, websiteUser                          sql.NullInt64
+		joined                                            time.Time
+	}
+	var invitations []invitation
+	for rows.Next() {
+		var i invitation
+		if err = rows.Scan(&i.qq, &i.userID, &i.inviter, &i.inviterUser, &i.evidenceType, &i.evidenceKey, &i.joined, &i.websiteUser, &i.websiteQQ); err != nil {
+			rows.Close()
+			return err
+		}
+		invitations = append(invitations, i)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, i := range invitations {
+		inviter, user := i.inviter, i.inviterUser
+		evidence := ValidQQ(inviter) && i.evidenceKey != "" && (i.evidenceType == "direct_invite_pinned" || i.evidenceType == "admin_verified")
+		if i.websiteUser.Valid {
+			inviter, user = i.websiteQQ, i.websiteUser
+			evidence = ValidQQ(inviter)
+		} else if evidence && !user.Valid {
+			err = tx.QueryRowContext(ctx, `SELECT user_id FROM qq_activity_binding_history WHERE qq=$1 ORDER BY CASE WHEN bound_at<=$2 THEN 0 ELSE 1 END,CASE WHEN bound_at<=$2 THEN bound_at END DESC,bound_at,id LIMIT 1`, inviter, i.joined).Scan(&user)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+		}
+		self := inviter == i.qq || (user.Valid && user.Int64 == i.userID)
+		if ValidQQ(inviter) {
+			var crossed bool
+			if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM qq_activity_binding_history a JOIN qq_activity_binding_history b ON a.user_id=b.user_id OR (a.email_digest<>'' AND a.email_digest=b.email_digest) WHERE a.qq=$1 AND b.qq=$2)`, inviter, i.qq).Scan(&crossed); err != nil {
+				return err
+			}
+			self = self || crossed
+		}
+		state, reason := "awaiting_evidence", "invitation_provenance_unknown"
+		if i.websiteUser.Valid && !evidence {
+			state, reason = "awaiting_inviter", "website_inviter_not_bound"
+		}
+		if evidence {
+			state, reason = "pending", ""
+			if !user.Valid {
+				state = "awaiting_inviter"
+			}
+		}
+		if self {
+			state, reason = "ineligible", "self_invitation"
+		}
+		recipient := user
+		if !evidence || self {
+			recipient = sql.NullInt64{}
+		}
+		// Re-resolve pending rows too: an earlier QQ candidate must not win
+		// because newcomer or invitation payments were temporarily disabled.
+		if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_rewards SET recipient_qq=$1,recipient_user_id=$2 WHERE kind='invitation' AND subject_qq=$3 AND subject_user_id=$4 AND status='pending'`, inviter, recipient, i.qq, i.userID); err != nil {
+			return err
+		}
+		if evidence && !self {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO qq_activity_rewards(kind,recipient_qq,recipient_user_id,subject_qq,subject_user_id) VALUES('invitation',$1,$2,$3,$4) ON CONFLICT DO NOTHING`, inviter, recipient, i.qq, i.userID); err != nil {
+				return err
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_invitations SET qualified_at=COALESCE(qualified_at,NOW()) WHERE invitee_qq=$1`, i.qq); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE qq_activity_invitations SET invitee_user_id=COALESCE(invitee_user_id,$1),status=$2,reason=$3,updated_at=NOW() WHERE invitee_qq=$4 AND status<>'paid'`, i.userID, state, reason, i.qq); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // settle credits newcomers first, then invitations backed by the same QQ/user's
 // paid newcomer reward. Both stages share one transaction, including notices.
 // Paused campaigns retain rows; late inviter bindings may settle after the end.
@@ -144,6 +237,9 @@ func (s *Store) settle(ctx context.Context, tx *sql.Tx, c Config) ([]int64, erro
 		if kind == "invitation" {
 			// Also bring historical pending invitations under the payment gate.
 			if _, err := tx.ExecContext(ctx, `UPDATE qq_activity_invitations i SET status=CASE WHEN `+invitationNewcomerPaid+` THEN CASE WHEN r.recipient_user_id IS NULL THEN 'awaiting_inviter' ELSE 'pending' END ELSE 'awaiting_newcomer' END,reason=CASE WHEN `+invitationNewcomerPaid+` THEN '' ELSE 'invitee_newcomer_unpaid' END,updated_at=NOW() FROM qq_activity_rewards r WHERE r.kind='invitation' AND r.status='pending' AND i.invitee_qq=r.subject_qq AND i.invitee_user_id=r.subject_user_id AND i.status<>'paid'`); err != nil {
+				return nil, err
+			}
+			if err := resolvePaidInvitations(ctx, tx); err != nil {
 				return nil, err
 			}
 		}
