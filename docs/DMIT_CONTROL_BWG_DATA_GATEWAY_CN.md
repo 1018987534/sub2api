@@ -45,6 +45,29 @@ Responses 的三类路径及两类 Chat Completions 路径由现有 Worker 分�
 现有流量阈值、健康和丢包保护保持启用。零权重备用和全节点故障时的紧急兜底仅从配置中的节点选择，
 因此退役节点必须从 `nodes` 删除。历史 `usage_logs.instance_id=bwg-us-01` 继续保留。
 
+### 暂停与自动恢复的实际健康探测
+
+主控每轮对全部已配置节点（包括暂停和零权重节点）请求 `/health/ready`，失败后立即复核。
+探测必须得到 HTTP 200、`status=ready`、`checks.database=ok` 和 `checks.redis=ok`。
+Nginx 的 403、空响应、重定向或仅网页可访问不能证明数据库和 Redis 正常，不计为恢复成功。
+
+四个 gateway origin 的 Nginx 精确 `location = /health/ready` 必须允许主控公网地址
+`179.255.105.184`；复制该 server 原有 allow/deny 规则后，在最后的 `deny all` 前追加此地址。
+只对健康路径增加主控权限，模型接口继续使用原有 Cloudflare 访问限制。每次修改先备份、
+`nginx -t` 后 reload，并从 DMIT 请求四个 origin 确认返回真实 readiness JSON。
+
+暂停期间继续探测；暂停事件之后的新 ICMP 恢复信号与连续三轮 readiness 成功共同确认恢复，
+即可提前恢复原目标比例。旧探测缓存、持续严重丢包、数据库/Redis 不可用以及流量阈值保护
+不能被提前恢复条件解除；重启主控后继续读取持久化暂停状态。
+
+2026-11-15 恢复记录：YT 到 DMIT 的 UDP 链路发生单向丢包，三台网关到数据库/Redis 的
+WireGuard 流量已改为经 YT 的 TLS WebSocket/TCP 通道。DMIT 的
+`sub2api-wg-wss-server.service` 仅允许 YT 访问 TCP 51824，并只转发本机 WireGuard 51820；
+YT 的 `sub2api-wg-wss-client.service` 通过校验证书的 TLS 连接承载 UDP，监听 UDP 51823，
+仅允许本机与两台 VMISS 访问。YT WireGuard endpoint 为 `127.0.0.1:51823`，
+两台 VMISS 为 `154.23.243.26:51823`。旧 UDP 51821 中继保留作回滚，原始配置和回滚脚本
+保存在各节点 `/root/sub2api-incident-20261115/`，该目录含私密配置，不复制进仓库。
+
 ## 发布与监控
 
 DMIT control 使用 `-tags embed` 构建；三台 gateway 使用无前端产物。
