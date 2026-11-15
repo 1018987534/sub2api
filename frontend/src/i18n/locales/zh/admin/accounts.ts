@@ -182,6 +182,11 @@ export default {
         }
       },
       upstreamBilling: {
+        paymentFeePercent: '上游支付手续费（%）',
+        paymentFeeHint: '输入 3 表示额外支付 3% 手续费。真实成本倍率 = 原成本倍率 ×（1 + 手续费 ÷ 100）；留空按 0% 计算。用于账号成本、利润控制和低倍率调度。',
+        paymentFeeInvalid: '上游支付手续费必须为 0 到 100 之间的百分数',
+        paymentRealRate: '含手续费真实倍率：{rate}x',
+        paymentFeeSummary: '支付手续费：{percent}%，含手续费当前倍率：{rate}x',
         trustWarning: '此列显示本地实际采用的上游计费倍率；配置折算比例时，原始声明会先折算再参与利润控制、低倍率调度、排序和账号成本计算。Sub2API 无法验证上游声明是否与实际扣费一致，请结合账单、余额变化和实际用量自行核验。',
         autoProbe: '自动探测上游声明倍率',
         autoProbeHint: '启用后按全局周期刷新上游声明倍率；此开关本身不会修改账号倍率。',

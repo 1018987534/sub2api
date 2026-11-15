@@ -21,6 +21,9 @@
               })
             }}
           </p>
+          <p v-if="readPaymentFeePercent(account.extra) > 0" data-testid="upstream-payment-fee-summary">
+            {{ t('admin.accounts.upstreamBilling.paymentFeeSummary', { percent: readPaymentFeePercent(account.extra), rate: currentEffectiveRate }) }}
+          </p>
           <p>{{ t('admin.accounts.upstreamBilling.groupRate', { value: data.group_rate_multiplier }) }}</p>
           <p v-if="data.user_rate_multiplier != null">
             {{ t('admin.accounts.upstreamBilling.userRate', { value: data.user_rate_multiplier }) }}
@@ -93,6 +96,7 @@
 </template>
 
 <script setup lang="ts">
+import { applyPaymentFee, readPaymentFeePercent } from '@/utils/accountPaymentFee'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
@@ -174,13 +178,14 @@ const currentEffectiveRate = computed(() => {
   const base = billing.resolved_rate_multiplier
   if (typeof base !== 'number' || !Number.isFinite(base) || base < 0) return null
   if (typeof billing.peak_rate_enabled !== 'boolean') return null
-  if (!billing.peak_rate_enabled) return base
+  const realBase = applyPaymentFee(base, readPaymentFeePercent(props.account.extra))
+  if (!billing.peak_rate_enabled) return realBase
   const start = parseMinute(billing.peak_start)
   const end = parseMinute(billing.peak_end)
   const minute = minuteInTimeZone(props.now, billing.timezone)
   const peak = billing.peak_rate_multiplier
   if (start == null || end == null || minute == null || start >= end || typeof peak !== 'number' || !Number.isFinite(peak) || peak < 0) return null
-  const value = minute >= start && minute < end ? base * peak : base
+  const value = minute >= start && minute < end ? realBase * peak : realBase
   return Number.isFinite(value) ? value : null
 })
 const conversionSummary = computed(() => {
@@ -199,7 +204,7 @@ const conversionSummary = computed(() => {
 const lastDetectedRate = computed(() => {
   const value = data.value?.effective_rate_multiplier
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
-    ? Number(value.toPrecision(12))
+    ? applyPaymentFee(value, readPaymentFeePercent(props.account.extra))
     : null
 })
 const elapsedSinceLastSuccess = computed(() => {

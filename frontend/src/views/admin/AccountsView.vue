@@ -349,7 +349,7 @@
           </template>
           <template #cell-rate_multiplier="{ row }">
             <span class="inline-flex items-center gap-1 text-sm font-mono text-gray-700 dark:text-gray-300">
-              <span>{{ formatMultiplier(row.rate_multiplier ?? 1) }}x</span>
+              <span>{{ formatMultiplier(applyPaymentFee(row.rate_multiplier ?? 1, readPaymentFeePercent(row.extra))) }}x</span>
               <span
                 v-if="row.extra?.upstream_billing_rate_sync_enabled === true"
                 class="inline-flex cursor-help text-emerald-600 dark:text-emerald-400"
@@ -534,6 +534,7 @@ import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { formatMultiplier } from '@/utils/formatters'
+import { applyPaymentFee, readPaymentFeePercent } from '@/utils/accountPaymentFee'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { sanitizeUrl } from '@/utils/url'

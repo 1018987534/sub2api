@@ -147,7 +147,7 @@ func (s *adminServiceImpl) ScopedAdminUpdateCodex(ctx context.Context, id int64,
 			safe.GroupIDs = &groups
 		}
 		// 客户端常附带默认倍率；只接受与现值相同的值，绝不借导入改价。
-		if safe.RateMultiplier != nil && *safe.RateMultiplier != current.BillingRateMultiplier() {
+		if safe.RateMultiplier != nil && *safe.RateMultiplier != current.BaseBillingRateMultiplier() {
 			return nil, infraerrors.Forbidden("SCOPED_CODEX_RATE", "受限导入不能修改计费倍率")
 		}
 		safe.RateMultiplier = nil

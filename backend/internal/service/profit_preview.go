@@ -175,7 +175,7 @@ func previewAccountProfitAdmission(
 		!math.IsInf(*account.RateMultiplier, 0) &&
 		*account.RateMultiplier >= 0
 	if validRate {
-		rate := *account.RateMultiplier
+		rate := account.BillingRateMultiplier()
 		verdict.AccountRate = &rate
 	}
 	switch {
@@ -183,11 +183,11 @@ func previewAccountProfitAdmission(
 		verdict.Class = ProfitPreviewClassAdmitted
 	case !validRate:
 		verdict.Class = ProfitPreviewClassRejectedInvalidRate
-	case profitControlOverThreshold(*account.RateMultiplier, thresholdDefault):
+	case profitControlOverThreshold(account.BillingRateMultiplier(), thresholdDefault):
 		verdict.Class = ProfitPreviewClassRejectedThreshold
 	default:
 		verdict.Class = ProfitPreviewClassAdmitted
-		verdict.RejectedUnderMinD = profitControlOverThreshold(*account.RateMultiplier, thresholdMinD)
+		verdict.RejectedUnderMinD = profitControlOverThreshold(account.BillingRateMultiplier(), thresholdMinD)
 	}
 	return verdict
 }

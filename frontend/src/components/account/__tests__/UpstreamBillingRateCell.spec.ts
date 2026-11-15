@@ -68,6 +68,19 @@ describe('UpstreamBillingRateCell', () => {
     vi.useRealTimers()
   })
 
+  it('includes the payment surcharge once in the displayed current upstream rate', async () => {
+    const account = makeAccount({ extra: {
+      upstream_payment_fee_percent: 3,
+      upstream_billing_probe: { status: 'ok', data: { ...billingData, resolved_rate_multiplier: 0.1, peak_rate_enabled: false, effective_rate_multiplier: 0.1 },
+        received_at: '2026-07-13T00:00:00Z', fresh_until: '2026-07-14T00:00:00Z', last_attempt_at: '2026-07-13T00:00:00Z', next_probe_at: '2026-07-13T00:30:00Z' }
+    } })
+    const wrapper = mount(UpstreamBillingRateCell, { props: { account, now: Date.parse('2026-07-13T01:00:00Z') } })
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.103x')
+    await wrapper.setProps({ account: { ...account, extra: { ...account.extra, upstream_payment_fee_percent: 5 } } })
+    expect(wrapper.get('[data-testid="upstream-billing-rate"]').text()).toBe('0.105x')
+    expect(account.extra?.upstream_billing_probe?.data?.resolved_rate_multiplier).toBe(0.1)
+  })
+
   it('recomputes the current effective rate and keeps the icon-only probe action', async () => {
     const wrapper = mount(UpstreamBillingRateCell, {
       props: {

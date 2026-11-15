@@ -727,7 +727,7 @@ func (s *UpstreamBillingProbeService) probeLoadedAccount(ctx context.Context, ac
 	// 账号不因声明值不适配 accounts.rate_multiplier 而被记成探测失败并进入
 	// 指数退避——探测本身成功了，原始声明照常存进快照供展示。
 	var syncRate *float64
-	previousRate := account.BillingRateMultiplier()
+	previousRate := account.BaseBillingRateMultiplier()
 	if upstreamBillingRateSyncEnabled(account) {
 		conversionRatio := upstreamBillingRateConversionRatio(account)
 		if normalizedData, value, valid := NormalizeUpstreamBillingProbeData(data, conversionRatio); valid {

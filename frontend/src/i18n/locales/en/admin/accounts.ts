@@ -336,6 +336,11 @@ export default {
         }
       },
       upstreamBilling: {
+        paymentFeePercent: 'Upstream payment fee (%)',
+        paymentFeeHint: 'Enter 3 for a 3% surcharge. Real cost multiplier = base cost multiplier × (1 + fee / 100). Blank means 0%. Applied to account costs, profit control, and cost-based scheduling.',
+        paymentFeeInvalid: 'Upstream payment fee must be a percentage between 0 and 100',
+        paymentRealRate: 'Real multiplier including fees: {rate}x',
+        paymentFeeSummary: 'Payment fee: {percent}%; current multiplier including fees: {rate}x',
         trustWarning: 'This column shows the upstream billing rate used locally. When a conversion ratio is configured, the declaration is converted before profit control, low-rate scheduling, sorting, and account-cost calculation use it. Sub2API cannot verify the declaration against actual upstream billing; verify it against bills, balance changes, and actual usage.',
         autoProbe: 'Automatically probe upstream declared rate',
         autoProbeHint: 'Refresh the upstream declared rate on the global interval. This switch alone does not change the account rate.',

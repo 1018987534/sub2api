@@ -164,11 +164,11 @@ func (a *Account) IsSyntheticUITest() bool {
 	return ok && enabled
 }
 
-// BillingRateMultiplier 返回账号计费倍率。
+// BaseBillingRateMultiplier returns the configured rate before upstream payment fees.
 // - nil 表示未配置/旧缓存缺字段，按 1.0 处理
 // - 允许 0，表示该账号计费为 0
 // - 负数属于非法数据，出于安全考虑按 1.0 处理
-func (a *Account) BillingRateMultiplier() float64 {
+func (a *Account) BaseBillingRateMultiplier() float64 {
 	if a == nil || a.RateMultiplier == nil {
 		return 1.0
 	}
@@ -176,6 +176,11 @@ func (a *Account) BillingRateMultiplier() float64 {
 		return 1.0
 	}
 	return *a.RateMultiplier
+}
+
+// BillingRateMultiplier includes the upstream payment surcharge in account costs.
+func (a *Account) BillingRateMultiplier() float64 {
+	return a.ApplyUpstreamPaymentFee(a.BaseBillingRateMultiplier())
 }
 
 func (a *Account) EffectiveLoadFactor() int {
