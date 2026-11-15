@@ -1976,6 +1976,11 @@
               )
             }}
           </p>
+
+          <UpstreamPaymentFeeField
+            v-model="upstreamPaymentFeePercent"
+            :base-rate="upstreamPaymentFeeBaseRate"
+          />
           <div
             v-if="account?.type === 'apikey'"
             class="mt-3 flex items-center justify-between gap-3"
@@ -3490,6 +3495,8 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Select from '@/components/common/Select.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import UpstreamRequestIdHeaderField from '@/components/account/UpstreamRequestIdHeaderField.vue'
+import UpstreamPaymentFeeField from '@/components/account/UpstreamPaymentFeeField.vue'
+import { isValidPaymentFeePercent, readPaymentFeePercent } from '@/utils/accountPaymentFee'
 import OpenAIImageSizeTiersField from '@/components/account/OpenAIImageSizeTiersField.vue'
 import {
   OPENAI_IMAGE_SIZE_TIERS,
@@ -4179,6 +4186,7 @@ const autoPause7dDisabled = ref(false)
 const autoResetCreditEnabled = ref(false)
 const autoResetCredit5hThreshold = ref(100)
 const autoResetCredit7dThreshold = ref(100)
+const upstreamPaymentFeePercent = ref(0)
 const upstreamBillingAutoProbeEnabled = ref(false)
 const upstreamBillingRateSyncEnabled = ref(false)
 const upstreamBillingRateConversionRatio = ref(1)
@@ -4600,6 +4608,17 @@ const form = reactive({
   expires_at: null as number | null
 })
 
+const upstreamPaymentFeeBaseRate = computed(() => {
+  if (!upstreamBillingRateSyncEnabled.value) return form.rate_multiplier
+  const billing = props.account?.extra?.upstream_billing_probe?.data
+  if (!billing) return form.rate_multiplier
+  const declared = billing.rate_conversion_applied ? billing.declared_resolved_rate_multiplier : billing.resolved_rate_multiplier
+  const ratio = Number(upstreamBillingRateConversionRatio.value)
+  if (typeof declared !== 'number' || !Number.isFinite(declared) || !Number.isFinite(ratio) || ratio <= 0 || ratio > 100) return null
+  const rate = Math.round(declared * ratio * 10000) / 10000
+  return rate > 0 && rate <= 100 ? rate : null
+})
+
 const handleUpstreamBillingRateSyncChange = (enabled: boolean) => {
   upstreamBillingRateSyncEnabled.value = enabled
   if (enabled) {
@@ -4742,6 +4761,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 		typeof extra?.auto_reset_credit_5h_threshold === 'number' ? extra.auto_reset_credit_5h_threshold * 100 : 100
 	autoResetCredit7dThreshold.value =
 		typeof extra?.auto_reset_credit_7d_threshold === 'number' ? extra.auto_reset_credit_7d_threshold * 100 : 100
+  upstreamPaymentFeePercent.value = readPaymentFeePercent(extra)
   upstreamBillingAutoProbeEnabled.value = extra?.upstream_billing_probe_enabled === true
   upstreamBillingRateSyncEnabled.value =
     upstreamBillingAutoProbeEnabled.value && extra?.upstream_billing_rate_sync_enabled === true
@@ -5735,6 +5755,10 @@ const submitUpdateAccount = async (accountID: number, updatePayload: Record<stri
 }
 
 const handleSubmit = async () => {
+  if (!isValidPaymentFeePercent(upstreamPaymentFeePercent.value)) {
+    appStore.showError(t('admin.accounts.upstreamBilling.paymentFeeInvalid'))
+    return
+  }
   if (!props.account) return
   const accountID = props.account.id
 
@@ -6506,6 +6530,11 @@ const handleSubmit = async () => {
         delete newExtra.upstream_request_id_header
       }
       updatePayload.extra = newExtra
+    }
+
+    updatePayload.extra = {
+      ...((updatePayload.extra || props.account.extra || {}) as Record<string, unknown>),
+      upstream_payment_fee_percent: upstreamPaymentFeePercent.value
     }
 
     const canContinue = await ensureAntigravityMixedChannelConfirmed(async () => {

@@ -3276,7 +3276,7 @@ func openAISchedulingRate(account *Account, now time.Time, oauthSchedulingRateMu
 	}
 	if account.IsOpenAIOAuthLike() {
 		if rate := oauthSchedulingRateMultiplier; rate != nil && *rate >= 0 && !math.IsNaN(*rate) && !math.IsInf(*rate, 0) {
-			return *rate, true
+			return account.ApplyUpstreamPaymentFee(*rate), true
 		}
 	} else if rate, ok := openAIFreshUpstreamBillingRate(account, now); ok {
 		return rate, true
@@ -3328,7 +3328,8 @@ func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, b
 	if freshUntil == nil || !freshUntil.After(receivedAt) || now.Before(receivedAt) || now.After(*freshUntil) {
 		return 0, false
 	}
-	return upstreamBillingRateAt(snapshot.Data, now)
+	rate, ok := upstreamBillingRateAt(snapshot.Data, now)
+	return account.ApplyUpstreamPaymentFee(rate), ok
 }
 
 func openAIQuotaHeadroomFactor(account *Account, now time.Time) float64 {

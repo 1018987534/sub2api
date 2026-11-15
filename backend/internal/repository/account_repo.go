@@ -1280,7 +1280,7 @@ func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platfor
 func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selector) {
 	sortBy := strings.ToLower(strings.TrimSpace(params.SortBy))
 	sortOrder := params.NormalizedSortOrder(pagination.SortOrderAsc)
-	if sortBy == "upstream_billing_rate" {
+	if sortBy == "upstream_billing_rate" || sortBy == "rate_multiplier" {
 		direction := "ASC"
 		tieOrder := entsql.Asc
 		if sortOrder == pagination.SortOrderDesc {
@@ -1290,6 +1290,10 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 		return []func(*entsql.Selector){func(s *entsql.Selector) {
 			extra := s.C(dbaccount.FieldExtra)
 			expression := upstreamBillingRateSortExpression(extra)
+			if sortBy == "rate_multiplier" {
+				expression = "COALESCE(" + s.C(dbaccount.FieldRateMultiplier) + ", 1)"
+			}
+			expression = "(" + expression + ") * " + upstreamPaymentFeeSortFactor(extra)
 			s.OrderExpr(entsql.Expr(expression + " " + direction + " NULLS LAST"))
 			s.OrderBy(tieOrder(s.C(dbaccount.FieldID)))
 		}}
@@ -1333,6 +1337,12 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 		return []func(*entsql.Selector){dbent.Asc(dbaccount.FieldName), dbent.Asc(dbaccount.FieldID)}
 	}
 	return []func(*entsql.Selector){dbent.Asc(field), dbent.Asc(dbaccount.FieldID)}
+}
+
+func upstreamPaymentFeeSortFactor(extra string) string {
+	feeJSON := extra + " -> 'upstream_payment_fee_percent'"
+	fee := "(" + extra + " ->> 'upstream_payment_fee_percent')::numeric"
+	return "(CASE WHEN jsonb_typeof(" + feeJSON + ") = 'number' THEN CASE WHEN " + fee + " BETWEEN 0 AND 100 THEN 1 + " + fee + " / 100 ELSE 1 END ELSE 1 END)"
 }
 
 func upstreamBillingRateSortExpression(extra string) string {

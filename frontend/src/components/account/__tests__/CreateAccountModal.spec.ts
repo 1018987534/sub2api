@@ -296,6 +296,19 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
 
+  it('creates an account with the entered upstream payment fee', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('fee account')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('[data-testid="upstream-payment-fee-percent"]').setValue('3')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledOnce()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra?.upstream_payment_fee_percent).toBe(3)
+  })
+
   it('omits the upstream request id header from extra when left empty', async () => {
     await submitApiKeyAccount('openai')
 

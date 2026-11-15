@@ -1361,6 +1361,27 @@ describe('EditAccountModal', () => {
     expect(updateAccountMock.mock.calls[0]?.[1]?.upstream_billing_probe_enabled).toBe(true)
   })
 
+  it('loads, saves and clears an upstream payment fee without compounding the base rate', async () => {
+    const account = buildAccount()
+    account.rate_multiplier = 0.1
+    account.extra = { upstream_payment_fee_percent: 3 }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    const fee = wrapper.get<HTMLInputElement>('[data-testid="upstream-payment-fee-percent"]')
+    expect(fee.element.value).toBe('3')
+    await fee.setValue('5')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra?.upstream_payment_fee_percent).toBe(5)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.rate_multiplier).toBe(0.1)
+    await fee.setValue('')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[1]?.[1]?.extra?.upstream_payment_fee_percent).toBe(0)
+    await fee.setValue('-1')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock).toHaveBeenCalledTimes(2)
+  })
+
   it('enabling rate sync also enables probing and stops submitting a manual rate', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset()
