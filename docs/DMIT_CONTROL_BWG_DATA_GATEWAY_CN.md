@@ -75,8 +75,13 @@ DMIT control 使用 `-tags embed` 构建；三台 gateway 使用无前端产物�
 发布前从 DMIT 的 `sub2api-migration-postgres` 检查 schema：
 
 - 无待执行 migration：依次发布 VMISS-01、YT、VMISS-02、DMIT。
-- 存在兼容的待执行 migration：先备份 DMIT PostgreSQL 并以 DMIT control 执行官方 migration，
+- 存在兼容的待执行 migration：先以 DMIT control 执行官方 migration，确认 schema 已更新，
   再发布三台 gateway。不得手工写 migration 表。
+
+2026-11-15 起，按用户要求，应用发布流程不自动创建、复制、下载或上传数据库备份，
+包括存在待执行 migration 的发布。仅保留只读 schema 检查、兼容性检查和官方 migration
+入口；确需数据库备份时必须作为用户单独明确要求的操作执行。程序二进制与 runtime
+resources 的节点本地回滚归档继续保留，完成全节点验证后才清理历史程序归档。
 
 发布保留既有 main 提交、远端同步、干净构建、逐节点检查和失败回滚门禁。
 数据库、Redis 和其他业务不随应用发布重建或重启。
