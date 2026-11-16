@@ -110,7 +110,7 @@ func (h *IntelligenceHandler) credential(ctx context.Context, c intelligence.Con
 	if err != nil {
 		return "", err
 	}
-	if group.Status != service.StatusActive {
+	if group == nil || !intelligence.GroupEligible(group.Name, group.Status) {
 		return "", intelligence.ErrInvalid
 	}
 	return key.Key, nil
@@ -153,8 +153,13 @@ func (h *IntelligenceHandler) Save(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-	if _, err := h.groups.GetByID(c.Request.Context(), id); err != nil {
+	group, err := h.groups.GetByID(c.Request.Context(), id)
+	if err != nil || group == nil {
 		response.NotFound(c, "group not found")
+		return
+	}
+	if !intelligence.GroupEligible(group.Name, group.Status) {
+		response.BadRequest(c, "仅支持名称包含不降智且状态为启用的分组")
 		return
 	}
 	if input.APIKeyID > 0 {
@@ -179,7 +184,16 @@ func (h *IntelligenceHandler) Run(c *gin.Context) {
 	if !ok {
 		return
 	}
-	err := h.runner.RunNow(c.Request.Context(), id)
+	group, err := h.groups.GetByID(c.Request.Context(), id)
+	if err != nil || group == nil {
+		response.NotFound(c, "group not found")
+		return
+	}
+	if !intelligence.GroupEligible(group.Name, group.Status) {
+		response.BadRequest(c, "仅支持名称包含不降智且状态为启用的分组")
+		return
+	}
+	err = h.runner.RunNow(c.Request.Context(), id)
 	if errors.Is(err, intelligence.ErrConflict) {
 		response.Error(c, 409, "检测正在运行、队列已满或配置尚未保存")
 		return

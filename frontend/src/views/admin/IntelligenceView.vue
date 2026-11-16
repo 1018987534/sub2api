@@ -2,7 +2,7 @@
   <AppLayout>
     <div class="intelligence-page mx-auto max-w-[1500px] space-y-5">
       <header class="flex flex-wrap items-start justify-between gap-4">
-        <div><h1 class="text-2xl font-semibold text-gray-900 dark:text-white">降智检测</h1><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">按分组配置真实低成本探针；不会伪造检测记录，也不会把检测答案展示给普通用户。</p></div>
+        <div><h1 class="text-2xl font-semibold text-gray-900 dark:text-white">降智检测</h1><p class="mt-1 text-sm text-gray-500 dark:text-gray-400">仅检测名称包含“不降智”且已启用的分组；其他分组不展示，并自动关闭检测。</p></div>
 
       </header>
       <div class="flex gap-5 border-b border-gray-200 pb-3 dark:border-dark-700" role="tablist" aria-label="检测类型">
@@ -102,7 +102,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import IntelligenceRecoveryPanel from './IntelligenceRecoveryPanel.vue'
 import { getIntelligenceConfigs, getIntelligenceHistory, runIntelligenceCheck, saveIntelligenceConfig, type IntelligenceConfig, type IntelligenceRecord, getIntelligenceKeyOptions, type IntelligenceKeyOption } from '@/api/intelligence'
-import { getAllIncludingInactive } from '@/api/admin/groups'
+import { getAll } from '@/api/admin/groups'
 import type { AdminGroup } from '@/types'
 import { INTELLIGENCE_CAPTION } from '@/features/channel-monitor-v2-cards/constants'
 
@@ -187,8 +187,9 @@ function message(e: unknown) {
 async function reload() {
   error.value = ''
   try {
-    const [gs, cs] = await Promise.all([getAllIncludingInactive(), getIntelligenceConfigs()])
+    const [allGroups, cs] = await Promise.all([getAll(), getIntelligenceConfigs()])
     if (disposed) return
+    const gs = allGroups.filter(group => group.status === 'active' && group.name.includes('不降智'))
     groups.value = gs; configs.value = cs.items || []; defaults.value = cs.defaults
     if (gs[0]) selectGroup(gs[0])
   } catch (e) { if (!disposed) error.value = message(e) }

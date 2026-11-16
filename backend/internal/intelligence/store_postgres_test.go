@@ -30,6 +30,8 @@ func TestIntelligenceSavePostgres(t *testing.T) {
  timeout_seconds INTEGER NOT NULL, next_run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
  lease_token TEXT, lease_until TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`)
 	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `CREATE TEMP TABLE groups(id BIGINT PRIMARY KEY,name TEXT,status TEXT,deleted_at TIMESTAMPTZ);INSERT INTO groups VALUES(99,'不降智-测试','active',NULL)`)
+	require.NoError(t, err)
 	// Exclude public entirely: even an accidental connection change cannot access a real table.
 	_, err = db.ExecContext(ctx, `SET search_path = pg_temp`)
 	require.NoError(t, err)

@@ -189,7 +189,7 @@ func TestIntelligenceSelectedKeySaveValidatesActualOwnerAndGroup(t *testing.T) {
 			store := &intelligencePickerStore{}
 			h := &IntelligenceHandler{store: store,
 				keys:   &intelligenceSelectedKey{key: &service.APIKey{ID: 12, UserID: tc.owner, GroupID: &tc.group, Key: "never-return-this-secret", Status: tc.status}},
-				groups: &intelligencePickerGroups{group: &service.Group{ID: 7, Status: service.StatusActive}},
+				groups: &intelligencePickerGroups{group: &service.Group{ID: 7, Name: "不降智-测试", Status: service.StatusActive}},
 			}
 			input := intelligence.DefaultConfig(7)
 			input.APIKeyID = 12

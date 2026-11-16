@@ -42,7 +42,7 @@ func TestIntelligenceClaimLeaseAndSnapshot(t *testing.T) {
 	s := SQLStore{DB: db}
 	c := DefaultConfig(3)
 	raw, _ := json.Marshal(c)
-	mock.ExpectQuery("UPDATE intelligence_check_configs SET lease_token=.*FOR UPDATE SKIP LOCKED LIMIT 1").
+	mock.ExpectQuery("UPDATE intelligence_check_configs SET lease_token=.*FOR UPDATE OF c SKIP LOCKED LIMIT 1").
 		WithArgs(int64(0), sqlmock.AnyArg(), false).WillReturnRows(sqlmock.NewRows([]string{"config", "version"}).AddRow(raw, 8))
 	claim, err := s.Claim(context.Background(), 0, false)
 	require.NoError(t, err)

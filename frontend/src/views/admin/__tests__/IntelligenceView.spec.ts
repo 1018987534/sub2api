@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import IntelligenceView from '../IntelligenceView.vue'
 import { getIntelligenceConfigs, getIntelligenceHistory, getIntelligenceRecoveryHistory, getIntelligenceKeyOptions, saveIntelligenceConfig, runIntelligenceCheck, type IntelligenceConfig } from '@/api/intelligence'
-import { getAllIncludingInactive } from '@/api/admin/groups'
+import { getAll } from '@/api/admin/groups'
 import type { AdminGroup } from '@/types'
 
 vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
 vi.mock('vue-router', () => ({ onBeforeRouteLeave: vi.fn() }))
-vi.mock('@/api/admin/groups', () => ({ getAllIncludingInactive: vi.fn() }))
+vi.mock('@/api/admin/groups', () => ({ getAll: vi.fn() }))
 vi.mock('@/api/intelligence', () => ({
   getIntelligenceConfigs: vi.fn(), getIntelligenceHistory: vi.fn(), getIntelligenceRecoveryHistory: vi.fn(), getIntelligenceKeyOptions: vi.fn(), saveIntelligenceConfig: vi.fn(), runIntelligenceCheck: vi.fn()
 }))
@@ -19,9 +19,9 @@ const config: IntelligenceConfig = {
 const mountView = () => mount(IntelligenceView, { global: { stubs: { BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' } } } })
 beforeEach(() => {
   vi.resetAllMocks()
-  vi.mocked(getAllIncludingInactive).mockResolvedValue([
-    { id: 1, name: 'Group One', platform: 'openai', status: 'active' },
-    { id: 2, name: 'Group Two', platform: 'openai', status: 'active' }
+  vi.mocked(getAll).mockResolvedValue([
+    { id: 1, name: '不降智 Group One', platform: 'openai', status: 'active' },
+    { id: 2, name: '不降智 Group Two', platform: 'openai', status: 'active' }
   ] as AdminGroup[])
   vi.mocked(getIntelligenceConfigs).mockResolvedValue({ items: [{ ...config, expected: [...config.expected] }], defaults: { ...config, group_id: 0, version: 0, api_key_id: 0 } })
   vi.mocked(getIntelligenceHistory).mockResolvedValue({ items: [], has_more: false })
@@ -33,6 +33,37 @@ beforeEach(() => {
   ], page: 1, has_more: false })
 })
 describe('intelligence admin', () => {
+  it('only lists active groups containing 不降智 and selects the first eligible group', async () => {
+    vi.mocked(getAll).mockResolvedValue([
+      { id: 111, name: '013不降智', platform: 'openai', status: 'inactive' },
+      { id: 114, name: 'DeepSeek', platform: 'deepseek', status: 'active' },
+      { id: 5, name: '不降智-稳定', platform: 'openai', status: 'active' },
+      { id: 99, name: '018不降智(超高缓存)', platform: 'openai', status: 'inactive' },
+      { id: 79, name: '不降智-VIP', platform: 'openai', status: 'active' }
+    ] as AdminGroup[])
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.findAll('.group-option').map(button => button.text())).toEqual(['不降智-稳定#5', '不降智-VIP#79'])
+    expect(wrapper.get('[aria-pressed="true"]').text()).toContain('不降智-稳定')
+    expect(wrapper.find('.group-sidebar').text()).not.toContain('013不降智')
+    expect(wrapper.find('.group-sidebar').text()).not.toContain('018不降智')
+    expect(getIntelligenceHistory).toHaveBeenCalledWith(5, 0)
+    expect(getIntelligenceKeyOptions).toHaveBeenCalledWith(5, 1, '', expect.any(AbortSignal))
+    wrapper.unmount()
+  })
+  it('leaves configuration empty when no groups are eligible', async () => {
+    vi.mocked(getAll).mockResolvedValue([
+      { id: 111, name: '013不降智', platform: 'openai', status: 'inactive' },
+      { id: 114, name: 'DeepSeek', platform: 'deepseek', status: 'active' }
+    ] as AdminGroup[])
+    const wrapper = mountView(); await flushPromises()
+    expect(wrapper.findAll('.group-option')).toHaveLength(0)
+    expect(wrapper.text()).toContain('暂无分组')
+    expect(wrapper.find('.config-panel').exists()).toBe(false)
+    expect(getIntelligenceHistory).not.toHaveBeenCalled()
+    expect(getIntelligenceKeyOptions).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('opens global recovery records independently of the selected group and preserves unsaved config', async () => {
     const wrapper = mountView(); await flushPromises()
     await wrapper.findAll('textarea')[0].setValue('unsaved config')

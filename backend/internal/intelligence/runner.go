@@ -48,7 +48,9 @@ func (r *Runner) Start() {
 				return
 			case <-tick.C:
 				ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
-				if r.Enabled == nil || r.Enabled(ctx) {
+				if err := r.reconcileGroupEligibility(ctx); err != nil {
+					slog.Warn("intelligence group eligibility reconciliation failed", "error", err)
+				} else if r.Enabled == nil || r.Enabled(ctx) {
 					legacyReconciled = r.reconcileProtection(r.ctx, legacyReconciled)
 					for i := 0; i < cap(r.slots); i++ {
 						if err := r.launch(ctx, 0, false); err != nil {
@@ -70,6 +72,14 @@ func (r *Runner) Start() {
 		}
 	}()
 }
+
+func (r *Runner) reconcileGroupEligibility(ctx context.Context) error {
+	if reconciler, ok := r.Store.(interface{ ReconcileGroupEligibility(context.Context) error }); ok {
+		return reconciler.ReconcileGroupEligibility(ctx)
+	}
+	return nil
+}
+
 func (r *Runner) reconcileProtection(ctx context.Context, legacyReconciled bool) bool {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -92,6 +102,9 @@ func (r *Runner) reconcileProtection(ctx context.Context, legacyReconciled bool)
 func (r *Runner) RunNow(ctx context.Context, groupID int64) error {
 	if groupID <= 0 {
 		return ErrInvalid
+	}
+	if err := r.reconcileGroupEligibility(ctx); err != nil {
+		return err
 	}
 	if r.Enabled != nil && !r.Enabled(ctx) {
 		return errors.New("V2 intelligence checks are disabled")

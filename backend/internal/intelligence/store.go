@@ -27,8 +27,24 @@ type SQLStore struct {
 	RecoveryCutoff     func(context.Context, int64) (time.Time, error)
 }
 
+const eligibleGroupSQL = `g.deleted_at IS NULL AND g.status='active' AND POSITION('不降智' IN g.name)>0`
+
+// ReconcileGroupEligibility persists disabled state in both representations. It
+// preserves in-flight leases and increments CAS versions only when state changes.
+func (s *SQLStore) ReconcileGroupEligibility(ctx context.Context) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE intelligence_check_configs c
+ SET enabled=FALSE,config=jsonb_set(c.config,'{enabled}','false'::jsonb),version=c.version+1,updated_at=NOW()
+ WHERE (c.enabled OR c.config->'enabled'='true'::jsonb)
+ AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id=c.group_id AND `+eligibleGroupSQL+`)`)
+	return err
+}
+
 func (s *SQLStore) Configs(ctx context.Context) ([]Config, error) {
-	rows, err := s.DB.QueryContext(ctx, "SELECT config, version FROM intelligence_check_configs ORDER BY group_id")
+	if err := s.ReconcileGroupEligibility(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT c.config,c.version FROM intelligence_check_configs c
+ JOIN groups g ON g.id=c.group_id WHERE `+eligibleGroupSQL+` ORDER BY c.group_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +94,8 @@ func (s *SQLStore) Claim(ctx context.Context, groupID int64, manual bool) (*Clai
 	token := uuid.NewString()
 	// Row locking + fencing protects multiple control instances and manual/timer races.
 	row := s.DB.QueryRowContext(ctx, `UPDATE intelligence_check_configs SET lease_token=$2,lease_until=NOW()+((timeout_seconds+60)*INTERVAL '1 second'),next_run_at=NOW()+(interval_minutes*INTERVAL '1 minute')
- WHERE group_id=(SELECT group_id FROM intelligence_check_configs WHERE ($1=0 OR group_id=$1) AND ($3 OR (enabled AND next_run_at<=NOW())) AND (lease_until IS NULL OR lease_until<NOW()) ORDER BY next_run_at FOR UPDATE SKIP LOCKED LIMIT 1)
+ WHERE group_id=(SELECT c.group_id FROM intelligence_check_configs c JOIN groups g ON g.id=c.group_id
+ WHERE `+eligibleGroupSQL+` AND ($1=0 OR c.group_id=$1) AND ($3 OR (c.enabled AND c.next_run_at<=NOW())) AND (c.lease_until IS NULL OR c.lease_until<NOW()) ORDER BY c.next_run_at FOR UPDATE OF c SKIP LOCKED LIMIT 1)
  RETURNING config,version`, groupID, token, manual)
 	var raw []byte
 	var version int
