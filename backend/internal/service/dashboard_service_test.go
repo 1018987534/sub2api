@@ -397,11 +397,18 @@ func TestDashboardService_AggDisabled_UsesUsageLogsFallback(t *testing.T) {
 
 type dashboardProfitRepoStub struct {
 	UsageLogRepository
-	usage map[int64]*usagestats.BatchUserUsageStats
-	err   error
-	ids   []int64
-	start time.Time
-	end   time.Time
+	usage            map[int64]*usagestats.BatchUserUsageStats
+	err              error
+	ids              []int64
+	start            time.Time
+	end              time.Time
+	todayAccountCost float64
+	monthAccountCost float64
+	accountCostErr   error
+}
+
+func (r *dashboardProfitRepoStub) GetDashboardAdminAccountCosts(_ context.Context, _ int64, _ time.Time) (float64, float64, error) {
+	return r.todayAccountCost, r.monthAccountCost, r.accountCostErr
 }
 
 func (r *dashboardProfitRepoStub) GetBatchUserUsageStats(_ context.Context, ids []int64, start, end time.Time) (map[int64]*usagestats.BatchUserUsageStats, error) {
@@ -427,6 +434,33 @@ func TestDashboardService_ProfitExcludesCurrentAdminActualCost(t *testing.T) {
 	require.InDelta(t, 5.32584, profit.TodayWithdrawalFee, 1e-9)
 	require.InDelta(t, 88.55416, profit.TodayProfit, 1e-9)
 	require.Equal(t, 315.88, stats.TodayActualCost, "shared dashboard statistics must stay unchanged")
+}
+
+func TestDashboardService_ProfitSplitsUpstreamSelfCostWithoutChangingProfit(t *testing.T) {
+	for _, billed := range []float64{20, 0} {
+		repo := &dashboardProfitRepoStub{
+			usage:            map[int64]*usagestats.BatchUserUsageStats{7: {TodayActualCost: billed, TotalActualCost: billed * 5}},
+			todayAccountCost: 8.1256789, monthAccountCost: 30.987654,
+		}
+		stats := &usagestats.DashboardStats{
+			TodayActualCost: 315.88, TodayAccountCost: 202,
+			MonthActualCost: 1000, MonthAccountCost: 600,
+		}
+		profit, err := NewDashboardService(repo, nil, nil, nil, nil).GetDashboardProfitStats(context.Background(), 7, stats)
+		require.NoError(t, err)
+		require.Equal(t, 8.1256789, profit.TodayAdminAccountCost)
+		require.Equal(t, 30.987654, profit.MonthAdminAccountCost)
+		require.InDelta(t, 315.88-202-billed-(315.88-billed)*0.018, profit.TodayProfit, 1e-9)
+		require.InDelta(t, 1000-600-billed*5-(1000-billed*5)*0.018, profit.MonthProfit, 1e-9)
+		require.Equal(t, 202.0, stats.TodayAccountCost)
+		require.Equal(t, 600.0, stats.MonthAccountCost)
+	}
+}
+
+func TestDashboardService_ProfitFailsWhenUpstreamSelfCostUnavailable(t *testing.T) {
+	repo := &dashboardProfitRepoStub{accountCostErr: errors.New("cost ledger unavailable")}
+	_, err := NewDashboardService(repo, nil, nil, nil, nil).GetDashboardProfitStats(context.Background(), 7, &usagestats.DashboardStats{})
+	require.ErrorContains(t, err, "cost ledger unavailable")
 }
 
 func TestDashboardService_ProfitAllowsLossAndNoSelfUsage(t *testing.T) {

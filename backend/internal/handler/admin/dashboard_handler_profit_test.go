@@ -27,6 +27,10 @@ func (r *dashboardProfitHandlerRepo) GetDashboardStats(context.Context) (*usages
 		MonthActualCost: 1000, MonthAccountCost: 600, MonthLotteryCost: 10, MonthQQRewardCost: 20}, nil
 }
 
+func (r *dashboardProfitHandlerRepo) GetDashboardAdminAccountCosts(_ context.Context, adminID int64, _ time.Time) (float64, float64, error) {
+	return float64(adminID) * 4, float64(adminID) * 15, r.err
+}
+
 func (r *dashboardProfitHandlerRepo) GetBatchUserUsageStats(_ context.Context, ids []int64, _, _ time.Time) (map[int64]*usagestats.BatchUserUsageStats, error) {
 	r.calls++
 	return map[int64]*usagestats.BatchUserUsageStats{
@@ -78,6 +82,8 @@ func TestDashboardHandler_ProfitSnapshotCacheIsolatedByAuthenticatedAdmin(t *tes
 	}
 	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &body))
 	require.Equal(t, 20.0, body.Data.Stats.TodayAdminActualCost)
+	require.Equal(t, 8.0, body.Data.Stats.TodayAdminAccountCost)
+	require.Equal(t, 30.0, body.Data.Stats.MonthAdminAccountCost)
 	require.Equal(t, 5.0, body.Data.Stats.TodayLotteryCost)
 	require.Equal(t, 4.0, body.Data.Stats.TodayQQRewardCost)
 	require.InDelta(t, 5.32584, body.Data.Stats.TodayWithdrawalFee, 1e-9)
@@ -93,6 +99,8 @@ func TestDashboardHandler_ProfitSnapshotCacheIsolatedByAuthenticatedAdmin(t *tes
 	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
 	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &body))
 	require.Equal(t, 30.0, body.Data.Stats.TodayAdminActualCost)
+	require.Equal(t, 12.0, body.Data.Stats.TodayAdminAccountCost)
+	require.Equal(t, 45.0, body.Data.Stats.MonthAdminAccountCost)
 	require.Equal(t, 5.0, body.Data.Stats.TodayLotteryCost)
 	require.Equal(t, 4.0, body.Data.Stats.TodayQQRewardCost)
 	require.InDelta(t, 5.14584, body.Data.Stats.TodayWithdrawalFee, 1e-9)
@@ -113,6 +121,8 @@ func TestDashboardHandler_ProfitStatsAndFailureHandling(t *testing.T) {
 		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.Contains(t, rec.Body.String(), `"today_admin_actual_cost":20`)
+		require.Contains(t, rec.Body.String(), `"today_admin_account_cost":8`)
+		require.Contains(t, rec.Body.String(), `"month_admin_account_cost":30`)
 		require.Contains(t, rec.Body.String(), `"today_account_cost":202`)
 		require.Contains(t, rec.Body.String(), `"today_lottery_cost":5`)
 		require.Contains(t, rec.Body.String(), `"today_qq_reward_cost":4`)

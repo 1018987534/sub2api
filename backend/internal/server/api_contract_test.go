@@ -2762,6 +2762,10 @@ func (r *stubUsageLogRepo) GetBatchUserUsageStats(ctx context.Context, userIDs [
 	return nil, errors.New("not implemented")
 }
 
+func (r *stubUsageLogRepo) GetDashboardAdminAccountCosts(context.Context, int64, time.Time) (float64, float64, error) {
+	return 0, 0, errors.New("not implemented")
+}
+
 func (r *stubUsageLogRepo) GetBatchAPIKeyUsageStats(ctx context.Context, apiKeyIDs []int64, startTime, endTime time.Time) (map[int64]*usagestats.BatchAPIKeyUsageStats, error) {
 	return nil, errors.New("not implemented")
 }
