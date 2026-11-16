@@ -18,13 +18,15 @@ import (
 
 type dashboardProfitHandlerRepo struct {
 	service.UsageLogRepository
-	calls int
-	err   error
+	calls              int
+	err                error
+	todayAffiliateCost float64
+	monthAffiliateCost float64
 }
 
 func (r *dashboardProfitHandlerRepo) GetDashboardStats(context.Context) (*usagestats.DashboardStats, error) {
-	return &usagestats.DashboardStats{TodayActualCost: 315.88, TodayAccountCost: 202, TodayLotteryCost: 5, TodayQQRewardCost: 4,
-		MonthActualCost: 1000, MonthAccountCost: 600, MonthLotteryCost: 10, MonthQQRewardCost: 20}, nil
+	return &usagestats.DashboardStats{TodayActualCost: 315.88, TodayAccountCost: 202, TodayLotteryCost: 5, TodayQQRewardCost: 4, TodayAffiliateRebateCost: r.todayAffiliateCost,
+		MonthActualCost: 1000, MonthAccountCost: 600, MonthLotteryCost: 10, MonthQQRewardCost: 20, MonthAffiliateRebateCost: r.monthAffiliateCost}, nil
 }
 
 func (r *dashboardProfitHandlerRepo) GetDashboardAdminAccountCosts(_ context.Context, adminID int64, _ time.Time) (float64, float64, error) {
@@ -212,4 +214,30 @@ func TestDashboardHandler_ProfitServerCostSaveRefreshesSnapshotImmediately(t *te
 	require.InDelta(t, 253.8, body.Data.Stats.MonthProfit, 1e-9)
 	settingsRepo.getErr = errors.New("settings unavailable")
 	require.Equal(t, http.StatusInternalServerError, request("").Code, "must not serve cached profit with an unknown server expense")
+}
+
+func TestDashboardHandler_ProfitIncludesAffiliateRebateExpenseOnBothEndpoints(t *testing.T) {
+	resetDashboardReadCachesForTest()
+	t.Cleanup(resetDashboardReadCachesForTest)
+	adminID := int64(2)
+	router := newDashboardProfitRouter(&dashboardProfitHandlerRepo{todayAffiliateCost: 3.25, monthAffiliateCost: 12.5}, &adminID)
+	for _, url := range []string{"/stats", "/snapshot?include_trend=false&include_model_stats=false"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var body struct {
+			Data map[string]any `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+		stats := body.Data
+		if nested, ok := stats["stats"].(map[string]any); ok {
+			stats = nested
+		}
+		require.Equal(t, 3.25, stats["today_affiliate_rebate_cost"])
+		require.Equal(t, 12.5, stats["month_affiliate_rebate_cost"])
+		require.Equal(t, 8.0, stats["today_admin_account_cost"])
+		require.Equal(t, 30.0, stats["month_admin_account_cost"])
+		require.InDelta(t, 76.30416, stats["today_profit"], 1e-9)
+		require.InDelta(t, 241.3, stats["month_profit"], 1e-9)
+	}
 }

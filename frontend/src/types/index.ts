@@ -2099,13 +2099,14 @@ export interface DashboardStats {
   today_actual_cost: number // 今日实际扣除
   today_account_cost: number // 今日账号成本
 
-  // 利润：实际扣费减账号成本、当前管理员自用扣费、今日已到账抽奖及 QQ 奖励、提现手续费和服务器日成本。
+  // 利润：实际扣费减账号成本、当前管理员自用扣费、今日已到账抽奖及 QQ 奖励、入账邀请返利、提现手续费和服务器日成本。
   // 提现手续费按保存的百分比计算，默认 1.8%，计费基数最低为零。
   // 旧版本后端不提供这些字段时，不展示尚未计算的利润。
   today_admin_actual_cost?: number
   today_admin_account_cost?: number // 当前登录管理员请求的上游成本，已包含在 today_account_cost 中。
   today_lottery_cost?: number
   today_qq_reward_cost?: number // 新人奖励到账余额、邀请奖励到账邀请余额，各计一次。
+  today_affiliate_rebate_cost?: number // 常规返利按 accrue 入账（含冻结额度），QQ、转余额和提现不重复计入。
   today_withdrawal_fee?: number
   withdrawal_fee_rate_percent?: number
   // 手动保存的月服务器费用，按业务时区当月实际天数分摊，不提前按日舍入。
@@ -2119,6 +2120,7 @@ export interface DashboardStats {
   month_admin_account_cost?: number // 本月自用上游成本，已包含在 month_account_cost 中。
   month_lottery_cost?: number
   month_qq_reward_cost?: number
+  month_affiliate_rebate_cost?: number
   month_withdrawal_fee?: number
   month_server_cost_usd?: number
   month_profit?: number

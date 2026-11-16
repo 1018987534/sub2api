@@ -217,7 +217,7 @@
         </div>
 
         <section
-          v-if="stats.today_profit != null && stats.today_lottery_cost != null && stats.today_qq_reward_cost != null && stats.today_withdrawal_fee != null && stats.today_server_cost_usd != null"
+          v-if="stats.today_profit != null && stats.today_lottery_cost != null && stats.today_qq_reward_cost != null && stats.today_affiliate_rebate_cost != null && stats.today_withdrawal_fee != null && stats.today_server_cost_usd != null"
           class="card p-4"
           :aria-label="t('admin.dashboard.profitStats')"
           :title="t('admin.dashboard.profitFormula', { rate: stats.withdrawal_fee_rate_percent ?? 1.8 })"
@@ -249,12 +249,13 @@
               − {{ t('admin.dashboard.adminSelfUsage') }} {{ formatProfit(stats.today_admin_actual_cost) }}
               − {{ t('admin.dashboard.lotteryCost') }} {{ formatProfit(stats.today_lottery_cost) }}
               − {{ t('admin.dashboard.qqRewardCost') }} {{ formatProfit(stats.today_qq_reward_cost) }}
+              − {{ t('admin.dashboard.affiliateRebateCost') }} {{ formatProfit(stats.today_affiliate_rebate_cost) }}
               − {{ t('admin.dashboard.withdrawalFee', { rate: stats.withdrawal_fee_rate_percent ?? 1.8 }) }} {{ formatProfit(stats.today_withdrawal_fee) }}
               − {{ t('admin.dashboard.dailyServerCost') }} {{ formatProfit(stats.today_server_cost_usd) }}
             </p>
           </div>
           <div
-            v-if="stats.month_profit != null && stats.month_actual_cost != null && stats.month_account_cost != null && stats.month_admin_actual_cost != null && stats.month_lottery_cost != null && stats.month_qq_reward_cost != null && stats.month_withdrawal_fee != null && stats.month_server_cost_usd != null"
+            v-if="stats.month_profit != null && stats.month_actual_cost != null && stats.month_account_cost != null && stats.month_admin_actual_cost != null && stats.month_lottery_cost != null && stats.month_qq_reward_cost != null && stats.month_affiliate_rebate_cost != null && stats.month_withdrawal_fee != null && stats.month_server_cost_usd != null"
             class="mt-3 flex flex-col gap-3 border-t border-gray-200 pt-3 dark:border-dark-600 sm:flex-row sm:items-center sm:justify-between"
             :title="t('admin.dashboard.monthProfitFormula')"
           >
@@ -284,6 +285,7 @@
               − {{ t('admin.dashboard.adminSelfUsage') }} {{ formatProfit(stats.month_admin_actual_cost) }}
               − {{ t('admin.dashboard.lotteryCost') }} {{ formatProfit(stats.month_lottery_cost) }}
               − {{ t('admin.dashboard.qqRewardCost') }} {{ formatProfit(stats.month_qq_reward_cost) }}
+              − {{ t('admin.dashboard.affiliateRebateCost') }} {{ formatProfit(stats.month_affiliate_rebate_cost) }}
               − {{ t('admin.dashboard.withdrawalFee', { rate: stats.withdrawal_fee_rate_percent ?? 1.8 }) }} {{ formatProfit(stats.month_withdrawal_fee) }}
               − {{ t('admin.dashboard.monthServerCost') }} {{ formatProfit(stats.month_server_cost_usd) }}
             </p>

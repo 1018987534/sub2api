@@ -137,12 +137,14 @@ func TestUsageLogRepository_DashboardMonthStatsUsesLocalMonthAndBothSources(t *t
 				}
 				mock.ExpectQuery(`(?s)FROM lottery_balance_ledger.*WHERE created_at >= \$1 AND created_at < \$2`).WithArgs(first, end).WillReturnRows(sqlmock.NewRows([]string{"amount"}).AddRow(10))
 				mock.ExpectQuery(`(?s)FROM qq_activity_rewards.*WHERE status = 'paid' AND paid_at >= \$1 AND paid_at < \$2`).WithArgs(first, end).WillReturnRows(sqlmock.NewRows([]string{"amount"}).AddRow(20))
+				mock.ExpectQuery(`(?s)FROM user_affiliate_ledger.*WHERE action = 'accrue' AND created_at >= \$1 AND created_at < \$2`).WithArgs(first, end).WillReturnRows(sqlmock.NewRows([]string{"amount"}).AddRow(12.5))
 				stats := &DashboardStats{TodayActualCost: 315.88}
 				require.NoError(t, (&usageLogRepository{sql: db}).fillDashboardMonthStats(context.Background(), stats, today, aggregated))
 				require.Equal(t, 1000.0, stats.MonthActualCost)
 				require.Equal(t, 600.0, stats.MonthAccountCost)
 				require.Equal(t, 10.0, stats.MonthLotteryCost)
 				require.Equal(t, 20.0, stats.MonthQQRewardCost)
+				require.Equal(t, 12.5, stats.MonthAffiliateRebateCost)
 				require.Equal(t, 315.88, stats.TodayActualCost)
 				require.NoError(t, mock.ExpectationsWereMet())
 			})
@@ -151,7 +153,7 @@ func TestUsageLogRepository_DashboardMonthStatsUsesLocalMonthAndBothSources(t *t
 }
 
 func TestUsageLogRepository_DashboardMonthStatsDoesNotHideErrors(t *testing.T) {
-	for _, source := range []string{"usage", "lottery", "QQ"} {
+	for _, source := range []string{"usage", "lottery", "QQ", "affiliate"} {
 		t.Run(source, func(t *testing.T) {
 			db, mock := newSQLMock(t)
 			want := errors.New(source + " unavailable")
@@ -165,11 +167,60 @@ func TestUsageLogRepository_DashboardMonthStatsDoesNotHideErrors(t *testing.T) {
 					lottery.WillReturnError(want)
 				} else {
 					lottery.WillReturnRows(sqlmock.NewRows([]string{"amount"}).AddRow(0))
-					mock.ExpectQuery(`FROM qq_activity_rewards`).WillReturnError(want)
+					qq := mock.ExpectQuery(`FROM qq_activity_rewards`)
+					if source == "QQ" {
+						qq.WillReturnError(want)
+					} else {
+						qq.WillReturnRows(sqlmock.NewRows([]string{"amount"}).AddRow(0))
+						mock.ExpectQuery(`FROM user_affiliate_ledger`).WillReturnError(want)
+					}
 				}
 			}
 			require.ErrorIs(t, (&usageLogRepository{sql: db}).fillDashboardMonthStats(context.Background(), &DashboardStats{}, time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC), true), want)
 			require.NoError(t, mock.ExpectationsWereMet())
 		})
+	}
+}
+
+func TestUsageLogRepository_DashboardAffiliateRebateCostCountsOnlyAccrualAtLocalDay(t *testing.T) {
+	for _, zone := range []string{"Asia/Shanghai", "America/New_York"} {
+		t.Run(zone, func(t *testing.T) {
+			loc, err := time.LoadLocation(zone)
+			require.NoError(t, err)
+			start := time.Date(2026, 11, 1, 0, 0, 0, 0, loc)
+			db, mock := newSQLMock(t)
+			// Exact predicate excludes qq_activity, transfer and withdraw and
+			// deliberately keeps frozen accruals without using updated_at.
+			mock.ExpectQuery(`^SELECT COALESCE\(SUM\(amount\), 0\) FROM user_affiliate_ledger\s+WHERE action = 'accrue' AND created_at >= \$1 AND created_at < \$2$`).
+				WithArgs(start, start.AddDate(0, 0, 1)).
+				WillReturnRows(sqlmock.NewRows([]string{"amount"}).AddRow(3.25123456))
+			stats := &DashboardStats{TodayQQRewardCost: 4}
+			require.NoError(t, (&usageLogRepository{sql: db}).fillDashboardAffiliateRebateStats(context.Background(), stats, start))
+			require.Equal(t, 3.25123456, stats.TodayAffiliateRebateCost)
+			require.Equal(t, 4.0, stats.TodayQQRewardCost)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestUsageLogRepository_DashboardAffiliateRebateCostEmptyAndFailure(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		db, mock := newSQLMock(t)
+		want := errors.New("affiliate ledger unavailable")
+		expectation := mock.ExpectQuery("FROM user_affiliate_ledger")
+		if failed {
+			expectation.WillReturnError(want)
+		} else {
+			expectation.WillReturnRows(sqlmock.NewRows([]string{"amount"}).AddRow(0))
+		}
+		stats := &DashboardStats{TodayAffiliateRebateCost: 9}
+		err := (&usageLogRepository{sql: db}).fillDashboardAffiliateRebateStats(context.Background(), stats, time.Now())
+		if failed {
+			require.ErrorIs(t, err, want)
+		} else {
+			require.NoError(t, err)
+			require.Zero(t, stats.TodayAffiliateRebateCost)
+		}
+		require.NoError(t, mock.ExpectationsWereMet())
 	}
 }

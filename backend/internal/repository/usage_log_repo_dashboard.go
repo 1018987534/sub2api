@@ -95,6 +95,9 @@ func (r *usageLogRepository) GetDashboardStats(ctx context.Context) (*DashboardS
 	if err := r.fillDashboardQQRewardStats(ctx, stats, todayStart); err != nil {
 		return nil, err
 	}
+	if err := r.fillDashboardAffiliateRebateStats(ctx, stats, todayStart); err != nil {
+		return nil, err
+	}
 	if err := r.fillDashboardMonthStats(ctx, stats, todayStart, true); err != nil {
 		return nil, err
 	}
@@ -130,6 +133,9 @@ func (r *usageLogRepository) GetDashboardStatsWithRange(ctx context.Context, sta
 		return nil, err
 	}
 	if err := r.fillDashboardQQRewardStats(ctx, stats, todayStart); err != nil {
+		return nil, err
+	}
+	if err := r.fillDashboardAffiliateRebateStats(ctx, stats, todayStart); err != nil {
 		return nil, err
 	}
 	if err := r.fillDashboardMonthStats(ctx, stats, todayStart, false); err != nil {
@@ -169,6 +175,15 @@ func (r *usageLogRepository) fillDashboardQQRewardStats(ctx context.Context, sta
 	return scanSingleRow(ctx, r.sql, query, []any{todayStart, todayStart.AddDate(0, 0, 1)}, &stats.TodayQQRewardCost)
 }
 
+// Accrual credits create the rebate liability, including frozen quota. Transfer
+// and withdrawal settle that liability; qq_activity was counted in QQ rewards.
+// Count only accrue, once at its immutable creation time, never at thaw/update.
+func (r *usageLogRepository) fillDashboardAffiliateRebateStats(ctx context.Context, stats *DashboardStats, todayStart time.Time) error {
+	const query = `SELECT COALESCE(SUM(amount), 0) FROM user_affiliate_ledger
+		WHERE action = 'accrue' AND created_at >= $1 AND created_at < $2`
+	return scanSingleRow(ctx, r.sql, query, []any{todayStart, todayStart.AddDate(0, 0, 1)}, &stats.TodayAffiliateRebateCost)
+}
+
 // Month-to-date totals use the same source as today's usage, regardless of the
 // chart range. Reward ledgers are counted once, when the credit was committed.
 func (r *usageLogRepository) fillDashboardMonthStats(ctx context.Context, stats *DashboardStats, todayStart time.Time, aggregated bool) error {
@@ -190,8 +205,12 @@ func (r *usageLogRepository) fillDashboardMonthStats(ctx context.Context, stats 
 		WHERE created_at >= $1 AND created_at < $2`, []any{monthStart, end}, &stats.MonthLotteryCost); err != nil {
 		return err
 	}
-	return scanSingleRow(ctx, r.sql, `SELECT COALESCE(SUM(amount), 0) FROM qq_activity_rewards
-		WHERE status = 'paid' AND paid_at >= $1 AND paid_at < $2`, []any{monthStart, end}, &stats.MonthQQRewardCost)
+	if err := scanSingleRow(ctx, r.sql, `SELECT COALESCE(SUM(amount), 0) FROM qq_activity_rewards
+		WHERE status = 'paid' AND paid_at >= $1 AND paid_at < $2`, []any{monthStart, end}, &stats.MonthQQRewardCost); err != nil {
+		return err
+	}
+	return scanSingleRow(ctx, r.sql, `SELECT COALESCE(SUM(amount), 0) FROM user_affiliate_ledger
+		WHERE action = 'accrue' AND created_at >= $1 AND created_at < $2`, []any{monthStart, end}, &stats.MonthAffiliateRebateCost)
 }
 
 func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats *DashboardStats, todayUTC, now time.Time) error {
