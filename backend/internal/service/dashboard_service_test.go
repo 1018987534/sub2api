@@ -633,3 +633,27 @@ func TestDashboardService_ProfitUsesSavedWithdrawalFeeForTodayAndMonth(t *testin
 	require.Zero(t, profit.TodayWithdrawalFee)
 	require.Zero(t, profit.MonthWithdrawalFee)
 }
+
+func TestDashboardService_ProfitDeductsAffiliateAccrualOnceWithoutChangingFee(t *testing.T) {
+	repo := &dashboardProfitRepoStub{usage: map[int64]*usagestats.BatchUserUsageStats{
+		7: {TodayActualCost: 20, TotalActualCost: 100},
+	}, todayAccountCost: 8, monthAccountCost: 30}
+	stats := &usagestats.DashboardStats{
+		TodayActualCost: 315.88, TodayAccountCost: 202, TodayLotteryCost: 5, TodayQQRewardCost: 4,
+		MonthActualCost: 1000, MonthAccountCost: 600, MonthLotteryCost: 10, MonthQQRewardCost: 20,
+	}
+	svc := NewDashboardService(repo, nil, nil, nil, nil)
+	baseline, err := svc.GetDashboardProfitStats(context.Background(), 7, stats)
+	require.NoError(t, err)
+	for _, expense := range []float64{0, 3.25123456, 400} {
+		stats.TodayAffiliateRebateCost, stats.MonthAffiliateRebateCost = expense, expense*4
+		profit, err := svc.GetDashboardProfitStats(context.Background(), 7, stats)
+		require.NoError(t, err)
+		require.InDelta(t, baseline.TodayProfit-expense, profit.TodayProfit, 1e-9)
+		require.InDelta(t, baseline.MonthProfit-expense*4, profit.MonthProfit, 1e-9)
+		require.Equal(t, baseline.TodayWithdrawalFee, profit.TodayWithdrawalFee)
+		require.Equal(t, baseline.MonthWithdrawalFee, profit.MonthWithdrawalFee)
+		require.Equal(t, 8.0, profit.TodayAdminAccountCost)
+		require.Equal(t, 30.0, profit.MonthAdminAccountCost)
+	}
+}

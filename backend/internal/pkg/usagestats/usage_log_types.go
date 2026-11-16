@@ -67,17 +67,19 @@ type DashboardStats struct {
 	TodayCacheCreationTokens int64   `json:"today_cache_creation_tokens"`
 	TodayCacheReadTokens     int64   `json:"today_cache_read_tokens"`
 	TodayTokens              int64   `json:"today_tokens"`
-	TodayCost                float64 `json:"today_cost"`           // 今日标准计费
-	TodayActualCost          float64 `json:"today_actual_cost"`    // 今日实际扣除
-	TodayAccountCost         float64 `json:"today_account_cost"`   // 今日账号成本
-	TodayLotteryCost         float64 `json:"today_lottery_cost"`   // 今日已到账抽奖奖金
-	TodayQQRewardCost        float64 `json:"today_qq_reward_cost"` // 今日已到账 QQ 新人和邀请奖励
+	TodayCost                float64 `json:"today_cost"`                  // 今日标准计费
+	TodayActualCost          float64 `json:"today_actual_cost"`           // 今日实际扣除
+	TodayAccountCost         float64 `json:"today_account_cost"`          // 今日账号成本
+	TodayLotteryCost         float64 `json:"today_lottery_cost"`          // 今日已到账抽奖奖金
+	TodayQQRewardCost        float64 `json:"today_qq_reward_cost"`        // 今日已到账 QQ 新人和邀请奖励
+	TodayAffiliateRebateCost float64 `json:"today_affiliate_rebate_cost"` // 今日入账的常规邀请返利（含冻结额度）。
 
 	// 业务时区本月累计成本，独立于图表所选时间范围。
-	MonthActualCost   float64 `json:"month_actual_cost"`
-	MonthAccountCost  float64 `json:"month_account_cost"`
-	MonthLotteryCost  float64 `json:"month_lottery_cost"`
-	MonthQQRewardCost float64 `json:"month_qq_reward_cost"`
+	MonthActualCost          float64 `json:"month_actual_cost"`
+	MonthAccountCost         float64 `json:"month_account_cost"`
+	MonthLotteryCost         float64 `json:"month_lottery_cost"`
+	MonthQQRewardCost        float64 `json:"month_qq_reward_cost"`
+	MonthAffiliateRebateCost float64 `json:"month_affiliate_rebate_cost"`
 
 	// 系统运行统计
 	AverageDurationMs float64 `json:"average_duration_ms"` // 平均响应时间

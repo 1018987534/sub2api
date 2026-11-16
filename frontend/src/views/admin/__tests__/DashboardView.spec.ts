@@ -103,6 +103,8 @@ const createDashboardStats = (): DashboardStats => ({
   today_actual_cost: 0,
   today_account_cost: 0,
   today_qq_reward_cost: 0,
+  today_affiliate_rebate_cost: 0,
+  month_affiliate_rebate_cost: 0,
   today_server_cost_usd: 0,
   average_duration_ms: 0,
   uptime: 0,
@@ -236,6 +238,51 @@ describe('admin DashboardView', () => {
     })
     await flushPromises()
     expect(wrapper.find('[data-testid="today-profit"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each([
+    { todayExpense: 3.25, monthExpense: 12.5, todayProfit: 76.30416, monthProfit: 241.3, todayDisplay: '$76.30', monthDisplay: '$241.30' },
+    { todayExpense: 0, monthExpense: 0, todayProfit: 79.55416, monthProfit: 253.8, todayDisplay: '$79.55', monthDisplay: '$253.80' }
+  ])('shows affiliate rebates beside the existing cost split ($todayDisplay)', async ({ todayExpense, monthExpense, todayProfit, monthProfit, todayDisplay, monthDisplay }) => {
+    getSnapshotV2.mockResolvedValueOnce({
+      stats: { ...createDashboardStats(), today_actual_cost: 315.88, today_account_cost: 202,
+        today_admin_actual_cost: 20, today_admin_account_cost: 8, today_lottery_cost: 5, today_qq_reward_cost: 4,
+        today_affiliate_rebate_cost: todayExpense, today_withdrawal_fee: 5.32584, today_profit: todayProfit,
+        month_actual_cost: 1000, month_account_cost: 600, month_admin_actual_cost: 100, month_admin_account_cost: 30,
+        month_lottery_cost: 10, month_qq_reward_cost: 20, month_affiliate_rebate_cost: monthExpense,
+        month_withdrawal_fee: 16.2, month_server_cost_usd: 0, month_profit: monthProfit },
+      trend: [], models: []
+    })
+    const wrapper = mount(DashboardView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true,
+      DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+    } } })
+    await flushPromises()
+    const today = wrapper.get('[data-testid="today-profit-breakdown"]').text()
+    expect(today).toContain(`admin.dashboard.affiliateRebateCost $${todayExpense.toFixed(2)}`)
+    expect(today).toContain('admin.dashboard.salesAccountCost $194.00')
+    expect(today).toContain('admin.dashboard.selfAccountCost $8.00')
+    expect(today).toContain('admin.dashboard.qqRewardCost $4.00')
+    expect(wrapper.get('[data-testid="month-profit-breakdown"]').text()).toContain(`admin.dashboard.affiliateRebateCost $${monthExpense.toFixed(2)}`)
+    expect(wrapper.get('[data-testid="today-profit"]').text()).toBe(todayDisplay)
+    expect(wrapper.get('[data-testid="month-profit"]').text()).toBe(monthDisplay)
+    wrapper.unmount()
+  })
+
+  it.each(['today', 'month'] as const)('hides the %s profit when affiliate expenses are unavailable', async (period) => {
+    const stats = { ...createDashboardStats(), today_lottery_cost: 0, today_withdrawal_fee: 0, today_profit: 0,
+      month_actual_cost: 0, month_account_cost: 0, month_admin_actual_cost: 0, month_lottery_cost: 0,
+      month_qq_reward_cost: 0, month_withdrawal_fee: 0, month_server_cost_usd: 0, month_profit: 0,
+      [`${period}_affiliate_rebate_cost`]: undefined }
+    getSnapshotV2.mockResolvedValueOnce({ stats, trend: [], models: [] })
+    const wrapper = mount(DashboardView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true,
+      DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+    } } })
+    await flushPromises()
+    expect(wrapper.find(`[data-testid="${period}-profit"]`).exists()).toBe(false)
+    if (period === 'month') expect(wrapper.find('[data-testid="today-profit"]').exists()).toBe(true)
     wrapper.unmount()
   })
 

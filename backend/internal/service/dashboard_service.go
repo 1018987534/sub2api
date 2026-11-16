@@ -160,7 +160,7 @@ func (s *DashboardService) GetDashboardProfitStats(ctx context.Context, adminID 
 	// costs and lottery or QQ reward payouts do not reduce the withdrawal fee base.
 	withdrawableRevenue := math.Max(0, stats.TodayActualCost-profit.TodayAdminActualCost)
 	profit.TodayWithdrawalFee = withdrawableRevenue * settings.WithdrawalFeeRatePercent / 100
-	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost - stats.TodayQQRewardCost - profit.TodayWithdrawalFee - profit.TodayServerCostUSD
+	profit.TodayProfit = stats.TodayActualCost - stats.TodayAccountCost - profit.TodayAdminActualCost - stats.TodayLotteryCost - stats.TodayQQRewardCost - stats.TodayAffiliateRebateCost - profit.TodayWithdrawalFee - profit.TodayServerCostUSD
 	fillDashboardMonthProfit(stats, profit, settings.DailyServerCostUSD, settings.WithdrawalFeeRatePercent, now)
 	return profit, nil
 }
@@ -170,7 +170,7 @@ func fillDashboardMonthProfit(stats *usagestats.DashboardStats, profit *usagesta
 	// using calendar days rather than elapsed hours (which vary with DST).
 	profit.MonthServerCostUSD = dailyServerCost * float64(at.Day())
 	profit.MonthWithdrawalFee = math.Max(0, stats.MonthActualCost-profit.MonthAdminActualCost) * withdrawalFeeRatePercent / 100
-	profit.MonthProfit = stats.MonthActualCost - stats.MonthAccountCost - profit.MonthAdminActualCost - stats.MonthLotteryCost - stats.MonthQQRewardCost - profit.MonthWithdrawalFee - profit.MonthServerCostUSD
+	profit.MonthProfit = stats.MonthActualCost - stats.MonthAccountCost - profit.MonthAdminActualCost - stats.MonthLotteryCost - stats.MonthQQRewardCost - stats.MonthAffiliateRebateCost - profit.MonthWithdrawalFee - profit.MonthServerCostUSD
 }
 
 func (s *DashboardService) GetDashboardProfitSettings(ctx context.Context) (*DashboardProfitSettings, error) {
