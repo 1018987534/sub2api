@@ -740,11 +740,6 @@ export default {
       transferring: 'Transferring...',
       empty: 'No available rebate quota',
       success: '{amount} has been transferred to your balance',
-      paidInviteesProgress: 'Paid invited accounts: {current} / {required}. Reach the requirement to transfer.',
-      errors: {
-        AFFILIATE_PAID_INVITEES_TOO_LOW: 'At least {required} distinct invited accounts must complete a payment; currently {current}',
-        AFFILIATE_TRANSFER_UNAVAILABLE: 'Rebate transfer is temporarily unavailable. Please try again later.'
-      }
     },
     invitees: {
       title: 'Invited Users',
@@ -762,8 +757,7 @@ export default {
       line2: 'When invitees recharge, you receive {rate} of the recharge as rebate quota.',
       lineRecurringRecharge: 'Whenever an invited account recharges again later, you continue to earn rebate at the applicable rate.',
       lineNoSelfReferralAbuse: 'Using self-referred accounts to obtain rebates is prohibited.',
-      line3: 'Rebates can be transferred after at least {count} distinct invited accounts complete a payment.',
-      line3NoMinimum: 'Rebate quota can be transferred to your account balance.',
+      line3: 'Rebate quota can be transferred to your account balance.',
       line4: 'Newly earned rebates may have a waiting period before they can be transferred.'
     }
   },

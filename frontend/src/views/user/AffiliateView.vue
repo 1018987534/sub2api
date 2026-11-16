@@ -79,10 +79,7 @@
               <li>2. {{ t('affiliate.tips.line2', { rate: `${formattedRebateRate}%` }) }}</li>
               <li>3. {{ t('affiliate.tips.lineRecurringRecharge') }}</li>
               <li>4. {{ t('affiliate.tips.lineNoSelfReferralAbuse') }}</li>
-              <li v-if="detail.min_paid_invitees_for_transfer > 0">
-                5. {{ t('affiliate.tips.line3', { count: detail.min_paid_invitees_for_transfer }) }}
-              </li>
-              <li v-else>5. {{ t('affiliate.tips.line3NoMinimum') }}</li>
+              <li>5. {{ t('affiliate.tips.line3') }}</li>
               <li v-if="detail.aff_frozen_quota > 0">6. {{ t('affiliate.tips.line4') }}</li>
             </ul>
           </div>
@@ -96,7 +93,7 @@
             </div>
             <button
               class="btn btn-primary"
-              :disabled="transferring || detail.aff_quota <= 0 || !paidInviteeRequirementMet"
+              :disabled="transferring || detail.aff_quota <= 0"
               @click="transferQuota"
             >
               <Icon v-if="transferring" name="refresh" size="sm" class="animate-spin" />
@@ -104,16 +101,7 @@
               <span>{{ transferring ? t('affiliate.transfer.transferring') : t('affiliate.transfer.button') }}</span>
             </button>
           </div>
-          <p
-            v-if="!paidInviteeRequirementMet"
-            class="mt-3 text-sm text-amber-600 dark:text-amber-400"
-          >
-            {{ t('affiliate.transfer.paidInviteesProgress', {
-              current: detail.paid_invitee_count,
-              required: detail.min_paid_invitees_for_transfer,
-            }) }}
-          </p>
-          <p v-else-if="detail.aff_quota <= 0" class="mt-3 text-sm text-amber-600 dark:text-amber-400">
+          <p v-if="detail.aff_quota <= 0" class="mt-3 text-sm text-amber-600 dark:text-amber-400">
             {{ t('affiliate.transfer.empty') }}
           </p>
         </div>
@@ -189,12 +177,6 @@ const formattedRebateRate = computed(() => {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toString()
 })
 
-const paidInviteeRequirementMet = computed(() => {
-  if (!detail.value) return false
-  return detail.value.min_paid_invitees_for_transfer <= 0
-    || detail.value.paid_invitee_count >= detail.value.min_paid_invitees_for_transfer
-})
-
 function formatCount(value: number): string {
   return value.toLocaleString()
 }
@@ -225,7 +207,7 @@ async function copyInviteLink(): Promise<void> {
 }
 
 async function transferQuota(): Promise<void> {
-  if (!detail.value || detail.value.aff_quota <= 0 || !paidInviteeRequirementMet.value || transferring.value) return
+  if (!detail.value || detail.value.aff_quota <= 0 || transferring.value) return
   transferring.value = true
   try {
     const resp = await userAPI.transferAffiliateQuota()

@@ -880,7 +880,6 @@ func TestAPIContracts(t *testing.T) {
 					"affiliate_rebate_freeze_hours": 0,
 					"affiliate_rebate_duration_days": 0,
 					"affiliate_rebate_per_invitee_cap": 0,
-					"affiliate_min_paid_invitees": 5,
 					"affiliate_admin_recharge_enabled": false,
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
@@ -970,6 +969,7 @@ func TestAPIContracts(t *testing.T) {
 					"claude_code_client_version_synced": "",
 					"claude_code_version_auto_sync_enabled": true,
 					"openai_fast_policy_settings": {
+						"billing_follow_upstream_tier": false,
 						"rules": []
 					},
 					"custom_menu_items": [],
@@ -1220,7 +1220,6 @@ func TestAPIContracts(t *testing.T) {
 					"affiliate_rebate_freeze_hours": 0,
 					"affiliate_rebate_duration_days": 0,
 					"affiliate_rebate_per_invitee_cap": 0,
-					"affiliate_min_paid_invitees": 5,
 					"affiliate_admin_recharge_enabled": false,
 					"default_user_rpm_limit": 0,
 					"default_subscriptions": [],
@@ -1303,6 +1302,7 @@ func TestAPIContracts(t *testing.T) {
 					"claude_code_client_version_synced": "",
 					"claude_code_version_auto_sync_enabled": true,
 					"openai_fast_policy_settings": {
+						"billing_follow_upstream_tier": false,
 						"rules": []
 					},
 					"payment_enabled": false,

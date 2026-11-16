@@ -103,8 +103,6 @@ export default {
           durationDaysDesc: 'Rebate relationship expires after this many days since invitee registration. 0 = permanent.',
           perInviteeCap: 'Per-Invitee Rebate Cap',
           perInviteeCapDesc: 'Maximum total rebate from a single invitee. 0 = no limit.',
-          minPaidInvitees: 'Minimum Paid Invitees for Transfer',
-          minPaidInviteesDesc: 'Require this many distinct invited accounts to each complete a paid order before rebates can be transferred to balance. 0 = no restriction.',
           customUsers: {
             title: 'Per-User Overrides',
             description: 'Set a custom invite code or exclusive rebate rate for specific users. Lists only users that have an override applied.',

@@ -744,11 +744,6 @@ export default {
       transferring: '转入中...',
       empty: '当前没有可转入额度',
       success: '已转入余额：{amount}',
-      paidInviteesProgress: '已成功充值的邀请账号：{current} / {required}，达标后才能转入余额',
-      errors: {
-        AFFILIATE_PAID_INVITEES_TOO_LOW: '至少需要 {required} 个不同邀请账号成功充值，当前为 {current} 个',
-        AFFILIATE_TRANSFER_UNAVAILABLE: '当前暂不可转入余额，请稍后再试'
-      }
     },
     invitees: {
       title: '已邀请用户',
@@ -766,8 +761,7 @@ export default {
       line2: '被邀请用户充值后，你可获得 {rate} 的返利额度。',
       lineRecurringRecharge: '被邀请账号后续每次继续充值，你仍可按返利比例持续获得返利。',
       lineNoSelfReferralAbuse: '禁止通过自邀账号充值等方式套取返利。',
-      line3: '至少 {count} 个不同邀请账号成功充值后，返利额度才能转入余额。',
-      line3NoMinimum: '可将返利额度转入账户余额。',
+      line3: '可将返利额度转入账户余额。',
       line4: '新产生的返利需要经过冻结期后才能提现。'
     }
   },

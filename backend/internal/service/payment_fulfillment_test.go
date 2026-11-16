@@ -104,15 +104,11 @@ type paymentFulfillmentAffiliateRepoStub struct {
 		inviterID int64
 		source    AffiliateBindingSource
 	}
-	bindResult                 bool
-	bindErr                    error
-	paidInviteeCount           int
-	paidInviteeCountErr        error
-	transferCalled             bool
-	transferMinPaidInvitees    int
-	transferRecentPaymentSince time.Time
-	transferAmount             float64
-	transferBalance            float64
+	bindResult      bool
+	bindErr         error
+	transferCalled  bool
+	transferAmount  float64
+	transferBalance float64
 }
 
 func (r *paymentFulfillmentAffiliateRepoStub) EnsureUserAffiliate(_ context.Context, userID int64) (*AffiliateSummary, error) {
@@ -161,18 +157,12 @@ func (r *paymentFulfillmentAffiliateRepoStub) GetAccruedRebateFromInvitee(contex
 	return 0, nil
 }
 
-func (r *paymentFulfillmentAffiliateRepoStub) CountPaidInvitees(context.Context, int64) (int, error) {
-	return r.paidInviteeCount, r.paidInviteeCountErr
-}
-
 func (r *paymentFulfillmentAffiliateRepoStub) ThawFrozenQuota(context.Context, int64) (float64, error) {
 	return 0, nil
 }
 
-func (r *paymentFulfillmentAffiliateRepoStub) TransferQuotaToBalance(_ context.Context, _ int64, minPaidInvitees int, recentPaymentSince time.Time) (float64, float64, error) {
+func (r *paymentFulfillmentAffiliateRepoStub) TransferQuotaToBalance(_ context.Context, _ int64) (float64, float64, error) {
 	r.transferCalled = true
-	r.transferMinPaidInvitees = minPaidInvitees
-	r.transferRecentPaymentSince = recentPaymentSince
 	return r.transferAmount, r.transferBalance, nil
 }
 

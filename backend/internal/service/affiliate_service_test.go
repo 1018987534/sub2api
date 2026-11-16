@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -108,84 +107,6 @@ func TestAffiliateRebateStartsAt(t *testing.T) {
 		InviterBoundAt: &boundAt,
 	}))
 	require.Equal(t, createdAt, affiliateRebateStartsAt(&AffiliateSummary{CreatedAt: createdAt}))
-}
-
-func TestTransferAffiliateQuotaRequiresDistinctPaidInvitees(t *testing.T) {
-	t.Parallel()
-
-	t.Run("blocks below the default five-account requirement", func(t *testing.T) {
-		t.Parallel()
-		repo := &paymentFulfillmentAffiliateRepoStub{paidInviteeCount: 4}
-		svc := &AffiliateService{repo: repo}
-
-		_, _, err := svc.TransferAffiliateQuota(context.Background(), 10)
-		require.ErrorIs(t, err, ErrAffiliatePaidInviteesLow)
-		require.False(t, repo.transferCalled)
-		require.Equal(t, map[string]string{"current": "4", "required": "5"}, infraerrors.FromError(err).Metadata)
-	})
-
-	t.Run("passes the configured requirement into the transactional transfer", func(t *testing.T) {
-		t.Parallel()
-		repo := &paymentFulfillmentAffiliateRepoStub{
-			paidInviteeCount: 7,
-			transferAmount:   12.5,
-			transferBalance:  30,
-		}
-		settingService := NewSettingService(&paymentFulfillmentSettingRepoStub{values: map[string]string{
-			SettingKeyAffiliateMinPaidInvitees: "7",
-		}}, nil)
-		svc := &AffiliateService{repo: repo, settingService: settingService}
-
-		transferred, balance, err := svc.TransferAffiliateQuota(context.Background(), 10)
-		require.NoError(t, err)
-		require.Equal(t, 12.5, transferred)
-		require.Equal(t, 30.0, balance)
-		require.True(t, repo.transferCalled)
-		require.Equal(t, 7, repo.transferMinPaidInvitees)
-		require.WithinDuration(t, time.Now().Add(-affiliateInviterRecentPaymentWindow), repo.transferRecentPaymentSince, time.Second)
-	})
-}
-
-func TestGetAffiliateDetailIncludesPaidInviteeTransferProgress(t *testing.T) {
-	t.Parallel()
-	repo := &paymentFulfillmentAffiliateRepoStub{
-		inviterSummary:   &AffiliateSummary{UserID: 10, AffCode: "AFFTEST"},
-		paidInviteeCount: 3,
-	}
-	settingService := NewSettingService(&paymentFulfillmentSettingRepoStub{values: map[string]string{
-		SettingKeyAffiliateMinPaidInvitees: "5",
-	}}, nil)
-	svc := &AffiliateService{repo: repo, settingService: settingService}
-
-	detail, err := svc.GetAffiliateDetail(context.Background(), 10)
-	require.NoError(t, err)
-	require.Equal(t, 3, detail.PaidInviteeCount)
-	require.Equal(t, 5, detail.MinPaidInviteesForTransfer)
-}
-
-func TestGetAffiliateMinPaidInvitees(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		value string
-		want  int
-	}{
-		{name: "configured", value: "7", want: 7},
-		{name: "disabled", value: "0", want: 0},
-		{name: "negative falls back", value: "-1", want: AffiliateMinPaidInviteesDefault},
-		{name: "invalid falls back", value: "invalid", want: AffiliateMinPaidInviteesDefault},
-		{name: "clamped", value: "10001", want: AffiliateMinPaidInviteesMax},
-	}
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			svc := NewSettingService(&paymentFulfillmentSettingRepoStub{values: map[string]string{
-				SettingKeyAffiliateMinPaidInvitees: tc.value,
-			}}, nil)
-			require.Equal(t, tc.want, svc.GetAffiliateMinPaidInvitees(context.Background()))
-		})
-	}
 }
 
 // TestResolveRebateRatePercent_PerUserOverride verifies that per-inviter
@@ -421,4 +342,15 @@ func TestAdminWithdrawQuota_PropagatesRepositoryErrors(t *testing.T) {
 		_, err := svc.AdminWithdrawQuota(context.Background(), 1, 1, testAffiliateWithdrawKey)
 		require.ErrorIs(t, err, want)
 	}
+}
+
+func TestTransferAffiliateQuotaWithoutPaidInvitees(t *testing.T) {
+	t.Parallel()
+	repo := &paymentFulfillmentAffiliateRepoStub{transferAmount: 2, transferBalance: 4}
+	svc := &AffiliateService{repo: repo}
+	transferred, balance, err := svc.TransferAffiliateQuota(context.Background(), 10)
+	require.NoError(t, err)
+	require.True(t, repo.transferCalled)
+	require.Equal(t, 2.0, transferred)
+	require.Equal(t, 4.0, balance)
 }

@@ -183,61 +183,6 @@ func (r *affiliateRepository) GetAccruedRebateFromInvitee(ctx context.Context, i
 	return total, rows.Close()
 }
 
-func (r *affiliateRepository) CountPaidInvitees(ctx context.Context, inviterID int64) (int, error) {
-	return countPaidInvitees(ctx, clientFromContext(ctx, r.client), inviterID)
-}
-
-func countPaidInvitees(ctx context.Context, client affiliateQueryExecer, inviterID int64) (int, error) {
-	rows, err := client.QueryContext(ctx, `
-SELECT COUNT(DISTINCT invitee.user_id)::integer
-FROM user_affiliates invitee
-JOIN payment_orders po
-  ON po.user_id = invitee.user_id
- AND po.status = 'completed'
-WHERE invitee.inviter_id = $1`, inviterID)
-	if err != nil {
-		return 0, fmt.Errorf("count paid affiliate invitees: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return 0, err
-		}
-		return 0, nil
-	}
-	var count int
-	if err := rows.Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, rows.Err()
-}
-
-func hasRecentCompletedPayment(ctx context.Context, client affiliateQueryExecer, userID int64, since time.Time) (bool, error) {
-	rows, err := client.QueryContext(ctx, `
-SELECT EXISTS (
-    SELECT 1
-    FROM payment_orders payment
-    WHERE payment.user_id = $1
-      AND payment.status = 'completed'
-      AND COALESCE(payment.completed_at, payment.paid_at) >= $2
-)`, userID, since)
-	if err != nil {
-		return false, fmt.Errorf("check recent affiliate inviter payment: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
-			return false, err
-		}
-		return false, nil
-	}
-	var exists bool
-	if err := rows.Scan(&exists); err != nil {
-		return false, err
-	}
-	return exists, rows.Err()
-}
-
 func (r *affiliateRepository) ThawFrozenQuota(ctx context.Context, userID int64) (float64, error) {
 	var thawed float64
 	err := r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {
@@ -290,31 +235,13 @@ WHERE user_id = $2`, thawed, userID)
 	return thawed, nil
 }
 
-func (r *affiliateRepository) TransferQuotaToBalance(ctx context.Context, userID int64, minPaidInvitees int, recentPaymentSince time.Time) (float64, float64, error) {
+func (r *affiliateRepository) TransferQuotaToBalance(ctx context.Context, userID int64) (float64, float64, error) {
 	var transferred float64
 	var newBalance float64
 
 	err := r.withTx(ctx, func(txCtx context.Context, txClient *dbent.Client) error {
 		if _, err := ensureUserAffiliateWithClient(txCtx, txClient, userID); err != nil {
 			return err
-		}
-		if minPaidInvitees > 0 {
-			paidInvitees, err := countPaidInvitees(txCtx, txClient, userID)
-			if err != nil {
-				return err
-			}
-			if paidInvitees < minPaidInvitees {
-				return service.NewAffiliatePaidInviteesLowError(paidInvitees, minPaidInvitees)
-			}
-		}
-		if !recentPaymentSince.IsZero() {
-			hasRecentPayment, err := hasRecentCompletedPayment(txCtx, txClient, userID, recentPaymentSince)
-			if err != nil {
-				return err
-			}
-			if !hasRecentPayment {
-				return service.ErrAffiliateTransferUnavailable
-			}
 		}
 
 		// Thaw any matured frozen quota before transfer.

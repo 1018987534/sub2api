@@ -65,7 +65,7 @@ INSERT INTO user_affiliates (user_id, aff_code, aff_quota, aff_history_quota, cr
 VALUES ($1, $2, $3, $3, NOW(), NOW())`, u.ID, affCode, 12.34)
 	require.NoError(t, err)
 
-	transferred, balance, err := repo.TransferQuotaToBalance(txCtx, u.ID, 0, time.Time{})
+	transferred, balance, err := repo.TransferQuotaToBalance(txCtx, u.ID)
 	require.NoError(t, err)
 	require.InDelta(t, 12.34, transferred, 1e-9)
 	require.InDelta(t, 17.84, balance, 1e-9)
@@ -196,7 +196,7 @@ INSERT INTO user_affiliates (user_id, aff_code, aff_quota, aff_history_quota, cr
 VALUES ($1, $2, 0, 0, NOW(), NOW())`, u.ID, affCode)
 	require.NoError(t, err)
 
-	transferred, balance, err := repo.TransferQuotaToBalance(txCtx, u.ID, 0, time.Time{})
+	transferred, balance, err := repo.TransferQuotaToBalance(txCtx, u.ID)
 	require.ErrorIs(t, err, service.ErrAffiliateQuotaEmpty)
 	require.InDelta(t, 0.0, transferred, 1e-9)
 	require.InDelta(t, 0.0, balance, 1e-9)
@@ -204,64 +204,6 @@ VALUES ($1, $2, 0, 0, NOW(), NOW())`, u.ID, affCode)
 	persistedBalance := querySingleFloat(t, txCtx, client,
 		"SELECT balance::double precision FROM users WHERE id = $1", u.ID)
 	require.InDelta(t, 3.21, persistedBalance, 1e-9)
-}
-
-func TestAffiliateRepository_TransferQuotaToBalance_BlocksBelowPaidInviteeRequirement(t *testing.T) {
-	ctx := context.Background()
-	tx := testEntTx(t)
-	txCtx := dbent.NewTxContext(ctx, tx)
-	client := tx.Client()
-	repo := NewAffiliateRepository(client, integrationDB)
-
-	u := mustCreateUser(t, client, &service.User{
-		Email:        fmt.Sprintf("affiliate-paid-gate-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hash",
-		Role:         service.RoleUser,
-		Status:       service.StatusActive,
-		Balance:      5,
-		Concurrency:  5,
-	})
-	affCode := fmt.Sprintf("GATE%08d", time.Now().UnixNano()%100_000_000)
-	_, err := client.ExecContext(txCtx, `
-INSERT INTO user_affiliates (user_id, aff_code, aff_quota, aff_history_quota, created_at, updated_at)
-VALUES ($1, $2, 12, 12, NOW(), NOW())`, u.ID, affCode)
-	require.NoError(t, err)
-
-	_, _, err = repo.TransferQuotaToBalance(txCtx, u.ID, 1, time.Time{})
-	require.ErrorIs(t, err, service.ErrAffiliatePaidInviteesLow)
-	require.InDelta(t, 12, querySingleFloat(t, txCtx, client,
-		"SELECT aff_quota::double precision FROM user_affiliates WHERE user_id = $1", u.ID), 1e-9)
-	require.InDelta(t, 5, querySingleFloat(t, txCtx, client,
-		"SELECT balance::double precision FROM users WHERE id = $1", u.ID), 1e-9)
-}
-
-func TestAffiliateRepository_TransferQuotaToBalance_BlocksWithoutInviterRecentPayment(t *testing.T) {
-	ctx := context.Background()
-	tx := testEntTx(t)
-	txCtx := dbent.NewTxContext(ctx, tx)
-	client := tx.Client()
-	repo := NewAffiliateRepository(client, integrationDB)
-
-	u := mustCreateUser(t, client, &service.User{
-		Email:        fmt.Sprintf("affiliate-recent-payment-gate-%d@example.com", time.Now().UnixNano()),
-		PasswordHash: "hash",
-		Role:         service.RoleUser,
-		Status:       service.StatusActive,
-		Balance:      5,
-		Concurrency:  5,
-	})
-	affCode := fmt.Sprintf("RECENT%06d", time.Now().UnixNano()%1_000_000)
-	_, err := client.ExecContext(txCtx, `
-INSERT INTO user_affiliates (user_id, aff_code, aff_quota, aff_history_quota, created_at, updated_at)
-VALUES ($1, $2, 12, 12, NOW(), NOW())`, u.ID, affCode)
-	require.NoError(t, err)
-
-	_, _, err = repo.TransferQuotaToBalance(txCtx, u.ID, 0, time.Now().Add(-7*24*time.Hour))
-	require.ErrorIs(t, err, service.ErrAffiliateTransferUnavailable)
-	require.InDelta(t, 12, querySingleFloat(t, txCtx, client,
-		"SELECT aff_quota::double precision FROM user_affiliates WHERE user_id = $1", u.ID), 1e-9)
-	require.InDelta(t, 5, querySingleFloat(t, txCtx, client,
-		"SELECT balance::double precision FROM users WHERE id = $1", u.ID), 1e-9)
 }
 
 // TestAffiliateRepository_AdminCustomCode covers the success path of admin
@@ -857,4 +799,35 @@ func TestAffiliateRepository_ListAffiliateRebateRecords_IncludesNonOrderAccruals
 	require.NotNil(t, record.InviteeID)
 	require.Equal(t, invitee.ID, *record.InviteeID)
 	require.InDelta(t, 2.0, record.RebateAmount, 1e-9)
+}
+
+func TestAffiliateRepository_TransferQuotaToBalance_WithoutPaymentOrders(t *testing.T) {
+	for _, minimum := range []string{"0", "5"} {
+		t.Run("legacy_minimum_"+minimum, func(t *testing.T) {
+			ctx := context.Background()
+			tx := testEntTx(t)
+			txCtx := dbent.NewTxContext(ctx, tx)
+			client := tx.Client()
+			u := mustCreateUser(t, client, &service.User{Email: fmt.Sprintf("affiliate-no-orders-%d@example.com", time.Now().UnixNano()), PasswordHash: "fixture", Role: service.RoleUser, Status: service.StatusActive, Balance: 2, Concurrency: 5})
+			repo := NewAffiliateRepository(client, integrationDB)
+			_, err := repo.EnsureUserAffiliate(txCtx, u.ID)
+			require.NoError(t, err)
+			_, err = client.ExecContext(txCtx, "UPDATE user_affiliates SET aff_quota=2, aff_history_quota=2 WHERE user_id=$1", u.ID)
+			require.NoError(t, err)
+			_, err = client.ExecContext(txCtx, "INSERT INTO user_affiliate_ledger(user_id,action,amount) VALUES($1,'qq_activity',2)", u.ID)
+			require.NoError(t, err)
+			settings := NewSettingRepository(client)
+			require.NoError(t, settings.Set(txCtx, "affiliate_min_paid_invitees", minimum))
+			svc := service.NewAffiliateService(repo, service.NewSettingService(settings, nil), nil, nil)
+			transferred, balance, err := svc.TransferAffiliateQuota(txCtx, u.ID)
+			require.NoError(t, err)
+			require.Equal(t, 2.0, transferred)
+			require.Equal(t, 4.0, balance)
+			require.Zero(t, querySingleFloat(t, txCtx, client, "SELECT aff_quota::double precision FROM user_affiliates WHERE user_id=$1", u.ID))
+			require.Equal(t, 1, querySingleInt(t, txCtx, client, "SELECT COUNT(*) FROM user_affiliate_ledger WHERE user_id=$1 AND action='transfer'", u.ID))
+			require.Zero(t, querySingleInt(t, txCtx, client, "SELECT COUNT(*) FROM payment_orders WHERE user_id=$1", u.ID))
+			_, _, err = svc.TransferAffiliateQuota(txCtx, u.ID)
+			require.ErrorIs(t, err, service.ErrAffiliateQuotaEmpty)
+		})
+	}
 }

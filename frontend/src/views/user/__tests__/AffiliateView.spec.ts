@@ -54,8 +54,6 @@ describe('AffiliateView', () => {
       aff_code: affiliateCode,
       inviter_id: null,
       aff_count: 0,
-      paid_invitee_count: 0,
-      min_paid_invitees_for_transfer: 5,
       aff_quota: 0,
       aff_frozen_quota: 0,
       aff_history_quota: 0,
@@ -119,14 +117,12 @@ describe('AffiliateView', () => {
     )
   })
 
-  it('requires five distinct paid invitees before enabling transfer', async () => {
+  it('transfers available quota without paid invitees', async () => {
     getAffiliateDetail.mockResolvedValue({
       user_id: 1,
       aff_code: affiliateCode,
       inviter_id: null,
-      aff_count: 5,
-      paid_invitee_count: 4,
-      min_paid_invitees_for_transfer: 5,
+      aff_count: 0,
       aff_quota: 10,
       aff_frozen_quota: 0,
       aff_history_quota: 10,
@@ -144,9 +140,11 @@ describe('AffiliateView', () => {
     await flushPromises()
 
     const transferButton = wrapper.findAll('button').find(button => button.text() === 'affiliate.transfer.button')
-    expect(transferButton?.attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('affiliate.transfer.paidInviteesProgress')
+    expect(transferButton?.attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).not.toContain('affiliate.transfer.paidInviteesProgress')
+    transferAffiliateQuota.mockResolvedValue({ transferred_quota: 10, balance: 10 })
     await transferButton?.trigger('click')
-    expect(transferAffiliateQuota).not.toHaveBeenCalled()
+    await flushPromises()
+    expect(transferAffiliateQuota).toHaveBeenCalledTimes(1)
   })
 })
