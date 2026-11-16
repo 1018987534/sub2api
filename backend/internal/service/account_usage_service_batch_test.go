@@ -128,6 +128,10 @@ func (r *usageBatchLogRepoStub) GetDailyStatsAggregated(context.Context, int64, 
 	return nil, nil
 }
 
+func (r *usageBatchLogRepoStub) GetDashboardAdminAccountCosts(context.Context, int64, time.Time) (float64, float64, error) {
+	return 0, 0, nil
+}
+
 func TestAccountUsageService_GetUsageBatch_BestEffortByAccount(t *testing.T) {
 	t.Parallel()
 

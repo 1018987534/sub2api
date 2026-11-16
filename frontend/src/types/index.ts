@@ -2105,6 +2105,7 @@ export interface DashboardStats {
   // 提现手续费按保存的百分比计算，默认 1.8%，计费基数最低为零。
   // 旧版本后端不提供这些字段时，不展示尚未计算的利润。
   today_admin_actual_cost?: number
+  today_admin_account_cost?: number // 当前登录管理员请求的上游成本，已包含在 today_account_cost 中。
   today_lottery_cost?: number
   today_qq_reward_cost?: number // 新人奖励到账余额、邀请奖励到账邀请余额，各计一次。
   today_withdrawal_fee?: number
@@ -2117,6 +2118,7 @@ export interface DashboardStats {
   month_actual_cost?: number
   month_account_cost?: number
   month_admin_actual_cost?: number
+  month_admin_account_cost?: number // 本月自用上游成本，已包含在 month_account_cost 中。
   month_lottery_cost?: number
   month_qq_reward_cost?: number
   month_withdrawal_fee?: number

@@ -240,6 +240,39 @@ describe('admin DashboardView', () => {
   })
 
   it.each([
+    { own: 8.1256789, sales: '$102.49', self: '$8.13', monthOwn: 78.987654, monthSales: '$2,890.85', monthSelf: '$78.99' },
+    { own: 0, sales: '$110.62', self: '$0.00', monthOwn: 0, monthSales: '$2,969.84', monthSelf: '$0.00' }
+  ])('splits only upstream cost into sales and self-use cost ($self)', async ({ own, sales, self, monthOwn, monthSales, monthSelf }) => {
+    getSnapshotV2.mockResolvedValueOnce({
+      stats: { ...createDashboardStats(), today_actual_cost: 143.99, today_account_cost: 110.62,
+        today_admin_actual_cost: 1.61, today_admin_account_cost: own, today_lottery_cost: 0,
+        today_withdrawal_fee: 3.99, today_profit: 12.93,
+        month_actual_cost: 5594.47, month_account_cost: 2969.84, month_admin_actual_cost: 435.42,
+        month_admin_account_cost: monthOwn, month_lottery_cost: 0, month_qq_reward_cost: 14,
+        month_withdrawal_fee: 144.45, month_server_cost_usd: 141.50, month_profit: 1889.27 },
+      trend: [], models: []
+    })
+    const wrapper = mount(DashboardView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, LoadingSpinner: true, Icon: true,
+      DateRangePicker: true, Select: true, ModelDistributionChart: true, TokenUsageTrend: true
+    } } })
+    await flushPromises()
+    const today = wrapper.get('[data-testid="today-profit-breakdown"]').text()
+    expect(today).toContain(`admin.dashboard.salesAccountCost ${sales}`)
+    expect(today).toContain(`admin.dashboard.selfAccountCost ${self}`)
+    expect(today).toContain('admin.dashboard.adminSelfUsage $1.61')
+    expect(today).not.toContain('admin.dashboard.accountCost')
+    const month = wrapper.get('[data-testid="month-profit-breakdown"]').text()
+    expect(month).toContain(`admin.dashboard.salesAccountCost ${monthSales}`)
+    expect(month).toContain(`admin.dashboard.selfAccountCost ${monthSelf}`)
+    expect(month).toContain('admin.dashboard.adminSelfUsage $435.42')
+    expect(month).not.toContain('admin.dashboard.accountCost')
+    expect(wrapper.get('[data-testid="today-profit"]').text()).toBe('$12.93')
+    expect(wrapper.get('[data-testid="month-profit"]').text()).toBe('$1,889.27')
+    wrapper.unmount()
+  })
+
+  it.each([
     { actual: 1000, actualDisplay: '$1,000.00', cost: 600, own: 100, lottery: 10, qq: 20, fee: 16.2, server: 160, profit: 93.8, display: '$93.80', color: 'text-emerald-600' },
     { actual: 10, actualDisplay: '$10.00', cost: 12, own: 3, lottery: 0, qq: 4, fee: 0.126, server: 0, profit: -9.126, display: '-$9.13', color: 'text-red-600' },
     { actual: 0, actualDisplay: '$0.00', cost: 0, own: 0, lottery: 0, qq: 0, fee: 0, server: 0, profit: 0, display: '$0.00', color: 'text-emerald-600' }

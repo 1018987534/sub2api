@@ -145,6 +145,10 @@ func (s *DashboardService) GetDashboardProfitStats(ctx context.Context, adminID 
 		profit.TodayAdminActualCost = own.TodayActualCost
 		profit.MonthAdminActualCost = own.TotalActualCost
 	}
+	profit.TodayAdminAccountCost, profit.MonthAdminAccountCost, err = s.usageRepo.GetDashboardAdminAccountCosts(ctx, adminID, now)
+	if err != nil {
+		return nil, fmt.Errorf("get administrator upstream self cost: %w", err)
+	}
 	settings, err := s.GetDashboardProfitSettings(ctx)
 	if err != nil {
 		return nil, err

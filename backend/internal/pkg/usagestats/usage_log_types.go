@@ -92,10 +92,12 @@ type DashboardStats struct {
 type DashboardProfitStats struct {
 	WithdrawalFeeRatePercent float64 `json:"withdrawal_fee_rate_percent"`
 	TodayAdminActualCost     float64 `json:"today_admin_actual_cost"`
+	TodayAdminAccountCost    float64 `json:"today_admin_account_cost"`
 	TodayWithdrawalFee       float64 `json:"today_withdrawal_fee"`
 	TodayServerCostUSD       float64 `json:"today_server_cost_usd"`
 	TodayProfit              float64 `json:"today_profit"`
 	MonthAdminActualCost     float64 `json:"month_admin_actual_cost"`
+	MonthAdminAccountCost    float64 `json:"month_admin_account_cost"`
 	MonthWithdrawalFee       float64 `json:"month_withdrawal_fee"`
 	MonthServerCostUSD       float64 `json:"month_server_cost_usd"`
 	MonthProfit              float64 `json:"month_profit"`

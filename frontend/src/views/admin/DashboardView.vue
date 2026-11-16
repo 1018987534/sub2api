@@ -239,7 +239,13 @@
             </div>
             <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="today-profit-breakdown">
               {{ t('admin.dashboard.actual') }} {{ formatProfit(stats.today_actual_cost) }}
-              − {{ t('admin.dashboard.accountCost') }} {{ formatProfit(stats.today_account_cost) }}
+              <template v-if="stats.today_admin_account_cost != null">
+                − {{ t('admin.dashboard.salesAccountCost') }} {{ formatProfit(stats.today_account_cost - stats.today_admin_account_cost) }}
+                − {{ t('admin.dashboard.selfAccountCost') }} {{ formatProfit(stats.today_admin_account_cost) }}
+              </template>
+              <template v-else>
+                − {{ t('admin.dashboard.accountCost') }} {{ formatProfit(stats.today_account_cost) }}
+              </template>
               − {{ t('admin.dashboard.adminSelfUsage') }} {{ formatProfit(stats.today_admin_actual_cost) }}
               − {{ t('admin.dashboard.lotteryCost') }} {{ formatProfit(stats.today_lottery_cost) }}
               − {{ t('admin.dashboard.qqRewardCost') }} {{ formatProfit(stats.today_qq_reward_cost) }}
@@ -268,7 +274,13 @@
             </div>
             <p class="text-xs text-gray-500 dark:text-gray-400" data-testid="month-profit-breakdown">
               {{ t('admin.dashboard.actual') }} {{ formatProfit(stats.month_actual_cost) }}
-              − {{ t('admin.dashboard.accountCost') }} {{ formatProfit(stats.month_account_cost) }}
+              <template v-if="stats.month_admin_account_cost != null">
+                − {{ t('admin.dashboard.salesAccountCost') }} {{ formatProfit(stats.month_account_cost - stats.month_admin_account_cost) }}
+                − {{ t('admin.dashboard.selfAccountCost') }} {{ formatProfit(stats.month_admin_account_cost) }}
+              </template>
+              <template v-else>
+                − {{ t('admin.dashboard.accountCost') }} {{ formatProfit(stats.month_account_cost) }}
+              </template>
               − {{ t('admin.dashboard.adminSelfUsage') }} {{ formatProfit(stats.month_admin_actual_cost) }}
               − {{ t('admin.dashboard.lotteryCost') }} {{ formatProfit(stats.month_lottery_cost) }}
               − {{ t('admin.dashboard.qqRewardCost') }} {{ formatProfit(stats.month_qq_reward_cost) }}
