@@ -52,6 +52,10 @@ type schedulerFleetTestCache struct {
 
 type schedulerFleetAccountRepo struct{ AccountRepository }
 
+func (*schedulerFleetAccountRepo) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]Account, error) {
+	return nil, nil
+}
+
 func (*schedulerFleetAccountRepo) ListSchedulableByPlatform(context.Context, string) ([]Account, error) {
 	return nil, nil
 }
