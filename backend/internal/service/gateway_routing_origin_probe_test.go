@@ -162,7 +162,7 @@ func TestGatewayOriginProbeRecoveryFreshnessAndSettings(t *testing.T) {
 	}, 3*time.Second, 5*time.Millisecond)
 }
 
-func TestGatewayOriginProbePauseThenAutomaticallyRecovers(t *testing.T) {
+func TestGatewayOriginProbeWaitsForCooldownBeforeRecovery(t *testing.T) {
 	var ready atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !ready.Load() {
@@ -205,16 +205,20 @@ func TestGatewayOriginProbePauseThenAutomaticallyRecovers(t *testing.T) {
 	for round := 1; round <= 3; round++ {
 		svc.refreshGatewayOriginProbes(settings, key, svc.gatewayRoutingOriginProbeCache)
 		runtime = apply()
-		if round < 3 {
-			require.Zero(t, runtime.Nodes[0].EffectiveWeight)
-			require.NotNil(t, runtime.Nodes[0].PacketLossPausedUntil)
-		} else {
-			require.Equal(t, 70, runtime.Nodes[0].EffectiveWeight)
-			require.Nil(t, runtime.Nodes[0].PacketLossPausedUntil)
-			require.Equal(t, "{}", repo.values[gatewayPacketLossStateKey])
-		}
+		require.Zero(t, runtime.Nodes[0].EffectiveWeight)
+		require.NotNil(t, runtime.Nodes[0].PacketLossPausedUntil)
 	}
-	require.True(t, time.Now().Before(deadline), "three actual readiness rounds recover before the one-hour deadline")
+	require.True(t, time.Now().Before(deadline), "successful readiness rounds must not shorten the one-hour pause")
+	// Once the whole cooldown has elapsed, confirmed origin recovery restores
+	// this origin-triggered pause without changing the configured target.
+	runtime = packetLossRuntime(settings)
+	svc.applyGatewayPacketLossProtection(context.Background(), settings, runtime, map[string]gatewayPacketLossSignal{
+		"yt":   {OriginHealthy: true, OriginRecovered: true, OriginSampleAt: deadline},
+		"peer": {Fresh: true, Recovered: true, SampleAt: deadline},
+	}, deadline)
+	require.Equal(t, 70, runtime.Nodes[0].EffectiveWeight)
+	require.Nil(t, runtime.Nodes[0].PacketLossPausedUntil)
+	require.Equal(t, "{}", repo.values[gatewayPacketLossStateKey])
 }
 
 func TestGatewayOriginProbeTimeoutIsBoundedAndConfirmed(t *testing.T) {
