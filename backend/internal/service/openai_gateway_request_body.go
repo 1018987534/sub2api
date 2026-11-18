@@ -1538,7 +1538,7 @@ func normalizeOpenAIOAuthResponsesCompatibilityBody(body []byte) ([]byte, bool, 
 }
 
 func normalizeGPT6ResponsesSampling(body []byte, model string) ([]byte, bool, error) {
-	if (!openai.IsGPT6SolOrLunaModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model)) || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
+	if (!openai.IsGPT62ModelSpelling(model) && !openai.IsGPT6SolOrLunaModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model)) || gjson.GetBytes(body, "reasoning.effort").String() == "none" {
 		return body, false, nil
 	}
 	out := body
@@ -2236,12 +2236,11 @@ func openAIFastPolicySettingsFromContext(ctx context.Context) *OpenAIFastPolicyS
 }
 
 // openAIModelSupportsUltrafast reports whether OpenAI offers the Ultrafast
-// service tier for the model: GPT-6 Astra and GPT-6.1 Sol only. It is the single
-// source for both the group-forced tier gate and the 6x Ultrafast billing
-// multiplier, so a model can never be forced onto Ultrafast yet billed below it.
+// service tier for the model. It is shared by the group-forced tier gate and
+// model-specific Ultrafast billing, including the GPT-6.2 introductory price.
 func openAIModelSupportsUltrafast(model string) bool {
 	normalized := normalizeKnownOpenAICodexModel(model)
-	return isOpenAIGPT6AstraModel(normalized) || normalized == "gpt-6.1-sol"
+	return openai.IsGPT62ModelSpelling(normalized) || isOpenAIGPT6AstraModel(normalized) || normalized == "gpt-6.1-sol"
 }
 
 // openAIGroupForcedServiceTier returns the service_tier that the trusted request
@@ -2843,7 +2842,7 @@ func validateGPT61CompatRequest(body []byte, model string) error {
 }
 
 func validateGPT61RawEffort(body []byte, model string) error {
-	if !openai.IsGPT61SolModelSpelling(model) && !openai.IsGPT61TerraModelSpelling(model) {
+	if !openai.IsGPT62ModelSpelling(model) && !openai.IsGPT61SolModelSpelling(model) && !openai.IsGPT61TerraModelSpelling(model) {
 		return nil
 	}
 	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {

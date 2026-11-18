@@ -74,6 +74,8 @@ var (
 		Mode:                                "chat",
 		SupportsPromptCaching:               true,
 	}
+	openAIGPT62SolFallbackPricing   = newOpenAIGPT62FallbackPricing(2e-6, 10e-6, 0.1e-6)
+	openAIGPT62AstraFallbackPricing = newOpenAIGPT62FallbackPricing(8e-6, 40e-6, 0.4e-6)
 	openAIGPT61TerraFallbackPricing = &LiteLLMModelPricing{
 		InputCostPerToken:                   1e-6,
 		InputCostPerTokenPriority:           2e-6,
@@ -231,6 +233,19 @@ var (
 		SupportsPromptCaching:   true,
 	}
 )
+
+// Verified against the official GPT-6.2 model price cards on 2026-11-18.
+func newOpenAIGPT62FallbackPricing(input, output, cached float64) *LiteLLMModelPricing {
+	return &LiteLLMModelPricing{
+		InputCostPerToken: input, InputCostPerTokenPriority: input * 2,
+		OutputCostPerToken: output, OutputCostPerTokenPriority: output * 2,
+		CacheCreationInputTokenCost: input * 1.25, CacheCreationInputTokenCostPriority: input * 2.5,
+		CacheCreationInputTokenCostExplicit: true,
+		CacheReadInputTokenCost:             cached, CacheReadInputTokenCostPriority: cached * 2,
+		LongContextInputTokenThreshold: 272_000, LongContextInputCostMultiplier: 2, LongContextOutputCostMultiplier: 1.5,
+		SupportsServiceTier: true, SupportsPromptCaching: true, LiteLLMProvider: "openai", Mode: "chat",
+	}
+}
 
 // tokenPriceOverrides tracks explicit nonnegative rates from pricing.override_file.
 // Keep this provenance with the parsed card so billing never rereads the file.
@@ -1647,6 +1662,15 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 // 5. gpt-5.4* -> 业务静态兜底价
 // 6. 最终回退到 DefaultTestModel (gpt-5.1-codex)
 func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
+	if base := openai.GPT62ModelID(model); base != "" {
+		if pricing, ok := s.pricingData[base]; ok {
+			return pricing
+		}
+		if base == "gpt-6.2-astra" {
+			return openAIGPT62AstraFallbackPricing
+		}
+		return openAIGPT62SolFallbackPricing
+	}
 	if strings.HasPrefix(model, "gpt-5.3-codex-spark") {
 		if pricing, ok := s.pricingData["gpt-5.1-codex"]; ok {
 			logger.LegacyPrintf("service.pricing", "[Pricing][SparkBilling] %s -> %s billing", model, "gpt-5.1-codex")
