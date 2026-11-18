@@ -86,6 +86,14 @@ var instructionsGPT55 string
 //go:embed instructions_gpt6_astra.txt
 var instructionsGPT6Astra string
 
+// GPT-6.2 descriptors from the 2026-11-17 Codex models response, client 0.169.0.
+//
+//go:embed codex_gpt62_sol.json
+var CodexGPT62SolMetadata []byte
+
+//go:embed codex_gpt62_astra.json
+var CodexGPT62AstraMetadata []byte
+
 // CodexGPT61SolMetadata is the complete official descriptor from openai/codex
 // b1e72963c3b71a9265a551e54beff078384efed9, codex-rs/models-manager/models.json.
 //
@@ -97,32 +105,6 @@ var CodexGPT61SolMetadata []byte
 //
 //go:embed codex_gpt61_terra.json
 var CodexGPT61TerraMetadata []byte
-
-// Official descriptors from openai/codex 1c2e4cd45f15ea7d9576d638f6a1112b8fa58f77.
-//
-//go:embed codex_gpt62_sol.json
-var CodexGPT62SolMetadata []byte
-
-//go:embed codex_gpt62_astra.json
-var CodexGPT62AstraMetadata []byte
-
-// GPT62ModelID recognizes published IDs and local effort/compact spellings.
-// Invalid none/minimal suffixes stay identifiable so request validation rejects them.
-func GPT62ModelID(model string) string {
-	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
-	for _, base := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
-		if canonical == base {
-			return base
-		}
-		if suffix, ok := strings.CutPrefix(canonical, base+"-"); ok {
-			switch suffix {
-			case "none", "minimal", "low", "medium", "high", "xhigh", "max", "openai-compact":
-				return base
-			}
-		}
-	}
-	return ""
-}
 
 func IsGPT62ModelSpelling(model string) bool { return GPT62ModelID(model) != "" }
 
@@ -249,6 +231,25 @@ func IsGPT6SolOrLunaModelSpelling(model string) bool {
 	return false
 }
 
+// GPT62ModelID returns the published model ID for local effort and compact
+// spellings. Keep disabled effort suffixes identifiable for request validation.
+func GPT62ModelID(model string) string {
+	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
+	for _, base := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
+		if canonical == base {
+			return base
+		}
+		suffix, ok := strings.CutPrefix(canonical, base+"-")
+		if ok {
+			switch suffix {
+			case "none", "minimal", "low", "medium", "high", "xhigh", "max", "openai-compact":
+				return base
+			}
+		}
+	}
+	return ""
+}
+
 // IsGPT61SolModelSpelling recognizes the published model and local effort/compact
 // spellings. Invalid effort suffixes remain identifiable for request validation.
 func IsGPT61SolModelSpelling(model string) bool {
@@ -290,7 +291,7 @@ func IsGPT61TerraModelSpelling(model string) bool {
 // RequiresResponsesForToolCalls reports models whose tool calls are only
 // available through the Responses API.
 func RequiresResponsesForToolCalls(model string) bool {
-	return IsGPT62ModelSpelling(model) || IsGPT61SolModelSpelling(model) || IsGPT61TerraModelSpelling(model)
+	return GPT62ModelID(model) != "" || IsGPT61SolModelSpelling(model) || IsGPT61TerraModelSpelling(model)
 }
 
 // ValidateGPT61SolReasoningEffort rejects disabled reasoning instead of silently
@@ -315,16 +316,24 @@ func ValidateGPT61TerraReasoningEffort(model, effort string) error {
 }
 
 // ValidateGPT61ReasoningEffort applies the published effort scale of each
-// GPT-6.1/6.2 model.
+// GPT-6.1 and GPT-6.2 model.
 func ValidateGPT61ReasoningEffort(model, effort string) error {
-	if base := GPT62ModelID(model); base != "" {
-		switch strings.ToLower(strings.TrimSpace(effort)) {
-		case "none", "minimal":
-			return fmt.Errorf("%s does not support reasoning effort %q; use low, medium, high, xhigh or max", base, effort)
-		}
+	if err := ValidateGPT62ReasoningEffort(model, effort); err != nil {
+		return err
 	}
 	if err := ValidateGPT61SolReasoningEffort(model, effort); err != nil {
 		return err
 	}
 	return ValidateGPT61TerraReasoningEffort(model, effort)
+}
+
+// ValidateGPT62ReasoningEffort rejects disabled and minimal reasoning on GPT-6.2.
+func ValidateGPT62ReasoningEffort(model, effort string) error {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none", "minimal":
+		if base := GPT62ModelID(model); base != "" {
+			return fmt.Errorf("%s does not support reasoning effort %q; use low, medium, high, xhigh or max", base, effort)
+		}
+	}
+	return nil
 }
