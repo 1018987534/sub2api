@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import responsesDispatcher, {
+  classifyCountry,
   fetchRoutingNodes,
   normalizeRuntimeNodes,
   resetRoutingConfigCache,
@@ -140,6 +141,7 @@ test("tries the configured zero-weight capacity fallback before random peers", (
           target_weight: 0,
           effective_weight: 0,
           auto_disabled: false,
+          origin_ready: true,
         },
       ],
     },
@@ -169,30 +171,25 @@ test("packet-loss pauses exclude a node from weighted and capacity fallback rout
   assert.equal(originsFor(30, normalizeRuntimeNodes(payload))[0], "https://yt.example");
 });
 
-test("exhausted weighted nodes use healthy zero-weight standbys before paused nodes", () => {
-  const nodes = normalizeRuntimeNodes({nodes: [
+test("exhausted weighted nodes use only a verified, configured standby", () => {
+  const nodes = normalizeRuntimeNodes({overflow_node_id:"standby", nodes: [
     {id:"primary", origin:"https://primary.example", target_weight:100, effective_weight:0, auto_disabled:true},
-    {id:"standby", origin:"https://standby.example", target_weight:0, effective_weight:0},
+    {id:"standby", origin:"https://standby.example", target_weight:0, effective_weight:0, origin_ready:true},
     {id:"stale", origin:"https://stale.example", target_weight:0, effective_weight:0, monitor_stale:true},
     {id:"bad", origin:"https://bad.example", target_weight:0, effective_weight:0, auto_disabled:true},
   ]});
   for (let roll=0; roll<100; roll++) {
-    const origins=originsFor(roll,nodes);
-    assert.equal(origins[0],"https://standby.example");
-    assert.equal(new Set(origins).size,4);
+    assert.deepEqual(originsFor(roll,nodes),["https://standby.example"]);
   }
 });
 
-test("all paused nodes still form a random nonempty emergency routing pool", () => {
+test("all paused nodes remain excluded even during exhaustion", () => {
   const nodes = normalizeRuntimeNodes({nodes: [
     {id:"primary", origin:"https://primary.example", target_weight:100, effective_weight:0, auto_disabled:true},
     {id:"standby", origin:"https://standby.example", target_weight:0, effective_weight:0, auto_disabled:true},
   ]});
   for (let roll=0; roll<100; roll++) {
-    const origins=originsFor(roll,nodes);
-    assert.equal(origins.length,2);
-    assert.equal(origins[0],nodes[roll%2].origin);
-    assert.equal(new Set(origins).size,2);
+    assert.deepEqual(originsFor(roll,nodes),[]);
   }
   assert.deepEqual(selectOrigins({}, {getRandomValues(a) {a[0]=0; return a;}}, []), []);
 });
@@ -203,9 +200,9 @@ test("emergency standby forwards a POST once without changing its body", async (
   resetRoutingConfigCache();
   try {
     globalThis.fetch=async (input) => {
-      if (typeof input === "string") return Response.json({nodes:[
+      if (typeof input === "string") return Response.json({overflow_node_id:"standby",nodes:[
         {id:"primary", origin:"https://primary.example", target_weight:100, effective_weight:0, auto_disabled:true},
-        {id:"standby", origin:"https://standby.example", target_weight:0, effective_weight:0},
+        {id:"standby", origin:"https://standby.example", target_weight:0, effective_weight:0, origin_ready:true},
       ]});
       calls.push({url:input.url, body:await input.text()});
       return new Response("data: [DONE]\n\n",{headers:{"Content-Type":"text/event-stream"}});
@@ -248,15 +245,15 @@ test("default runtime cache observes a pause after one second", async () => {
   }
 });
 
-test("exhausted emergency standby admission still tries another configured node", async () => {
+test("exhausted standby admission never retries against a paused node", async () => {
   const originalFetch=globalThis.fetch;
   const calls=[];
   resetRoutingConfigCache();
   try {
     globalThis.fetch=async (input) => {
-      if (typeof input === "string") return Response.json({nodes:[
+      if (typeof input === "string") return Response.json({overflow_node_id:"standby",nodes:[
         {id:"primary",origin:"https://primary.example",target_weight:100,effective_weight:0,auto_disabled:true},
-        {id:"standby",origin:"https://standby.example",target_weight:0,effective_weight:0},
+        {id:"standby",origin:"https://standby.example",target_weight:0,effective_weight:0,origin_ready:true},
       ]});
       calls.push(input.url);
       if (input.url.startsWith("https://standby.example")) {
@@ -268,10 +265,94 @@ test("exhausted emergency standby admission still tries another configured node"
       return new Response("data: [DONE]\n\n");
     };
     const response=await responsesDispatcher.fetch(new Request("https://xiaohondou.com/v1/responses",{method:"POST",body:"fixture"}),{ROUTING_CONFIG_URL:"https://control.example/runtime"});
-    assert.equal(response.status,200);
-    assert.deepEqual(calls,["https://standby.example/v1/responses","https://primary.example/v1/responses"]);
+    assert.equal(response.status,503);
+    assert.deepEqual(calls,["https://standby.example/v1/responses"]);
   } finally {
     globalThis.fetch=originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("geo cohorts limit OVH to verified overseas canary traffic", () => {
+  const nodes = normalizeRuntimeNodes({nodes:[
+    {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:1,origin_ready:true},
+    {id:"yt-us-01",origin:"https://yt.example",effective_weight:99,origin_ready:true},
+  ]});
+  const choose = (cohort, roll) => selectOrigins({OVH_GEO_PERCENT:"5"}, {
+    getRandomValues(a) { a[0]=roll; return a; },
+  }, nodes, cohort);
+  assert.deepEqual(choose("CN",0),["https://yt.example"]);
+  assert.deepEqual(choose("INTL",4),["https://ovh.example","https://yt.example"]);
+  assert.deepEqual(choose("INTL",5),["https://yt.example"]);
+  assert.equal(choose("UNKNOWN",0)[0],"https://ovh.example");
+  for (const unavailable of [{origin_ready:null}, {origin_ready:false}, {auto_disabled:true}, {monitor_stale:true}, {recovering:true}]) {
+    const original = nodes[0];
+    nodes[0] = {...original,...unavailable};
+    assert.deepEqual(choose("INTL",0),["https://yt.example"]);
+    nodes[0] = original;
+  }
+  assert.equal(classifyCountry({country:"CN"}),"CN");
+  assert.equal(classifyCountry({country:"US",colo:"PEK"}),"INTL");
+  for (const country of [undefined,null,"XX","T1","ZZ"]) {
+    assert.equal(classifyCountry({country}),"UNKNOWN");
+  }
+});
+
+test("geo routing uses trusted request metadata instead of country headers", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  resetRoutingConfigCache();
+  try {
+    globalThis.fetch = async (input) => {
+      if (typeof input === "string") return Response.json({nodes:[
+        {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:1,origin_ready:true},
+        {id:"yt-us-01",origin:"https://yt.example",effective_weight:99,origin_ready:true},
+      ]});
+      calls.push(input.url);
+      return new Response(null,{status:401});
+    };
+    const options = {ROUTING_CONFIG_URL:"https://control.example/runtime",GEO_ROUTING_MODE:"on",OVH_GEO_PERCENT:"100"};
+    for (const [country,spoof] of [["CN","US"],["US","CN"]]) {
+      const request = new Request("https://xiaohondou.com/v1/responses",{headers:{"CF-IPCountry":spoof}});
+      Object.defineProperty(request,"cf",{value:{country}});
+      assert.equal((await responsesDispatcher.fetch(request,options)).status,401);
+    }
+    assert.deepEqual(calls,["https://yt.example/v1/responses","https://ovh.example/v1/responses"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetRoutingConfigCache();
+  }
+});
+
+test("shadow mode records the CN pool without moving the actual request", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalRandom = crypto.getRandomValues;
+  const originalLog = console.log;
+  const calls = [], records = [];
+  resetRoutingConfigCache();
+  try {
+    crypto.getRandomValues = (buffer) => buffer.fill(0);
+    console.log = (...args) => records.push(args);
+    globalThis.fetch = async (input) => {
+      if (typeof input === "string") return Response.json({nodes:[
+        {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:1,origin_ready:true},
+        {id:"yt-us-01",origin:"https://yt.example",effective_weight:99,origin_ready:true},
+      ]});
+      calls.push(input.url);
+      return new Response(null,{status:401});
+    };
+    const request = new Request("https://xiaohondou.com/v1/responses");
+    Object.defineProperty(request,"cf",{value:{country:"CN",colo:"SEA"}});
+    const response = await responsesDispatcher.fetch(request, {
+      ROUTING_CONFIG_URL:"https://control.example/runtime",GEO_ROUTING_MODE:"shadow",OVH_GEO_PERCENT:"5",
+    });
+    assert.equal(response.status,401);
+    assert.deepEqual(calls,["https://ovh.example/v1/responses"]);
+    assert.deepEqual(records,[["gateway_geo_shadow",{cohort:"CN",colo:"SEA",selected:"ovh-us-01",proposed:"yt-us-01"}]]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    crypto.getRandomValues = originalRandom;
+    console.log = originalLog;
     resetRoutingConfigCache();
   }
 });
@@ -863,6 +944,7 @@ test("retries a POST on explicit node capacity rejection using the configured fa
               target_weight: 0,
               effective_weight: 0,
               auto_disabled: false,
+              origin_ready: true,
             },
           ],
         },

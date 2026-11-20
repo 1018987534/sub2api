@@ -42,7 +42,7 @@ func TestGatewayRoutingPacketLossContract(t *testing.T) {
 	}))
 	defer server.Close()
 	var settings GatewayRoutingSettings
-	require.NoError(t, json.Unmarshal([]byte(`{"packet_loss_protection_enabled":true,"packet_loss_cooldown_minutes":7,"nodes":[{"id":"yt","origin":"https://yt.example","target_weight":70},{"id":"peer","origin":"https://peer.example","target_weight":30}]}`), &settings))
+	require.NoError(t, json.Unmarshal([]byte(`{"packet_loss_protection_enabled":true,"icmp_pause_mode":"legacy","packet_loss_cooldown_minutes":7,"nodes":[{"id":"yt","origin":"https://yt.example","target_weight":70},{"id":"peer","origin":"https://peer.example","target_weight":30}]}`), &settings))
 	settings.MonitorURL = server.URL
 	svc := NewSettingService(newGatewayRoutingRepoStub(), &config.Config{})
 	svc.gatewayRoutingHTTPClient = server.Client()

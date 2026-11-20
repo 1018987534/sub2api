@@ -40,6 +40,7 @@ type GatewayRoutingSettings struct {
 	TrafficProtectionEnabled    bool                         `json:"traffic_protection_enabled"`
 	HealthProtectionEnabled     bool                         `json:"health_protection_enabled"`
 	PacketLossProtectionEnabled bool                         `json:"packet_loss_protection_enabled"`
+	ICMPPauseMode               string                       `json:"icmp_pause_mode"`
 	PacketLossCooldownMinutes   int                          `json:"packet_loss_cooldown_minutes"`
 	TrafficThresholdPercent     float64                      `json:"traffic_threshold_percent"`
 	OverflowNodeID              string                       `json:"overflow_node_id"`
@@ -95,6 +96,9 @@ type GatewayRoutingNodeRuntime struct {
 	PacketLossPercent     *float64   `json:"packet_loss_percent,omitempty"`
 	PacketLossSampleAt    *time.Time `json:"packet_loss_sample_at,omitempty"`
 	PacketLossPausedUntil *time.Time `json:"packet_loss_paused_until,omitempty"`
+	ICMPProbeState        string     `json:"icmp_probe_state,omitempty"`
+	OriginReady           *bool      `json:"origin_ready,omitempty"`
+	OriginSampleAt        *time.Time `json:"origin_sample_at,omitempty"`
 }
 
 type cachedGatewayRoutingRuntime struct {
@@ -143,6 +147,7 @@ func DefaultGatewayRoutingSettings() *GatewayRoutingSettings {
 		TrafficProtectionEnabled:    true,
 		HealthProtectionEnabled:     true,
 		PacketLossProtectionEnabled: true,
+		ICMPPauseMode:               gatewayICMPObserve,
 		PacketLossCooldownMinutes:   defaultGatewayPacketLossCooldownMinutes,
 		TrafficThresholdPercent:     defaultGatewayRoutingThresholdPercent,
 		Nodes: []GatewayRoutingNodeSettings{
@@ -209,6 +214,10 @@ func normalizeAndValidateGatewayRoutingSettings(settings *GatewayRoutingSettings
 		return errors.New("gateway routing settings are required")
 	}
 	settings.MonitorURL = strings.TrimRight(strings.TrimSpace(settings.MonitorURL), "/")
+	settings.ICMPPauseMode = strings.ToLower(strings.TrimSpace(settings.ICMPPauseMode))
+	if settings.ICMPPauseMode == "" {
+		settings.ICMPPauseMode = gatewayICMPObserve
+	}
 	if settings.PacketLossCooldownMinutes == 0 && !settings.PacketLossProtectionEnabled {
 		settings.PacketLossCooldownMinutes = defaultGatewayPacketLossCooldownMinutes
 	}
@@ -232,6 +241,9 @@ func validateGatewayRoutingSettings(settings *GatewayRoutingSettings) error {
 	}
 	if settings.PacketLossCooldownMinutes < 1 || settings.PacketLossCooldownMinutes > 120 {
 		return errors.New("packet_loss_cooldown_minutes must be between 1 and 120")
+	}
+	if settings.ICMPPauseMode != "" && settings.ICMPPauseMode != gatewayICMPObserve && settings.ICMPPauseMode != gatewayICMPLegacy {
+		return errors.New("icmp_pause_mode must be observe or legacy")
 	}
 	if len(settings.Nodes) == 0 || len(settings.Nodes) > maxGatewayRoutingNodes {
 		return fmt.Errorf("nodes must contain between 1 and %d entries", maxGatewayRoutingNodes)

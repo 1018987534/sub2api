@@ -250,6 +250,16 @@
                   </div>
 
                   <div>
+                    <label for="icmp-pause-mode" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {{ t("admin.settings.gatewayRouting.icmpPauseMode") }}
+                    </label>
+                    <select id="icmp-pause-mode" v-model="gatewayRoutingForm.icmp_pause_mode" class="input max-w-full">
+                      <option value="observe">{{ t("admin.settings.gatewayRouting.icmpObserve") }}</option>
+                      <option value="legacy">{{ t("admin.settings.gatewayRouting.icmpLegacy") }}</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label for="packet-loss-cooldown" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
                       {{ t("admin.settings.gatewayRouting.packetLossCooldown") }}
                     </label>
@@ -9559,6 +9569,7 @@ const gatewayRoutingForm = reactive<GatewayRoutingSettings>({
   traffic_protection_enabled: true,
   health_protection_enabled: true,
   packet_loss_protection_enabled: true,
+  icmp_pause_mode: "observe",
   packet_loss_cooldown_minutes: 5,
   traffic_threshold_percent: 90,
   overflow_node_id: "",
@@ -12614,6 +12625,7 @@ function applyGatewayRoutingResponse(response: {
     response.settings.health_protection_enabled;
   gatewayRoutingForm.packet_loss_protection_enabled =
     response.settings.packet_loss_protection_enabled ?? true;
+  gatewayRoutingForm.icmp_pause_mode = response.settings.icmp_pause_mode ?? "observe";
   gatewayRoutingForm.packet_loss_cooldown_minutes =
     response.settings.packet_loss_cooldown_minutes ?? 5;
   gatewayRoutingForm.traffic_threshold_percent =
@@ -12669,6 +12681,7 @@ async function saveGatewayRoutingSettings() {
           gatewayRoutingForm.health_protection_enabled,
         packet_loss_protection_enabled:
           gatewayRoutingForm.packet_loss_protection_enabled,
+        icmp_pause_mode: gatewayRoutingForm.icmp_pause_mode,
         packet_loss_cooldown_minutes: cooldown,
         traffic_threshold_percent:
           Number(gatewayRoutingForm.traffic_threshold_percent),
@@ -12736,11 +12749,12 @@ function gatewayRoutingPacketLossLabel(nodeID: string): string {
   const node = gatewayRoutingRuntimeByID.value[nodeID];
   if (!node?.packet_loss_state) return "";
   const state = t(`admin.settings.gatewayRouting.packetLossStates.${node.packet_loss_state}`);
-  const percent = node.packet_loss_percent == null ? "" : ` · ${node.packet_loss_percent.toFixed(1)}%`;
-  const until = node.packet_loss_paused_until
+  const percent = node.packet_loss_percent == null ? "" : ` · ICMP ${node.packet_loss_percent.toFixed(1)}%`;
+  const icmp = node.icmp_probe_state === "severe" ? ` · ${t("admin.settings.gatewayRouting.icmpSevere")}` : "";
+  const until = node.packet_loss_paused_until && node.packet_loss_state !== "recovering"
     ? ` · ${t("admin.settings.gatewayRouting.packetLossUntil", { time: new Date(node.packet_loss_paused_until).toLocaleString() })}`
     : "";
-  return `${state}${percent}${until}`;
+  return `${state}${percent}${icmp}${until}`;
 }
 
 function gatewayRoutingStatusClass(nodeID: string): string {

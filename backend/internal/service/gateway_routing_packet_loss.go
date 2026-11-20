@@ -13,6 +13,9 @@ import (
 const (
 	defaultGatewayPacketLossCooldownMinutes = 5
 	gatewayPacketLossStateKey               = "gateway_routing_packet_loss_state"
+	gatewayICMPObserve                      = "observe"
+	gatewayICMPLegacy                       = "legacy"
+	gatewayOriginRecoveryStep               = 30 * time.Second
 )
 
 type gatewayPingTask struct {
@@ -48,9 +51,11 @@ type gatewayPacketLossSignal struct {
 }
 
 type gatewayPacketLossPause struct {
-	Until       time.Time `json:"until"`
-	SampleAt    time.Time `json:"sample_at"`
-	OriginProbe bool      `json:"origin_probe,omitempty"`
+	Until         time.Time  `json:"until"`
+	SampleAt      time.Time  `json:"sample_at"`
+	OriginProbe   bool       `json:"origin_probe,omitempty"`
+	RecoveryStage int        `json:"recovery_stage,omitempty"`
+	RecoverySince *time.Time `json:"recovery_since,omitempty"`
 }
 
 func fetchGatewayPacketLossSignal(ctx context.Context, client *http.Client, baseURL, uuid string, now time.Time) gatewayPacketLossSignal {
@@ -155,8 +160,24 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 		previous = currentCachedGatewayRoutingRuntime(s)
 	}
 	defer func() { s.gatewayRoutingProtectedRuntime = cloneGatewayRoutingRuntime(runtime) }()
+	legacy := settings.ICMPPauseMode == gatewayICMPLegacy
 	for i, configured := range settings.Nodes {
-		resetGatewayPacketLossRuntime(&runtime.Nodes[i], configured)
+		node := &runtime.Nodes[i]
+		resetGatewayPacketLossRuntime(node, configured)
+		signal := signals[configured.ID]
+		if !signal.OriginSampleAt.IsZero() {
+			node.OriginSampleAt = &signal.OriginSampleAt
+			ready := signal.OriginHealthy && !signal.OriginUnhealthy
+			node.OriginReady = &ready
+		}
+		if signal.Fresh {
+			node.ICMPProbeState = "observing"
+			if signal.Severe {
+				node.ICMPProbeState = "severe"
+			} else if signal.Recovered {
+				node.ICMPProbeState = "healthy"
+			}
+		}
 	}
 	base := cloneGatewayRoutingRuntime(runtime)
 	if s.settingRepo == nil {
@@ -182,8 +203,14 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 	healthyPeer := false
 	for i, configured := range settings.Nodes {
 		signal := signals[configured.ID]
-		until := states[stateKey(configured)].Until
-		if !runtime.Nodes[i].AutoDisabled && !runtime.Nodes[i].MonitorStale && !signal.OriginUnhealthy && !(signal.Fresh && signal.Severe) && ((signal.Fresh && signal.Recovered) || signal.OriginHealthy) && !now.Before(until) {
+		pause, stored := states[stateKey(configured)]
+		node := runtime.Nodes[i]
+		if node.AutoDisabled || node.MonitorStale || signal.OriginUnhealthy {
+			continue
+		}
+		if legacy && !(signal.Fresh && signal.Severe) && ((signal.Fresh && signal.Recovered) || signal.OriginHealthy) && !now.Before(pause.Until) {
+			healthyPeer = true
+		} else if !legacy && !stored && signal.OriginHealthy && !signal.OriginSampleAt.IsZero() && (node.EffectiveWeight > 0 || configured.ID == settings.OverflowNodeID) {
 			healthyPeer = true
 		}
 	}
@@ -201,6 +228,14 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 			if signal.Recovered {
 				node.PacketLossState = "healthy"
 			}
+		}
+		if !legacy {
+			key := stateKey(configured)
+			pause, paused := states[key]
+			if pause, retain := applyGatewayOriginHealth(node, settings, signal, pause, paused, healthyPeer, now); retain {
+				next[key] = pause
+			}
+			continue
 		}
 		if !signal.OriginSampleAt.IsZero() && (!signal.Fresh || signal.OriginUnhealthy) {
 			if signal.OriginUnhealthy {
@@ -264,10 +299,62 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 	}
 }
 
+// In observe mode only origin evidence can change routing. This also covers
+// old pauses without provenance: keep their deadline and require fresh readiness.
+func applyGatewayOriginHealth(node *GatewayRoutingNodeRuntime, settings *GatewayRoutingSettings, signal gatewayPacketLossSignal, pause gatewayPacketLossPause, paused, healthyPeer bool, now time.Time) (gatewayPacketLossPause, bool) {
+	node.PacketLossState = "unknown"
+	if signal.OriginHealthy {
+		node.PacketLossState = "healthy"
+	}
+	if signal.OriginUnhealthy {
+		if paused || (!node.AutoDisabled && !node.MonitorStale && healthyPeer) {
+			if !paused || pause.RecoveryStage > 0 || (!now.Before(pause.Until) && signal.OriginSampleAt.After(pause.SampleAt)) {
+				pause = gatewayPacketLossPause{
+					Until:       now.Add(time.Duration(settings.PacketLossCooldownMinutes) * time.Minute),
+					SampleAt:    signal.OriginSampleAt,
+					OriginProbe: true,
+				}
+			}
+			paused = true
+		} else {
+			node.PacketLossState = "no_healthy_peer"
+		}
+	}
+	if !paused {
+		return pause, false
+	}
+	if !signal.OriginUnhealthy && signal.OriginRecovered && signal.OriginSampleAt.After(pause.SampleAt) && !now.Before(pause.Until) && !node.AutoDisabled && !node.MonitorStale {
+		if pause.RecoveryStage == 0 || (pause.RecoverySince != nil && now.Sub(*pause.RecoverySince) >= gatewayOriginRecoveryStep && signal.OriginSampleAt.After(*pause.RecoverySince)) {
+			pause.RecoveryStage++
+			pause.RecoverySince = &now
+		}
+		if pause.RecoveryStage > 3 || node.TargetWeight == 0 {
+			return pause, false
+		}
+	}
+	node.PacketLossPausedUntil = &pause.Until
+	if pause.RecoveryStage >= 1 && pause.RecoveryStage <= 3 && !node.AutoDisabled && !node.MonitorStale {
+		percent := [...]int{5, 25, 50}[pause.RecoveryStage-1]
+		node.EffectiveWeight = (node.EffectiveWeight*percent + 99) / 100
+		node.PacketLossState = "recovering"
+		return pause, true
+	}
+	node.PacketLossState = "paused"
+	if !now.Before(pause.Until) {
+		node.PacketLossState = "awaiting_recovery"
+	}
+	if !node.AutoDisabled {
+		applyAutoDisabledGatewayRoutingNode(node, "packet_loss")
+	}
+	return pause, true
+}
+
 func resetGatewayPacketLossRuntime(node *GatewayRoutingNodeRuntime, configured GatewayRoutingNodeSettings) {
+	wasRecovering := node.PacketLossState == "recovering"
 	node.PacketLossState, node.PacketLossPercent, node.PacketLossSampleAt, node.PacketLossPausedUntil = "", nil, nil, nil
+	node.ICMPProbeState, node.OriginReady, node.OriginSampleAt = "", nil, nil
 	// Independent quota/offline decisions keep their existing priority.
-	if node.AutoDisabledReason == "packet_loss" {
+	if node.AutoDisabledReason == "packet_loss" || (wasRecovering && !node.AutoDisabled) {
 		node.AutoDisabled, node.AutoDisabledReason = false, ""
 		node.EffectiveWeight, node.Status = configured.TargetWeight, "active"
 		if node.MonitorStale {

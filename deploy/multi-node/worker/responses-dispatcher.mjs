@@ -4,6 +4,7 @@ const DEFAULT_VMISS_US_02_PERCENT = 10;
 const DEFAULT_DMIT_US_01_PERCENT = 16;
 const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 1;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
+const OVH_NODE_ID = "ovh-us-01";
 const MAX_INGRESS_ERROR_BODY_BYTES = 8 * 1024;
 const MAX_CLOUDFLARE_520_BODY_BYTES = 32 * 1024;
 const MAX_CLOUDFLARE_502_BODY_BYTES = 32 * 1024;
@@ -151,6 +152,8 @@ function normalizeRuntimeNodes(payload) {
       target_weight: Number.parseInt(node?.target_weight ?? weight, 10),
       auto_disabled: node?.auto_disabled === true,
       monitor_stale: node?.monitor_stale === true,
+      origin_ready: node?.origin_ready === true ? true : node?.origin_ready === false ? false : null,
+      recovering: node?.packet_loss_state === "recovering",
       overflow_fallback:
         node?.overflow_fallback === true || String(node?.id ?? "") === overflowNodeID,
     };
@@ -253,47 +256,35 @@ function weightedNode(nodes, randomSource) {
   return nodes.at(-1) ?? null;
 }
 
-function selectOrigins(env, randomSource = crypto, runtimeNodes = null) {
-  const allNodes = (runtimeNodes ?? staticRoutingNodes(env)).filter((node) => node.origin);
-  const weightedNodes = allNodes.filter((node) => node.effective_weight > 0 && !node.auto_disabled);
-  const fallbackNode = allNodes.find(
-    (node) => node.overflow_fallback && !node.auto_disabled && !node.monitor_stale,
-  );
-  if (weightedNodes.length === 0) {
-    const standbys = allNodes.filter((node) => node.target_weight === 0 && !node.auto_disabled && !node.monitor_stale);
-    // Exhaustion is an explicit availability fallback: healthy zero-weight
-    // standbys first, then every configured origin if none remain usable.
-    const remaining = [...(standbys.length > 0 ? standbys : allNodes)];
-    const origins = [];
-    if (standbys.includes(fallbackNode)) {
-      appendUnique(origins, fallbackNode.origin);
-      remaining.splice(remaining.indexOf(fallbackNode), 1);
+function classifyCountry(cf) {
+  const country = cf?.country;
+  if (country === "CN") return "CN";
+  if (typeof country !== "string" || !/^[A-Z]{2}$/.test(country) || ["XX", "ZZ"].includes(country)) return "UNKNOWN";
+  return "INTL";
+}
+
+function selectOrigins(env, randomSource = crypto, runtimeNodes = null, cohort = "UNKNOWN") {
+  const eligible = (runtimeNodes ?? staticRoutingNodes(env)).filter((node) => node.origin && !node.auto_disabled);
+  const geo = runtimeNodes !== null && cohort !== "UNKNOWN";
+  const nodes = geo ? eligible.filter((node) => node.id !== OVH_NODE_ID) : eligible;
+  const weightedNodes = nodes.filter((node) => node.effective_weight > 0);
+  const fallbackNode = nodes.find((node) => node.overflow_fallback && !node.monitor_stale && !node.recovering && node.origin_ready === true);
+  const origins = [];
+  if (geo && cohort === "INTL") {
+    const ovh = eligible.find((node) => node.id === OVH_NODE_ID && node.effective_weight > 0 && node.origin_ready === true && !node.monitor_stale && !node.recovering);
+    const percent = environmentInteger(env, "OVH_GEO_PERCENT", 0);
+    if (ovh && percent > 0 && randomIndex(randomSource, 100) < percent) {
+      appendUnique(origins, ovh.origin);
     }
-    while (remaining.length > 0) {
-      const [next] = remaining.splice(randomIndex(randomSource, remaining.length), 1);
-      appendUnique(origins, next.origin);
-    }
-    // If every standby rejects admission before accepting a POST, the existing
-    // safe-ingress retry may still try the other configured origins.
-    const emergency = allNodes.filter((node) => !origins.includes(node.origin));
-    while (emergency.length > 0) {
-      const [next] = emergency.splice(randomIndex(randomSource, emergency.length), 1);
-      appendUnique(origins, next.origin);
-    }
-    return origins;
-  }
-  const selectedNode = weightedNode(weightedNodes, randomSource);
-  if (!selectedNode) {
-    return [];
   }
 
-  const origins = [];
-  appendUnique(origins, selectedNode.origin);
+  const selectedNode = weightedNode(weightedNodes, randomSource);
+  appendUnique(origins, selectedNode?.origin);
   if (fallbackNode) {
     appendUnique(origins, fallbackNode.origin);
   }
   const remaining = weightedNodes.filter(
-    (node) => node.origin !== selectedNode.origin && node.origin !== fallbackNode?.origin,
+    (node) => node.origin !== selectedNode?.origin && node.origin !== fallbackNode?.origin,
   );
   while (remaining.length > 0) {
     const next = weightedNode(remaining, randomSource);
@@ -560,11 +551,18 @@ export default {
       );
     }
     const routingWaitMs = Math.max(0, Date.now() - routingStart);
-    const origins = selectOrigins(env, crypto, routingNodes);
+    const mode = environmentValue(env, "GEO_ROUTING_MODE");
+    const cohort = classifyCountry(request.cf);
+    const origins = selectOrigins(env, crypto, routingNodes, mode === "on" ? cohort : "UNKNOWN");
+    if (mode === "shadow" && randomIndex(crypto, 100) < 5) {
+      const proposed = selectOrigins(env, crypto, routingNodes, cohort);
+      const id = (origin) => routingNodes?.find((node) => node.origin === origin)?.id ?? null;
+      console.log("gateway_geo_shadow", {cohort, colo: request.cf?.colo ?? "unknown", selected: id(origins[0]), proposed: id(proposed[0])});
+    }
     if (origins.length === 0) {
       return Response.json(
-        { error: "No routing origin is configured" },
-        { status: 503 },
+        { error: "No routing origin is available" },
+        { status: 503, headers: { "Retry-After": "1", "Cache-Control": "no-store" } },
       );
     }
 
@@ -591,6 +589,7 @@ function resetRoutingConfigCache() {
 }
 
 export {
+  classifyCountry,
   fetchRoutingNodes,
   normalizeRuntimeNodes,
   resetRoutingConfigCache,

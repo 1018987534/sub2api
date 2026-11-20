@@ -87,11 +87,82 @@ func TestGatewayPacketLossProbeWindows(t *testing.T) {
 
 func packetLossSettings() *GatewayRoutingSettings {
 	s := DefaultGatewayRoutingSettings()
+	s.ICMPPauseMode = gatewayICMPLegacy
 	s.Nodes = []GatewayRoutingNodeSettings{
 		{ID: "yt", Origin: "https://yt.example", TargetWeight: 70},
 		{ID: "peer", Origin: "https://peer.example", TargetWeight: 30},
 	}
 	return s
+}
+
+func TestGatewayPacketLossObserveModeUsesOnlyOriginEvidence(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 11, 20, 14, 0, 0, 0, time.UTC)
+	settings := packetLossSettings()
+	settings.ICMPPauseMode = gatewayICMPObserve
+	settings.PacketLossCooldownMinutes = 1
+	repo := newGatewayRoutingRepoStub()
+	svc := NewSettingService(repo, &config.Config{})
+	signals := map[string]gatewayPacketLossSignal{}
+	for _, node := range settings.Nodes {
+		signals[node.ID] = gatewayPacketLossSignal{Fresh: true, Severe: true, Percent: 80, SampleAt: now, OriginHealthy: true, OriginSampleAt: now}
+	}
+	run := func(when time.Time) GatewayRoutingNodeRuntime {
+		r := packetLossRuntime(settings)
+		svc.applyGatewayPacketLossProtection(ctx, settings, r, signals, when)
+		return r.Nodes[0]
+	}
+	node := run(now)
+	require.Equal(t, 70, node.EffectiveWeight)
+	require.Equal(t, "severe", node.ICMPProbeState)
+	require.True(t, *node.OriginReady)
+	require.Equal(t, 80., *node.PacketLossPercent)
+
+	failureAt := now.Add(time.Second)
+	signals["yt"] = gatewayPacketLossSignal{Fresh: true, Recovered: true, OriginUnhealthy: true, OriginSampleAt: failureAt}
+	node = run(failureAt)
+	require.Zero(t, node.EffectiveWeight)
+	require.False(t, *node.OriginReady)
+	require.Equal(t, "packet_loss", node.AutoDisabledReason)
+	deadline := *node.PacketLossPausedUntil
+	require.Equal(t, failureAt.Add(time.Minute), deadline)
+	// Neither a cached health result nor a healthy ICMP sample releases a pause.
+	signals["yt"] = gatewayPacketLossSignal{Fresh: true, Recovered: true, OriginHealthy: true, OriginRecovered: true, OriginSampleAt: now}
+	require.Zero(t, run(deadline).EffectiveWeight)
+	svc = NewSettingService(repo, &config.Config{})
+	signals["yt"] = gatewayPacketLossSignal{Fresh: true, Severe: true, OriginHealthy: true, OriginRecovered: true, OriginSampleAt: deadline}
+	node = run(deadline)
+	require.Equal(t, "recovering", node.PacketLossState)
+	require.Equal(t, 4, node.EffectiveWeight)
+	require.Equal(t, 4, run(deadline.Add(time.Minute)).EffectiveWeight, "cached probes cannot advance the ramp")
+	for i, want := range []int{18, 35, 70} {
+		when := deadline.Add(time.Duration(i+1) * gatewayOriginRecoveryStep)
+		signal := signals["yt"]
+		signal.OriginSampleAt = when
+		signals["yt"] = signal
+		require.Equal(t, want, run(when).EffectiveWeight)
+	}
+	require.Equal(t, "{}", repo.values[gatewayPacketLossStateKey])
+}
+
+func TestGatewayPacketLossObserveModeDoesNotUseZeroWeightOrFailedPeers(t *testing.T) {
+	ctx, now := context.Background(), time.Now().UTC()
+	settings := packetLossSettings()
+	settings.ICMPPauseMode = gatewayICMPObserve
+	settings.Nodes[1].TargetWeight = 0
+	svc := NewSettingService(newGatewayRoutingRepoStub(), &config.Config{})
+	signals := map[string]gatewayPacketLossSignal{
+		"yt":   {OriginUnhealthy: true, OriginSampleAt: now},
+		"peer": {OriginHealthy: true, OriginSampleAt: now},
+	}
+	r := packetLossRuntime(settings)
+	svc.applyGatewayPacketLossProtection(ctx, settings, r, signals, now)
+	require.Equal(t, "no_healthy_peer", r.Nodes[0].PacketLossState)
+	require.Equal(t, 70, r.Nodes[0].EffectiveWeight)
+	settings.OverflowNodeID = "peer"
+	r = packetLossRuntime(settings)
+	svc.applyGatewayPacketLossProtection(ctx, settings, r, signals, now)
+	require.Zero(t, r.Nodes[0].EffectiveWeight)
 }
 
 func packetLossRuntime(settings *GatewayRoutingSettings) *GatewayRoutingRuntime {

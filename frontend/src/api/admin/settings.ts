@@ -1357,6 +1357,7 @@ export interface GatewayRoutingSettings {
   traffic_protection_enabled: boolean;
   health_protection_enabled: boolean;
   packet_loss_protection_enabled: boolean;
+  icmp_pause_mode?: "observe" | "legacy";
   packet_loss_cooldown_minutes: number;
   traffic_threshold_percent: number;
   overflow_node_id: string;
@@ -1390,6 +1391,7 @@ export interface GatewayRoutingNodeRuntime extends GatewayRoutingNodeSettings {
   packet_loss_percent?: number;
   packet_loss_sample_at?: string;
   packet_loss_paused_until?: string;
+  icmp_probe_state?: "observing" | "healthy" | "severe";
 }
 
 export interface GatewayRoutingRuntime {
