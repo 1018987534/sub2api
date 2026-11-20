@@ -16,10 +16,8 @@ const (
 // A terminal declaration wins over an earlier declaration; otherwise the first
 // declaration is retained. Observation never affects the forwarding path.
 //
-// Billing normally ignores the observed model as well; the only exception is a
-// channel explicitly configured with billing_model_source = response_model,
-// where a conflict flag makes billing fall back to the baseline model
-// (see responseModelBillingDeclaration).
+// Upstream pricing modes may compare the observed model's price. A conflict
+// keeps the baseline model (see responseModelBillingDeclaration).
 //
 // The same observer also records the service tier the upstream reports having
 // used (OpenAI service_tier, Anthropic usage.speed). The observed tier stays

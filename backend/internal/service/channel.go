@@ -40,9 +40,8 @@ const (
 	BillingModelSourceRequested     = "requested"
 	BillingModelSourceUpstream      = "upstream"
 	BillingModelSourceChannelMapped = "channel_mapped"
-	// BillingModelSourceResponse bills by a trusted model declaration observed
-	// in the successful upstream response. It is deliberately distinct from
-	// "upstream", which means the model sent to the provider.
+	// BillingModelSourceResponse is the explicit response-pricing mode. Like
+	// "upstream", it compares the sent-model baseline with the observed response.
 	BillingModelSourceResponse = "response_model"
 )
 

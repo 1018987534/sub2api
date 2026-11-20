@@ -11,7 +11,7 @@ import (
 )
 
 // 夹具模型必须同时满足两个条件，否则测的就不是想测的那条规则：
-//  1. 两者价格不同——否则"更便宜才采纳"的断言退化成恒真；
+//  1. 两者价格不同，确保能验证计费取高；
 //  2. 两者都能被 HasIdentifiedTokenPricing 确定性识别（即价格表里的精确条目），
 //     否则请求会先被"响应模型必须可识别"这道更靠前的门挡掉，成本比较根本走不到。
 //
@@ -43,12 +43,12 @@ func orderedResponseBillingModels(t *testing.T, svc *BillingService, tokens Usag
 
 // --- Anthropic gateway (GatewayService.RecordUsage) ---
 
-func TestGatewayServiceRecordUsage_ResponseModelBillsCheaperResponseModel(t *testing.T) {
+func TestGatewayServiceRecordUsage_ResponseModelKeepsPricierBaseline(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{})
 	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50}
-	cheaper, pricier, cheaperCost, _ := orderedResponseBillingModels(t, svc.billingService, tokens, anthropicCheapFixtureModel, anthropicPriceyFixtureModel)
+	cheaper, pricier, _, pricierCost := orderedResponseBillingModels(t, svc.billingService, tokens, anthropicCheapFixtureModel, anthropicPriceyFixtureModel)
 
 	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
 		Result: &ForwardResult{
@@ -71,8 +71,8 @@ func TestGatewayServiceRecordUsage_ResponseModelBillsCheaperResponseModel(t *tes
 
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
-	require.InDelta(t, cheaperCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
-	require.InDelta(t, cheaperCost.ActualCost, userRepo.lastAmount, 1e-12)
+	require.InDelta(t, pricierCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, pricierCost.ActualCost, userRepo.lastAmount, 1e-12)
 	require.True(t, usageRepo.lastLog.ActualCost > 0, "cost must not be zero")
 	// 审计链完整保留：请求/发送模型不因计费切换被改写，响应模型与 mismatch 记录在案。
 	require.Equal(t, pricier, usageRepo.lastLog.Model)
@@ -83,19 +83,19 @@ func TestGatewayServiceRecordUsage_ResponseModelBillsCheaperResponseModel(t *tes
 	require.True(t, *usageRepo.lastLog.UpstreamModelMismatch)
 }
 
-func TestGatewayServiceRecordUsage_ResponseModelRejectsPricierResponseModel(t *testing.T) {
+func TestGatewayServiceRecordUsage_ResponseModelUsesPricierResponse(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{})
 	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50}
-	cheaper, pricier, cheaperCost, _ := orderedResponseBillingModels(t, svc.billingService, tokens, anthropicCheapFixtureModel, anthropicPriceyFixtureModel)
+	cheaper, pricier, _, pricierCost := orderedResponseBillingModels(t, svc.billingService, tokens, anthropicCheapFixtureModel, anthropicPriceyFixtureModel)
 
 	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
 		Result: &ForwardResult{
-			RequestID:             "gateway_response_model_forged_upgrade",
+			RequestID:             "gateway_response_model_upgrade",
 			Usage:                 ClaudeUsage{InputTokens: 100, OutputTokens: 50},
 			Model:                 cheaper,
-			UpstreamResponseModel: pricier, // forged/upgraded declaration must not raise cost
+			UpstreamResponseModel: pricier,
 			Duration:              time.Second,
 		},
 		APIKey:  &APIKey{ID: 501, Quota: 100},
@@ -111,8 +111,8 @@ func TestGatewayServiceRecordUsage_ResponseModelRejectsPricierResponseModel(t *t
 
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
-	require.InDelta(t, cheaperCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
-	require.InDelta(t, cheaperCost.ActualCost, userRepo.lastAmount, 1e-12)
+	require.InDelta(t, pricierCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, pricierCost.ActualCost, userRepo.lastAmount, 1e-12)
 }
 
 func TestGatewayServiceRecordUsage_ResponseModelSafeFallbacks(t *testing.T) {
@@ -183,12 +183,12 @@ func TestGatewayServiceRecordUsage_ResponseModelSafeFallbacks(t *testing.T) {
 
 // --- OpenAI gateway (OpenAIGatewayService.RecordUsage) ---
 
-func TestOpenAIGatewayServiceRecordUsage_ResponseModelBillsCheaperResponseModel(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_ResponseModelKeepsPricierBaseline(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
 	tokens := UsageTokens{InputTokens: 20, OutputTokens: 10}
-	cheaper, pricier, cheaperCost, _ := orderedResponseBillingModels(t, svc.billingService, tokens, openAICheapFixtureModel, openAIPriceyFixtureModel)
+	cheaper, pricier, _, pricierCost := orderedResponseBillingModels(t, svc.billingService, tokens, openAICheapFixtureModel, openAIPriceyFixtureModel)
 
 	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{
@@ -212,8 +212,8 @@ func TestOpenAIGatewayServiceRecordUsage_ResponseModelBillsCheaperResponseModel(
 
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
-	require.InDelta(t, cheaperCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
-	require.InDelta(t, cheaperCost.ActualCost, userRepo.lastAmount, 1e-12)
+	require.InDelta(t, pricierCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, pricierCost.ActualCost, userRepo.lastAmount, 1e-12)
 	require.True(t, usageRepo.lastLog.ActualCost > 0, "cost must not be zero")
 	// 审计链完整保留。
 	require.Equal(t, pricier, usageRepo.lastLog.Model)
@@ -223,16 +223,16 @@ func TestOpenAIGatewayServiceRecordUsage_ResponseModelBillsCheaperResponseModel(
 	require.True(t, *usageRepo.lastLog.UpstreamModelMismatch)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_ResponseModelRejectsPricierResponseModel(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_ResponseModelUsesPricierResponse(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{}, nil)
 	tokens := UsageTokens{InputTokens: 20, OutputTokens: 10}
-	cheaper, pricier, cheaperCost, _ := orderedResponseBillingModels(t, svc.billingService, tokens, openAICheapFixtureModel, openAIPriceyFixtureModel)
+	cheaper, pricier, _, pricierCost := orderedResponseBillingModels(t, svc.billingService, tokens, openAICheapFixtureModel, openAIPriceyFixtureModel)
 
 	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{
-			RequestID:             "openai_response_model_forged_upgrade",
+			RequestID:             "openai_response_model_upgrade",
 			Model:                 cheaper,
 			UpstreamModel:         cheaper,
 			UpstreamResponseModel: pricier,
@@ -252,8 +252,8 @@ func TestOpenAIGatewayServiceRecordUsage_ResponseModelRejectsPricierResponseMode
 
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
-	require.InDelta(t, cheaperCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
-	require.InDelta(t, cheaperCost.ActualCost, userRepo.lastAmount, 1e-12)
+	require.InDelta(t, pricierCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
+	require.InDelta(t, pricierCost.ActualCost, userRepo.lastAmount, 1e-12)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_ResponseModelSafeFallbacks(t *testing.T) {
@@ -338,7 +338,7 @@ func TestResponseModelBillingDeclaration(t *testing.T) {
 		{name: "opted_in_and_clean", source: BillingModelSourceResponse, model: " claude-sonnet-4 ", want: "claude-sonnet-4"},
 		{name: "other_source_never_looks_at_response", source: BillingModelSourceChannelMapped, model: "claude-sonnet-4"},
 		{name: "empty_source_never_looks_at_response", source: "", model: "claude-sonnet-4"},
-		{name: "upstream_source_never_looks_at_response", source: BillingModelSourceUpstream, model: "claude-sonnet-4"},
+		{name: "upstream_source_considers_response", source: BillingModelSourceUpstream, model: "claude-sonnet-4", want: "claude-sonnet-4"},
 		{name: "in_stream_conflict_rejected", source: BillingModelSourceResponse, model: "claude-sonnet-4", conflict: true},
 		{name: "media_billed_request_rejected", source: BillingModelSourceResponse, model: "claude-sonnet-4", mediaBilled: true},
 		{name: "blank_declaration_rejected", source: BillingModelSourceResponse, model: "   "},
@@ -473,22 +473,19 @@ func TestResponseModelBillingAdoptable(t *testing.T) {
 		responseChannelPriced bool
 		want                  bool
 	}{
-		// 1. 不得更贵
-		{name: "cheaper_adopted", baseline: cost(1), response: cost(0.5), want: true},
-		{name: "equal_adopted", baseline: cost(1), response: cost(1), want: true},
-		{name: "float_noise_within_epsilon_adopted", baseline: cost(1), response: cost(1 + 1e-13), want: true},
-		{name: "pricier_rejected", baseline: cost(1), response: cost(1.0001)},
-
-		// 2. 不得把一笔本应计费的请求归零（价格表里有显式写 0 的条目，能通过确定性识别）
+		{name: "cheaper_keeps_baseline", baseline: cost(1), response: cost(0.5)},
+		{name: "equal_keeps_baseline", baseline: cost(1), response: cost(1)},
+		{name: "float_noise_keeps_baseline", baseline: cost(1), response: cost(1 + 1e-13)},
+		{name: "pricier_adopted", baseline: cost(1), response: cost(1.0001), want: true},
+		{name: "compares_customer_cost_not_standard_cost", baseline: &CostBreakdown{TotalCost: 20, ActualCost: 1}, response: cost(2), want: true},
 		{name: "zeroing_a_billable_request_rejected", baseline: cost(1), response: cost(0)},
 		{name: "negative_cost_rejected_as_zeroing", baseline: cost(1), response: cost(-1)},
-		{name: "already_zero_baseline_unaffected", baseline: cost(0), response: cost(0), want: true},
-
-		// 3. 不得从渠道定价跨到全局价格表（否则渠道加价被带日期的自报模型名绕过）
-		{name: "channel_priced_baseline_to_global_rejected", baseline: cost(1), response: cost(0.5), baselineChannelPriced: true},
-		{name: "channel_priced_on_both_sides_adopted", baseline: cost(1), response: cost(0.5), baselineChannelPriced: true, responseChannelPriced: true, want: true},
-		{name: "global_baseline_to_channel_priced_adopted", baseline: cost(1), response: cost(0.5), responseChannelPriced: true, want: true},
-
+		{name: "already_zero_baseline_unaffected", baseline: cost(0), response: cost(0)},
+		{name: "channel_priced_baseline_to_global_rejected", baseline: cost(1), response: cost(2), baselineChannelPriced: true},
+		{name: "channel_priced_on_both_sides_adopted", baseline: cost(1), response: cost(2), baselineChannelPriced: true, responseChannelPriced: true, want: true},
+		{name: "global_baseline_to_channel_priced_adopted", baseline: cost(1), response: cost(2), responseChannelPriced: true, want: true},
+		{name: "per_request_baseline_rejected", baseline: &CostBreakdown{BillingMode: string(BillingModePerRequest), ActualCost: 1}, response: cost(2)},
+		{name: "per_request_response_rejected", baseline: cost(1), response: &CostBreakdown{BillingMode: string(BillingModePerRequest), ActualCost: 2}},
 		{name: "nil_baseline_rejected", response: cost(0.5)},
 		{name: "nil_response_rejected", baseline: cost(1)},
 	}
@@ -640,7 +637,7 @@ func TestGrokResponseAuditDefaultSourceKeepsCost(t *testing.T) {
 	}
 }
 
-func TestGrokResponseAuditResponseModelRejectsUnknownHigherAndConflict(t *testing.T) {
+func TestGrokResponseAuditResponseModelUsesEligibleHigherPrice(t *testing.T) {
 	tokens := UsageTokens{InputTokens: 20, OutputTokens: 10}
 	record := func(t *testing.T, baseline, responseModel string, conflict bool) float64 {
 		t.Helper()
@@ -694,7 +691,7 @@ func TestGrokResponseAuditResponseModelRejectsUnknownHigherAndConflict(t *testin
 		require.NoError(t, err)
 		require.Greater(t, fasterCost.TotalCost, baselineCost.TotalCost)
 
-		require.InDelta(t, record(t, "grok-4.7", "", false), record(t, "grok-4.7", "grok-4.7-fast", false), 1e-12)
+		require.InDelta(t, record(t, "grok-4.7-fast", "", false), record(t, "grok-4.7", "grok-4.7-fast", false), 1e-12)
 	})
 
 	t.Run("conflict", func(t *testing.T) {
@@ -706,7 +703,7 @@ func TestGrokResponseAuditResponseModelRejectsUnknownHigherAndConflict(t *testin
 		require.NoError(t, err)
 		require.Less(t, cheaperCost.TotalCost, baselineCost.TotalCost)
 
-		require.InDelta(t, record(t, "grok-4.7", "", false), record(t, "grok-4.7", "grok-4.3", true), 1e-12)
+		require.InDelta(t, record(t, "grok-4.3", "", false), record(t, "grok-4.3", "grok-4.7", true), 1e-12)
 	})
 }
 
