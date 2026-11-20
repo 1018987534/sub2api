@@ -273,18 +273,18 @@ test("exhausted standby admission never retries against a paused node", async ()
   }
 });
 
-test("geo cohorts limit OVH to verified overseas canary traffic", () => {
+test("only eligible overseas requests use the live OVH share", () => {
   const nodes = normalizeRuntimeNodes({nodes:[
-    {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:1,origin_ready:true},
-    {id:"yt-us-01",origin:"https://yt.example",effective_weight:99,origin_ready:true},
+    {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:0,ovh_geo_effective_percent:5,origin_ready:true},
+    {id:"yt-us-01",origin:"https://yt.example",effective_weight:100,origin_ready:true},
   ]});
-  const choose = (cohort, roll) => selectOrigins({OVH_GEO_PERCENT:"5"}, {
+  const choose = (cohort, roll) => selectOrigins({}, {
     getRandomValues(a) { a[0]=roll; return a; },
   }, nodes, cohort);
   assert.deepEqual(choose("CN",0),["https://yt.example"]);
   assert.deepEqual(choose("INTL",4),["https://ovh.example","https://yt.example"]);
   assert.deepEqual(choose("INTL",5),["https://yt.example"]);
-  assert.equal(choose("UNKNOWN",0)[0],"https://ovh.example");
+  assert.deepEqual(choose("UNKNOWN",0),["https://yt.example"]);
   for (const unavailable of [{origin_ready:null}, {origin_ready:false}, {auto_disabled:true}, {monitor_stale:true}, {recovering:true}]) {
     const original = nodes[0];
     nodes[0] = {...original,...unavailable};
@@ -298,6 +298,17 @@ test("geo cohorts limit OVH to verified overseas canary traffic", () => {
   }
 });
 
+test("OVH never enters the ordinary pool or its fallback", () => {
+  const onlyOVH = normalizeRuntimeNodes({overflow_node_id:"ovh-us-01", nodes:[
+    {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:42,ovh_geo_effective_percent:100,origin_ready:true},
+  ]});
+  const rng = {getRandomValues(a) {return a.fill(99);}};
+  for (const cohort of ["CN", "UNKNOWN"]) {
+    assert.deepEqual(selectOrigins({},rng,onlyOVH,cohort),[]);
+  }
+  assert.deepEqual(selectOrigins({},rng,onlyOVH,"INTL"),["https://ovh.example"]);
+});
+
 test("geo routing uses trusted request metadata instead of country headers", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -305,54 +316,54 @@ test("geo routing uses trusted request metadata instead of country headers", asy
   try {
     globalThis.fetch = async (input) => {
       if (typeof input === "string") return Response.json({nodes:[
-        {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:1,origin_ready:true},
-        {id:"yt-us-01",origin:"https://yt.example",effective_weight:99,origin_ready:true},
+        {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:0,ovh_geo_effective_percent:100,origin_ready:true},
+        {id:"yt-us-01",origin:"https://yt.example",effective_weight:100,origin_ready:true},
       ]});
       calls.push(input.url);
       return new Response(null,{status:401});
     };
-    const options = {ROUTING_CONFIG_URL:"https://control.example/runtime",GEO_ROUTING_MODE:"on",OVH_GEO_PERCENT:"100"};
-    for (const [country,spoof] of [["CN","US"],["US","CN"]]) {
+    const options = {ROUTING_CONFIG_URL:"https://control.example/runtime"};
+    for (const [country,spoof] of [["CN","US"],["US","CN"],[undefined,"US"]]) {
       const request = new Request("https://xiaohondou.com/v1/responses",{headers:{"CF-IPCountry":spoof}});
       Object.defineProperty(request,"cf",{value:{country}});
       assert.equal((await responsesDispatcher.fetch(request,options)).status,401);
     }
-    assert.deepEqual(calls,["https://yt.example/v1/responses","https://ovh.example/v1/responses"]);
+    assert.deepEqual(calls,["https://yt.example/v1/responses","https://ovh.example/v1/responses","https://yt.example/v1/responses"]);
   } finally {
     globalThis.fetch = originalFetch;
     resetRoutingConfigCache();
   }
 });
 
-test("shadow mode records the CN pool without moving the actual request", async () => {
+test("Worker applies updated runtime shares after cache refresh, not old environment flags", async () => {
   const originalFetch = globalThis.fetch;
-  const originalRandom = crypto.getRandomValues;
-  const originalLog = console.log;
-  const calls = [], records = [];
+  const originalNow = Date.now;
+  let now = originalNow();
+  let geoShare;
+  const calls = [];
   resetRoutingConfigCache();
   try {
-    crypto.getRandomValues = (buffer) => buffer.fill(0);
-    console.log = (...args) => records.push(args);
+    Date.now = () => now;
     globalThis.fetch = async (input) => {
-      if (typeof input === "string") return Response.json({nodes:[
-        {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:1,origin_ready:true},
+      if (typeof input === "string") return Response.json({data:{nodes:[
+        {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:1,ovh_geo_effective_percent:geoShare,origin_ready:true},
         {id:"yt-us-01",origin:"https://yt.example",effective_weight:99,origin_ready:true},
-      ]});
+      ]}});
       calls.push(input.url);
       return new Response(null,{status:401});
     };
-    const request = new Request("https://xiaohondou.com/v1/responses");
-    Object.defineProperty(request,"cf",{value:{country:"CN",colo:"SEA"}});
-    const response = await responsesDispatcher.fetch(request, {
-      ROUTING_CONFIG_URL:"https://control.example/runtime",GEO_ROUTING_MODE:"shadow",OVH_GEO_PERCENT:"5",
-    });
-    assert.equal(response.status,401);
-    assert.deepEqual(calls,["https://ovh.example/v1/responses"]);
-    assert.deepEqual(records,[["gateway_geo_shadow",{cohort:"CN",colo:"SEA",selected:"ovh-us-01",proposed:"yt-us-01"}]]);
+    const workerEnv = {ROUTING_CONFIG_URL:"https://control.example/runtime",OVH_GEO_PERCENT:"100"};
+    for (const percent of [undefined, 100, 0, "100", 101, -1, 10.5]) {
+      geoShare = percent;
+      const request = new Request("https://xiaohondou.com/v1/responses");
+      Object.defineProperty(request,"cf",{value:{country:"US"}});
+      assert.equal((await responsesDispatcher.fetch(request, workerEnv)).status,401);
+      assert.equal(calls.at(-1), `https://${percent === 100 ? "ovh" : "yt"}.example/v1/responses`);
+      now += 1001;
+    }
   } finally {
     globalThis.fetch = originalFetch;
-    crypto.getRandomValues = originalRandom;
-    console.log = originalLog;
+    Date.now = originalNow;
     resetRoutingConfigCache();
   }
 });

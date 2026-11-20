@@ -320,7 +320,7 @@
 				  </label>
 				  <select v-model="gatewayRoutingForm.overflow_node_id" class="input w-full">
 					<option value="">{{ t("admin.settings.gatewayRouting.overflowRandom") }}</option>
-					<option v-for="node in gatewayRoutingForm.nodes" :key="node.id" :value="node.id">
+					<option v-for="node in gatewayRoutingStandardNodes" :key="node.id" :value="node.id">
 					  {{ node.id }}
 					</option>
 				  </select>
@@ -357,7 +357,7 @@
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-700 dark:bg-dark-900">
-                      <tr v-for="node in gatewayRoutingForm.nodes" :key="node.id">
+                      <tr v-for="node in gatewayRoutingStandardNodes" :key="node.id">
                         <td class="px-4 py-3">
                           <div class="font-medium text-gray-900 dark:text-white">{{ node.id }}</div>
                           <div class="max-w-xs truncate font-mono text-xs text-gray-400" :title="node.origin">
@@ -429,11 +429,62 @@
                   <span class="font-mono font-semibold">{{ gatewayRoutingTargetWeightTotal }}%</span>
                 </div>
 
+                <section v-if="gatewayRoutingOVHNode" aria-labelledby="gateway-ovh-heading" class="border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 id="gateway-ovh-heading" class="font-medium text-gray-900 dark:text-white">
+                      {{ gatewayRoutingOVHNode.id }} · {{ t("admin.settings.gatewayRouting.ovhOnly") }}
+                    </h3>
+                    <span :class="gatewayRoutingStatusClass(gatewayRoutingOVHNodeID)">
+                      {{ gatewayRoutingStatusLabel(gatewayRoutingOVHNodeID) }}
+                    </span>
+                  </div>
+                  <div class="mt-1 break-all font-mono text-xs text-gray-500 dark:text-gray-400">{{ gatewayRoutingOVHNode.origin }}</div>
+                  <div class="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    <div>
+                      <label for="gateway-ovh-geo-percent" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.gatewayRouting.ovhGeoPercent") }}
+                      </label>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <input
+                          id="gateway-ovh-geo-percent"
+                          v-model.number="gatewayRoutingForm.ovh_geo_percent"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          :title="t('admin.settings.gatewayRouting.ovhGeoPercentHint')"
+                          aria-describedby="gateway-ovh-geo-percent-effective"
+                          class="input w-24"
+                        />
+                        <span class="text-sm text-gray-500">%</span>
+                        <span id="gateway-ovh-geo-percent-effective" class="text-sm text-gray-600 dark:text-gray-400">
+                          {{ t("admin.settings.gatewayRouting.effectiveWeight") }}:
+                          {{ gatewayRoutingOVHEffectivePercent == null ? "-" : `${gatewayRoutingOVHEffectivePercent}%` }}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <label for="gateway-ovh-concurrency" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        {{ t("admin.settings.gatewayRouting.maxConcurrency") }}
+                      </label>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <input id="gateway-ovh-concurrency" v-model.number="gatewayRoutingOVHNode.max_concurrency" type="number" min="0" max="100000" step="1" class="input w-24" />
+                        <span class="text-sm text-gray-600 dark:text-gray-400">{{ gatewayRoutingConcurrencyLabel(gatewayRoutingOVHNodeID) }}</span>
+                      </div>
+                    </div>
+                    <div class="text-sm text-gray-600 dark:text-gray-400">
+                      <p>{{ t("admin.settings.gatewayRouting.traffic") }}: {{ gatewayRoutingTrafficLabel(gatewayRoutingOVHNodeID) }}</p>
+                      <p class="mt-1">{{ gatewayRoutingPacketLossLabel(gatewayRoutingOVHNodeID) }}</p>
+                    </div>
+                  </div>
+                </section>
+
                 <div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-4 dark:border-dark-700">
                   <p class="text-xs text-gray-500 dark:text-gray-400">
                     {{ t("admin.settings.gatewayRouting.weightHint") }}
                   </p>
                   <button
+                    id="gateway-routing-save"
                     type="button"
                     class="btn btn-primary btn-sm"
                     :disabled="gatewayRoutingSaving || gatewayRoutingTargetWeightTotal !== 100"
@@ -9564,6 +9615,7 @@ const ollamaCloudUsageForm = reactive({
 
 const gatewayRoutingLoading = ref(true);
 const gatewayRoutingSaving = ref(false);
+const gatewayRoutingOVHNodeID = "ovh-us-01";
 const gatewayRoutingForm = reactive<GatewayRoutingSettings>({
   monitor_url: "",
   traffic_protection_enabled: true,
@@ -9573,6 +9625,7 @@ const gatewayRoutingForm = reactive<GatewayRoutingSettings>({
   packet_loss_cooldown_minutes: 5,
   traffic_threshold_percent: 90,
   overflow_node_id: "",
+  ovh_geo_percent: 0,
   nodes: [],
 });
 const gatewayRoutingRuntime = ref<GatewayRoutingRuntime | null>(null);
@@ -9582,8 +9635,17 @@ const gatewayRoutingRuntimeByID = computed<Record<string, GatewayRoutingNodeRunt
       (gatewayRoutingRuntime.value?.nodes || []).map((node) => [node.id, node]),
     ),
 );
+const gatewayRoutingOVHNode = computed(() =>
+  gatewayRoutingForm.nodes.find((node) => node.id === gatewayRoutingOVHNodeID),
+);
+const gatewayRoutingStandardNodes = computed(() =>
+  gatewayRoutingForm.nodes.filter((node) => node.id !== gatewayRoutingOVHNodeID),
+);
+const gatewayRoutingOVHEffectivePercent = computed(() =>
+  gatewayRoutingRuntimeByID.value[gatewayRoutingOVHNodeID]?.ovh_geo_effective_percent,
+);
 const gatewayRoutingTargetWeightTotal = computed(() =>
-  gatewayRoutingForm.nodes.reduce((total, node) => {
+  gatewayRoutingStandardNodes.value.reduce((total, node) => {
     const weight = Number(node.target_weight);
     return total + (Number.isFinite(weight) ? weight : 0);
   }, 0),
@@ -12630,7 +12692,8 @@ function applyGatewayRoutingResponse(response: {
     response.settings.packet_loss_cooldown_minutes ?? 5;
   gatewayRoutingForm.traffic_threshold_percent =
     response.settings.traffic_threshold_percent;
-	gatewayRoutingForm.overflow_node_id = response.settings.overflow_node_id || "";
+	gatewayRoutingForm.overflow_node_id = response.settings.overflow_node_id === gatewayRoutingOVHNodeID ? "" : response.settings.overflow_node_id || "";
+  gatewayRoutingForm.ovh_geo_percent = response.settings.ovh_geo_percent ?? 0;
 	gatewayRoutingForm.nodes = response.settings.nodes.map((node) => ({
 	  ...node,
 	  max_concurrency: Number(node.max_concurrency) || 0,
@@ -12662,6 +12725,11 @@ async function saveGatewayRoutingSettings() {
     appStore.showError(t("admin.settings.gatewayRouting.packetLossCooldownError"));
     return;
   }
+  const ovhPercent = gatewayRoutingForm.ovh_geo_percent;
+  if (!Number.isInteger(ovhPercent) || ovhPercent < 0 || ovhPercent > 100) {
+    appStore.showError(t("admin.settings.gatewayRouting.ovhGeoPercentError"));
+    return;
+  }
   if (gatewayRoutingTargetWeightTotal.value !== 100) {
     appStore.showError(
       t("admin.settings.gatewayRouting.targetTotalError", {
@@ -12686,10 +12754,11 @@ async function saveGatewayRoutingSettings() {
         traffic_threshold_percent:
           Number(gatewayRoutingForm.traffic_threshold_percent),
 		overflow_node_id: gatewayRoutingForm.overflow_node_id,
+        ovh_geo_percent: ovhPercent,
         nodes: gatewayRoutingForm.nodes.map((node) => ({
           id: node.id,
           origin: node.origin,
-          target_weight: Number(node.target_weight),
+          ...(node.id === gatewayRoutingOVHNodeID ? {} : { target_weight: Number(node.target_weight) }),
           max_concurrency: Number(node.max_concurrency) || 0,
         })),
       }),
@@ -12742,6 +12811,9 @@ function gatewayRoutingConcurrencyLabel(nodeID: string): string {
 
 function gatewayRoutingStatusLabel(nodeID: string): string {
   const status = gatewayRoutingRuntimeByID.value[nodeID]?.status || "monitor_stale";
+  if (nodeID === gatewayRoutingOVHNodeID && status === "manual_disabled") {
+    return t("admin.settings.gatewayRouting.ovhGeoDisabled");
+  }
   return t(`admin.settings.gatewayRouting.statuses.${status}`);
 }
 

@@ -1348,7 +1348,7 @@ export async function updateOverloadCooldownSettings(
 export interface GatewayRoutingNodeSettings {
   id: string;
   origin: string;
-  target_weight: number;
+  target_weight?: number;
   max_concurrency: number;
 }
 
@@ -1361,11 +1361,13 @@ export interface GatewayRoutingSettings {
   packet_loss_cooldown_minutes: number;
   traffic_threshold_percent: number;
   overflow_node_id: string;
+  ovh_geo_percent: number;
   nodes: GatewayRoutingNodeSettings[];
 }
 
 export interface GatewayRoutingNodeRuntime extends GatewayRoutingNodeSettings {
   effective_weight: number;
+  ovh_geo_effective_percent?: number;
   current_concurrency: number | null;
   overflow_fallback: boolean;
   auto_disabled: boolean;

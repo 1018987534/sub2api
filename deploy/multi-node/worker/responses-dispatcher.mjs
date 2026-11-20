@@ -150,6 +150,10 @@ function normalizeRuntimeNodes(payload) {
       origin,
       effective_weight: weight,
       target_weight: Number.parseInt(node?.target_weight ?? weight, 10),
+      ovh_geo_effective_percent:
+        Number.isInteger(node?.ovh_geo_effective_percent) &&
+        node.ovh_geo_effective_percent >= 0 && node.ovh_geo_effective_percent <= 100
+          ? node.ovh_geo_effective_percent : 0,
       auto_disabled: node?.auto_disabled === true,
       monitor_stale: node?.monitor_stale === true,
       origin_ready: node?.origin_ready === true ? true : node?.origin_ready === false ? false : null,
@@ -265,14 +269,13 @@ function classifyCountry(cf) {
 
 function selectOrigins(env, randomSource = crypto, runtimeNodes = null, cohort = "UNKNOWN") {
   const eligible = (runtimeNodes ?? staticRoutingNodes(env)).filter((node) => node.origin && !node.auto_disabled);
-  const geo = runtimeNodes !== null && cohort !== "UNKNOWN";
-  const nodes = geo ? eligible.filter((node) => node.id !== OVH_NODE_ID) : eligible;
+  const nodes = eligible.filter((node) => node.id !== OVH_NODE_ID);
   const weightedNodes = nodes.filter((node) => node.effective_weight > 0);
   const fallbackNode = nodes.find((node) => node.overflow_fallback && !node.monitor_stale && !node.recovering && node.origin_ready === true);
   const origins = [];
-  if (geo && cohort === "INTL") {
-    const ovh = eligible.find((node) => node.id === OVH_NODE_ID && node.effective_weight > 0 && node.origin_ready === true && !node.monitor_stale && !node.recovering);
-    const percent = environmentInteger(env, "OVH_GEO_PERCENT", 0);
+  if (runtimeNodes !== null && cohort === "INTL") {
+    const ovh = eligible.find((node) => node.id === OVH_NODE_ID && node.origin_ready === true && !node.monitor_stale && !node.recovering);
+    const percent = ovh?.ovh_geo_effective_percent ?? 0;
     if (ovh && percent > 0 && randomIndex(randomSource, 100) < percent) {
       appendUnique(origins, ovh.origin);
     }
@@ -551,14 +554,8 @@ export default {
       );
     }
     const routingWaitMs = Math.max(0, Date.now() - routingStart);
-    const mode = environmentValue(env, "GEO_ROUTING_MODE");
     const cohort = classifyCountry(request.cf);
-    const origins = selectOrigins(env, crypto, routingNodes, mode === "on" ? cohort : "UNKNOWN");
-    if (mode === "shadow" && randomIndex(crypto, 100) < 5) {
-      const proposed = selectOrigins(env, crypto, routingNodes, cohort);
-      const id = (origin) => routingNodes?.find((node) => node.origin === origin)?.id ?? null;
-      console.log("gateway_geo_shadow", {cohort, colo: request.cf?.colo ?? "unknown", selected: id(origins[0]), proposed: id(proposed[0])});
-    }
+    const origins = selectOrigins(env, crypto, routingNodes, cohort);
     if (origins.length === 0) {
       return Response.json(
         { error: "No routing origin is available" },

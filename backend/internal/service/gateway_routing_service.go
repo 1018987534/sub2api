@@ -29,6 +29,7 @@ const (
 	maxGatewayRoutingNodes                = 16
 	maxGatewayRoutingWeight               = 100
 	maxGatewayRoutingConcurrency          = 100000
+	gatewayRoutingOVHNodeID               = "ovh-us-01"
 )
 
 var gatewayRoutingNodeIDPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
@@ -44,6 +45,7 @@ type GatewayRoutingSettings struct {
 	PacketLossCooldownMinutes   int                          `json:"packet_loss_cooldown_minutes"`
 	TrafficThresholdPercent     float64                      `json:"traffic_threshold_percent"`
 	OverflowNodeID              string                       `json:"overflow_node_id"`
+	OVHGeoPercent               int                          `json:"ovh_geo_percent"`
 	Nodes                       []GatewayRoutingNodeSettings `json:"nodes"`
 }
 
@@ -61,6 +63,18 @@ type GatewayRoutingNodeSettings struct {
 	MaxConcurrency int    `json:"max_concurrency"`
 }
 
+func (node GatewayRoutingNodeSettings) MarshalJSON() ([]byte, error) {
+	type nodeJSON GatewayRoutingNodeSettings
+	// An overseas-only node has no pool weight. Zero remains meaningful elsewhere.
+	if node.ID == gatewayRoutingOVHNodeID {
+		return json.Marshal(struct {
+			nodeJSON
+			TargetWeight *int `json:"target_weight,omitempty"`
+		}{nodeJSON: nodeJSON(node)})
+	}
+	return json.Marshal(nodeJSON(node))
+}
+
 // GatewayRoutingRuntime is the read-only configuration consumed by the edge
 // dispatcher and displayed in the administrator settings page.
 type GatewayRoutingRuntime struct {
@@ -75,30 +89,31 @@ type GatewayRoutingRuntime struct {
 }
 
 type GatewayRoutingNodeRuntime struct {
-	ID                    string     `json:"id"`
-	Origin                string     `json:"origin"`
-	TargetWeight          int        `json:"target_weight"`
-	EffectiveWeight       int        `json:"effective_weight"`
-	MaxConcurrency        int        `json:"max_concurrency"`
-	CurrentConcurrency    *int       `json:"current_concurrency"`
-	OverflowFallback      bool       `json:"overflow_fallback"`
-	AutoDisabled          bool       `json:"auto_disabled"`
-	AutoDisabledReason    string     `json:"auto_disabled_reason,omitempty"`
-	Status                string     `json:"status"`
-	TrafficLimitBytes     int64      `json:"traffic_limit_bytes"`
-	TrafficUsedBytes      int64      `json:"traffic_used_bytes"`
-	TrafficUsagePercent   *float64   `json:"traffic_usage_percent"`
-	TrafficLimitType      string     `json:"traffic_limit_type,omitempty"`
-	Unlimited             bool       `json:"unlimited"`
-	MonitorStale          bool       `json:"monitor_stale"`
-	MonitorSampleAt       *time.Time `json:"monitor_sample_at,omitempty"`
-	PacketLossState       string     `json:"packet_loss_state,omitempty"`
-	PacketLossPercent     *float64   `json:"packet_loss_percent,omitempty"`
-	PacketLossSampleAt    *time.Time `json:"packet_loss_sample_at,omitempty"`
-	PacketLossPausedUntil *time.Time `json:"packet_loss_paused_until,omitempty"`
-	ICMPProbeState        string     `json:"icmp_probe_state,omitempty"`
-	OriginReady           *bool      `json:"origin_ready,omitempty"`
-	OriginSampleAt        *time.Time `json:"origin_sample_at,omitempty"`
+	ID                     string     `json:"id"`
+	Origin                 string     `json:"origin"`
+	TargetWeight           int        `json:"target_weight"`
+	EffectiveWeight        int        `json:"effective_weight"`
+	OVHGeoEffectivePercent *int       `json:"ovh_geo_effective_percent,omitempty"`
+	MaxConcurrency         int        `json:"max_concurrency"`
+	CurrentConcurrency     *int       `json:"current_concurrency"`
+	OverflowFallback       bool       `json:"overflow_fallback"`
+	AutoDisabled           bool       `json:"auto_disabled"`
+	AutoDisabledReason     string     `json:"auto_disabled_reason,omitempty"`
+	Status                 string     `json:"status"`
+	TrafficLimitBytes      int64      `json:"traffic_limit_bytes"`
+	TrafficUsedBytes       int64      `json:"traffic_used_bytes"`
+	TrafficUsagePercent    *float64   `json:"traffic_usage_percent"`
+	TrafficLimitType       string     `json:"traffic_limit_type,omitempty"`
+	Unlimited              bool       `json:"unlimited"`
+	MonitorStale           bool       `json:"monitor_stale"`
+	MonitorSampleAt        *time.Time `json:"monitor_sample_at,omitempty"`
+	PacketLossState        string     `json:"packet_loss_state,omitempty"`
+	PacketLossPercent      *float64   `json:"packet_loss_percent,omitempty"`
+	PacketLossSampleAt     *time.Time `json:"packet_loss_sample_at,omitempty"`
+	PacketLossPausedUntil  *time.Time `json:"packet_loss_paused_until,omitempty"`
+	ICMPProbeState         string     `json:"icmp_probe_state,omitempty"`
+	OriginReady            *bool      `json:"origin_ready,omitempty"`
+	OriginSampleAt         *time.Time `json:"origin_sample_at,omitempty"`
 }
 
 type cachedGatewayRoutingRuntime struct {
@@ -177,6 +192,9 @@ func (s *SettingService) GetGatewayRoutingSettings(ctx context.Context) (*Gatewa
 			return nil, fmt.Errorf("parse gateway routing settings: %w", err)
 		}
 	}
+	if settings.OverflowNodeID == gatewayRoutingOVHNodeID {
+		settings.OverflowNodeID = ""
+	}
 	normalizeStoredGatewayRoutingWeights(settings)
 	if err := validateGatewayRoutingSettings(settings); err != nil {
 		return nil, fmt.Errorf("stored gateway routing settings are invalid: %w", err)
@@ -225,6 +243,9 @@ func normalizeAndValidateGatewayRoutingSettings(settings *GatewayRoutingSettings
 	for i := range settings.Nodes {
 		settings.Nodes[i].ID = strings.ToLower(strings.TrimSpace(settings.Nodes[i].ID))
 		settings.Nodes[i].Origin = strings.TrimRight(strings.TrimSpace(settings.Nodes[i].Origin), "/")
+		if settings.Nodes[i].ID == gatewayRoutingOVHNodeID {
+			settings.Nodes[i].TargetWeight = 0
+		}
 	}
 	return validateGatewayRoutingSettings(settings)
 }
@@ -244,6 +265,12 @@ func validateGatewayRoutingSettings(settings *GatewayRoutingSettings) error {
 	}
 	if settings.ICMPPauseMode != "" && settings.ICMPPauseMode != gatewayICMPObserve && settings.ICMPPauseMode != gatewayICMPLegacy {
 		return errors.New("icmp_pause_mode must be observe or legacy")
+	}
+	if settings.OVHGeoPercent < 0 || settings.OVHGeoPercent > 100 {
+		return errors.New("ovh_geo_percent must be between 0 and 100")
+	}
+	if settings.OverflowNodeID == gatewayRoutingOVHNodeID {
+		return errors.New("the overseas-only OVH node cannot be the general overflow node")
 	}
 	if len(settings.Nodes) == 0 || len(settings.Nodes) > maxGatewayRoutingNodes {
 		return fmt.Errorf("nodes must contain between 1 and %d entries", maxGatewayRoutingNodes)
@@ -272,7 +299,12 @@ func validateGatewayRoutingSettings(settings *GatewayRoutingSettings) error {
 		if node.MaxConcurrency < 0 || node.MaxConcurrency > maxGatewayRoutingConcurrency {
 			return fmt.Errorf("nodes[%d].max_concurrency must be between 0 and %d", i, maxGatewayRoutingConcurrency)
 		}
-		totalWeight += node.TargetWeight
+		if node.ID != gatewayRoutingOVHNodeID {
+			totalWeight += node.TargetWeight
+		}
+	}
+	if _, exists := ids[gatewayRoutingOVHNodeID]; !exists && settings.OVHGeoPercent > 0 {
+		return errors.New("ovh_geo_percent requires a configured OVH node")
 	}
 	if settings.OverflowNodeID != "" {
 		if _, exists := ids[settings.OverflowNodeID]; !exists {
@@ -359,15 +391,19 @@ func (s *SettingService) AcquireGatewayRoutingNodeCapacity(ctx context.Context, 
 	return lease, current, limit, err
 }
 
-// normalizeStoredGatewayRoutingWeights migrates the pre-percentage ratio format
-// on read. New writes are rejected unless they already total exactly 100.
+// Normalize old ratios and discard the legacy OVH pool weight on read.
+// Only the remaining nodes are apportioned to 100%.
 func normalizeStoredGatewayRoutingWeights(settings *GatewayRoutingSettings) {
 	if settings == nil || len(settings.Nodes) == 0 {
 		return
 	}
 
 	total := 0
-	for _, node := range settings.Nodes {
+	for i := range settings.Nodes {
+		node := &settings.Nodes[i]
+		if node.ID == gatewayRoutingOVHNodeID {
+			node.TargetWeight = 0
+		}
 		if node.TargetWeight < 0 || node.TargetWeight > maxGatewayRoutingWeight {
 			return
 		}
@@ -384,6 +420,9 @@ func normalizeStoredGatewayRoutingWeights(settings *GatewayRoutingSettings) {
 	remainders := make([]remainder, 0, len(settings.Nodes))
 	floorTotal := 0
 	for i := range settings.Nodes {
+		if settings.Nodes[i].ID == gatewayRoutingOVHNodeID {
+			continue
+		}
 		scaled := settings.Nodes[i].TargetWeight * 100
 		settings.Nodes[i].TargetWeight = scaled / total
 		floorTotal += settings.Nodes[i].TargetWeight
@@ -417,10 +456,7 @@ func (s *SettingService) GetGatewayRoutingRuntime(ctx context.Context) (*Gateway
 	now := time.Now().UTC()
 	if cached, ok := s.gatewayRoutingRuntimeCache.Load().(*cachedGatewayRoutingRuntime); ok && cached != nil && cached.runtime != nil {
 		if now.UnixNano() < cached.expiresAt {
-			runtime := cloneGatewayRoutingRuntime(cached.runtime)
-			s.applyGatewayPacketLossProtection(ctx, settings, runtime, s.gatewayRoutingProbeSignals(settings, runtime.packetLossSignals, now), now)
-			s.populateGatewayRoutingCapacity(ctx, runtime)
-			return runtime, nil
+			return s.finalizeGatewayRoutingRuntime(ctx, settings, cloneGatewayRoutingRuntime(cached.runtime), now), nil
 		}
 	}
 
@@ -452,10 +488,35 @@ func (s *SettingService) GetGatewayRoutingRuntime(ctx context.Context) (*Gateway
 	if !ok || runtime == nil {
 		return nil, errors.New("gateway routing runtime is unavailable")
 	}
-	cloned := cloneGatewayRoutingRuntime(runtime)
-	s.applyGatewayPacketLossProtection(ctx, settings, cloned, s.gatewayRoutingProbeSignals(settings, cloned.packetLossSignals, time.Now().UTC()), time.Now().UTC())
-	s.populateGatewayRoutingCapacity(ctx, cloned)
-	return cloned, nil
+	return s.finalizeGatewayRoutingRuntime(ctx, settings, cloneGatewayRoutingRuntime(runtime), time.Now().UTC()), nil
+}
+
+func (s *SettingService) finalizeGatewayRoutingRuntime(ctx context.Context, settings *GatewayRoutingSettings, runtime *GatewayRoutingRuntime, now time.Time) *GatewayRoutingRuntime {
+	s.applyGatewayPacketLossProtection(ctx, settings, runtime, s.gatewayRoutingProbeSignals(settings, runtime.packetLossSignals, now), now)
+	s.populateGatewayRoutingCapacity(ctx, runtime)
+	applyGatewayRoutingOVHShare(settings, runtime)
+	return runtime
+}
+
+func applyGatewayRoutingOVHShare(settings *GatewayRoutingSettings, runtime *GatewayRoutingRuntime) {
+	for i := range runtime.Nodes {
+		node := &runtime.Nodes[i]
+		if node.ID != gatewayRoutingOVHNodeID {
+			continue
+		}
+		percent := 0
+		if !node.AutoDisabled && !node.MonitorStale && node.OriginReady != nil && *node.OriginReady && node.PacketLossState != "recovering" {
+			percent = settings.OVHGeoPercent
+		}
+		node.OVHGeoEffectivePercent = &percent
+	}
+}
+
+func gatewayRoutingConfiguredShare(settings *GatewayRoutingSettings, node GatewayRoutingNodeSettings) int {
+	if node.ID == gatewayRoutingOVHNodeID {
+		return settings.OVHGeoPercent
+	}
+	return node.TargetWeight
 }
 
 func currentCachedGatewayRoutingRuntime(s *SettingService) *GatewayRoutingRuntime {
@@ -495,7 +556,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 	missing := make([]int, 0)
 	for i, configured := range settings.Nodes {
 		status := "active"
-		if configured.TargetWeight == 0 {
+		if gatewayRoutingConfiguredShare(settings, configured) == 0 {
 			status = "manual_disabled"
 		}
 		runtime.Nodes[i] = GatewayRoutingNodeRuntime{
@@ -549,7 +610,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 			continue
 		}
 		configured := settings.Nodes[result.index]
-		if gatewayRoutingNodeCanReceiveRequests(settings, configured) && gatewayRoutingRecordFreshForHealth(result.record, now) {
+		if configured.ID != gatewayRoutingOVHNodeID && gatewayRoutingNodeCanReceiveRequests(settings, configured) && gatewayRoutingRecordFreshForHealth(result.record, now) {
 			hasFreshRoutingNode = true
 			break
 		}
@@ -557,7 +618,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 
 	for _, index := range missing {
 		configured := settings.Nodes[index]
-		applyStaleGatewayRoutingNode(&runtime.Nodes[index], configured, previousGatewayRoutingNode(previous, configured))
+		applyStaleGatewayRoutingNode(settings, &runtime.Nodes[index], configured, previousGatewayRoutingNode(previous, configured))
 		if settings.HealthProtectionEnabled && gatewayRoutingNodeCanReceiveRequests(settings, configured) && hasFreshRoutingNode {
 			applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[index], "monitor_missing")
 		}
@@ -566,7 +627,7 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 	for _, result := range results {
 		configured := settings.Nodes[result.index]
 		if result.err != nil {
-			applyStaleGatewayRoutingNode(&runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
+			applyStaleGatewayRoutingNode(settings, &runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
 			if settings.HealthProtectionEnabled && gatewayRoutingNodeCanReceiveRequests(settings, configured) && hasFreshRoutingNode {
 				applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[result.index], "monitor_record_unavailable")
 			}
@@ -574,20 +635,20 @@ func (s *SettingService) buildGatewayRoutingRuntime(ctx context.Context, setting
 		}
 		runtime.Nodes[result.index].MonitorSampleAt = &result.record.Time
 		if !gatewayRoutingRecordFreshForHealth(result.record, now) {
-			applyStaleGatewayRoutingNode(&runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
+			applyStaleGatewayRoutingNode(settings, &runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
 			if settings.HealthProtectionEnabled && gatewayRoutingNodeCanReceiveRequests(settings, configured) && hasFreshRoutingNode {
 				applyAutoDisabledGatewayRoutingNode(&runtime.Nodes[result.index], "monitor_stale")
 			}
 			continue
 		}
 		if !gatewayRoutingRecordFreshForTraffic(result.record, now) {
-			applyStaleGatewayRoutingNode(&runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
+			applyStaleGatewayRoutingNode(settings, &runtime.Nodes[result.index], configured, previousGatewayRoutingNode(previous, configured))
 			continue
 		}
 		used := gatewayRoutingTrafficUsed(runtime.Nodes[result.index].TrafficLimitType, result.record.NetTotalUp, result.record.NetTotalDown)
 		runtime.Nodes[result.index].TrafficUsedBytes = used
 		if runtime.Nodes[result.index].Unlimited {
-			if configured.TargetWeight == 0 {
+			if gatewayRoutingConfiguredShare(settings, configured) == 0 {
 				continue
 			}
 			runtime.Nodes[result.index].Status = "unlimited"
@@ -664,7 +725,7 @@ func staleGatewayRoutingRuntime(settings *GatewayRoutingSettings, previous *Gate
 			MaxConcurrency:   node.MaxConcurrency,
 			OverflowFallback: node.ID == settings.OverflowNodeID,
 		}
-		applyStaleGatewayRoutingNode(&runtime.Nodes[i], node, previousGatewayRoutingNode(previous, node))
+		applyStaleGatewayRoutingNode(settings, &runtime.Nodes[i], node, previousGatewayRoutingNode(previous, node))
 	}
 	return runtime
 }
@@ -681,7 +742,7 @@ func previousGatewayRoutingNode(runtime *GatewayRoutingRuntime, configured Gatew
 	return nil
 }
 
-func applyStaleGatewayRoutingNode(runtime *GatewayRoutingNodeRuntime, configured GatewayRoutingNodeSettings, previous *GatewayRoutingNodeRuntime) {
+func applyStaleGatewayRoutingNode(settings *GatewayRoutingSettings, runtime *GatewayRoutingNodeRuntime, configured GatewayRoutingNodeSettings, previous *GatewayRoutingNodeRuntime) {
 	if runtime == nil {
 		return
 	}
@@ -702,7 +763,7 @@ func applyStaleGatewayRoutingNode(runtime *GatewayRoutingNodeRuntime, configured
 			runtime.Status = "auto_disabled"
 		}
 	}
-	if configured.TargetWeight == 0 {
+	if gatewayRoutingConfiguredShare(settings, configured) == 0 {
 		runtime.EffectiveWeight = 0
 		runtime.AutoDisabled = false
 		runtime.AutoDisabledReason = ""

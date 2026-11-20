@@ -163,7 +163,7 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 	legacy := settings.ICMPPauseMode == gatewayICMPLegacy
 	for i, configured := range settings.Nodes {
 		node := &runtime.Nodes[i]
-		resetGatewayPacketLossRuntime(node, configured)
+		resetGatewayPacketLossRuntime(node, settings, configured)
 		signal := signals[configured.ID]
 		if !signal.OriginSampleAt.IsZero() {
 			node.OriginSampleAt = &signal.OriginSampleAt
@@ -328,7 +328,11 @@ func applyGatewayOriginHealth(node *GatewayRoutingNodeRuntime, settings *Gateway
 			pause.RecoveryStage++
 			pause.RecoverySince = &now
 		}
-		if pause.RecoveryStage > 3 || node.TargetWeight == 0 {
+		configuredShare := node.TargetWeight
+		if node.ID == gatewayRoutingOVHNodeID {
+			configuredShare = settings.OVHGeoPercent
+		}
+		if pause.RecoveryStage > 3 || configuredShare == 0 {
 			return pause, false
 		}
 	}
@@ -349,7 +353,7 @@ func applyGatewayOriginHealth(node *GatewayRoutingNodeRuntime, settings *Gateway
 	return pause, true
 }
 
-func resetGatewayPacketLossRuntime(node *GatewayRoutingNodeRuntime, configured GatewayRoutingNodeSettings) {
+func resetGatewayPacketLossRuntime(node *GatewayRoutingNodeRuntime, settings *GatewayRoutingSettings, configured GatewayRoutingNodeSettings) {
 	wasRecovering := node.PacketLossState == "recovering"
 	node.PacketLossState, node.PacketLossPercent, node.PacketLossSampleAt, node.PacketLossPausedUntil = "", nil, nil, nil
 	node.ICMPProbeState, node.OriginReady, node.OriginSampleAt = "", nil, nil
@@ -360,7 +364,7 @@ func resetGatewayPacketLossRuntime(node *GatewayRoutingNodeRuntime, configured G
 		if node.MonitorStale {
 			node.Status = "monitor_stale"
 		}
-		if configured.TargetWeight == 0 {
+		if gatewayRoutingConfiguredShare(settings, configured) == 0 {
 			node.Status = "manual_disabled"
 		}
 	}

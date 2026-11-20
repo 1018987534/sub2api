@@ -148,6 +148,80 @@ func TestGatewayRoutingSettingsMigratesLegacyRatiosOnRead(t *testing.T) {
 	require.True(t, settings.HealthProtectionEnabled)
 }
 
+func TestGatewayRoutingOVHShareMigrationAndSettings(t *testing.T) {
+	ctx := context.Background()
+	repo := newGatewayRoutingRepoStub()
+	svc := NewSettingService(repo, &config.Config{})
+	legacy := `{"overflow_node_id":"ovh-us-01","nodes":[{"id":"vmiss-us-01","origin":"https://vmiss.example","target_weight":30},{"id":"yt-us-01","origin":"https://yt.example","target_weight":50},{"id":"vmiss-us-02","origin":"https://vmiss2.example","target_weight":9},{"id":"dmit-us-01","origin":"https://dmit.example","target_weight":10},{"id":"ovh-us-01","origin":"https://ovh.example","target_weight":1,"max_concurrency":10}]}`
+	require.NoError(t, repo.Set(ctx, SettingKeyGatewayRoutingSettings, legacy))
+	settings, err := svc.GetGatewayRoutingSettings(ctx)
+	require.NoError(t, err)
+	require.Zero(t, settings.OVHGeoPercent)
+	require.Empty(t, settings.OverflowNodeID)
+	require.Equal(t, 30, settings.Nodes[0].TargetWeight)
+	require.Equal(t, 51, settings.Nodes[1].TargetWeight)
+	require.Equal(t, 9, settings.Nodes[2].TargetWeight)
+	require.Equal(t, 10, settings.Nodes[3].TargetWeight)
+	require.Zero(t, settings.Nodes[4].TargetWeight)
+	require.Equal(t, 10, settings.Nodes[4].MaxConcurrency)
+	raw, err := repo.GetValue(ctx, SettingKeyGatewayRoutingSettings)
+	require.NoError(t, err)
+	require.Equal(t, legacy, raw, "reading does not rewrite stored settings")
+	for _, percent := range []int{100, -1, 101, 37, 0} {
+		settings.OVHGeoPercent = percent
+		if percent < 0 || percent > 100 {
+			require.ErrorContains(t, svc.SetGatewayRoutingSettings(ctx, settings), "ovh_geo_percent")
+			continue
+		}
+		require.NoError(t, svc.SetGatewayRoutingSettings(ctx, settings))
+		got, err := svc.GetGatewayRoutingSettings(ctx)
+		require.NoError(t, err)
+		require.Equal(t, percent, got.OVHGeoPercent)
+		require.Equal(t, settings.Nodes, got.Nodes)
+		raw, err := repo.GetValue(ctx, SettingKeyGatewayRoutingSettings)
+		require.NoError(t, err)
+		require.Contains(t, raw, `{"id":"ovh-us-01","origin":"https://ovh.example","max_concurrency":10}`)
+		require.Contains(t, raw, `"target_weight":30`)
+	}
+	settings.OverflowNodeID = gatewayRoutingOVHNodeID
+	require.ErrorContains(t, svc.SetGatewayRoutingSettings(ctx, settings), "cannot be the general overflow node")
+}
+
+func TestGatewayRoutingOVHEffectiveShare(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		percent                   int
+		ready                     *bool
+		paused, stale, recovering bool
+		want                      int
+	}{
+		{name: "healthy", percent: 100, ready: new(true), want: 100},
+		{name: "changed", percent: 43, ready: new(true), want: 43},
+		{name: "disabled", ready: new(true)},
+		{name: "cold", percent: 100},
+		{name: "unready", percent: 100, ready: new(false)},
+		{name: "paused", percent: 100, ready: new(true), paused: true},
+		{name: "stale", percent: 100, ready: new(true), stale: true},
+		{name: "recovering", percent: 100, ready: new(true), recovering: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := &GatewayRoutingSettings{OVHGeoPercent: tc.percent}
+			runtime := &GatewayRoutingRuntime{Nodes: []GatewayRoutingNodeRuntime{
+				{ID: "yt-us-01", EffectiveWeight: 60},
+				{ID: gatewayRoutingOVHNodeID, OriginReady: tc.ready, AutoDisabled: tc.paused, MonitorStale: tc.stale},
+			}}
+			if tc.recovering {
+				runtime.Nodes[1].PacketLossState = "recovering"
+			}
+			applyGatewayRoutingOVHShare(settings, runtime)
+			require.Equal(t, tc.want, *runtime.Nodes[1].OVHGeoEffectivePercent)
+			require.Zero(t, runtime.Nodes[1].EffectiveWeight)
+			require.Equal(t, 60, runtime.Nodes[0].EffectiveWeight)
+			require.Nil(t, runtime.Nodes[0].OVHGeoEffectivePercent)
+		})
+	}
+}
+
 func TestGatewayRoutingRuntimeAutoDisablesAtThresholdAndKeepsUnlimitedNode(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

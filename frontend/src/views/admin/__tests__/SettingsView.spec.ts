@@ -610,6 +610,50 @@ async function openGatewayTab(wrapper: ReturnType<typeof mountView>) {
   await flushPromises();
 }
 
+function mockGatewayRoutingSettings() {
+  const nodes = [
+    { id: "bwg-us-01", origin: "https://control.example", target_weight: 50, max_concurrency: 50 },
+    { id: "vmiss-us-01", origin: "https://gateway.example", target_weight: 10, max_concurrency: 20 },
+    { id: "yt-us-01", origin: "https://yt.example", target_weight: 30, max_concurrency: 40 },
+    { id: "vmiss-us-02", origin: "https://gateway-2.example", target_weight: 10, max_concurrency: 0 },
+    { id: "ovh-us-01", origin: "https://ovh.example", max_concurrency: 10 },
+  ];
+  const settings = {
+    monitor_url: "https://check.example",
+    traffic_protection_enabled: true,
+    health_protection_enabled: true,
+    traffic_threshold_percent: 90,
+    overflow_node_id: "yt-us-01",
+    ovh_geo_percent: 0,
+    nodes,
+  };
+  const buildResponse = (payload: typeof settings) => ({
+    settings: payload,
+    runtime: {
+      generated_at: "2026-08-01T00:00:00Z",
+      monitor_checked_at: "2026-08-01T00:00:00Z",
+      monitor_stale: false,
+      overflow_node_id: payload.overflow_node_id,
+      nodes: payload.nodes.map((node) => ({
+        ...node,
+        effective_weight: node.target_weight ?? 0,
+        ...(node.id === "ovh-us-01" ? { ovh_geo_effective_percent: payload.ovh_geo_percent } : {}),
+        current_concurrency: node.id === "bwg-us-01" ? 12 : 0,
+        overflow_fallback: node.id === payload.overflow_node_id,
+        auto_disabled: false,
+        status: "active",
+        traffic_limit_bytes: 0,
+        traffic_used_bytes: 0,
+        traffic_usage_percent: null,
+        unlimited: true,
+        monitor_stale: false,
+      })),
+    },
+  });
+  getGatewayRoutingSettings.mockReset().mockResolvedValue(buildResponse(settings));
+  updateGatewayRoutingSettings.mockReset().mockImplementation(async (payload) => buildResponse(payload));
+}
+
 async function openUsersTab(wrapper: ReturnType<typeof mountView>) {
   const usersTabButton = wrapper
     .findAll("button")
@@ -652,8 +696,6 @@ describe("admin SettingsView payment visible method controls", () => {
     getOverloadCooldownSettings.mockReset();
     getRateLimit429CooldownSettings.mockReset();
     updateRateLimit429CooldownSettings.mockReset();
-    getGatewayRoutingSettings.mockReset();
-    updateGatewayRoutingSettings.mockReset();
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
@@ -690,55 +732,7 @@ describe("admin SettingsView payment visible method controls", () => {
       exists: false,
       masked_key: "",
     });
-    getGatewayRoutingSettings.mockResolvedValue({
-      settings: {
-        monitor_url: "https://check.example",
-        traffic_protection_enabled: true,
-        health_protection_enabled: true,
-        traffic_threshold_percent: 90,
-		overflow_node_id: "yt-us-01",
-        nodes: [
-		  { id: "bwg-us-01", origin: "https://control.example", target_weight: 50, max_concurrency: 50 },
-		  { id: "vmiss-us-01", origin: "https://gateway.example", target_weight: 10, max_concurrency: 20 },
-		  { id: "yt-us-01", origin: "https://yt.example", target_weight: 30, max_concurrency: 40 },
-		  { id: "vmiss-us-02", origin: "https://gateway-2.example", target_weight: 10, max_concurrency: 0 },
-        ],
-      },
-      runtime: {
-        generated_at: "2026-08-01T00:00:00Z",
-        monitor_checked_at: "2026-08-01T00:00:00Z",
-        monitor_stale: false,
-		overflow_node_id: "yt-us-01",
-        nodes: [
-		  { id: "bwg-us-01", origin: "https://control.example", target_weight: 50, max_concurrency: 50, current_concurrency: 12, overflow_fallback: false, effective_weight: 50, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
-		  { id: "vmiss-us-01", origin: "https://gateway.example", target_weight: 10, max_concurrency: 20, current_concurrency: 3, overflow_fallback: false, effective_weight: 10, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
-		  { id: "yt-us-01", origin: "https://yt.example", target_weight: 30, max_concurrency: 40, current_concurrency: 7, overflow_fallback: true, effective_weight: 30, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
-		  { id: "vmiss-us-02", origin: "https://gateway-2.example", target_weight: 10, max_concurrency: 0, current_concurrency: 0, overflow_fallback: false, effective_weight: 10, auto_disabled: false, status: "active", traffic_limit_bytes: 0, traffic_used_bytes: 0, traffic_usage_percent: null, unlimited: true, monitor_stale: false },
-        ],
-      },
-    });
-    updateGatewayRoutingSettings.mockImplementation(async (payload) => ({
-      settings: payload,
-      runtime: {
-        generated_at: "2026-08-01T00:00:00Z",
-        monitor_checked_at: "2026-08-01T00:00:00Z",
-        monitor_stale: false,
-		overflow_node_id: payload.overflow_node_id,
-        nodes: payload.nodes.map((node: { id: string; origin: string; target_weight: number }) => ({
-          ...node,
-          effective_weight: node.target_weight,
-		  current_concurrency: 0,
-		  overflow_fallback: node.id === payload.overflow_node_id,
-          auto_disabled: false,
-          status: "active",
-          traffic_limit_bytes: 0,
-          traffic_used_bytes: 0,
-          traffic_usage_percent: null,
-          unlimited: true,
-          monitor_stale: false,
-        })),
-      },
-    }));
+    mockGatewayRoutingSettings();
     getOverloadCooldownSettings.mockResolvedValue({
       enabled: true,
       cooldown_minutes: 10,
@@ -2192,6 +2186,7 @@ describe("admin SettingsView wechat connect controls", () => {
 
 describe("admin SettingsView platform quota matrix", () => {
   beforeEach(() => {
+    mockGatewayRoutingSettings();
     getSettings.mockReset();
     updateSettings.mockReset();
     getWebSearchEmulationConfig.mockReset();
@@ -2354,6 +2349,8 @@ describe("admin SettingsView platform quota matrix", () => {
       .findAll("table")
       .find((table) => table.text().includes("bwg-us-01"));
     expect(gatewayTable).toBeDefined();
+    expect(gatewayTable!.text()).not.toContain("ovh-us-01");
+    expect(wrapper.find('select option[value="ovh-us-01"]').exists()).toBe(false);
 	const targetInputs = gatewayTable!
 	  .findAll('input[type="number"]')
 	  .filter((input) => input.attributes("max") === "100");
@@ -2370,16 +2367,14 @@ describe("admin SettingsView platform quota matrix", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("99%");
     expect(wrapper.text()).toContain("admin.settings.gatewayRouting.targetTotalError");
-    const saveButton = wrapper
-      .findAll("button")
-      .find((button) => button.text().includes("common.save") && button.attributes("disabled") !== undefined);
-    expect(saveButton).toBeDefined();
+    const saveButton = wrapper.get("#gateway-routing-save");
+    expect(saveButton.attributes("disabled")).toBeDefined();
 
 	await targetInputs[0].setValue("50");
 	await concurrencyInputs[0].setValue("");
     await flushPromises();
-    expect(saveButton!.attributes("disabled")).toBeUndefined();
-    await saveButton!.trigger("click");
+    expect(saveButton.attributes("disabled")).toBeUndefined();
+    await saveButton.trigger("click");
     await flushPromises();
     expect(updateGatewayRoutingSettings).toHaveBeenCalled();
     expect(updateGatewayRoutingSettings).toHaveBeenCalledWith(
@@ -2395,13 +2390,37 @@ describe("admin SettingsView platform quota matrix", () => {
 	expect(payload.nodes.every((node) => typeof node.max_concurrency === "number")).toBe(true);
   });
 
+  it("OVH 海外比例单独保存、不影响四节点权重或并发限制", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const percent = wrapper.get("#gateway-ovh-geo-percent");
+    const save = wrapper.get("#gateway-routing-save");
+    await percent.setValue("100");
+    await save.trigger("click");
+    await flushPromises();
+    const payload = updateGatewayRoutingSettings.mock.calls.at(-1)![0];
+    expect(payload.ovh_geo_percent).toBe(100);
+    expect(payload.nodes.find((node: { id: string }) => node.id === "ovh-us-01")).toEqual({
+      id: "ovh-us-01", origin: "https://ovh.example", max_concurrency: 10,
+    });
+    expect(wrapper.get("#gateway-ovh-geo-percent-effective").text()).toContain("100%");
+    updateGatewayRoutingSettings.mockClear();
+    for (const invalid of ["-1", "101", "1.5", ""]) {
+      await percent.setValue(invalid);
+      await save.trigger("click");
+      expect(updateGatewayRoutingSettings).not.toHaveBeenCalled();
+      expect(showError).toHaveBeenLastCalledWith("admin.settings.gatewayRouting.ovhGeoPercentError");
+    }
+  });
+
   it("丢包暂停时长支持修改、回显和边界校验", async () => {
     const wrapper = mountView();
     await flushPromises();
     await openGatewayTab(wrapper);
     const cooldown = wrapper.get('#packet-loss-cooldown');
     expect((cooldown.element as HTMLInputElement).value).toBe('5');
-    const save = wrapper.findAll('button').find((button) => button.text().includes('common.save'))!;
+    const save = wrapper.get("#gateway-routing-save");
     await cooldown.setValue('7');
     await save.trigger('click');
     await flushPromises();
