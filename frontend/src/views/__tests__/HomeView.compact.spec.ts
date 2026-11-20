@@ -172,13 +172,10 @@ describe('HomeView compact mode', () => {
     expect(modelPlazaDestination(wrapper)).toBe('/model-plaza')
   })
 
-  it('hides the model plaza link when the feature is disabled', () => {
-    const wrapper = mountHome({
-      compact_home_enabled: true,
-      model_plaza_enabled: false,
-      model_plaza_require_auth: false,
-    })
+  it.each([true, false])('shows only the custom plaza when the native flag is off (compact=%s)', (compact) => {
+    const wrapper = mountHome({ compact_home_enabled: compact, model_plaza_enabled: false })
 
     expect(modelPlazaDestination(wrapper)).toBeUndefined()
+    expect(wrapper.findAllComponents(RouterLinkStub).some(link => link.props('to') === '/custom-model-plaza')).toBe(true)
   })
 })

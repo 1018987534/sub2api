@@ -77,6 +77,11 @@ func RegisterAdminRoutes(
 
 		// 系统设置
 		registerSettingsRoutes(admin, h, stepUpAuth)
+		if h.CustomModelPlaza != nil {
+			plaza := admin.Group("/custom-model-plaza")
+			plaza.GET("", h.CustomModelPlaza.GetAdmin)
+			plaza.PUT("/:model", h.CustomModelPlaza.Update)
+		}
 
 		// 数据管理
 		registerDataManagementRoutes(admin, h, stepUpAuth)

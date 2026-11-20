@@ -197,6 +197,12 @@ const routes: RouteRecordRaw[] = [
       titleKey: 'modelPlaza.title'
     }
   },
+  {
+    path: '/custom-model-plaza',
+    name: 'CustomModelPlaza',
+    component: () => import('@/views/CustomModelPlazaView.vue'),
+    meta: { requiresAuth: false, title: 'Custom Model Plaza', titleKey: 'customModelPlaza.title' },
+  },
 
   // ==================== User Routes ====================
   {
@@ -728,6 +734,12 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/custom-model-plaza',
+    name: 'AdminCustomModelPlaza',
+    component: () => import('@/views/admin/CustomModelPlazaAdminView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Model Display Prices', titleKey: 'customModelPlaza.adminTitle' },
+  },
+  {
     path: '/admin/settings',
     name: 'AdminSettings',
     component: () => import('@/views/admin/SettingsView.vue'),
@@ -960,6 +972,13 @@ router.beforeEach(async (to, _from, next) => {
 
   // If route doesn't require auth, allow access
   if (!requiresAuth) {
+    if (to.name === 'CustomModelPlaza') {
+      await appStore.fetchPublicSettings()
+      if (appStore.backendModeEnabled && !authStore.isAdmin) {
+        next({ path: '/login', query: { redirect: to.fullPath } })
+        return
+      }
+    }
     // If already authenticated and trying to access login/register, redirect to appropriate dashboard
     if (authStore.isAuthenticated && (to.path === '/login' || to.path === '/register')) {
       // In backend mode, non-admin users should NOT be redirected away from login

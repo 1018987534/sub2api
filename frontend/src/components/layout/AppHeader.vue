@@ -52,6 +52,16 @@
 
         <!-- Model Plaza Entry (icon only below sm) -->
         <router-link
+          v-if="user && !modelPlazaEnabled"
+          to="/custom-model-plaza"
+          :title="t('customModelPlaza.title')"
+          :aria-label="t('customModelPlaza.title')"
+          class="inline-flex items-center gap-1.5 rounded-lg p-2 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+        >
+          <Icon name="grid" size="sm" />
+          <span class="hidden sm:inline">{{ t('customModelPlaza.title') }}</span>
+        </router-link>
+        <router-link
           v-if="user && modelPlazaEnabled"
           :to="{ path: '/model-plaza', query: { embedded: '1' } }"
           :title="t('nav.modelPlaza')"

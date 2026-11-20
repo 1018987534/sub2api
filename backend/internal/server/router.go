@@ -141,6 +141,9 @@ func registerRoutes(
 	routes.RegisterClientDownloadRoutes(v1, db, jwtAuth, settingService, panelRateLimiter)
 	routes.RegisterQQActivityRoutes(v1, h.QQActivity, jwtAuth, adminAuth, auditLog, settingService, panelRateLimiter)
 	routes.RegisterModelPlazaRoutes(v1, h, optionalJWTAuth, settingService, panelRateLimiter)
+	if h.CustomModelPlaza != nil {
+		v1.GET("/custom-model-plaza", panelRateLimiter.PublicIP(), gin.HandlerFunc(optionalJWTAuth), middleware2.BackendModeUserGuard(settingService), h.CustomModelPlaza.Get)
+	}
 	routes.RegisterAdminRoutes(v1, h, adminAuth, auditLog, stepUpAuth, settingService, panelRateLimiter)
 	routes.RegisterMCPRoutes(v1, h, auditLog, stepUpAuth, settingService, panelRateLimiter, cfg.CORS.AllowedOrigins, redisClient)
 	routes.RegisterMCPOAuthRoutes(r, v1, h, redisClient)

@@ -9,6 +9,7 @@ import admin from './admin'
 import misc from './misc'
 import imageStudio from './imageStudio'
 import feedback from './feedback'
+import customModelPlaza from './customModelPlaza'
 
 export default {
   adminAccessKeys,
@@ -22,4 +23,5 @@ export default {
   ...misc,
   ...imageStudio,
   feedback,
+  customModelPlaza,
 }
