@@ -37,6 +37,34 @@ describe('cards view independent read path', () => {
     wrapper.unmount()
   })
 
+  it('shows a labeled simulated summary when the snapshot has no traffic', async () => {
+    vi.mocked(getSnapshot).mockResolvedValueOnce({
+      config: { refresh_interval_seconds: 60 },
+      health: { overall: 'unknown' },
+      coverage: { coverage_complete: true, data_through: '2026-11-21T10:05:00Z', requested_end: '2026-11-21T10:05:00Z' },
+      metrics: { has_requests: false, has_cache_tokens: false }, trend: []
+    } as unknown as MonitorSnapshot)
+    const wrapper = view(); await flushPromises()
+    expect(wrapper.text()).toMatch(/可用率 99\.9\d% · 缓存率 \d+\.\d% · 模拟数据/)
+    expect(wrapper.text()).not.toContain('可用率 —')
+    wrapper.unmount()
+  })
+
+  it('passes the server window and correct bucket duration to every selected range', async () => {
+    const coverage = { requested_end: '2026-11-21T10:05:00Z' }
+    vi.mocked(getMatrix).mockResolvedValue({ items: [{ group_id: 1, group_name: 'Visible Group', platform: 'anthropic' }], coverage } as MonitorMatrixResponse)
+    const wrapper = view(); await flushPromises()
+    for (const [range, length, seconds] of [['90m', 18, 300], ['24h', 24, 3600], ['7d', 14, 43200], ['30d', 30, 86400]] as const) {
+      await wrapper.findAll('button').find(button => button.text() === range)!.trigger('click')
+      await flushPromises()
+      const card = wrapper.get('article')
+      expect(card.attributes('timeline-length')).toBe(String(length))
+      expect(card.attributes('bucket-seconds')).toBe(String(seconds))
+      expect(card.attributes('window-end')).toBe(coverage.requested_end)
+    }
+    wrapper.unmount()
+  })
+
   it('renders cards and detection status while the snapshot is still pending', async () => {
     let resolve!: (value: MonitorSnapshot) => void
     vi.mocked(getSnapshot).mockReturnValueOnce(new Promise(done => { resolve = done }))
@@ -86,6 +114,24 @@ describe('cards view independent read path', () => {
     expect(wrapper.text()).toContain('Visible Group')
     expect(wrapper.text()).toContain('缓存率 80.0%')
     expect(wrapper.text()).toContain('监控数据加载失败；监控汇总加载失败')
+    wrapper.unmount()
+  })
+
+  it('keeps the last successful range on cards and summary when a range change fails', async () => {
+    const coverage = { requested_end: '2026-11-21T10:05:00Z', data_through: '2026-11-21T10:00:00Z', coverage_complete: true }
+    vi.mocked(getMatrix).mockResolvedValueOnce({ items: [{ group_id: 1, group_name: 'Visible Group', platform: 'openai' }], coverage } as MonitorMatrixResponse)
+    vi.mocked(getSnapshot).mockResolvedValueOnce({ config: { refresh_interval_seconds: 60 }, coverage, metrics: { has_requests: false }, trend: [] } as MonitorSnapshot)
+    const wrapper = view(); await flushPromises()
+    const summary = wrapper.text().match(/可用率 [^·]+ · 缓存率 [^·]+ · 模拟数据/)?.[0]
+    expect(summary).toBeDefined()
+    vi.mocked(getMatrix).mockRejectedValueOnce(new Error('offline'))
+    vi.mocked(getSnapshot).mockRejectedValueOnce(new Error('offline'))
+    await wrapper.get('button[aria-pressed="false"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('article').attributes('timeline-length')).toBe('18')
+    expect(wrapper.get('article').attributes('window-end')).toBe(coverage.requested_end)
+    expect(wrapper.text()).toContain(summary!)
+    expect(wrapper.get('[role="alert"]').text()).toContain('已保留上次成功数据')
     wrapper.unmount()
   })
 

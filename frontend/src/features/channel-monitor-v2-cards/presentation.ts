@@ -8,11 +8,11 @@ export function recentRecords(records: IntelligenceRecord[], now: number): Intel
  return records.filter(r => { const time = Date.parse(r.checked_at); return time >= now - INTELLIGENCE_WINDOW_MS && time <= now })
   .sort((a, b) => Date.parse(a.checked_at) - Date.parse(b.checked_at) || a.id - b.id)
 }
-export function percent(value: number | undefined, known = true): string {
- return known && value != null && Number.isFinite(value) ? (value * 100).toFixed(1) + '%' : '—'
+export function percent(value: number | undefined, known = true, digits = 1): string {
+ return known && value != null && Number.isFinite(value) ? (value * 100).toFixed(digits) + '%' : '—'
 }
-export function availabilityPercent(metrics: MonitorMetric): string {
- return percent(1 - metrics.error_rate, metrics.has_requests === true)
+export function availabilityPercent(metrics: MonitorMetric, digits = 1): string {
+ return percent(1 - metrics.error_rate, metrics.has_requests === true, digits)
 }
 export function cachePercent(metrics: MonitorMetric): string {
  return percent(metrics.cache_rate, metrics.has_cache_tokens === true)
