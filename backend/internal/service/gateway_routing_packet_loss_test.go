@@ -123,7 +123,7 @@ func TestGatewayPacketLossObserveModeUsesOnlyOriginEvidence(t *testing.T) {
 	node = run(failureAt)
 	require.Zero(t, node.EffectiveWeight)
 	require.False(t, *node.OriginReady)
-	require.Equal(t, "packet_loss", node.AutoDisabledReason)
+	require.Equal(t, "origin_health", node.AutoDisabledReason)
 	deadline := *node.PacketLossPausedUntil
 	require.Equal(t, failureAt.Add(time.Minute), deadline)
 	// Neither a cached health result nor a healthy ICMP sample releases a pause.

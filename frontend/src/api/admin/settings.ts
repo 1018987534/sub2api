@@ -1380,6 +1380,9 @@ export interface GatewayRoutingNodeRuntime extends GatewayRoutingNodeSettings {
     | "auto_disabled_monitor_missing"
     | "auto_disabled_monitor_record_unavailable"
     | "auto_disabled_packet_loss"
+    | "auto_disabled_origin_health"
+    | "auto_disabled_protection_unknown"
+    | "origin_unavailable"
     | "unlimited"
     | "monitor_stale";
   traffic_limit_bytes: number;
@@ -1389,6 +1392,9 @@ export interface GatewayRoutingNodeRuntime extends GatewayRoutingNodeSettings {
   unlimited: boolean;
   monitor_stale: boolean;
   monitor_sample_at?: string;
+  protection_cause?: "origin_health" | "icmp_packet_loss" | "unknown";
+  origin_ready?: boolean;
+  origin_sample_at?: string;
   packet_loss_state?: string;
   packet_loss_percent?: number;
   packet_loss_sample_at?: string;

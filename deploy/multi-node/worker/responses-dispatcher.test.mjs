@@ -298,6 +298,19 @@ test("only eligible overseas requests use the live OVH share", () => {
   }
 });
 
+test("OVH origin readiness restores overseas routing without a cooldown status", () => {
+  const runtime = (ready) => normalizeRuntimeNodes({nodes:[
+    {id:"peer",origin:"https://peer.example",effective_weight:100,origin_ready:true},
+    {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:0,
+     ovh_geo_effective_percent:ready?100:0,origin_ready:ready,auto_disabled:!ready,
+     status:ready?"active":"origin_unavailable",protection_cause:ready?undefined:"origin_health"},
+  ]});
+  const random = { getRandomValues(values) { values.fill(0); return values; } };
+  assert.deepEqual(selectOrigins({},random,runtime(false),"INTL"),["https://peer.example"]);
+  assert.deepEqual(selectOrigins({},random,runtime(true),"INTL"),["https://ovh.example","https://peer.example"]);
+  assert.deepEqual(selectOrigins({},random,runtime(true),"CN"),["https://peer.example"]);
+});
+
 test("OVH never enters the ordinary pool or its fallback", () => {
   const onlyOVH = normalizeRuntimeNodes({overflow_node_id:"ovh-us-01", nodes:[
     {id:"ovh-us-01",origin:"https://ovh.example",effective_weight:42,ovh_geo_effective_percent:100,origin_ready:true},
