@@ -27,6 +27,10 @@ func (s *OpenAIGatewayService) RunIntelligenceRecovery(parent context.Context, c
 		account.GetExtraString(intelligencePauseUntilKey) != claim.Generation || !intelligenceIsolationActive(account, start) {
 		return r
 	}
+	until, err := time.Parse(time.RFC3339Nano, claim.Generation)
+	if err != nil || start.Before(until) {
+		return r
+	}
 	// Only the legacy intelligence block may be ignored. Disabled, expired,
 	// throttled and unrelated cooldown accounts remain untouched.
 	copy := *account

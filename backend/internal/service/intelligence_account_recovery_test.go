@@ -17,9 +17,12 @@ import (
 func TestIntelligenceRecoveryTargetsPausedAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, protocol := range []string{"responses", "chat_completions", "messages"} {
-		for _, status := range []string{"normal", "degraded", "error", "cooldown", "stale"} {
+		for _, status := range []string{"normal", "degraded", "error", "cooldown", "stale", "paused"} {
 			t.Run(protocol+"/"+status, func(t *testing.T) {
-				generation := time.Now().Add(20 * time.Minute).Format(time.RFC3339Nano)
+				generation := time.Now().Add(-time.Minute).Format(time.RFC3339Nano)
+				if status == "paused" {
+					generation = time.Now().Add(20 * time.Minute).Format(time.RFC3339Nano)
+				}
 				account := Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1,
 					Credentials: map[string]any{"api_key": "sk-fixture", "base_url": "https://example.com"},
 					Extra:       map[string]any{"use_responses_api": true, intelligencePauseUntilKey: generation, intelligenceRecoveryRequiredKey: true}}
@@ -50,13 +53,13 @@ func TestIntelligenceRecoveryTargetsPausedAccount(t *testing.T) {
 				}
 				result := svc.RunIntelligenceRecovery(context.Background(), claim)
 				want := status
-				if status == "cooldown" || status == "stale" {
+				if status == "cooldown" || status == "stale" || status == "paused" {
 					want = "error"
 				}
 				require.Equal(t, want, result.Status)
 				require.Empty(t, result.Answer)
 				require.Empty(t, result.RequestID)
-				if status == "cooldown" || status == "stale" {
+				if status == "cooldown" || status == "stale" || status == "paused" {
 					require.Nil(t, upstream.lastReq)
 				} else {
 					require.NotNil(t, upstream.lastReq)

@@ -4,6 +4,10 @@
 
 `ProtectDegradedIntelligenceAccount` 继续使用账号级降智记录和分组级调度隔离。
 暂停只作用于符合保护条件且有替代账号的“不降智”分组，唯一可用账号的例外保持原有规则。
+单次归因到账号的降智结果即触发保护，不再要求连续两次；已恢复之前开始的迟到结果不重复触发保护。
+首次恢复探测必须等账号 `intelligence_pause_until` 到期（至少 20 分钟）。恢复仍降智或失败时，
+从本次检测结束起按 30、40、50 分钟退避，之后维持 50 分钟；旧队列的小于 20 分钟间隔自动纠正。
+暂停期内迟到的正常结果不能提前恢复，队列领取和直连恢复探针也校验暂停截止时间。
 
 `firstTokenLatencyStatsCache.ResetForIntelligencePause` 保留现有接口名称，实际只写入
 `intelligence_pause_until_ms` 标记。不得删除耗时样本、改写统计时间、重置快慢池、触发熔断，

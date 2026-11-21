@@ -149,11 +149,10 @@ func (s *SQLStore) Finish(ctx context.Context, claim *Claim, r Record) error {
 	}
 	if eligible && r.AccountID > 0 {
 		// Lock before reading AND writing history. Results from different groups
-		// must observe each other's committed account streak and recovery.
+		// must observe each other's committed protection and recovery.
 		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('intelligence_account_protection'))`); err != nil {
 			return err
 		}
-		var previousStatus string
 		var cutoff time.Time
 		if s.RecoveryCutoff != nil {
 			cutoff, err = s.RecoveryCutoff(ctx, r.AccountID)
@@ -161,16 +160,13 @@ func (s *SQLStore) Finish(ctx context.Context, claim *Claim, r Record) error {
 				return err
 			}
 		}
-		err = tx.QueryRowContext(ctx, `SELECT status FROM intelligence_check_runs
- WHERE account_id=$1 AND protection_eligible AND checked_at >= $2 ORDER BY id DESC LIMIT 1`, r.AccountID, cutoff).Scan(&previousStatus)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if r.Status == "normal" && s.Recover != nil {
+		// One attributed degraded result is sufficient. Ignore results that
+		// started before the account's latest confirmed recovery.
+		if !r.CheckedAt.Before(cutoff) && r.Status == "normal" && s.Recover != nil {
 			if err = s.Recover(ctx, r.AccountID); err != nil {
 				return err
 			}
-		} else if r.Status == "degraded" && previousStatus == "degraded" && s.Protect != nil {
+		} else if !r.CheckedAt.Before(cutoff) && r.Status == "degraded" && s.Protect != nil {
 			r.Paused, err = s.Protect(ctx, claim.Config, r.AccountID)
 			if err != nil {
 				slog.Error("intelligence account protection failed", "group_id", r.GroupID, "account_id", r.AccountID, "error", err)

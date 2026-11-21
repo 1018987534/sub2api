@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/intelligence"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 )
 
@@ -141,7 +142,7 @@ func intelligenceGroupIDList(value any) []int64 {
 }
 
 // ProtectDegradedIntelligenceAccount runs under the global result lock. The
-// account's streak is shared, but sole-account exceptions are group-specific.
+// account's isolation is shared, but sole-account exceptions are group-specific.
 func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Context, group *Group, accountID int64, model string, userID int64) (bool, error) {
 	if s == nil || !IntelligenceProtectionGroupEligible(group) || !s.isFirstTokenPriorityEnabled(ctx) {
 		return false, nil
@@ -212,7 +213,7 @@ func (s *OpenAIGatewayService) ProtectDegradedIntelligenceAccount(ctx context.Co
 		return false, nil
 	}
 	sort.Slice(allowed, func(i, j int) bool { return allowed[i] < allowed[j] })
-	until := now.Add(20 * time.Minute)
+	until := now.Add(intelligence.MinimumRecoveryPause)
 	active := intelligenceIsolationActive(target, now)
 	if active {
 		if previous, err := time.Parse(time.RFC3339Nano, target.GetExtraString(intelligencePauseUntilKey)); err == nil {
@@ -257,8 +258,8 @@ func (s *OpenAIGatewayService) intelligenceGroupHasAlternative(ctx context.Conte
 	return false, nil
 }
 
-// A single normal attributed check in any eligible group clears the shared
-// intelligence restriction immediately, without undoing other cooldowns.
+// A normal attributed check clears the shared intelligence restriction only
+// after the minimum pause, without undoing other cooldowns.
 func (s *OpenAIGatewayService) RecoverIntelligenceAccount(ctx context.Context, accountID int64) error {
 	if s == nil || s.accountRepo == nil {
 		return errors.New("intelligence recovery dependencies unavailable")
@@ -268,6 +269,11 @@ func (s *OpenAIGatewayService) RecoverIntelligenceAccount(ctx context.Context, a
 		return err
 	}
 	if account == nil {
+		return nil
+	}
+	// A delayed public check or a sole-account exception must not recover an
+	// isolated account before its full minimum pause has elapsed.
+	if until, err := time.Parse(time.RFC3339Nano, account.GetExtraString(intelligencePauseUntilKey)); err == nil && time.Now().Before(until) {
 		return nil
 	}
 	legacy := strings.HasPrefix(account.TempUnschedulableReason, "intelligence:")
@@ -293,7 +299,7 @@ func (s *OpenAIGatewayService) RecoverIntelligenceAccount(ctx context.Context, a
 	return nil
 }
 
-// Internal recovery resets the account streak without creating a public result.
+// Recovery fences out older public results without creating another public result.
 func (s *OpenAIGatewayService) IntelligenceRecoveryCutoff(ctx context.Context, accountID int64) (time.Time, error) {
 	account, err := s.accountRepo.GetByID(ctx, accountID)
 	if err != nil || account == nil {

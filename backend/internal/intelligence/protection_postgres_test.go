@@ -41,9 +41,9 @@ func TestIntelligenceProtectionPostgres(t *testing.T) {
 		status  string
 		paused  bool
 	}{
-		{1, "degraded", false}, {2, "normal", false}, {1, "degraded", true},
-		{1, "degraded", true}, {1, "normal", false}, {1, "degraded", false},
-		{1, "error", false}, {1, "degraded", false}, {0, "error", false},
+		{1, "degraded", true}, {2, "normal", false}, {1, "degraded", true},
+		{1, "degraded", true}, {1, "normal", false}, {1, "degraded", true},
+		{1, "error", false}, {1, "degraded", true}, {0, "error", false},
 		{1, "degraded", true}, {1, "degraded", true},
 	}
 	for i, tc := range tests {
@@ -67,12 +67,12 @@ func TestIntelligenceProtectionPostgres(t *testing.T) {
 		require.Equal(t, tc.paused, paused)
 		t.Logf("check=%d account=%d status=%s paused=%v", i+1, gotID, tc.status, paused)
 	}
-	require.Equal(t, 4, pauses)
+	require.Equal(t, 7, pauses)
 	_, err = db.ExecContext(ctx, `UPDATE intelligence_check_configs SET lease_token='new-owner'`)
 	require.NoError(t, err)
 	err = s.Finish(ctx, &Claim{Config: c, Token: "stale"}, Record{GroupID: 7, Status: "degraded", AccountID: 1, CheckedAt: time.Now()})
 	require.ErrorIs(t, err, ErrConflict)
-	require.Equal(t, 4, pauses)
+	require.Equal(t, 7, pauses)
 	history, err := s.History(ctx, 7, time.Now().Add(-time.Hour), 0, 100)
 	require.NoError(t, err)
 	require.Len(t, history, len(tests))
@@ -101,10 +101,10 @@ func TestIntelligenceGlobalAccountPostgres(t *testing.T) {
 		status             string
 		pauses, recoveries int
 	}{
-		{7, 1, "degraded", 0, 0}, {9, 1, "normal", 0, 0}, {8, 1, "degraded", 1, 0},
-		{7, 1, "normal", 1, 1}, {8, 1, "degraded", 1, 1}, {7, 2, "degraded", 1, 1}, {7, 1, "degraded", 2, 1},
-		{9, 1, "normal", 2, 1}, {8, 1, "normal", 2, 2}, {9, 1, "degraded", 2, 2}, {7, 1, "degraded", 2, 2},
-		{8, 1, "error", 2, 2}, {7, 1, "degraded", 2, 2}, {8, 0, "error", 2, 2}, {8, 1, "degraded", 3, 2},
+		{7, 1, "degraded", 1, 0}, {9, 1, "normal", 1, 0}, {8, 1, "degraded", 2, 0},
+		{7, 1, "normal", 2, 1}, {8, 1, "degraded", 3, 1}, {7, 2, "degraded", 4, 1}, {7, 1, "degraded", 5, 1},
+		{9, 1, "normal", 5, 1}, {8, 1, "normal", 5, 2}, {9, 1, "degraded", 5, 2}, {7, 1, "degraded", 6, 2},
+		{8, 1, "error", 6, 2}, {7, 1, "degraded", 7, 2}, {8, 0, "error", 7, 2}, {8, 1, "degraded", 8, 2},
 	}
 	for i, step := range steps {
 		_, err = db.ExecContext(ctx, `UPDATE intelligence_check_configs SET lease_token='owned' WHERE group_id=$1`, step.group)

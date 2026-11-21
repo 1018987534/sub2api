@@ -42,7 +42,7 @@ func recoveryTestDB(t *testing.T) *sql.DB {
  schedulable BOOLEAN DEFAULT true,deleted_at TIMESTAMPTZ,extra JSONB);
  CREATE TABLE groups(id BIGINT PRIMARY KEY,name TEXT); INSERT INTO groups VALUES(5,'fixture-group'),(79,'protected-group');
  CREATE TABLE intelligence_check_runs(id BIGSERIAL PRIMARY KEY,status TEXT);
- INSERT INTO accounts(id,extra) VALUES(1,'{"intelligence_pause_until":"2099-01-01T00:00:00Z","intelligence_recovery_required":true}');
+ INSERT INTO accounts(id,extra) VALUES(1,jsonb_build_object('intelligence_pause_until',(NOW()+INTERVAL '20 minutes')::text,'intelligence_recovery_required',true));
  INSERT INTO intelligence_check_runs(status) VALUES('degraded');`)
 	require.NoError(t, err)
 	migration, err := os.ReadFile("../../migrations/245_intelligence_recovery_queue.sql")
@@ -61,6 +61,15 @@ func recoveryTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// Advance the persisted deadline instead of sleeping for a real 20-minute pause.
+func advanceRecoveryDue(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`UPDATE accounts SET extra=jsonb_set(extra,'{intelligence_pause_until}','"2000-01-01T00:00:00Z"') WHERE extra->>'intelligence_recovery_required'='true';
+ UPDATE intelligence_recovery_queue q SET generation=a.extra->>'intelligence_pause_until',next_run_at=NOW()-INTERVAL '1 minute',last_checked_at=NOW()-INTERVAL '1 hour'
+ FROM accounts a WHERE a.id=q.account_id`)
+	require.NoError(t, err)
+}
+
 func TestIntelligenceRecoveryPostgres(t *testing.T) {
 	db := recoveryTestDB(t)
 	ctx := context.Background()
@@ -73,13 +82,12 @@ func TestIntelligenceRecoveryPostgres(t *testing.T) {
 	require.NoError(t, store.Sync(ctx))
 	var minutes float64
 	require.NoError(t, db.QueryRow(`SELECT EXTRACT(EPOCH FROM(next_run_at-NOW()))/60 FROM intelligence_recovery_queue`).Scan(&minutes))
-	require.InDelta(t, 3, minutes, .02)
+	require.InDelta(t, 20, minutes, .02)
 	c := DefaultConfig(79)
 	_, err := store.ClaimRecovery(ctx, c)
 	require.ErrorIs(t, err, ErrConflict)
-	for _, expected := range []int{5, 8, 10, 20, 30, 40, 50, 50, 50} {
-		_, err = db.Exec(`UPDATE intelligence_recovery_queue SET next_run_at=NOW()-INTERVAL '1 minute'`)
-		require.NoError(t, err)
+	for _, expected := range []int{30, 40, 50, 50, 50} {
+		advanceRecoveryDue(t, db)
 		// A new store represents restarting the control process; retry progress persists.
 		store = &SQLRecoveryStore{DB: db, Recover: store.Recover}
 		claim, err := store.ClaimRecovery(ctx, c)
@@ -92,8 +100,7 @@ func TestIntelligenceRecoveryPostgres(t *testing.T) {
 		require.ErrorIs(t, store.FinishRecovery(ctx, claim, Record{Status: "normal"}), ErrConflict)
 		t.Logf("degraded retry=%dm restart=preserved duplicate=blocked", expected)
 	}
-	_, err = db.Exec(`UPDATE intelligence_recovery_queue SET next_run_at=NOW()-INTERVAL '1 minute'`)
-	require.NoError(t, err)
+	advanceRecoveryDue(t, db)
 	claim, err := store.ClaimRecovery(ctx, c)
 	require.NoError(t, err)
 	require.NoError(t, store.FinishRecovery(ctx, claim, Record{Status: "normal"}))
@@ -113,8 +120,7 @@ func TestIntelligenceRecoveryFencesAndParallelLeases(t *testing.T) {
 	recovered := 0
 	store := &SQLRecoveryStore{DB: db, Recover: func(context.Context, int64) error { recovered++; return nil }}
 	require.NoError(t, store.Sync(ctx))
-	_, err := db.Exec(`UPDATE intelligence_recovery_queue SET next_run_at=NOW()-INTERVAL '1 minute'`)
-	require.NoError(t, err)
+	advanceRecoveryDue(t, db)
 	c := DefaultConfig(5)
 	var wg sync.WaitGroup
 	claims := make(chan *RecoveryClaim, 8)
@@ -139,14 +145,13 @@ func TestIntelligenceRecoveryFencesAndParallelLeases(t *testing.T) {
 		require.ErrorIs(t, err, ErrConflict)
 	}
 	stale := <-claims
-	_, err = db.Exec(`UPDATE accounts SET extra=jsonb_set(extra,'{intelligence_pause_until}','"2099-02-01T00:00:00Z"') WHERE id=1`)
+	_, err := db.Exec(`UPDATE accounts SET extra=jsonb_set(extra,'{intelligence_pause_until}','"2099-02-01T00:00:00Z"') WHERE id=1`)
 	require.NoError(t, err)
 	require.ErrorIs(t, store.FinishRecovery(ctx, stale, Record{Status: "normal"}), ErrConflict)
 	require.NoError(t, store.Sync(ctx))
 	require.ErrorIs(t, store.FinishRecovery(ctx, stale, Record{Status: "normal"}), ErrConflict)
 	require.Zero(t, recovered)
-	_, err = db.Exec(`UPDATE intelligence_recovery_queue SET next_run_at=NOW()-INTERVAL '1 minute'`)
-	require.NoError(t, err)
+	advanceRecoveryDue(t, db)
 	old, err := store.ClaimRecovery(ctx, c)
 	require.NoError(t, err)
 	_, err = db.Exec(`UPDATE intelligence_recovery_queue SET lease_until=NOW()-INTERVAL '1 second'`)
@@ -165,7 +170,7 @@ func TestIntelligenceRecoveryFencesAndParallelLeases(t *testing.T) {
 	t.Log("8 concurrent claims=1 upstream lease; stale generation/expired lease cannot recover; group reset removes queue")
 }
 
-func TestIntelligenceInternalRecoveryResetsMonitorStreak(t *testing.T) {
+func TestIntelligenceSingleDegradedAfterRecovery(t *testing.T) {
 	db := recoveryTestDB(t)
 	ctx := context.Background()
 	_, err := db.Exec(`DROP TABLE intelligence_check_runs;
@@ -185,11 +190,11 @@ func TestIntelligenceInternalRecoveryResetsMonitorStreak(t *testing.T) {
 		_, err = db.Exec(`UPDATE intelligence_check_configs SET lease_token='owned'`)
 		require.NoError(t, err)
 		require.NoError(t, s.Finish(ctx, &Claim{Config: DefaultConfig(79), Token: "owned"}, Record{GroupID: 79, AccountID: 1, Status: "degraded", CheckedAt: time.Now()}))
-		require.Equal(t, i, pauses)
+		require.Equal(t, i+1, pauses)
 	}
 	var normal, total int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FILTER(WHERE status='normal'),count(*) FROM intelligence_check_runs`).Scan(&normal, &total))
 	require.Zero(t, normal)
 	require.Equal(t, 3, total)
-	t.Log("internal normal is invisible; first new degraded does not re-pause; second new degraded pauses")
+	t.Log("internal normal is invisible; each new degraded result immediately pauses")
 }

@@ -102,12 +102,15 @@ func TestIntelligenceSharedAccountIsolationAndRecovery(t *testing.T) {
 	account.TempUnschedulableUntil = &until
 	account.TempUnschedulableReason = "unrelated"
 	require.NoError(t, svc.RecoverIntelligenceAccount(ctx, 1))
+	require.True(t, intelligenceAccountBlocked(account, &g2.ID, time.Now()))
+	account.Extra[intelligencePauseUntilKey] = time.Now().Add(-time.Minute).Format(time.RFC3339Nano)
+	require.NoError(t, svc.RecoverIntelligenceAccount(ctx, 1))
 	for _, group := range []Group{g1, g2, g3} {
 		require.False(t, intelligenceAccountBlocked(account, &group.ID, time.Now()))
 	}
 	require.Equal(t, "unrelated", account.TempUnschedulableReason)
 	require.Equal(t, []int64{111, 5, 79}, account.GroupIDs)
-	t.Log("normal result: all group restrictions removed immediately; membership and unrelated cooldown preserved")
+	t.Log("normal result after minimum pause: all group restrictions removed; membership and unrelated cooldown preserved")
 }
 
 func TestIntelligenceIsolationExpiresWithoutSoleGroupException(t *testing.T) {
