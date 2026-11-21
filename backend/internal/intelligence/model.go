@@ -56,7 +56,7 @@ type Claim struct {
 }
 
 func DefaultConfig(groupID int64) Config {
-	return Config{GroupID: groupID, IntervalMinutes: 10, Model: "gpt-6-astra", ReasoningEffort: "low", Protocol: "responses", Prompt: DefaultPrompt, TimeoutSeconds: 900, MatchMode: "contains_any", Expected: []string{"手感", "21"}}
+	return Config{GroupID: groupID, IntervalMinutes: 10, Model: "gpt-6-astra", ReasoningEffort: "low", Protocol: "responses", Prompt: DefaultPrompt, TimeoutSeconds: 900, MatchMode: "exact", Expected: []string{"21"}}
 }
 
 func (c Config) Validate() error {
@@ -83,10 +83,13 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Matches ports FP CandyAnswerPolicy's NFKC + full-answer keyword rule by
-// default. This is a configurable heuristic, NOT a model-identity/IQ assertion.
+// Matches validates the built-in candy probe as a complete numeric answer.
+// Custom prompts retain their configured matching rule; a pass is not an IQ assertion.
 func Matches(answer string, c Config) bool {
 	text := norm.NFKC.String(strings.TrimSpace(answer))
+	if isBuiltinCandyProbe(c) {
+		return text == "21"
+	}
 	for _, expected := range c.Expected {
 		token := norm.NFKC.String(strings.TrimSpace(expected))
 		if token != "" && ((c.MatchMode == "exact" && text == token) || (c.MatchMode == "contains_any" && strings.Contains(text, token))) {

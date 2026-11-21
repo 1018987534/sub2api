@@ -40,12 +40,12 @@ func TestIntelligenceDefaultAndValidation(t *testing.T) {
 		})
 	}
 }
-func TestIntelligenceFPHeuristic(t *testing.T) {
+func TestIntelligenceAnswerMatching(t *testing.T) {
 	c := DefaultConfig(1)
-	for _, answer := range []string{"根据手感区分", "答案 21", "２１"} {
+	for _, answer := range []string{"21", " ２１ "} {
 		require.True(t, Matches(answer, c), answer)
 	}
-	for _, answer := range []string{"", "29", "不知道"} {
+	for _, answer := range []string{"", "29", "不知道", "根据手感区分", "答案 21", "121", "答案不是21，而是27"} {
 		require.False(t, Matches(answer, c), answer)
 	}
 	c.MatchMode = "exact"
@@ -125,6 +125,7 @@ func TestIntelligenceHTTPProtocolsAndRedaction(t *testing.T) {
 			c.Model = "real-model"
 			c.ReasoningEffort = "high"
 			c.Prompt = "custom prompt"
+			c.MatchMode = "contains_any"
 			record := p.Run(context.Background(), c)
 			require.Equal(t, "client:gateway-generated-fixture", record.RequestID)
 			require.Equal(t, "normal", record.Status)
