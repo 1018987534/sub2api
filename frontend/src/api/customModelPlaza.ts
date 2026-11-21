@@ -11,17 +11,23 @@ export const plazaFamilies = [
   { id: 'glm', name: 'GLM' },
   { id: 'deepseek', name: 'DeepSeek' },
 ] as const
-export type PlazaFamily = typeof plazaFamilies[number]['id']
+export function plazaFamilyName(family: string): string {
+  return plazaFamilies.find(entry => entry.id === family.toLowerCase())?.name ?? family
+}
 
 export interface CustomPlazaModel {
   id: string
-  family: PlazaFamily
+  family: string
   tiers: CustomPlazaTier[]
 }
 
 export interface CustomPlazaAdminModel {
   id: string
-  family: PlazaFamily
+  family: string
+  hidden: boolean
+  gpt_cache_free: boolean
+  context_limits: number[] | null
+  official_tiers: CustomPlazaTier[]
   default_tiers: CustomPlazaTier[]
   overrides: CustomPlazaTier[]
 }
@@ -36,7 +42,20 @@ export async function getCustomModelPlazaAdmin(): Promise<CustomPlazaAdminModel[
   return data
 }
 
-export async function saveCustomModelPlazaPrices(id: string, tiers: CustomPlazaTier[]): Promise<CustomPlazaAdminModel> {
-  const { data } = await apiClient.put<CustomPlazaAdminModel>(`/admin/custom-model-plaza/${encodeURIComponent(id)}`, { tiers })
+export type CustomPlazaConfig = Pick<CustomPlazaAdminModel, 'id' | 'family' | 'hidden' | 'context_limits'> & { tiers: CustomPlazaTier[] }
+
+export async function getCustomModelPlazaDefaults(id: string, family: string): Promise<CustomPlazaAdminModel> {
+  const { data } = await apiClient.get<CustomPlazaAdminModel>('/admin/custom-model-plaza/defaults', { params: { model: id, family } })
   return data
+}
+
+export async function saveCustomModelPlazaConfig(config: CustomPlazaConfig, create: boolean): Promise<CustomPlazaAdminModel> {
+  const { data } = await apiClient.request<CustomPlazaAdminModel>({
+    url: '/admin/custom-model-plaza', method: create ? 'post' : 'put', data: config,
+  })
+  return data
+}
+
+export async function deleteCustomModelPlazaModel(id: string): Promise<void> {
+  await apiClient.delete('/admin/custom-model-plaza', { params: { model: id } })
 }

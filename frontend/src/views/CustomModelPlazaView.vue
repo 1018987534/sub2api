@@ -26,7 +26,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import CustomModelPriceTable from '@/components/customModelPlaza/CustomModelPriceTable.vue'
-import { getCustomModelPlaza, plazaFamilies, type CustomPlazaModel } from '@/api/customModelPlaza'
+import { getCustomModelPlaza, plazaFamilyName, type CustomPlazaModel } from '@/api/customModelPlaza'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 
@@ -36,9 +36,16 @@ const auth = useAuthStore()
 const models = ref<CustomPlazaModel[]>([])
 const loading = ref(true)
 const failed = ref(false)
-const sections = computed(() => plazaFamilies.map(family => ({
-  ...family, models: models.value.filter(model => model.family === family.id),
-})).filter(family => family.models.length > 0))
+const sections = computed(() => {
+  const families = new Map<string, { id: string; name: string; models: CustomPlazaModel[] }>()
+  for (const model of models.value) {
+    const id = model.family.toLowerCase()
+    const family = families.get(id) ?? { id, name: plazaFamilyName(model.family), models: [] }
+    family.models.push(model)
+    families.set(id, family)
+  }
+  return [...families.values()]
+})
 
 async function load() {
   loading.value = true

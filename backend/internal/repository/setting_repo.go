@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
@@ -41,6 +42,8 @@ func (r *settingRepository) SetContentModerationConfig(ctx context.Context, valu
 type settingRepository struct {
 	client *ent.Client
 }
+
+var _ service.CustomPlazaSettingsRepository = (*settingRepository)(nil)
 
 func NewSettingRepository(client *ent.Client) service.SettingRepository {
 	return &settingRepository{client: client}
@@ -110,6 +113,44 @@ func (r *settingRepository) GetMultiple(ctx context.Context, keys []string) (map
 		result[s.Key] = s.Value
 	}
 	return result, nil
+}
+
+func (r *settingRepository) GetValuesByPrefixes(ctx context.Context, prefixes ...string) (map[string]string, error) {
+	result := make(map[string]string)
+	if len(prefixes) == 0 {
+		return result, nil
+	}
+	conditions := make([]predicate.Setting, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		conditions = append(conditions, setting.KeyHasPrefix(prefix))
+	}
+	rows, err := r.client.Setting.Query().Where(setting.Or(conditions...)).All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.Key] = row.Value
+	}
+	return result, nil
+}
+
+func (r *settingRepository) CompareAndSetValue(ctx context.Context, key string, before, after *string) (bool, error) {
+	if before == nil {
+		if after == nil {
+			return false, nil
+		}
+		_, err := r.client.Setting.Create().SetKey(key).SetValue(*after).Save(ctx)
+		if ent.IsConstraintError(err) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	if after == nil {
+		n, err := r.client.Setting.Delete().Where(setting.KeyEQ(key), setting.ValueEQ(*before)).Exec(ctx)
+		return n == 1, err
+	}
+	n, err := r.client.Setting.Update().Where(setting.KeyEQ(key), setting.ValueEQ(*before)).SetValue(*after).Save(ctx)
+	return n == 1, err
 }
 
 func (r *settingRepository) SetMultiple(ctx context.Context, settings map[string]string) error {

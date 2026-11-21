@@ -2,17 +2,9 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"math"
-
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
 const customPlazaSettingPrefix = "custom_model_plaza_price:"
-
-var errCustomPlazaModelNotFound = infraerrors.NotFound("CUSTOM_PLAZA_MODEL_NOT_FOUND", "model is not in the custom plaza")
 
 // All prices here are display-only, in USD per million tokens. Nil is unconfigured,
 // not zero. The settings below are never read by billing or channel resolution.
@@ -41,10 +33,14 @@ type CustomPlazaModel struct {
 }
 
 type CustomPlazaAdminModel struct {
-	ID           string            `json:"id"`
-	Family       string            `json:"family"`
-	DefaultTiers []CustomPlazaTier `json:"default_tiers"`
-	Overrides    []CustomPlazaTier `json:"overrides"`
+	ID            string            `json:"id"`
+	Family        string            `json:"family"`
+	Hidden        bool              `json:"hidden"`
+	GPTCacheFree  bool              `json:"gpt_cache_free"`
+	ContextLimits []int             `json:"context_limits"` // null follows the official schedule; [] is a single manual tier
+	OfficialTiers []CustomPlazaTier `json:"official_tiers"`
+	DefaultTiers  []CustomPlazaTier `json:"default_tiers"`
+	Overrides     []CustomPlazaTier `json:"overrides"`
 }
 
 type customPlazaCatalogEntry struct {
@@ -61,9 +57,9 @@ func plazaModels(ids ...string) []customPlazaCatalogEntry {
 	return entries
 }
 
-// Curated display inventory, in publication order. Channel entitlement, account
-// availability and user-specific rates must not affect this catalog.
-var customPlazaCatalog = []struct {
+// Initial catalog, in publication order. A stored record can replace or remove
+// any starter entry. New model IDs need not occur here or in the billing catalog.
+var customPlazaSeeds = []struct {
 	family string
 	models []customPlazaCatalogEntry
 }{
@@ -86,13 +82,14 @@ var customPlazaCatalog = []struct {
 }
 
 type CustomModelPlazaService struct {
-	settings SettingRepository
+	settings CustomPlazaSettingsRepository
 	billing  *BillingService
 	resolver *ModelPricingResolver
 }
 
 func NewCustomModelPlazaService(settings SettingRepository, billing *BillingService) *CustomModelPlazaService {
-	return &CustomModelPlazaService{settings: settings, billing: billing, resolver: NewModelPricingResolver(nil, billing)}
+	store, _ := settings.(CustomPlazaSettingsRepository)
+	return &CustomModelPlazaService{settings: store, billing: billing, resolver: NewModelPricingResolver(nil, billing)}
 }
 
 func (s *CustomModelPlazaService) List(ctx context.Context) ([]CustomPlazaModel, error) {
@@ -102,6 +99,9 @@ func (s *CustomModelPlazaService) List(ctx context.Context) ([]CustomPlazaModel,
 	}
 	models := make([]CustomPlazaModel, 0, len(admin))
 	for _, m := range admin {
+		if m.Hidden {
+			continue
+		}
 		for i := range m.DefaultTiers {
 			for _, override := range m.Overrides {
 				if override.bounds() == m.DefaultTiers[i].bounds() {
@@ -109,7 +109,7 @@ func (s *CustomModelPlazaService) List(ctx context.Context) ([]CustomPlazaModel,
 					break
 				}
 			}
-			if m.Family == "gpt" {
+			if m.GPTCacheFree {
 				m.DefaultTiers[i].CustomPlazaRates = freeGPTPlazaCacheWrites(m.DefaultTiers[i].CustomPlazaRates)
 			}
 		}
@@ -118,94 +118,18 @@ func (s *CustomModelPlazaService) List(ctx context.Context) ([]CustomPlazaModel,
 	return models, nil
 }
 
-func (s *CustomModelPlazaService) ListAdmin(ctx context.Context) ([]CustomPlazaAdminModel, error) {
-	var keys []string
-	for _, section := range customPlazaCatalog {
-		for _, model := range section.models {
-			keys = append(keys, customPlazaSettingPrefix+model.id)
-		}
-	}
-	values, err := s.settings.GetMultiple(ctx, keys)
-	if err != nil {
-		return nil, fmt.Errorf("read custom plaza price settings: %w", err)
-	}
-	models := make([]CustomPlazaAdminModel, 0, len(keys))
-	for _, section := range customPlazaCatalog {
-		for _, model := range section.models {
-			result := CustomPlazaAdminModel{
-				ID: model.id, Family: section.family, Overrides: []CustomPlazaTier{},
-				DefaultTiers: s.defaultTiers(ctx, section.family, model),
-			}
-			if raw := values[customPlazaSettingPrefix+model.id]; raw != "" {
-				if err := json.Unmarshal([]byte(raw), &result.Overrides); err != nil {
-					return nil, fmt.Errorf("decode custom plaza price for %s: %w", model.id, err)
-				}
-			}
-			models = append(models, result)
-		}
-	}
-	return models, nil
-}
-
-func (s *CustomModelPlazaService) SetOverrides(ctx context.Context, id string, overrides []CustomPlazaTier) (*CustomPlazaAdminModel, error) {
-	for _, section := range customPlazaCatalog {
-		for _, model := range section.models {
-			if model.id != id {
-				continue
-			}
-			result := &CustomPlazaAdminModel{ID: id, Family: section.family, DefaultTiers: s.defaultTiers(ctx, section.family, model), Overrides: []CustomPlazaTier{}}
-			known, seen := map[[2]int]bool{}, map[[2]int]bool{}
-			for _, tier := range result.DefaultTiers {
-				known[tier.bounds()] = true
-			}
-			for _, tier := range overrides {
-				bounds := tier.bounds()
-				if !known[bounds] || seen[bounds] {
-					return nil, infraerrors.BadRequest("CUSTOM_PLAZA_INVALID_TIER", "unknown or duplicate context tier")
-				}
-				seen[bounds] = true
-				if section.family == "gpt" && (tier.CacheWrite != nil || tier.CacheWrite1h != nil || tier.CacheWrite12h != nil) {
-					return nil, infraerrors.BadRequest("CUSTOM_PLAZA_GPT_CACHE_WRITE", "GPT cache write display prices are fixed at zero")
-				}
-				hasPrice := false
-				for _, field := range tier.CustomPlazaRates.fields() {
-					if *field != nil {
-						v := **field
-						if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1_000_000 {
-							return nil, infraerrors.BadRequest("CUSTOM_PLAZA_INVALID_PRICE", "prices must be between 0 and 1000000 USD per million tokens")
-						}
-						hasPrice = true
-					}
-				}
-				if hasPrice {
-					result.Overrides = append(result.Overrides, tier)
-				}
-			}
-			key := customPlazaSettingPrefix + id
-			if len(result.Overrides) == 0 {
-				if err := s.settings.Delete(ctx, key); err != nil && !errors.Is(err, ErrSettingNotFound) {
-					return nil, fmt.Errorf("reset custom plaza model: %w", err)
-				}
-			} else {
-				data, err := json.Marshal(result.Overrides)
-				if err != nil {
-					return nil, err
-				}
-				if err := s.settings.Set(ctx, key, string(data)); err != nil {
-					return nil, fmt.Errorf("save custom plaza model: %w", err)
-				}
-			}
-			return result, nil
-		}
-	}
-	return nil, errCustomPlazaModelNotFound
-}
-
-func (s *CustomModelPlazaService) defaultTiers(ctx context.Context, family string, model customPlazaCatalogEntry) []CustomPlazaTier {
+func (s *CustomModelPlazaService) defaultTiers(ctx context.Context, gpt, seeded bool, model customPlazaCatalogEntry) []CustomPlazaTier {
 	base := CustomPlazaRates{}
-	price, err := s.billing.GetModelPricing(model.priceModel)
 	official := s.billing.pricingService.GetIdentifiedModelPricing(model.priceModel)
 	hasOfficialTokenPrice := official != nil && !official.TokenPricingAbsent
+	if !seeded && !hasOfficialTokenPrice {
+		// Billing's family-level fallback is not a quote for a newly entered ID.
+		if gpt {
+			base = freeGPTPlazaCacheWrites(base)
+		}
+		return []CustomPlazaTier{{CustomPlazaRates: base}}
+	}
+	price, err := s.billing.GetModelPricing(model.priceModel)
 	// For these newer SKUs a family-level fallback is not an official quote.
 	// Once an identified catalog entry arrives it replaces the reference price.
 	if ref := model.fallbackUSD; ref != nil && (err != nil || !hasOfficialTokenPrice) {
@@ -247,7 +171,7 @@ func (s *CustomModelPlazaService) defaultTiers(ctx context.Context, family strin
 				if source.MaxTokens != nil {
 					tier.MaxTokens = *source.MaxTokens
 				}
-				if family == "gpt" {
+				if gpt {
 					tier.CustomPlazaRates = freeGPTPlazaCacheWrites(tier.CustomPlazaRates)
 				}
 				tiers = append(tiers, tier)
@@ -255,7 +179,7 @@ func (s *CustomModelPlazaService) defaultTiers(ctx context.Context, family strin
 			return tiers
 		}
 	}
-	if family == "gpt" {
+	if gpt {
 		base = freeGPTPlazaCacheWrites(base)
 	}
 	return []CustomPlazaTier{{CustomPlazaRates: base}}

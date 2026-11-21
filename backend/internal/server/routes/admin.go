@@ -80,6 +80,10 @@ func RegisterAdminRoutes(
 		if h.CustomModelPlaza != nil {
 			plaza := admin.Group("/custom-model-plaza")
 			plaza.GET("", h.CustomModelPlaza.GetAdmin)
+			plaza.GET("/defaults", h.CustomModelPlaza.PreviewDefaults)
+			plaza.POST("", h.CustomModelPlaza.Create)
+			plaza.PUT("", h.CustomModelPlaza.Edit)
+			plaza.DELETE("", h.CustomModelPlaza.Delete)
 			plaza.PUT("/:model", h.CustomModelPlaza.Update)
 		}
 

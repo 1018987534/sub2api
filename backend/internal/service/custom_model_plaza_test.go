@@ -6,8 +6,10 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,19 +21,35 @@ type customPlazaSettingsStub struct {
 func (s customPlazaSettingsStub) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
 	out := make(map[string]string)
 	for _, key := range keys {
-		out[key] = s.values[key]
+		if value, ok := s.values[key]; ok {
+			out[key] = value
+		}
 	}
 	return out, nil
 }
 
-func (s customPlazaSettingsStub) Set(_ context.Context, key, value string) error {
-	s.values[key] = value
-	return nil
+func (s customPlazaSettingsStub) GetValuesByPrefixes(_ context.Context, prefixes ...string) (map[string]string, error) {
+	out := make(map[string]string)
+	for k, v := range s.values {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(k, prefix) {
+				out[k] = v
+			}
+		}
+	}
+	return out, nil
 }
 
-func (s customPlazaSettingsStub) Delete(_ context.Context, key string) error {
-	delete(s.values, key)
-	return nil
+func (s customPlazaSettingsStub) CompareAndSetValue(_ context.Context, key string, before, after *string) (bool, error) {
+	if current, exists := s.values[key]; exists != (before != nil) || exists && current != *before {
+		return false, nil
+	}
+	if after == nil {
+		delete(s.values, key)
+	} else {
+		s.values[key] = *after
+	}
+	return true, nil
 }
 
 func TestCustomModelPlazaOverridesDoNotChangeBilling(t *testing.T) {
@@ -147,4 +165,72 @@ func TestCustomModelPlazaFollowsIdentifiedDirectoryAndDistinguishesZero(t *testi
 	billed, err := billing.GetModelPricing(model)
 	require.NoError(t, err)
 	require.NotEqual(t, *configured.Input, *plazaPerMillion(&billed.InputPricePerToken))
+}
+
+func TestCustomModelPlazaCatalogCRUD(t *testing.T) {
+	ctx := context.Background()
+	const starter = "claude-opus-5-5"
+	legacy := `[{"min_tokens":0,"max_tokens":0,"input":11}]`
+	settings := customPlazaSettingsStub{values: map[string]string{
+		SettingKeyModelPlazaEnabled: "false", customPlazaSettingPrefix + starter: legacy,
+	}}
+	billing := newTestBillingService()
+	newService := func() *CustomModelPlazaService { return NewCustomModelPlazaService(settings, billing) }
+	plaza := newService()
+	initial, err := plaza.List(ctx)
+	require.NoError(t, err)
+	seed, err := plaza.GetAdminModel(ctx, starter)
+	require.NoError(t, err)
+	require.Equal(t, 11.0, *seed.Overrides[0].Input)
+
+	const model = "acme/claude-opus-experimental:online"
+	quote, err := plaza.PreviewDefaults(ctx, model, "Research")
+	require.NoError(t, err)
+	require.Nil(t, quote.DefaultTiers[0].Input, "unknown ID must not inherit a guessed Opus price")
+	input, free := 2.5, 0.0
+	config := CustomPlazaConfig{ID: model, Family: "Research", ContextLimits: []int{42000}, Tiers: []CustomPlazaTier{
+		{MaxTokens: 42000, CustomPlazaRates: CustomPlazaRates{Input: &input}},
+		{MinTokens: 42000, CustomPlazaRates: CustomPlazaRates{CacheRead: &free}},
+	}}
+	created, err := plaza.Configure(ctx, config, true)
+	require.NoError(t, err)
+	require.Equal(t, config.Tiers, created.Overrides)
+
+	plaza = newService() // The catalog is shared storage, not process memory.
+	public, err := plaza.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, public, len(initial)+1)
+	require.Equal(t, config.Tiers, public[len(public)-1].Tiers)
+	duplicate := config
+	duplicate.ID = strings.ToUpper(config.ID)
+	_, err = plaza.Configure(ctx, duplicate, true)
+	require.ErrorIs(t, err, errCustomPlazaDuplicate)
+
+	config.ContextLimits, config.Tiers = []int{42000, 40000}, nil
+	_, err = plaza.Configure(ctx, config, false)
+	require.Equal(t, "CUSTOM_PLAZA_INVALID_LIMITS", infraerrors.Reason(err))
+	config.ContextLimits, config.Tiers, config.Family, config.Hidden = []int{}, []CustomPlazaTier{}, "新系列", true
+	_, err = plaza.Configure(ctx, config, false)
+	require.NoError(t, err)
+	updated, err := plaza.GetAdminModel(ctx, model)
+	require.NoError(t, err)
+	require.True(t, updated.Hidden)
+	require.Equal(t, "新系列", updated.Family)
+	require.NotNil(t, updated.ContextLimits, "a manual single tier is distinct from following official limits")
+	public, err = plaza.List(ctx)
+	require.NoError(t, err)
+	require.Equal(t, initial, public)
+
+	require.NoError(t, plaza.DeleteModel(ctx, model))
+	_, err = plaza.GetAdminModel(ctx, model)
+	require.ErrorIs(t, err, errCustomPlazaModelNotFound)
+	require.NotContains(t, settings.values, plazaRecordKey(model))
+	require.NoError(t, plaza.DeleteModel(ctx, starter))
+	_, err = newService().GetAdminModel(ctx, starter)
+	require.ErrorIs(t, err, errCustomPlazaModelNotFound)
+	restored, err := plaza.Configure(ctx, CustomPlazaConfig{ID: starter, Family: "claude"}, true)
+	require.NoError(t, err)
+	require.Empty(t, restored.Overrides, "recreating a removed model must not restore old overrides")
+	require.Equal(t, legacy, settings.values[customPlazaSettingPrefix+starter], "legacy settings remain available to an older binary")
+	require.Equal(t, "false", settings.values[SettingKeyModelPlazaEnabled])
 }

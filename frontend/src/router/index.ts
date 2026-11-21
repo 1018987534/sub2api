@@ -201,7 +201,7 @@ const routes: RouteRecordRaw[] = [
     path: '/custom-model-plaza',
     name: 'CustomModelPlaza',
     component: () => import('@/views/CustomModelPlazaView.vue'),
-    meta: { requiresAuth: false, title: 'Custom Model Plaza', titleKey: 'customModelPlaza.title' },
+    meta: { requiresAuth: false, title: 'Model Plaza', titleKey: 'customModelPlaza.title' },
   },
 
   // ==================== User Routes ====================
@@ -737,7 +737,7 @@ const routes: RouteRecordRaw[] = [
     path: '/admin/custom-model-plaza',
     name: 'AdminCustomModelPlaza',
     component: () => import('@/views/admin/CustomModelPlazaAdminView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Model Display Prices', titleKey: 'customModelPlaza.adminTitle' },
+    meta: { requiresAuth: true, requiresAdmin: true, title: 'Model Plaza Pricing', titleKey: 'customModelPlaza.adminTitle' },
   },
   {
     path: '/admin/settings',

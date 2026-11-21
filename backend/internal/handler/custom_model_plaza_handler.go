@@ -29,28 +29,87 @@ func (h *CustomModelPlazaHandler) Get(c *gin.Context) {
 }
 
 func (h *CustomModelPlazaHandler) GetAdmin(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	if id, ok := c.GetQuery("model"); ok {
+		model, err := h.plaza.GetAdminModel(c.Request.Context(), id)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, model)
+		return
+	}
 	models, err := h.plaza.ListAdmin(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	c.Header("Cache-Control", "no-store")
 	response.Success(c, models)
 }
 
+func decodePlazaRequest(c *gin.Context, dst any) bool {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil || decoder.Decode(new(any)) != io.EOF {
+		response.BadRequest(c, "expected one valid model configuration object")
+		return false
+	}
+	return true
+}
+
+func (h *CustomModelPlazaHandler) PreviewDefaults(c *gin.Context) {
+	model, err := h.plaza.PreviewDefaults(c.Request.Context(), c.Query("model"), c.Query("family"))
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, model)
+}
+
+func (h *CustomModelPlazaHandler) Create(c *gin.Context) { h.configure(c, true) }
+func (h *CustomModelPlazaHandler) Edit(c *gin.Context)   { h.configure(c, false) }
+
+func (h *CustomModelPlazaHandler) configure(c *gin.Context, create bool) {
+	var req service.CustomPlazaConfig
+	if !decodePlazaRequest(c, &req) {
+		return
+	}
+	if req.Tiers == nil {
+		response.BadRequest(c, "tiers must be a JSON array")
+		return
+	}
+	model, err := h.plaza.Configure(c.Request.Context(), req, create)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if create {
+		response.Created(c, model)
+		return
+	}
+	response.Success(c, model)
+}
+
+func (h *CustomModelPlazaHandler) Delete(c *gin.Context) {
+	if err := h.plaza.DeleteModel(c.Request.Context(), c.Query("model")); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, nil)
+}
+
+// Update retains the price-only endpoint for older frontend bundles.
 func (h *CustomModelPlazaHandler) Update(c *gin.Context) {
 	var req struct {
 		Tiers []service.CustomPlazaTier `json:"tiers"`
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16*1024)
-	decoder := json.NewDecoder(c.Request.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil || req.Tiers == nil {
-		response.BadRequest(c, "tiers must be a JSON array")
+	if !decodePlazaRequest(c, &req) {
 		return
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		response.BadRequest(c, "expected one JSON object")
+	if req.Tiers == nil {
+		response.BadRequest(c, "tiers must be a JSON array")
 		return
 	}
 	model, err := h.plaza.SetOverrides(c.Request.Context(), c.Param("model"), req.Tiers)
