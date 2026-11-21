@@ -68,11 +68,11 @@
                 <label class="field prompt-field"><span>提示词（最多 32KB）</span><textarea v-model="draft.prompt" maxlength="32768" rows="9"></textarea></label>
                 <div class="space-y-4">
                   <label class="field"><span>答案匹配</span><select v-model="draft.match_mode"><option value="contains_any">包含任一关键词（NFKC）</option><option value="exact">完全匹配（NFKC）</option></select></label>
-                  <label class="field"><span>期望答案（每行一个；默认：手感、21）</span><textarea v-model="expectedText" rows="5"></textarea></label>
+                  <label class="field"><span>期望答案（每行一个；默认：21）</span><textarea v-model="expectedText" rows="5"></textarea></label>
                 </div>
               </div>
             </section>
-            <p class="config-footnote">检测会实际消耗所绑定 Key 的额度。系统不重试请求；失败只写入 error 状态。保存采用版本号 CAS，避免覆盖其他管理员的修改。</p>
+            <p class="config-footnote">内置糖果题仅接受最终数字 21；旧版“手感、21”关键词配置也按此规则判断。自定义题目按所选匹配方式判断。检测会实际消耗所绑定 Key 的额度。系统不重试请求；失败只写入 error 状态。保存采用版本号 CAS，避免覆盖其他管理员的修改。</p>
           </div>
           <div class="panel history-panel">
             <div class="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h2 class="font-semibold text-gray-900 dark:text-white">最近 7 天记录</h2><p class="text-xs text-gray-500">答案仅管理员点击详情时可见。</p></div><div class="flex gap-2"><button class="btn-secondary" :disabled="running || saving || dirty || !draft.version || !draft.api_key_id || keySelectionBlocked" @click="run">{{ running ? '已排队…' : '立即检测' }}</button><button class="btn-secondary" :disabled="historyLoading" @click="loadHistory()">刷新</button></div></div>

@@ -105,10 +105,11 @@ func (p *HTTPProbe) request(ctx context.Context, c Config, record *Record) (stri
 // public monitor checks and fixed-account internal recovery checks.
 func ProbeRequest(c Config) (string, []byte, error) {
 	payload := map[string]any{"model": c.Model}
+	prompt := probePrompt(c)
 	path := "/v1/responses"
 	switch c.Protocol {
 	case "responses":
-		payload["input"] = c.Prompt
+		payload["input"] = prompt
 		payload["stream"] = true
 		payload["store"] = false
 		if c.ReasoningEffort != "none" {
@@ -116,14 +117,14 @@ func ProbeRequest(c Config) (string, []byte, error) {
 		}
 	case "chat_completions":
 		path = "/v1/chat/completions"
-		payload["messages"] = []map[string]string{{"role": "user", "content": c.Prompt}}
+		payload["messages"] = []map[string]string{{"role": "user", "content": prompt}}
 		payload["stream"] = false
 		if c.ReasoningEffort != "none" {
 			payload["reasoning_effort"] = c.ReasoningEffort
 		}
 	case "messages":
 		path = "/v1/messages"
-		payload["messages"] = []map[string]string{{"role": "user", "content": c.Prompt}}
+		payload["messages"] = []map[string]string{{"role": "user", "content": prompt}}
 		payload["max_tokens"] = 4096
 	default:
 		return "", nil, ErrInvalid
