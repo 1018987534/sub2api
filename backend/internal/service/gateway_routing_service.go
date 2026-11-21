@@ -107,6 +107,7 @@ type GatewayRoutingNodeRuntime struct {
 	Unlimited              bool       `json:"unlimited"`
 	MonitorStale           bool       `json:"monitor_stale"`
 	MonitorSampleAt        *time.Time `json:"monitor_sample_at,omitempty"`
+	ProtectionCause        string     `json:"protection_cause,omitempty"`
 	PacketLossState        string     `json:"packet_loss_state,omitempty"`
 	PacketLossPercent      *float64   `json:"packet_loss_percent,omitempty"`
 	PacketLossSampleAt     *time.Time `json:"packet_loss_sample_at,omitempty"`

@@ -229,9 +229,15 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 				node.PacketLossState = "healthy"
 			}
 		}
+		key := stateKey(configured)
+		pause, paused := states[key]
+		// OVH follows current readiness instead of retaining a timed origin
+		// pause after a deployment restart. Explicit legacy ICMP pauses remain.
+		if configured.ID == gatewayRoutingOVHNodeID && (!legacy || ((!paused || pause.OriginProbe) && !(signal.Fresh && signal.Severe))) {
+			applyGatewayOVHOriginHealth(node)
+			continue
+		}
 		if !legacy {
-			key := stateKey(configured)
-			pause, paused := states[key]
 			if pause, retain := applyGatewayOriginHealth(node, settings, signal, pause, paused, healthyPeer, now); retain {
 				next[key] = pause
 			}
@@ -248,8 +254,6 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 				node.PacketLossState = "healthy"
 			}
 		}
-		key := stateKey(configured)
-		pause, paused := states[key]
 		until := pause.Until
 		recovered := signal.Fresh && signal.Recovered
 		if pause.OriginProbe {
@@ -278,6 +282,12 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 			}
 		}
 		if paused {
+			reason := "packet_loss"
+			node.ProtectionCause = "icmp_packet_loss"
+			if pause.OriginProbe {
+				reason = "origin_health"
+				node.ProtectionCause = "origin_health"
+			}
 			next[key] = pause
 			node.PacketLossPausedUntil = &until
 			node.PacketLossState = "paused"
@@ -285,7 +295,7 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 				node.PacketLossState = "awaiting_recovery"
 			}
 			if !node.AutoDisabled {
-				applyAutoDisabledGatewayRoutingNode(node, "packet_loss")
+				applyAutoDisabledGatewayRoutingNode(node, reason)
 			}
 		}
 	}
@@ -296,6 +306,27 @@ func (s *SettingService) applyGatewayPacketLossProtection(ctx context.Context, s
 			*runtime = *base
 			preserveGatewayPacketLossRuntime(settings, runtime, previous)
 		}
+	}
+}
+
+// OVH does not persist origin-failure cooldowns: a planned process restart
+// may temporarily make readiness false, but fresh readiness restores its share.
+// Independent traffic/monitor protection keeps its priority.
+func applyGatewayOVHOriginHealth(node *GatewayRoutingNodeRuntime) {
+	node.PacketLossPausedUntil = nil
+	node.PacketLossState = "unknown"
+	if node.OriginReady == nil {
+		return
+	}
+	if *node.OriginReady {
+		node.PacketLossState = "healthy"
+		return
+	}
+	node.PacketLossState = "origin_unavailable"
+	node.ProtectionCause = "origin_health"
+	if !node.AutoDisabled {
+		applyAutoDisabledGatewayRoutingNode(node, "origin_health")
+		node.Status = "origin_unavailable"
 	}
 }
 
@@ -336,6 +367,12 @@ func applyGatewayOriginHealth(node *GatewayRoutingNodeRuntime, settings *Gateway
 			return pause, false
 		}
 	}
+	reason := "origin_health"
+	node.ProtectionCause = "origin_health"
+	if !pause.OriginProbe {
+		reason = "protection_unknown"
+		node.ProtectionCause = "unknown"
+	}
 	node.PacketLossPausedUntil = &pause.Until
 	if pause.RecoveryStage >= 1 && pause.RecoveryStage <= 3 && !node.AutoDisabled && !node.MonitorStale {
 		percent := [...]int{5, 25, 50}[pause.RecoveryStage-1]
@@ -348,7 +385,7 @@ func applyGatewayOriginHealth(node *GatewayRoutingNodeRuntime, settings *Gateway
 		node.PacketLossState = "awaiting_recovery"
 	}
 	if !node.AutoDisabled {
-		applyAutoDisabledGatewayRoutingNode(node, "packet_loss")
+		applyAutoDisabledGatewayRoutingNode(node, reason)
 	}
 	return pause, true
 }
@@ -357,8 +394,9 @@ func resetGatewayPacketLossRuntime(node *GatewayRoutingNodeRuntime, settings *Ga
 	wasRecovering := node.PacketLossState == "recovering"
 	node.PacketLossState, node.PacketLossPercent, node.PacketLossSampleAt, node.PacketLossPausedUntil = "", nil, nil, nil
 	node.ICMPProbeState, node.OriginReady, node.OriginSampleAt = "", nil, nil
+	node.ProtectionCause = ""
 	// Independent quota/offline decisions keep their existing priority.
-	if node.AutoDisabledReason == "packet_loss" || (wasRecovering && !node.AutoDisabled) {
+	if node.AutoDisabledReason == "packet_loss" || node.AutoDisabledReason == "origin_health" || node.AutoDisabledReason == "protection_unknown" || (wasRecovering && !node.AutoDisabled) {
 		node.AutoDisabled, node.AutoDisabledReason = false, ""
 		node.EffectiveWeight, node.Status = configured.TargetWeight, "active"
 		if node.MonitorStale {
@@ -376,11 +414,27 @@ func preserveGatewayPacketLossRuntime(settings *GatewayRoutingSettings, runtime,
 		if !settings.PacketLossProtectionEnabled || !gatewayRoutingNodeCanReceiveRequests(settings, configured) {
 			continue
 		}
+		if configured.ID == gatewayRoutingOVHNodeID && settings.ICMPPauseMode != gatewayICMPLegacy {
+			applyGatewayOVHOriginHealth(node)
+			continue
+		}
 		node.PacketLossState = "state_unavailable"
 		if old := previousGatewayRoutingNode(previous, configured); old != nil && old.PacketLossPausedUntil != nil && settings.PacketLossProtectionEnabled {
 			node.PacketLossPausedUntil = old.PacketLossPausedUntil
+			node.ProtectionCause = old.ProtectionCause
+			reason := old.AutoDisabledReason
+			if reason == "" {
+				switch old.ProtectionCause {
+				case "origin_health":
+					reason = "origin_health"
+				case "icmp_packet_loss":
+					reason = "packet_loss"
+				default:
+					reason = "protection_unknown"
+				}
+			}
 			if !node.AutoDisabled {
-				applyAutoDisabledGatewayRoutingNode(node, "packet_loss")
+				applyAutoDisabledGatewayRoutingNode(node, reason)
 			}
 		}
 	}

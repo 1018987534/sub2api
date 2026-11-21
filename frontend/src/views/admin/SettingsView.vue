@@ -439,6 +439,7 @@
                     </span>
                   </div>
                   <div class="mt-1 break-all font-mono text-xs text-gray-500 dark:text-gray-400">{{ gatewayRoutingOVHNode.origin }}</div>
+                  <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ t("admin.settings.gatewayRouting.ovhRecoveryHint") }}</p>
                   <div class="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                     <div>
                       <label for="gateway-ovh-geo-percent" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -12821,12 +12822,23 @@ function gatewayRoutingPacketLossLabel(nodeID: string): string {
   const node = gatewayRoutingRuntimeByID.value[nodeID];
   if (!node?.packet_loss_state) return "";
   const state = t(`admin.settings.gatewayRouting.packetLossStates.${node.packet_loss_state}`);
-  const percent = node.packet_loss_percent == null ? "" : ` · ICMP ${node.packet_loss_percent.toFixed(1)}%`;
-  const icmp = node.icmp_probe_state === "severe" ? ` · ${t("admin.settings.gatewayRouting.icmpSevere")}` : "";
+  const cause = node.protection_cause
+    ? t(`admin.settings.gatewayRouting.protectionCauses.${node.protection_cause}`)
+    : "";
+  const origin = node.origin_ready == null ? "" : t(
+    `admin.settings.gatewayRouting.${node.origin_ready ? "originReady" : "originNotReady"}`,
+  );
+  const percent = node.packet_loss_percent == null ? "" : t(
+    `admin.settings.gatewayRouting.${gatewayRoutingForm.icmp_pause_mode === "legacy" ? "icmpParticipating" : "icmpObservation"}`,
+    { percent: node.packet_loss_percent.toFixed(1) },
+  );
+  const icmp = node.icmp_probe_state === "severe"
+    ? t(`admin.settings.gatewayRouting.${gatewayRoutingForm.icmp_pause_mode === "legacy" ? "icmpSevere" : "icmpSevereObserve"}`)
+    : "";
   const until = node.packet_loss_paused_until && node.packet_loss_state !== "recovering"
     ? ` · ${t("admin.settings.gatewayRouting.packetLossUntil", { time: new Date(node.packet_loss_paused_until).toLocaleString() })}`
     : "";
-  return `${state}${percent}${icmp}${until}`;
+  return [cause, state, origin, percent, icmp].filter(Boolean).join(" · ") + until;
 }
 
 function gatewayRoutingStatusClass(nodeID: string): string {
@@ -12835,7 +12847,7 @@ function gatewayRoutingStatusClass(nodeID: string): string {
   if (status?.startsWith("auto_disabled") || status === "manual_disabled") {
     return `${base} bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300`;
   }
-  if (status === "monitor_stale") {
+  if (status === "monitor_stale" || status === "origin_unavailable") {
     return `${base} bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300`;
   }
   return `${base} bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300`;

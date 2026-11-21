@@ -2414,6 +2414,44 @@ describe("admin SettingsView platform quota matrix", () => {
     }
   });
 
+  it("OVH 回源未就绪显示自动恢复，ICMP 标注仅告警", async () => {
+    const response = await getGatewayRoutingSettings();
+    response.settings.icmp_pause_mode = "observe";
+    const ovh = response.runtime.nodes.find((node) => node.id === "ovh-us-01")!;
+    Object.assign(ovh, {
+      status: "origin_unavailable", auto_disabled: true,
+      protection_cause: "origin_health", packet_loss_state: "origin_unavailable",
+      origin_ready: false, packet_loss_percent: 0, icmp_probe_state: "healthy",
+    });
+    getGatewayRoutingSettings.mockResolvedValue(response);
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    const text = wrapper.text();
+    expect(text).toContain("admin.settings.gatewayRouting.statuses.origin_unavailable");
+    expect(text).toContain("admin.settings.gatewayRouting.protectionCauses.origin_health");
+    expect(text).toContain("admin.settings.gatewayRouting.icmpObservation");
+    expect(text).toContain("admin.settings.gatewayRouting.originNotReady");
+    expect(text).toContain("admin.settings.gatewayRouting.ovhRecoveryHint");
+    expect(text).not.toContain("admin.settings.gatewayRouting.statuses.auto_disabled_packet_loss");
+  });
+
+  it("回源故障冷却使用独立原因，不显示为 ICMP 丢包暂停", async () => {
+    const response = await getGatewayRoutingSettings();
+    Object.assign(response.runtime.nodes[0], {
+      status: "auto_disabled_origin_health", auto_disabled: true,
+      protection_cause: "origin_health", packet_loss_state: "paused",
+      origin_ready: false, packet_loss_paused_until: "2026-11-21T10:27:40Z",
+    });
+    getGatewayRoutingSettings.mockResolvedValue(response);
+    const wrapper = mountView();
+    await flushPromises();
+    await openGatewayTab(wrapper);
+    expect(wrapper.text()).toContain("admin.settings.gatewayRouting.statuses.auto_disabled_origin_health");
+    expect(wrapper.text()).toContain("admin.settings.gatewayRouting.protectionCauses.origin_health");
+    expect(wrapper.text()).not.toContain("admin.settings.gatewayRouting.statuses.auto_disabled_packet_loss");
+  });
+
   it("丢包暂停时长支持修改、回显和边界校验", async () => {
     const wrapper = mountView();
     await flushPromises();
