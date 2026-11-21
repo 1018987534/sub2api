@@ -197,6 +197,35 @@ node scripts/sub2api-admin.js tls-profiles update 1 --file profile.json
 node scripts/sub2api-admin.js tls-profiles delete 1
 ```
 
+## 模型广场展示价
+
+沿用 `SUB2API_BASE_URL`（正式站点 `https://xiaohondou.com`）、`SUB2API_ADMIN_API_KEY` 或 `SUB2API_JWT`。频繁执行用只授予所需权限的管理员密钥：查询 `model_plaza.read`、创建/改价 `model_plaza.write`、删除 `model_plaza.delete`。写完自动通过管理员 GET 读回；HTTP 409 时先确认现状，不能盲目重放。生产仅按用户指令写真实模型，不用临时模型试操作。
+
+```bash
+node scripts/sub2api-admin.js plaza families
+node scripts/sub2api-admin.js plaza list --search gemini
+node scripts/sub2api-admin.js plaza get gpt-6.2-astra
+node scripts/sub2api-admin.js plaza defaults vendor/model-id --family Gemini
+node scripts/sub2api-admin.js plaza create --json '{"id":"vendor/model-id","family":"Gemini","hidden":false}'
+node scripts/sub2api-admin.js plaza update vendor/model-id --json '{"hidden":true}'
+node scripts/sub2api-admin.js plaza price vendor/model-id --min 0 --max 0 --json '{"input":1.25,"output":null,"cache_read":0}'
+node scripts/sub2api-admin.js plaza delete vendor/model-id --confirm vendor/model-id
+```
+
+示例 ID 与价格仅说明参数，不是要写入的生产数据。`family` 是自由文本，不是计费分组；第一次给模型设 `family: "Gemini"` 即增加该系列，删除或隐藏最后一项后公开页面不显示空系列。模型 ID 可含 `/`、`:`；CLI 使用查询参数或 JSON 传递，不把 ID 拼进路由。
+
+| 方法及路径（`/api/v1` 下） | 参数、响应和作用 |
+| --- | --- |
+| `GET /admin/custom-model-plaza` | 返回全部管理模型；可加 `?model=MODEL_ID` 读取单个。含官方档位、当前档位、覆盖价、展示状态。 |
+| `GET /admin/custom-model-plaza/defaults` | 传 `model` 与 `family`，只预览默认档位和价格，不新增。 |
+| `POST /admin/custom-model-plaza` | JSON `id, family, hidden, context_limits, tiers`；201 创建；已存在返回 409。 |
+| `PUT /admin/custom-model-plaza` | 同结构全量替换单个模型展示配置。变更档位时按新范围传 `tiers`；`tiers: []` 清空覆盖价。 |
+| `PATCH /admin/custom-model-plaza/prices` | JSON `id, min_tokens, max_tokens, rates`；原子合并本档明确提供的价格字段，不覆盖其他档或设置。 |
+| `DELETE /admin/custom-model-plaza?model=MODEL_ID` | 删除展示模型及其覆盖价。成功后单项 GET 返回 404，需恢复时以先前记录重新创建。 |
+| `GET /custom-model-plaza` | 公开在售视图，验收 `id`、`family`、生效 `tiers`；隐藏模型不返回。 |
+
+所有价格均为 **USD / 1M Token**。`context_limits: null` 跟随默认档位，`[]` 为一个手动档，`[42000,272000]` 为三个手动档；每个 `tiers` 元素包含 `min_tokens` 和 `max_tokens`，末档 `max_tokens: 0` 表示无上限。价格字段为 `input`、`output`、`cache_read`、`cache_write`、`cache_write_1h`、`cache_write_12h`；GPT 缓存写入固定展示 $0.00。更新一个价格优先用 `price`，未传字段保持不变；`null` 恢复默认，没默认价显示未配置。不要据此修改渠道、分组、路由、默认价格目录或实际扣费。
+
 ## Raw Admin API
 
 未封装或新版本后台接口可用 `api` 直通。路径可写 `/admin/...` 或 `/api/v1/admin/...`。

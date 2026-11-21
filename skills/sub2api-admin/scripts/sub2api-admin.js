@@ -58,6 +58,14 @@ function usage() {
   sub2api-admin.js redeem-codes stats
   sub2api-admin.js error-rules list|get|create|update|delete|toggle ...
   sub2api-admin.js tls-profiles list|get|create|update|delete ...
+  sub2api-admin.js plaza list [--search TEXT] [--family FAMILY]
+  sub2api-admin.js plaza get <model-id>
+  sub2api-admin.js plaza families
+  sub2api-admin.js plaza defaults <model-id> --family FAMILY
+  sub2api-admin.js plaza create --json '{"id":"...","family":"Gemini"}' | --file model.json
+  sub2api-admin.js plaza update <model-id> --json '{...}' | --file config.json
+  sub2api-admin.js plaza price <model-id> --min N --max N --json '{"input":1.25}'
+  sub2api-admin.js plaza delete <model-id> --confirm <model-id>
   sub2api-admin.js api <GET|POST|PUT|DELETE> <admin-path> [--json '{...}' | --file payload.json]
 `);
 }
@@ -96,13 +104,13 @@ function authHeaders() {
   throw new Error("Missing SUB2API_ADMIN_API_KEY or SUB2API_JWT");
 }
 
-async function apiRequest(method, pathname, body, extraHeaders = {}) {
+async function apiRequest(method, pathname, body, extraHeaders = {}, requestOptions = {}) {
   const headers = {
     ...authHeaders(),
     Accept: "application/json",
     ...extraHeaders,
   };
-  const options = { method, headers };
+  const options = { ...requestOptions, method, headers };
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
@@ -117,7 +125,7 @@ async function apiRequest(method, pathname, body, extraHeaders = {}) {
   }
   if (!res.ok || (data && data.code !== undefined && data.code !== 0 && data.code !== "0")) {
     const detail = data.message || data.code || res.statusText;
-    throw new Error(`${method} ${pathname} failed: ${detail}`);
+    throw Object.assign(new Error(`${method} ${pathname} failed: ${detail}`), { status: res.status, reason: data.reason });
   }
   return data.data;
 }
@@ -715,6 +723,86 @@ async function commandApi(args) {
   printJson(await adminRequest(method.toUpperCase(), pathname, body));
 }
 
+async function commandPlaza(args) {
+  const [, action, id] = args.positional;
+  const { flags } = args;
+  const origin = new URL(BASE_URL);
+  const local = ["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname);
+  if ((origin.protocol !== "https:" && !(local && origin.protocol === "http:")) || origin.username || origin.password || origin.origin !== BASE_URL) {
+    throw new Error("Use an HTTPS Sub2API origin without a path (HTTP is allowed only on loopback)");
+  }
+  const base = "/api/v1/admin/custom-model-plaza";
+  const request = (method, route = "", body) => apiRequest(method, `${base}${route}`, body, {}, { redirect: "error", signal: AbortSignal.timeout(12000) });
+  const get = (name) => request("GET", encodeQuery({ model: name }));
+  const verify = async (updated) => {
+    const actual = await get(updated.id);
+    const fields = ["id", "family", "hidden", "context_limits", "overrides"];
+    if (fields.some(field => JSON.stringify(actual[field]) !== JSON.stringify(updated[field]))) {
+      throw new Error(`Saved ${updated.id}, but readback differs; inspect with plaza get before retrying`);
+    }
+    printJson(actual);
+  };
+
+  if (action === "list" || action === "families") {
+    const rows = await request("GET");
+    if (action === "families") {
+      const families = new Map();
+      for (const row of rows) {
+        const key = row.family.toLowerCase();
+        if (!families.has(key)) families.set(key, { family: row.family, models: 0, visible: 0 });
+        const family = families.get(key);
+        family.models += 1;
+        if (!row.hidden) family.visible += 1;
+      }
+      printJson([...families.values()]);
+    } else {
+      const search = String(flags.search ?? "").toLowerCase();
+      const family = String(flags.family ?? "").toLowerCase();
+      printJson(rows.filter(row => (!family || row.family.toLowerCase() === family) && `${row.id} ${row.family}`.toLowerCase().includes(search)));
+    }
+    return;
+  }
+  if (action === "create") {
+    const config = readJsonPayload(flags);
+    await verify(await request("POST", "", { hidden: false, context_limits: null, tiers: [], ...config }));
+    return;
+  }
+  if (!id) throw new Error(`plaza ${action || "command"} requires a model ID`);
+  if (action === "get") {
+    printJson(await get(id));
+  } else if (action === "defaults") {
+    if (typeof flags.family !== "string" || !flags.family.trim()) throw new Error("plaza defaults requires --family FAMILY");
+    printJson(await request("GET", `/defaults${encodeQuery({ model: id, family: flags.family })}`));
+  } else if (action === "update") {
+    const config = readJsonPayload(flags);
+    if (config.id !== undefined && config.id !== id) throw new Error("The payload ID must match the model being updated");
+    const prior = await get(id);
+    await verify(await request("PUT", "", { family: prior.family, hidden: prior.hidden, context_limits: prior.context_limits, tiers: prior.overrides, ...config, id }));
+  } else if (action === "price") {
+    const limits = [flags.min, flags.max];
+    if (limits.some(limit => typeof limit !== "string" || !/^\d+$/.test(limit) || Number(limit) > 1e9)) {
+      throw new Error("plaza price requires numeric --min and --max (use 0 for an unbounded maximum)");
+    }
+    await verify(await request("PATCH", "/prices", {
+      id, min_tokens: Number(flags.min), max_tokens: Number(flags.max), rates: readJsonPayload(flags),
+    }));
+  } else if (action === "delete") {
+    const prior = await get(id);
+    if (flags.confirm !== prior.id) throw new Error(`Pass --confirm ${prior.id} to delete this display entry`);
+    await request("DELETE", encodeQuery({ model: prior.id }));
+    try {
+      await get(prior.id);
+    } catch (error) {
+      if (error.status !== 404 || error.reason !== "CUSTOM_PLAZA_MODEL_NOT_FOUND") throw error;
+      printJson({ id: prior.id, deleted: true, verified: true });
+      return;
+    }
+    throw new Error(`Deletion of ${prior.id} was not confirmed by readback`);
+  } else {
+    throw new Error(`unknown plaza subcommand: ${action}`);
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const root = args.positional[0];
@@ -744,6 +832,10 @@ async function main() {
   }
   if (root === "tls-profiles") {
     await commandCrudResource(args, "tls-profiles", "/admin/tls-fingerprint-profiles");
+    return;
+  }
+  if (root === "plaza") {
+    await commandPlaza(args);
     return;
   }
   if (root === "api") {

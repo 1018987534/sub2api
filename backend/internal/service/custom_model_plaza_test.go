@@ -206,6 +206,18 @@ func TestCustomModelPlazaCatalogCRUD(t *testing.T) {
 	_, err = plaza.Configure(ctx, duplicate, true)
 	require.ErrorIs(t, err, errCustomPlazaDuplicate)
 
+	patch := CustomPlazaPricePatch{ID: model, MaxTokens: 42000, Rates: map[string]*float64{"input": nil, "output": &input}}
+	updatedPrices, err := plaza.PatchPrices(ctx, patch)
+	require.NoError(t, err)
+	require.Nil(t, updatedPrices.Overrides[0].Input)
+	require.Equal(t, input, *updatedPrices.Overrides[0].Output)
+	require.Equal(t, free, *updatedPrices.Overrides[1].CacheRead, "the second tier must remain unchanged")
+	patch.Rates = map[string]*float64{"billing_multiplier": &input}
+	_, err = plaza.PatchPrices(ctx, patch)
+	require.Equal(t, "CUSTOM_PLAZA_INVALID_PRICE", infraerrors.Reason(err))
+	_, err = plaza.PatchPrices(ctx, CustomPlazaPricePatch{ID: "gpt-6.2-astra", MaxTokens: 272000, Rates: map[string]*float64{"cache_write": &input}})
+	require.Equal(t, "CUSTOM_PLAZA_GPT_CACHE_WRITE", infraerrors.Reason(err))
+
 	config.ContextLimits, config.Tiers = []int{42000, 40000}, nil
 	_, err = plaza.Configure(ctx, config, false)
 	require.Equal(t, "CUSTOM_PLAZA_INVALID_LIMITS", infraerrors.Reason(err))

@@ -38,6 +38,13 @@ type CustomPlazaConfig struct {
 	Tiers         []CustomPlazaTier `json:"tiers"`
 }
 
+type CustomPlazaPricePatch struct {
+	ID        string              `json:"id"`
+	MinTokens int                 `json:"min_tokens"`
+	MaxTokens int                 `json:"max_tokens"`
+	Rates     map[string]*float64 `json:"rates"` // omitted: keep; null: follow default; 0: explicit zero
+}
+
 type plazaRecord struct {
 	CustomPlazaConfig
 	Deleted bool `json:"deleted,omitempty"`
@@ -230,6 +237,42 @@ func (s *CustomModelPlazaService) SetOverrides(ctx context.Context, id string, o
 		return nil, errCustomPlazaModelNotFound
 	}
 	record.Tiers = overrides
+	return s.savePlazaConfig(ctx, record.CustomPlazaConfig, raw)
+}
+
+func (s *CustomModelPlazaService) PatchPrices(ctx context.Context, patch CustomPlazaPricePatch) (*CustomPlazaAdminModel, error) {
+	record, raw, seeded, err := s.lookup(ctx, strings.TrimSpace(patch.ID))
+	if err != nil {
+		return nil, err
+	}
+	if record.Deleted || (!seeded && raw == nil) {
+		return nil, errCustomPlazaModelNotFound
+	}
+	if len(patch.Rates) == 0 {
+		return nil, infraerrors.BadRequest("CUSTOM_PLAZA_INVALID_PRICE", "provide at least one display price field")
+	}
+	tier := CustomPlazaTier{MinTokens: patch.MinTokens, MaxTokens: patch.MaxTokens}
+	index := len(record.Tiers)
+	for i, old := range record.Tiers {
+		if old.bounds() == tier.bounds() {
+			tier, index = old, i
+			break
+		}
+	}
+	fields := map[string]**float64{"input": &tier.Input, "output": &tier.Output, "cache_read": &tier.CacheRead,
+		"cache_write": &tier.CacheWrite, "cache_write_1h": &tier.CacheWrite1h, "cache_write_12h": &tier.CacheWrite12h}
+	for key, value := range patch.Rates {
+		field := fields[key]
+		if field == nil {
+			return nil, infraerrors.BadRequest("CUSTOM_PLAZA_INVALID_PRICE", "unknown display price field")
+		}
+		*field = value
+	}
+	if index == len(record.Tiers) {
+		record.Tiers = append(record.Tiers, tier)
+	} else {
+		record.Tiers[index] = tier
+	}
 	return s.savePlazaConfig(ctx, record.CustomPlazaConfig, raw)
 }
 

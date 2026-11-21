@@ -83,6 +83,7 @@ func RegisterAdminRoutes(
 			plaza.GET("/defaults", h.CustomModelPlaza.PreviewDefaults)
 			plaza.POST("", h.CustomModelPlaza.Create)
 			plaza.PUT("", h.CustomModelPlaza.Edit)
+			plaza.PATCH("/prices", h.CustomModelPlaza.PatchPrices)
 			plaza.DELETE("", h.CustomModelPlaza.Delete)
 			plaza.PUT("/:model", h.CustomModelPlaza.Update)
 		}

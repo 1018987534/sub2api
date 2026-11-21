@@ -1,6 +1,6 @@
 ---
 name: sub2api-admin
-description: Manage Sub2API admin APIs for accounts, redeem codes, groups, proxies, error passthrough rules, TLS fingerprint profiles, imports, exports, batch updates, site logo/branding settings, and raw administrator API calls. Use when the user mentions Sub2API, admin API keys, account management, redeem code management, recharge codes, invitation codes, bulk account import/export, keeping or deleting accounts, refreshing accounts, clearing errors, CRS sync, site logo, system settings, or managing Sub2API backend settings through the admin API.
+description: Manage Sub2API admin APIs, including 小红豆模型广场 model/family CRUD and display pricing (新增模型、调展示价、增加 Gemini 等系列), accounts, groups, redeem codes, proxies, imports, and settings. Prefer the CLI for administrator operations.
 ---
 
 # Sub2API Admin
@@ -16,6 +16,12 @@ node scripts/sub2api-admin.js accounts list
 ```
 
 For all commands and payload examples, read [references/admin-cli.md](references/admin-cli.md).
+
+## 模型广场（只影响展示）
+
+小红豆的「模型广场定价」直接用 `node scripts/sub2api-admin.js plaza ...`，不要在后台点击，也不要改账单配置或直接写生产数据库。先锁定正式站点、模型 ID 及上下文档位，使用 `list` / `get` / `defaults` 得到现状，再执行 `create`、`update`、`price` 或 `delete`。写命令自带读回。新系列由首个模型的 `family` 自动建立，不需改代码、部署或先创建空系列。`null` 恢复默认，`0` 是明确的零价。
+
+优先使用只授权 `model_plaza.read` 和所需 `model_plaza.write` / `model_plaza.delete` 的管理密钥，或现有管理员 JWT。凭据由 `pwd-xiaofanqie-login` 按目标 HTTPS 站点取得，仅传入进程环境。缺失或被拒绝时说明认证卡点，不生成主密钥、不绕过鉴权。接口与示例见 [模型广场 API](references/admin-cli.md#模型广场展示价)。
 
 ## Workflow
 

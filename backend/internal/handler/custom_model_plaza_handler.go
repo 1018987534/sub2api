@@ -100,6 +100,19 @@ func (h *CustomModelPlazaHandler) Delete(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+func (h *CustomModelPlazaHandler) PatchPrices(c *gin.Context) {
+	var req service.CustomPlazaPricePatch
+	if !decodePlazaRequest(c, &req) {
+		return
+	}
+	model, err := h.plaza.PatchPrices(c.Request.Context(), req)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, model)
+}
+
 // Update retains the price-only endpoint for older frontend bundles.
 func (h *CustomModelPlazaHandler) Update(c *gin.Context) {
 	var req struct {
