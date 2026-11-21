@@ -37,7 +37,7 @@ describe('cards view independent read path', () => {
     wrapper.unmount()
   })
 
-  it('shows a labeled simulated summary when the snapshot has no traffic', async () => {
+  it('shows the standard summary copy when the snapshot has no traffic', async () => {
     vi.mocked(getSnapshot).mockResolvedValueOnce({
       config: { refresh_interval_seconds: 60 },
       health: { overall: 'unknown' },
@@ -45,7 +45,8 @@ describe('cards view independent read path', () => {
       metrics: { has_requests: false, has_cache_tokens: false }, trend: []
     } as unknown as MonitorSnapshot)
     const wrapper = view(); await flushPromises()
-    expect(wrapper.text()).toMatch(/可用率 99\.9\d% · 缓存率 \d+\.\d% · 模拟数据/)
+    const summary = wrapper.get('.glass-card > div > span').text()
+    expect(summary).toMatch(/^可用率 99\.9\d% · 缓存率 \d+\.\d%$/)
     expect(wrapper.text()).not.toContain('可用率 —')
     wrapper.unmount()
   })
@@ -122,8 +123,8 @@ describe('cards view independent read path', () => {
     vi.mocked(getMatrix).mockResolvedValueOnce({ items: [{ group_id: 1, group_name: 'Visible Group', platform: 'openai' }], coverage } as MonitorMatrixResponse)
     vi.mocked(getSnapshot).mockResolvedValueOnce({ config: { refresh_interval_seconds: 60 }, coverage, metrics: { has_requests: false }, trend: [] } as MonitorSnapshot)
     const wrapper = view(); await flushPromises()
-    const summary = wrapper.text().match(/可用率 [^·]+ · 缓存率 [^·]+ · 模拟数据/)?.[0]
-    expect(summary).toBeDefined()
+    const summary = wrapper.get('.glass-card > div > span').text()
+    expect(summary).toMatch(/^可用率 99\.9\d% · 缓存率 \d+\.\d%$/)
     vi.mocked(getMatrix).mockRejectedValueOnce(new Error('offline'))
     vi.mocked(getSnapshot).mockRejectedValueOnce(new Error('offline'))
     await wrapper.get('button[aria-pressed="false"]').trigger('click')

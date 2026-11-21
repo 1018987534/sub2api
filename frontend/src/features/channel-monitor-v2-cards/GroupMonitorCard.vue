@@ -13,8 +13,8 @@
    <div class="metric"><dt>首 TOKEN</dt><dd>{{ latency(display.metrics) }}</dd></div>
   </dl>
   <div class="passive-section mt-auto border-t border-white/70 pt-3 dark:border-dark-700/60">
-   <div class="mb-2 flex justify-between text-[10px] font-semibold uppercase tracking-widest text-gray-400"><span>近 {{ display.buckets.length }} 个时间区间<span v-if="display.simulatedCount || display.simulated" class="ml-1.5 font-medium tracking-normal text-sky-600 dark:text-sky-300">{{ display.simulated ? '模拟数据' : '含模拟区间' }}</span></span><span>{{ countdown }}S 后刷新</span></div>
-   <div class="timeline-track passive-track" :style="{ gridTemplateColumns: `repeat(${timelineLength}, minmax(0, 1fr))` }" :aria-label="display.simulated ? '模拟用量历史' : display.simulatedCount ? '用量历史（含模拟区间）' : '被动用量历史'">
+   <div class="mb-2 flex justify-between text-[10px] font-semibold uppercase tracking-widest text-gray-400"><span>近 {{ display.buckets.length }} 个时间区间</span><span>{{ countdown }}S 后刷新</span></div>
+   <div class="timeline-track passive-track" :style="{ gridTemplateColumns: `repeat(${timelineLength}, minmax(0, 1fr))` }" aria-label="用量历史">
     <div v-for="(bucket, index) in display.buckets" :key="bucket.bucket_start" class="history-slot" @mouseenter="showBucket(bucket, index, $event)" @mouseleave="hideBucket">
      <span class="history-hitbox" role="img" tabindex="0" :aria-label="bucketTitle(bucket)" :aria-describedby="activeIndex === index ? tooltipId : undefined" @focus="showBucket(bucket, index, $event)" @blur="hideBucket" @keydown.esc="hideBucket">
       <span class="history-visual" :style="barStyle(index)" aria-hidden="true"><span class="history-bar" :class="passiveColor(bucket)" :style="{ height: barHeight(bucket) + '%' }" /></span>
@@ -136,7 +136,7 @@ onMounted(() => { window.addEventListener('scroll', hideBucket, true); window.ad
 onUnmounted(() => { window.removeEventListener('scroll', hideBucket, true); window.removeEventListener('resize', hideBucket) })
 // Newest stays at the right edge; only a new record shifts existing marks left.
 const probeSlots = computed(() => [...Array.from({ length: 60 - recent.value.length }, () => [] as IntelligenceRecord[]), ...recent.value.map(record => [record])])
-const bucketTitle = (b: DisplayBucket) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(b.bucket_start)) + ' · 可用率 ' + availabilityPercent(b.metrics, b.simulated ? 2 : 1) + ' · 缓存率 ' + cachePercent(b.metrics) + ' · 首 Token ' + latency(b.metrics) + (b.simulated ? ' · 模拟数据' : b.health.overall === 'unknown' ? ' · 样本不足' : '')
+const bucketTitle = (b: DisplayBucket) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(b.bucket_start)) + ' · 可用率 ' + availabilityPercent(b.metrics, b.simulated ? 2 : 1) + ' · 缓存率 ' + cachePercent(b.metrics) + ' · 首 Token ' + latency(b.metrics) + (b.health.overall === 'unknown' ? ' · 样本不足' : '')
 const recordTitle = (r: IntelligenceRecord) => new Date(r.checked_at).toLocaleString() + ' · ' + statusLabels[r.status] + ' · ' + (r.duration_ms / 1000).toFixed(1) + 's'
 </script>
 <style scoped>

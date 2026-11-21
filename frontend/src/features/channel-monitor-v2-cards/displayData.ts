@@ -106,10 +106,9 @@ export function createMonitorDisplay(row: MonitorMatrixRow, options: TimelineOpt
     return bucket ? { ...bucket, simulated: false } : simulatedBucket(row, start, options.bucketSeconds)
   })
   const simulatedBuckets = buckets.filter(bucket => bucket.simulated)
-  const timeline = { buckets, simulatedCount: simulatedBuckets.length }
   if (row.metrics.has_requests === true) {
-    return { ...timeline, metrics: row.metrics, health: row.health, simulated: false }
+    return { buckets, metrics: row.metrics, health: row.health, simulated: false }
   }
   const samples = simulatedBuckets.length ? simulatedBuckets : [simulatedBucket(row, lastStart, options.bucketSeconds)]
-  return { ...timeline, metrics: summarize(samples, options.bucketSeconds), health: samples[0].health, simulated: true }
+  return { buckets, metrics: summarize(samples, options.bucketSeconds), health: samples[0].health, simulated: true }
 }

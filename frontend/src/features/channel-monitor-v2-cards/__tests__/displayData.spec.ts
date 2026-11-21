@@ -24,7 +24,6 @@ describe('simulated empty monitor intervals', () => {
     expect(result.simulated).toBe(true)
     expect(result.health.overall).toBe('healthy')
     expect(result.buckets).toHaveLength(length)
-    expect(result.simulatedCount).toBe(length)
     for (const bucket of result.buckets) {
       expect(bucket.simulated).toBe(true)
       expect(bucket.health.overall).toBe('healthy')
@@ -76,7 +75,7 @@ describe('simulated empty monitor intervals', () => {
     expect(result.simulated).toBe(false)
     expect(result.metrics).toBe(metrics)
     expect(result.health).toBe(health)
-    expect(result.simulatedCount).toBe(17)
+    expect(result.buckets.filter(bucket => bucket.simulated)).toHaveLength(17)
     expect(result.buckets.at(-3)).toEqual({ ...real, simulated: false })
     expect(result.buckets.at(-2)?.simulated).toBe(true)
     expect(result.buckets.at(-1)?.simulated).toBe(true)
@@ -101,7 +100,7 @@ describe('simulated empty monitor intervals', () => {
     }))
     const result = display({ ...emptyRow, metrics, buckets })
     expect(result.simulated).toBe(false)
-    expect(result.simulatedCount).toBe(0)
+    expect(result.buckets.every(bucket => !bucket.simulated)).toBe(true)
     expect(result.buckets.map(({ simulated: _simulated, ...bucket }) => bucket)).toEqual(buckets)
   })
 
@@ -110,6 +109,6 @@ describe('simulated empty monitor intervals', () => {
     const buckets = [new Date(end - 86400000).toISOString(), new Date(end).toISOString(), 'invalid'].map(bucket_start => ({
       bucket_start, metrics, health: emptyRow.health
     }))
-    expect(display({ ...emptyRow, buckets }).simulatedCount).toBe(18)
+    expect(display({ ...emptyRow, buckets }).buckets.filter(bucket => bucket.simulated)).toHaveLength(18)
   })
 })

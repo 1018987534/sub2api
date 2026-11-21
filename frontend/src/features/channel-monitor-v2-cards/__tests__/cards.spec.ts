@@ -40,24 +40,29 @@ describe('independent V2 cards', () => {
     expect(wrapper.findAll('.history-bar').at(-1)!.classes()).toContain('bg-gray-300')
     expect(wrapper.findAll('.history-bar').at(-1)!.attributes('style')).toContain('100%')
     expect(wrapper.findAll('.history-hitbox').at(-1)!.attributes('aria-label')).toContain('可用率 98.0% · 缓存率 85.3% · 首 Token 2.1s · 样本不足')
-    expect(wrapper.text()).toContain('近 18 个时间区间')
-    expect(wrapper.text()).toContain('含模拟区间')
+    expect(wrapper.get('.passive-section > div:first-child > span').text()).toBe('近 18 个时间区间')
   })
   it('keeps a genuine zero cache-hit rate visible for requests with input tokens', () => {
     const wrapper = mount(GroupMonitorCard, { props: { row: { ...row, metrics: { ...row.metrics, cache_rate: 0 }, health: { ...row.health, overall: 'unknown' } }, now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
     expect(wrapper.findAll('.metric dd')[0].text()).toBe('0.0%')
   })
-  it('labels simulated metrics and a full green timeline for empty traffic', () => {
+  it('displays empty-traffic metrics and a full green timeline with the standard copy', async () => {
     const metrics = { ...row.metrics, has_requests: false, has_cache_tokens: false, error_rate: 0, cache_rate: 0 }
     const health = { ...row.health, overall: 'unknown' as const }
     const wrapper = mount(GroupMonitorCard, { props: { row: { ...row, metrics, health, buckets: [{ bucket_start: new Date(now).toISOString(), metrics, health }] }, now, countdown: 30 }, global: { stubs: { PlatformIcon: true } } })
     expect(wrapper.findAll('.metric dd').every(node => node.text() !== '—')).toBe(true)
     expect(wrapper.find('.state-pill').text()).toBe('正常')
-    expect(wrapper.text()).toContain('模拟数据')
+    expect(wrapper.get('.passive-section > div:first-child > span').text()).toBe('近 18 个时间区间')
+    expect(wrapper.get('.passive-track').attributes('aria-label')).toBe('用量历史')
     expect(wrapper.text()).not.toContain('暂无请求')
     expect(wrapper.findAll('.history-bar')).toHaveLength(18)
     expect(wrapper.findAll('.history-bar').every(bar => bar.classes().includes('bg-emerald-600'))).toBe(true)
-    expect(wrapper.findAll('.history-hitbox').every(bar => bar.attributes('aria-label').includes('模拟数据'))).toBe(true)
+    const bars = wrapper.findAll('.history-hitbox')
+    for (const bar of bars) {
+      expect(bar.attributes('aria-label')).toMatch(/ · 可用率 99\.9\d% · 缓存率 \d+\.\d% · 首 Token \d+\.\ds$/)
+    }
+    await bars[0].trigger('focus')
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe(bars[0].attributes('aria-label'))
     expect(wrapper.findAll('.probe-bar')).toHaveLength(0)
   })
   it('shows failed-request availability while leaving an absent cache denominator blank', () => {
@@ -171,7 +176,7 @@ describe('reference card geometry and density', () => {
   expect(wrapper.findAll('.history-slot')).toHaveLength(18)
   expect(wrapper.findAll('.history-bar')).toHaveLength(18)
   expect(wrapper.findAll('.history-bar').at(-1)!.attributes('style')).toContain('65%')
-  expect(wrapper.findAll('.history-hitbox').at(-1)!.attributes('aria-label')).not.toContain('模拟数据')
+  expect(wrapper.findAll('.history-hitbox').at(-1)!.attributes('aria-label')).toMatch(/ · 可用率 98\.0% · 缓存率 85\.3% · 首 Token 2\.1s$/)
   expect(wrapper.findAll('.probe-slot')).toHaveLength(60)
   expect(wrapper.findAll('.probe-bar')).toHaveLength(6)
   expect(wrapper.findAll('.probe-track .empty-bar')).toHaveLength(0)

@@ -9,7 +9,7 @@
       <span class="border-l border-gray-300 pl-3 text-gray-500 dark:border-dark-600">V2 被动用量 · 缓存率与可用率</span>
      </div>
      <span v-if="summary" class="text-gray-500 dark:text-gray-400">
-      可用率 {{ availabilityPercent(summary.metrics, summary.simulated ? 2 : 1) }} · 缓存率 {{ cachePercent(summary.metrics) }}<span v-if="summary.simulated"> · 模拟数据</span>
+      可用率 {{ availabilityPercent(summary.metrics, summary.simulated ? 2 : 1) }} · 缓存率 {{ cachePercent(summary.metrics) }}
      </span>
     </div>
    </section>
