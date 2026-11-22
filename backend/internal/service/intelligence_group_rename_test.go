@@ -18,7 +18,7 @@ func TestIntelligenceGroupRenameReconcilesIsolation(t *testing.T) {
 	if dsn == "" {
 		t.Skip("disposable PostgreSQL required")
 	}
-	for _, scenario := range []string{"alternative", "sole", "model_incompatible"} {
+	for _, scenario := range []string{"alternative", "sole", "model_incompatible", "stale_alternative"} {
 		t.Run(scenario, func(t *testing.T) {
 			openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil))
 			t.Cleanup(func() { openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil)) })
@@ -28,6 +28,8 @@ func TestIntelligenceGroupRenameReconcilesIsolation(t *testing.T) {
 			renamed.ID = 107
 			renamed.Name = "030企业满血"
 			a, b := cacheRateTestAccount(1), cacheRateTestAccount(2)
+			recentUsage := time.Now().Add(-time.Hour)
+			b.LastUsedAt = &recentUsage
 			a.GroupIDs = []int64{79, 107}
 			a.Groups = []*Group{&oldGroup, &renamed}
 			generation := time.Now().Add(20 * time.Minute).Format(time.RFC3339Nano)
@@ -38,6 +40,10 @@ func TestIntelligenceGroupRenameReconcilesIsolation(t *testing.T) {
 			}
 			if scenario == "model_incompatible" {
 				repo.accounts[1].Credentials = map[string]any{"model_mapping": map[string]any{"different-model": "different-model"}}
+			}
+			if scenario == "stale_alternative" {
+				staleUsage := time.Now().Add(-25 * time.Hour)
+				repo.accounts[1].LastUsedAt = &staleUsage
 			}
 			cache := &intelligenceResetCache{staticFirstTokenLatencyStatsCache: staticFirstTokenLatencyStatsCache{stats: map[int64]FirstTokenLatencyStats{1: {PredictedMS: 8000, P50MS: 7500, P90MS: 10000, SampleCount: 24, WindowHours: 6, UpdatedAt: time.Now(), ReliableFast: true, FastConfirmationTracked: true}}}}
 			settings := &openAIAdvancedSchedulerSettingRepoStub{values: map[string]string{SettingKeyTotalDurationPriorityEnabled: "true"}}

@@ -1001,7 +1001,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 		return nil
 	}
 	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
-	if account == nil || !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
+	if account == nil || !s.openAIAccountMatchesSchedulingGroup(ctx, account, groupID) {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
@@ -1230,7 +1230,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, groupID, platform, requestedModel, requireCompact, requiredCapability)
 					if account == nil {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else if !s.openAIAccountMatchesSchedulingGroup(account, groupID) {
+					} else if !s.openAIAccountMatchesSchedulingGroup(ctx, account, groupID) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else if s.isOpenAIAccountRequestRuntimeBlocked(account, requestedModel, requireCompact) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
@@ -1643,7 +1643,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	if err != nil || latest == nil {
 		return nil
 	}
-	if !s.openAIAccountMatchesSchedulingGroup(latest, groupID) {
+	if !s.openAIAccountMatchesSchedulingGroup(ctx, latest, groupID) {
 		return nil
 	}
 	if s.openAIGroupRequiresPrivacySet(ctx, groupID) && !latest.IsPrivacySet() {
@@ -1667,8 +1667,8 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 	return latest
 }
 
-func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(account *Account, groupID *int64) bool {
-	if s.intelligenceAccountBlockedForGroup(context.Background(), account, groupID, time.Now()) {
+func (s *OpenAIGatewayService) openAIAccountMatchesSchedulingGroup(ctx context.Context, account *Account, groupID *int64) bool {
+	if s.intelligenceAccountBlockedForGroup(ctx, account, groupID, time.Now()) {
 		return false
 	}
 	if s != nil && s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {

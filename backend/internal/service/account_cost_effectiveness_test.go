@@ -126,5 +126,8 @@ func TestCostEffectivenessSoleAccountMustRemainPausedUntilRecovery(t *testing.T)
 	require.True(t, svc.intelligenceAccountBlockedForGroup(context.Background(), account, &group.ID, time.Now()))
 	require.Empty(t, intelligenceAllowedGroups(account))
 	require.NoError(t, svc.RecoverIntelligenceAccount(context.Background(), 1))
+	require.True(t, svc.intelligenceAccountBlockedForGroup(context.Background(), account, &group.ID, time.Now()))
+	account.Extra[intelligencePauseUntilKey] = time.Now().Add(-time.Minute).Format(time.RFC3339Nano)
+	require.NoError(t, svc.RecoverIntelligenceAccount(context.Background(), 1))
 	require.False(t, svc.intelligenceAccountBlockedForGroup(context.Background(), account, &group.ID, time.Now()))
 }

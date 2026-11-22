@@ -67,15 +67,22 @@ func (c *intelligenceResetCache) ResetForIntelligencePause(_ context.Context, id
 func (c *intelligenceResetCache) ClearIntelligencePause(context.Context, int64) error { return nil }
 
 func TestIntelligenceAccountProtection(t *testing.T) {
-	for _, scenario := range []string{"two", "only", "disabled", "cooldown", "model", "cache_rate", "profit", "ordinary_group", "pool_disabled"} {
+	for _, scenario := range []string{"two", "only", "never_used", "stale_usage", "disabled", "cooldown", "model", "cache_rate", "profit", "ordinary_group", "pool_disabled"} {
 		t.Run(scenario, func(t *testing.T) {
 			openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil))
 			t.Cleanup(func() { openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil)) })
 			group := &Group{ID: 7, Name: "013不降智", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, RateMultiplier: 1}
 			a, b := cacheRateTestAccount(1), cacheRateTestAccount(2)
+			recentUsage := time.Now().Add(-time.Hour)
+			b.LastUsedAt = &recentUsage
 			enabled := "true"
 			provider := cacheRateProviderStub{stats: map[int64]AccountCacheStats{}}
 			switch scenario {
+			case "never_used":
+				b.LastUsedAt = nil
+			case "stale_usage":
+				staleUsage := time.Now().Add(-25 * time.Hour)
+				b.LastUsedAt = &staleUsage
 			case "disabled":
 				b.Schedulable = false
 			case "cooldown":
@@ -135,6 +142,8 @@ func TestIntelligencePausedAccountPreservesMetricsThroughRecovery(t *testing.T) 
 			t.Cleanup(func() { openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil)) })
 			group := Group{ID: 7, Name: "013不降智", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, RateMultiplier: 1}
 			a, b := cacheRateTestAccount(1), cacheRateTestAccount(2)
+			recentUsage := time.Now().Add(-time.Hour)
+			b.LastUsedAt = &recentUsage
 			a.GroupIDs = []int64{7}
 			a.Groups = []*Group{&group}
 			a.Extra = map[string]any{"unrelated": "keep"}

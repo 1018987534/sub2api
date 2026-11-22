@@ -3,9 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/stretchr/testify/require"
 )
 
 type sharedIntelligenceRepo struct {
@@ -35,6 +38,8 @@ func TestIntelligenceSharedAccountIsolationAndRecovery(t *testing.T) {
 	g3.ID = 79
 	g3.Name = "020不降智"
 	a, b := cacheRateTestAccount(1), cacheRateTestAccount(2)
+	recentUsage := time.Now().Add(-time.Hour)
+	b.LastUsedAt = &recentUsage
 	a.GroupIDs = []int64{111, 5, 79}
 	b.GroupIDs = []int64{5, 79}
 	a.Groups = []*Group{&g1, &g2, &g3}
@@ -61,7 +66,7 @@ func TestIntelligenceSharedAccountIsolationAndRecovery(t *testing.T) {
 		if !ok {
 			require.Equal(t, "intelligence_isolated", reason)
 		}
-		require.Equal(t, group.ID == 111, svc.openAIAccountMatchesSchedulingGroup(account, &group.ID))
+		require.Equal(t, group.ID == 111, svc.openAIAccountMatchesSchedulingGroup(ctx, account, &group.ID))
 		require.Equal(t, group.ID == 111, svc.recheckSelectedOpenAIAccountFromDB(ctx, account, &group.ID, PlatformOpenAI, "gpt-6.1-sol", false, OpenAIEndpointCapability("")) != nil)
 		t.Logf("account=1 group=%d schedulable=%v", group.ID, ok)
 	}
@@ -121,12 +126,83 @@ func TestIntelligenceIsolationExpiresWithoutSoleGroupException(t *testing.T) {
 	require.False(t, intelligenceAccountBlocked(account, &groupID, time.Now().Add(21*time.Minute)))
 }
 
+func TestIntelligenceFallbackAfterNormalAccountFails(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+
+	group := &Group{ID: 98, Name: "不降智-特价", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, RateMultiplier: 1}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+	model := "gpt-6.2-sol"
+	paused, normal := cacheRateTestAccount(1), cacheRateTestAccount(2)
+	for _, account := range []*Account{paused, normal} {
+		account.GroupIDs = []int64{group.ID}
+		account.Groups = []*Group{group}
+	}
+	generation := time.Now().Add(20 * time.Minute).Format(time.RFC3339Nano)
+	paused.Extra = map[string]any{
+		intelligencePauseUntilKey:       generation,
+		intelligenceRecoveryRequiredKey: true,
+		intelligenceProtectedGroupsKey:  []int64{group.ID},
+	}
+	repo := &schedulerTestOpenAIAccountRepo{accounts: []Account{*paused, *normal}}
+	cache := &openAISnapshotCacheStub{snapshotAccounts: []*Account{paused, normal}, accountsByID: map[int64]*Account{paused.ID: paused, normal.ID: normal}}
+	settings := &fastPoolPrioritySettingsRepo{openAIAdvancedSchedulerSettingRepoStub: openAIAdvancedSchedulerSettingRepoStub{
+		values: map[string]string{SettingKeyTotalDurationPriorityEnabled: "true"},
+	}}
+	gateway := &OpenAIGatewayService{
+		cfg: &config.Config{}, accountRepo: repo,
+		schedulerSnapshot: NewSchedulerSnapshotService(cache, nil, repo, nil, nil),
+		rateLimitService:  &RateLimitService{settingService: NewSettingService(settings, nil)},
+	}
+
+	selectAccount := func(previous string, excluded map[int64]struct{}) (*AccountSelectionResult, error) {
+		result, _, err := gateway.SelectAccountWithSchedulerForCapability(ctx, &group.ID, previous, "", model, excluded, OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityResponses, false, false, false)
+		return result, err
+	}
+	requireSelection := func(want int64, previous string, excluded map[int64]struct{}) {
+		t.Helper()
+		result, err := selectAccount(previous, excluded)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, want, result.Account.ID)
+		result.ReleaseFunc()
+	}
+
+	requireSelection(normal.ID, "", nil)
+	excluded := map[int64]struct{}{normal.ID: {}}
+	requireSelection(paused.ID, "", excluded)
+	require.Equal(t, map[int64]struct{}{normal.ID: {}}, excluded)
+	require.True(t, gateway.intelligenceAccountBlockedForGroup(ctx, paused, &group.ID, time.Now()))
+	require.Equal(t, generation, paused.GetExtraString(intelligencePauseUntilKey))
+	requireSelection(normal.ID, "", nil)
+
+	_, err := selectAccount("resp_pinned", excluded)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	_, err = selectAccount("", map[int64]struct{}{normal.ID: {}, paused.ID: {}})
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+
+	// The DB recheck must still observe an independent cooldown after a cached
+	// snapshot considered the paused account schedulable.
+	until := time.Now().Add(time.Hour)
+	repo.accounts[0].TempUnschedulableUntil = &until
+	_, err = selectAccount("", excluded)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+	repo.accounts[0].TempUnschedulableUntil = nil
+
+	_, err = gateway.rateLimitService.settingService.UpdateFastPoolCostEffectivenessGroup(ctx, group.ID, true)
+	require.NoError(t, err)
+	_, err = selectAccount("", excluded)
+	require.ErrorIs(t, err, ErrNoAvailableAccounts)
+}
+
 func TestIntelligenceProtectionIgnoresOrdinaryGroups(t *testing.T) {
 	openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil))
 	t.Cleanup(func() { openAIAdvancedSchedulerSettingCache.Store((*cachedOpenAIAdvancedSchedulerSetting)(nil)) })
 	protected := Group{ID: 111, Name: "010不降智", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, RateMultiplier: 1}
 	ordinary := Group{ID: 999, Name: "测试", Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, RateMultiplier: 1}
 	a, b := cacheRateTestAccount(1), cacheRateTestAccount(2)
+	recentUsage := time.Now().Add(-time.Hour)
+	b.LastUsedAt = &recentUsage
 	a.GroupIDs = []int64{protected.ID, ordinary.ID}
 	a.Groups = []*Group{&protected, &ordinary}
 	b.GroupIDs = []int64{protected.ID, ordinary.ID}
