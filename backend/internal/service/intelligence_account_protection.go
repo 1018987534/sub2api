@@ -17,6 +17,10 @@ const intelligenceRecoveryRequiredKey = "intelligence_recovery_required"
 const intelligenceProtectedGroupsKey = "intelligence_protected_groups"
 const intelligenceRecoveredAtKey = "intelligence_recovered_at"
 
+const intelligenceAlternativeMaxIdle = 24 * time.Hour
+
+type intelligenceFallbackGroupKey struct{}
+
 // Exported for repository-owned account-group mutations. Group membership
 // changes must release any stale intelligence isolation immediately.
 const (
@@ -100,25 +104,35 @@ func (s *OpenAIGatewayService) intelligenceAccountBlockedForGroup(ctx context.Co
 	if s != nil && s.rateLimitService != nil && s.rateLimitService.fastPoolPrioritySettings(ctx).CostEffectivenessEnabled(*groupID) {
 		return true
 	}
-	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && group != nil && group.ID == *groupID {
+	if fallbackGroupID, ok := ctx.Value(intelligenceFallbackGroupKey{}).(int64); ok && fallbackGroupID == *groupID {
+		return false
+	}
+	if group := s.intelligenceSchedulingGroup(ctx, account, *groupID); group != nil {
 		return IntelligenceProtectionGroupEligible(group) && intelligenceAccountBlocked(account, groupID, now)
 	}
+	return intelligenceAccountBlocked(account, groupID, now)
+}
+
+func (s *OpenAIGatewayService) intelligenceSchedulingGroup(ctx context.Context, account *Account, groupID int64) *Group {
+	if group, ok := ctx.Value(ctxkey.Group).(*Group); ok && group != nil && group.ID == groupID {
+		return group
+	}
 	if s != nil && s.schedulerSnapshot != nil {
-		if group, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, *groupID); err == nil && group != nil {
-			return IntelligenceProtectionGroupEligible(group) && intelligenceAccountBlocked(account, groupID, now)
+		if group, err := s.schedulerSnapshot.GetGroupByIDLite(ctx, groupID); err == nil && group != nil {
+			return group
 		}
 	}
 	for _, group := range account.Groups {
-		if group != nil && group.ID == *groupID {
-			return IntelligenceProtectionGroupEligible(group) && intelligenceAccountBlocked(account, groupID, now)
+		if group != nil && group.ID == groupID {
+			return group
 		}
 	}
 	for _, membership := range account.AccountGroups {
-		if membership.GroupID == *groupID && membership.Group != nil {
-			return IntelligenceProtectionGroupEligible(membership.Group) && intelligenceAccountBlocked(account, groupID, now)
+		if membership.GroupID == groupID && membership.Group != nil {
+			return membership.Group
 		}
 	}
-	return intelligenceAccountBlocked(account, groupID, now)
+	return nil
 }
 
 func intelligenceGroupIDList(value any) []int64 {
@@ -243,15 +257,23 @@ func (s *OpenAIGatewayService) intelligenceGroupHasAlternative(ctx context.Conte
 	}
 	ctx = context.WithValue(ctx, ctxkey.Group, group)
 	ctx = context.WithValue(ctx, ctxkey.UserID, userID)
+	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
 	ctx = s.withOpenAIProfitControlGate(ctx, &group.ID)
 	req := OpenAIAccountScheduleRequest{GroupID: &group.ID, Platform: PlatformOpenAI, RequestedModel: model, FirstTokenPriority: true, MinCacheRate: group.MinCacheRate, RequirePrivacySet: group.RequirePrivacySet}
 	scheduler := &defaultOpenAIAccountScheduler{service: s}
 	scheduler.warmGroupCacheRateStats(ctx, accounts, req)
 	thresholds := s.rateLimitService.settingService.GetAccountSchedulingThresholds(ctx)
+	now := time.Now()
+	cutoff := now.Add(-intelligenceAlternativeMaxIdle)
 	for i := range accounts {
 		account := &accounts[i]
+		// LastUsedAt is updated after completed usage. A new or idle account
+		// can still receive traffic, but cannot be the only evidence of capacity.
+		if account.LastUsedAt == nil || account.LastUsedAt.Before(cutoff) {
+			continue
+		}
 		if account.ID != accountID && account.Platform == PlatformOpenAI && account.IsSchedulable() &&
-			!EvaluateAccountSchedulingThreshold(account, thresholds, time.Now()).ShouldPause && scheduler.isAccountRequestCompatible(ctx, account, req) {
+			!EvaluateAccountSchedulingThreshold(account, thresholds, now).ShouldPause && scheduler.isAccountRequestCompatible(ctx, account, req) {
 			return true, nil
 		}
 	}

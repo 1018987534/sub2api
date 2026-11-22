@@ -438,7 +438,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			hasGroupMetadata := len(selection.Account.GroupIDs) > 0 || len(selection.Account.AccountGroups) > 0
 			groupCompatible := !hasGroupMetadata || openAIStickyAccountMatchesGroup(selection.Account, req.GroupID)
 			if hasGroupMetadata && s.service != nil {
-				groupCompatible = s.service.openAIAccountMatchesSchedulingGroup(selection.Account, req.GroupID)
+				groupCompatible = s.service.openAIAccountMatchesSchedulingGroup(ctx, selection.Account, req.GroupID)
 			}
 			if !groupCompatible ||
 				!compatible || !s.isAccountTransportCompatible(selection.Account, req.RequiredTransport) {
@@ -567,7 +567,7 @@ func (s *defaultOpenAIAccountScheduler) selectManualProbe(ctx context.Context, r
 		}
 		account, err := s.service.getSchedulableAccount(ctx, accountID)
 		if err != nil || !isFirstTokenPriorityAccount(account) || !account.IsSchedulable() ||
-			!s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) ||
+			!s.service.openAIAccountMatchesSchedulingGroup(ctx, account, req.GroupID) ||
 			!s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 			continue
 		}
@@ -661,7 +661,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		return nil, false, nil
 	}
 	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.GroupID, req.Platform, req.RequestedModel, req.RequireCompact, req.RequiredCapability)
-	if account == nil || !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
+	if account == nil || !s.service.openAIAccountMatchesSchedulingGroup(ctx, account, req.GroupID) || !s.isAccountRequestCompatible(ctx, account, req) || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		clearBinding()
 		return nil, false, nil
 	}
@@ -1500,7 +1500,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 			}
 			continue
 		}
-		if !s.service.openAIAccountMatchesSchedulingGroup(account, req.GroupID) {
+		if !s.service.openAIAccountMatchesSchedulingGroup(ctx, account, req.GroupID) {
 			if accountID == req.StickyAccountID && strings.TrimSpace(req.SessionHash) != "" {
 				_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, req.SessionHash)
 			}
@@ -1605,7 +1605,6 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, int, int, float64, error) {
-	budget := newOpenAISelectionProbeBudget()
 	accounts, err := s.service.listSchedulableAccounts(ctx, req.GroupID, req.Platform)
 	if err != nil {
 		return nil, 0, 0, 0, err
@@ -1639,6 +1638,60 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		accounts = modelFiltered
 	}
 
+	selection, candidateCount, topK, loadSkew, err := s.selectFromLoadBalanceAccounts(ctx, req, accounts)
+	if !errors.Is(err, ErrNoAvailableAccounts) && !errors.Is(err, ErrNoAvailableCompactAccounts) {
+		return selection, candidateCount, topK, loadSkew, err
+	}
+	paused := s.intelligenceFallbackAccounts(ctx, req, accounts)
+	if len(paused) == 0 {
+		return selection, candidateCount, topK, loadSkew, err
+	}
+
+	// Retry only selection, with the same request constraints and exclusions.
+	// The allowance lasts for this selection and never updates recovery state.
+	ctx = context.WithValue(ctx, intelligenceFallbackGroupKey{}, *req.GroupID)
+	req.PreserveStickyBinding = true
+	req.FirstTokenProbeEligible = false
+	return s.selectFromLoadBalanceAccounts(ctx, req, paused)
+}
+
+func (s *defaultOpenAIAccountScheduler) intelligenceFallbackAccounts(ctx context.Context, req OpenAIAccountScheduleRequest, accounts []Account) []Account {
+	if !req.FirstTokenPriority || req.GroupID == nil || NormalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI ||
+		(strings.TrimSpace(req.PreviousResponseID) != "" && !req.PreviousResponseCanMove) {
+		return nil
+	}
+	if s.service.rateLimitService.fastPoolPrioritySettings(ctx).CostEffectivenessEnabled(*req.GroupID) {
+		return nil
+	}
+	now := time.Now()
+	var paused []Account
+	var group *Group
+	for i := range accounts {
+		account := &accounts[i]
+		if _, excluded := req.ExcludedIDs[account.ID]; excluded {
+			continue
+		}
+		if !isFirstTokenPriorityAccount(account) || !intelligenceAccountBlocked(account, req.GroupID, now) ||
+			!openAIStickyAccountMatchesGroup(account, req.GroupID) {
+			continue
+		}
+		if group == nil {
+			group = s.service.intelligenceSchedulingGroup(ctx, account, *req.GroupID)
+			if !IntelligenceProtectionGroupEligible(group) {
+				return nil
+			}
+		}
+		paused = append(paused, *account)
+	}
+	return paused
+}
+
+func (s *defaultOpenAIAccountScheduler) selectFromLoadBalanceAccounts(
+	ctx context.Context,
+	req OpenAIAccountScheduleRequest,
+	accounts []Account,
+) (*AccountSelectionResult, int, int, float64, error) {
+	budget := newOpenAISelectionProbeBudget()
 	filterStats := openAISelectionFilterStats{pool: len(accounts)}
 	filtered := make([]*Account, 0, len(accounts))
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
@@ -2563,7 +2616,7 @@ func (s *OpenAIGatewayService) selectLegacyAccountByPreviousResponse(
 		ExcludedIDs:             excludedIDs,
 		RequirePrivacySet:       s.openAIGroupRequiresPrivacySet(ctx, groupID),
 	})
-	if !s.openAIAccountMatchesSchedulingGroup(account, groupID) || !compatible || !scheduler.isAccountTransportCompatible(account, requiredTransport) {
+	if !s.openAIAccountMatchesSchedulingGroup(ctx, account, groupID) || !compatible || !scheduler.isAccountTransportCompatible(account, requiredTransport) {
 		if selection.ReleaseFunc != nil {
 			selection.ReleaseFunc()
 		}
