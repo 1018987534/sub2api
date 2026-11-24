@@ -80,7 +80,7 @@ func serviceTierAuditLogger(ctx context.Context) func(upstreamServiceTierAudit) 
 	}
 }
 
-func logServiceTierBillingResolution(ctx context.Context, account *Account, result *OpenAIForwardResult, resolution ServiceTierBillingResolution) {
+func logServiceTierBillingResolution(ctx context.Context, account *Account, result *OpenAIForwardResult, accountTier ServiceTierBillingResolution, customerTier string) {
 	l := logger.FromContext(ctx)
 	if requestID, _ := ctx.Value(ctxkey.RequestID).(string); requestID != "" {
 		l = l.With(zap.String("request_id", requestID))
@@ -91,11 +91,12 @@ func logServiceTierBillingResolution(ctx context.Context, account *Account, resu
 	l.Info("billing.service_tier_resolution",
 		zap.Int64("account_id", account.ID),
 		zap.String("upstream_request_id", result.RequestID),
-		zap.String("requested_tier", serviceTierAuditValue(resolution.Requested)),
-		zap.String("observed_tier", serviceTierAuditValue(resolution.Observed)),
-		zap.String("billed_tier", serviceTierAuditValue(resolution.Billing)),
+		zap.String("requested_tier", serviceTierAuditValue(accountTier.Requested)),
+		zap.String("observed_tier", serviceTierAuditValue(accountTier.Observed)),
+		zap.String("billed_tier", serviceTierAuditValue(customerTier)),
+		zap.String("account_cost_tier", serviceTierAuditValue(accountTier.Billing)),
 		zap.Any("header_tiers", serviceTierAuditHeaders(result.UpstreamHeaders, result.ResponseHeaders)),
-		zap.String("policy", "upstream_response"),
+		zap.String("policy", "outbound_request"),
 	)
 }
 

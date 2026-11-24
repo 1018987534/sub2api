@@ -728,8 +728,8 @@ type OpenAIFastPolicyRule struct {
 
 // OpenAIFastPolicySettings OpenAI fast 策略配置
 type OpenAIFastPolicySettings struct {
-	// BillingFollowUpstreamTier enables conservative upstream-tier reconciliation:
-	// missing or unknown upstream tiers select Standard pricing.
+	// BillingFollowUpstreamTier estimates OpenAI account costs from the response
+	// tier. Missing or unknown tiers use the Standard price for this estimate.
 	BillingFollowUpstreamTier bool                   `json:"billing_follow_upstream_tier"`
 	Rules                     []OpenAIFastPolicyRule `json:"rules"`
 }

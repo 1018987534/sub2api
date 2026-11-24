@@ -16,8 +16,8 @@ import (
 //  4. nil → 走默认公式（total_cost × account_rate_multiplier）
 //
 // upstreamModel 是最终发往上游的模型 ID。
-// totalCost 是本次请求的客户计费（倍率前），用于优先级 2。
-// serviceTier 是最终参与用户计费的 OpenAI 服务层级，用于优先级 3。
+// totalCost 是按指定档位算出的倍率前报价，用于优先级 2。
+// serviceTier 是估算账号成本使用的服务档位，用于优先级 3。
 // pricingAt 与本次客户计费使用同一时刻，避免跨峰谷请求的成本与售价错位。
 // longContextPricingEnabled 表示上游是否对本次请求收取长上下文费率，用于优先级 3；
 // 由 accountStatsLongContextPricingEnabled 按账号开关得出，不受分组售价开关影响。
@@ -58,7 +58,7 @@ func resolveAccountStatsCost(
 		return cost
 	}
 
-	// 优先级 2：渠道开启"应用模型定价到账号统计"时，直接使用客户计费（倍率前）
+	// 优先级 2：渠道开启"应用模型定价到账号统计"时，使用传入的倍率前报价。
 	if channel.ApplyPricingToAccountStats {
 		cost := totalCost
 		if cost <= 0 {
@@ -281,6 +281,7 @@ func applyAccountStatsCost(
 	upstreamModel, requestedModel string,
 	tokens UsageTokens,
 	totalCost float64,
+	serviceTier string,
 	pricingAt time.Time,
 	longContextPricingEnabled bool,
 	upstreamPriceFactor float64,
@@ -293,11 +294,7 @@ func applyAccountStatsCost(
 	if usageLog != nil && usageLog.ImageCount > 0 {
 		requestCount = usageLog.ImageCount
 	}
-	serviceTier := ""
 	reasoningEffort := ""
-	if usageLog != nil && usageLog.ServiceTier != nil {
-		serviceTier = *usageLog.ServiceTier
-	}
 	if usageLog != nil && usageLog.ReasoningEffort != nil {
 		reasoningEffort = *usageLog.ReasoningEffort
 	}

@@ -75,6 +75,7 @@ type usageLogBestEffortWriter interface {
 // postUsageBillingParams 统一扣费所需的参数
 type postUsageBillingParams struct {
 	Cost                  *CostBreakdown
+	AccountQuotaBaseCost  *float64 // With a separate upstream quote, use it for account quota before applying the account multiplier.
 	User                  *User
 	APIKey                *APIKey
 	Account               *Account
@@ -138,7 +139,14 @@ func (p *postUsageBillingParams) shouldUpdateRateLimits() bool {
 }
 
 func (p *postUsageBillingParams) shouldUpdateAccountQuota() bool {
-	return p.Cost.TotalCost > 0 && p.Account.SupportsAccountQuota() && p.Account.HasAnyQuotaLimit()
+	return p.accountQuotaBaseCost() > 0 && p.Account.SupportsAccountQuota() && p.Account.HasAnyQuotaLimit()
+}
+
+func (p *postUsageBillingParams) accountQuotaBaseCost() float64 {
+	if p.AccountQuotaBaseCost != nil {
+		return *p.AccountQuotaBaseCost
+	}
+	return p.Cost.TotalCost
 }
 
 // postUsageBilling is the legacy fallback billing path used when the unified
@@ -183,7 +191,7 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 	}
 
 	if p.shouldUpdateAccountQuota() {
-		accountCost := cost.TotalCost * p.AccountRateMultiplier
+		accountCost := p.accountQuotaBaseCost() * p.AccountRateMultiplier
 		if err := deps.accountRepo.IncrementQuotaUsed(billingCtx, p.Account.ID, accountCost); err != nil {
 			slog.Error("increment account quota used failed", "account_id", p.Account.ID, "cost", accountCost, "error", err)
 		}
@@ -345,7 +353,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.APIKeyRateLimitCost = p.Cost.ActualCost
 	}
 	if p.shouldUpdateAccountQuota() {
-		cmd.AccountQuotaCost = p.Cost.TotalCost * p.AccountRateMultiplier
+		cmd.AccountQuotaCost = p.accountQuotaBaseCost() * p.AccountRateMultiplier
 		cmd.AccountQuotaHasDailyLimit = p.Account.GetQuotaDailyLimit() > 0
 		cmd.AccountQuotaHasWeeklyLimit = p.Account.GetQuotaWeeklyLimit() > 0
 	}
@@ -547,9 +555,10 @@ func notifyAccountQuota(ctx context.Context, p *postUsageBillingParams, deps *bi
 			slog.Error("panic in notifyAccountQuota", "recover", r)
 		}
 	}()
-	if p.Cost.TotalCost <= 0 || p.Account == nil || !p.Account.SupportsAccountQuota() || !p.Account.HasAnyQuotaLimit() || deps.balanceNotifyService == nil {
+	accountBaseCost := p.accountQuotaBaseCost()
+	if accountBaseCost <= 0 || p.Account == nil || !p.Account.SupportsAccountQuota() || !p.Account.HasAnyQuotaLimit() || deps.balanceNotifyService == nil {
 		slog.Debug("notifyAccountQuota: skipped",
-			"total_cost", p.Cost.TotalCost,
+			"account_base_cost", accountBaseCost,
 			"account_nil", p.Account == nil,
 			"supports_account_quota", p.Account != nil && p.Account.SupportsAccountQuota(),
 			"has_quota_limit", p.Account != nil && p.Account.HasAnyQuotaLimit(),
@@ -557,7 +566,7 @@ func notifyAccountQuota(ctx context.Context, p *postUsageBillingParams, deps *bi
 		)
 		return
 	}
-	accountCost := p.Cost.TotalCost * p.AccountRateMultiplier
+	accountCost := accountBaseCost * p.AccountRateMultiplier
 	var quotaState *AccountQuotaState
 	if result != nil {
 		quotaState = result.QuotaState
@@ -829,7 +838,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 			// Anthropic's input_tokens excludes cache_read and cache_creation (billed separately);
 			// OpenAI gateway uses actualInputTokens which also excludes cache_read for the same reason.
 			result.Usage.billingUsageTokens(),
-			cost.TotalCost-cacheStorageCost, pricingAt,
+			cost.TotalCost-cacheStorageCost, optionalStringValue(usageLog.ServiceTier), pricingAt,
 			accountStatsLongContextPricingEnabled(nil), result.upstreamPriceFactor(),
 		)
 		addCacheStorageToAccountStatsCost(usageLog, cacheStorageCost)

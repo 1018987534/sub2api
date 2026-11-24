@@ -1288,8 +1288,8 @@ export default {
         commonPatterns: 'Common patterns'
       },
       openaiFastPolicy: {
-        billingFollowUpstreamTier: 'Bill by upstream response tier',
-        billingFollowUpstreamTierHint: 'Applies globally to all OpenAI accounts. Fast/priority responses use Fast pricing and display Fast; default, missing, or unknown tiers use Standard pricing and display. Flex/Ultrafast use their matching tiers. Disable to retain the existing policy.',
+        billingFollowUpstreamTier: 'Estimate account cost by upstream response tier',
+        billingFollowUpstreamTierHint: 'Use the upstream response tier to estimate costs and quota usage for all OpenAI accounts. Missing or unknown tiers use Standard pricing. Customer charges and usage records follow the outbound tier and group settings.',
         title: 'OpenAI Fast/Flex Policy',
         description: 'Intercept, filter, or pass OpenAI fast(priority), ultrafast, or flex requests based on the request body service_tier field. Applies to the OpenAI gateway only. "All tier values" includes explicitly sent tiers only.',
         empty: 'No rules configured. Click the button below to add one.',

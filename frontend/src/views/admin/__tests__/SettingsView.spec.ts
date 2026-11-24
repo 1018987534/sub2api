@@ -238,8 +238,8 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.upstreamBillingProbe.saved": "上游倍率自动探测设置已保存",
     "admin.settings.upstreamBillingProbe.saveFailed": "保存上游倍率自动探测设置失败",
     "admin.settings.openaiFastPolicy.summaryTargetModels": "目标模型",
-    "admin.settings.openaiFastPolicy.billingFollowUpstreamTier": "按上游返回档位计费",
-    "admin.settings.openaiFastPolicy.billingFollowUpstreamTierHint": "返回 Fast/priority 按 Fast，返回 default 或无信号按标准。",
+    "admin.settings.openaiFastPolicy.billingFollowUpstreamTier": "按上游返回档位估算账号成本",
+    "admin.settings.openaiFastPolicy.billingFollowUpstreamTierHint": "客户收费和用量记录仍按出站档位及分组配置处理。",
     "admin.settings.openaiFastPolicy.summaryAllModels": "全部模型",
     "admin.settings.openaiFastPolicy.summaryOtherModels": "其他模型",
     "admin.settings.openaiFastPolicy.summaryAction.filter": "过滤",
@@ -1562,7 +1562,7 @@ describe("admin SettingsView payment visible method controls", () => {
     }));
   });
 
-  it("loads and saves the global billing tier switch without changing routing rules", async () => {
+  it("loads and saves the account-cost tier switch without changing routing rules", async () => {
     const rules = [{ service_tier: "priority", action: "pass", scope: "all" }];
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
@@ -1572,7 +1572,7 @@ describe("admin SettingsView payment visible method controls", () => {
     await flushPromises();
     await openGatewayTab(wrapper);
     const toggle = wrapper.get('[data-testid="openai-billing-follow-upstream-tier"]');
-    expect(wrapper.text()).toContain("按上游返回档位计费");
+    expect(wrapper.text()).toContain("按上游返回档位估算账号成本");
     expect((toggle.element as HTMLInputElement).checked).toBe(true);
     await toggle.setValue(false);
     await wrapper.find("form").trigger("submit.prevent");

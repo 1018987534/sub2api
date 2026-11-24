@@ -3041,7 +3041,7 @@ func TestGatewayServiceCalculateRecordUsageCost_ChannelImageBillingNormalizesMis
 	require.InDelta(t, 0.44, cost.ActualCost, 1e-12)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_ServiceTierDowngradedByUpstreamResponse(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_OnlyAccountCostFollowsUpstreamDowngrade(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	subRepo := &openAIRecordUsageSubRepoStub{}
@@ -3066,11 +3066,17 @@ func TestOpenAIGatewayServiceRecordUsage_ServiceTierDowngradedByUpstreamResponse
 	require.NoError(t, err)
 	require.NotNil(t, usageRepo.lastLog)
 	require.NotNil(t, usageRepo.lastLog.ServiceTier)
-	require.Equal(t, "default", *usageRepo.lastLog.ServiceTier, "usage log must record the tier actually billed")
+	require.Equal(t, "priority", *usageRepo.lastLog.ServiceTier)
 
-	baseCost, calcErr := svc.billingService.CalculateCost("gpt-5.4", UsageTokens{InputTokens: 100, OutputTokens: 50}, 1.0)
+	tokens := UsageTokens{InputTokens: 100, OutputTokens: 50}
+	baseCost, calcErr := svc.billingService.CalculateCost("gpt-5.4", tokens, 1.0)
 	require.NoError(t, calcErr)
-	require.InDelta(t, baseCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10, "a request served at default must not pay the priority price")
+	fastCost, calcErr := svc.billingService.CalculateCostWithServiceTier("gpt-5.4", tokens, svc.cfg.Default.RateMultiplier, "priority")
+	require.NoError(t, calcErr)
+	require.InDelta(t, fastCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
+	require.InDelta(t, fastCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-10)
+	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
+	require.InDelta(t, baseCost.TotalCost, *usageRepo.lastLog.AccountStatsCost, 1e-10)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_CodexDefaultEchoKeepsFastBilling(t *testing.T) {
@@ -3212,6 +3218,61 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastChargesStandard(t *testin
 	require.InDelta(t, standardTotal*0.5, usageRepo.lastLog.ActualCost, 1e-10)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_ForcedUltrafastWithGroupDiscount(t *testing.T) {
+	for _, free := range []bool{true, false} {
+		name := "paid"
+		if free {
+			name = "free"
+		}
+		t.Run(name, func(t *testing.T) {
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			billingRepo := &openAIRecordUsageBillingRepoStub{}
+			svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+			inputPrice, outputPrice, ultrafastMultiplier := 0.001, 0.002, 3.0
+			group := &Group{
+				ID: 123, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true,
+				RateMultiplier: 0.5, ForceOpenAIUltrafast: true, FreeOpenAIFast: free,
+				ModelPricing: []ChannelModelPricing{{
+					Models: []string{"gpt-6.2-sol"}, BillingMode: BillingModeToken,
+					InputPrice: &inputPrice, OutputPrice: &outputPrice, UltrafastMultiplier: &ultrafastMultiplier,
+				}},
+			}
+			account := &Account{ID: 12491, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"quota_limit": 20.0}}
+			ctx := context.WithValue(context.Background(), ctxkey.Group, group)
+			ctx = withOpenAIFastPolicyContext(ctx, &OpenAIFastPolicySettings{BillingFollowUpstreamTier: true})
+			body, err := svc.applyOpenAIFastPolicyToBody(ctx, account, "gpt-6.2-sol", []byte(`{"model":"gpt-6.2-sol","stream":true,"service_tier":"default"}`))
+			require.NoError(t, err)
+			outboundTier := extractOpenAIServiceTierFromBody(body)
+			require.Equal(t, OpenAIFastTierUltrafast, optionalStringValue(outboundTier))
+			observer := &upstreamResponseModelObserver{}
+			observer.ObserveOpenAI([]byte(`{"response":{"model":"gpt-6.2-sol","service_tier":"default"}}`), "response.completed")
+			err = svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+				Result: &OpenAIForwardResult{
+					RequestID: "resp_forced_ultrafast", Model: "gpt-6.2-sol", Stream: true,
+					ServiceTier: outboundTier, UpstreamResponseServiceTier: observer.ServiceTier(),
+					Usage: OpenAIUsage{InputTokens: 100, OutputTokens: 50}, Duration: time.Second,
+				},
+				APIKey: &APIKey{ID: 129, GroupID: &group.ID, Group: group}, User: &User{ID: 1}, Account: account,
+			})
+			require.NoError(t, err)
+			standardCost := 100*inputPrice + 50*outputPrice
+			ultrafastCost := standardCost * ultrafastMultiplier
+			customerCost := ultrafastCost * group.RateMultiplier
+			if free {
+				customerCost = standardCost * group.RateMultiplier
+			}
+			require.Equal(t, OpenAIFastTierUltrafast, optionalStringValue(usageRepo.lastLog.ServiceTier))
+			require.InDelta(t, ultrafastCost, usageRepo.lastLog.TotalCost, 1e-10)
+			require.InDelta(t, customerCost, usageRepo.lastLog.ActualCost, 1e-10)
+			require.InDelta(t, customerCost, billingRepo.lastCmd.BalanceCost, 1e-10)
+			require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
+			require.InDelta(t, standardCost, *usageRepo.lastLog.AccountStatsCost, 1e-10)
+			require.InDelta(t, standardCost, billingRepo.lastCmd.AccountQuotaCost, 1e-10)
+		})
+	}
+}
+
 func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastMissingPricingRecordsZeroCostUsageLog(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	svc := newOpenAIRecordUsageServiceForTest(
@@ -3272,16 +3333,13 @@ func TestGroupBillsOpenAIFastAtStandardRequiresOpenAIAccount(t *testing.T) {
 	))
 }
 
-// "免费 Fast" 只把 priority 降到 Standard 价；Ultrafast 是独立的更高档位，
-// 分组强制 Ultrafast 时仍按 Ultrafast 计费。
-func TestGroupBillsOpenAIFastAtStandardExcludesUltrafast(t *testing.T) {
+func TestGroupBillsOpenAIFastAtStandardIncludesUltrafast(t *testing.T) {
 	apiKey := &APIKey{Group: &Group{Platform: PlatformOpenAI, FreeOpenAIFast: true, ForceOpenAIUltrafast: true}}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 
-	require.False(t, groupBillsOpenAIFastAtStandard(
-		apiKey,
-		&Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth},
-		OpenAIFastTierUltrafast,
-	))
+	require.True(t, groupBillsOpenAIFastAtStandard(apiKey, account, OpenAIFastTierUltrafast))
+	require.False(t, groupBillsOpenAIFastAtStandard(apiKey, account, "flex"))
+	require.False(t, groupBillsOpenAIFastAtStandard(apiKey, account, "default"))
 }
 
 func TestOpenAIGatewayServiceRecordUsage_ServiceTierNeverRaisedByUpstreamResponse(t *testing.T) {
@@ -3313,7 +3371,7 @@ func TestOpenAIGatewayServiceRecordUsage_ServiceTierNeverRaisedByUpstreamRespons
 	require.InDelta(t, baseCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_GlobalBillingUsesUpstreamReportedTier(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_GlobalTierPolicyOnlyAffectsAccountCost(t *testing.T) {
 	for _, accountType := range []string{AccountTypeAPIKey, AccountTypeOAuth, AccountTypeSetupToken} {
 		t.Run(accountType, func(t *testing.T) {
 			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
@@ -3324,13 +3382,14 @@ func TestOpenAIGatewayServiceRecordUsage_GlobalBillingUsesUpstreamReportedTier(t
 			tokens := UsageTokens{InputTokens: 291, OutputTokens: 38, CacheReadTokens: 221696}
 			for _, enabled := range []bool{false, true, false} {
 				require.NoError(t, svc.settingService.SetOpenAIFastPolicySettings(context.Background(), &OpenAIFastPolicySettings{BillingFollowUpstreamTier: enabled}))
-				for _, test := range []struct{ requested, observed, enabledTier string }{
+				for _, test := range []struct{ requested, observed, enabledAccountTier string }{
 					{"priority", "default", "default"}, {"priority", "flex", "flex"},
 					{"fast", "default", "default"}, {"ultrafast", "priority", "priority"},
 					{"", "priority", "priority"}, {"default", "priority", "priority"},
 					{"default", "flex", "flex"}, {"flex", "default", "default"},
 					{"priority", "", "default"}, {"priority", "unknown", "default"},
 					{"priority", "fast", "priority"}, {"priority", "priority", "priority"},
+					{"ultrafast", "ultrafast", "ultrafast"}, {"ultrafast", "default", "default"},
 				} {
 					var sentTier *string
 					if test.requested != "" {
@@ -3338,36 +3397,51 @@ func TestOpenAIGatewayServiceRecordUsage_GlobalBillingUsesUpstreamReportedTier(t
 						sentTier = &tier
 					}
 					result := &OpenAIForwardResult{RequestID: "global-tier-billing", ServiceTier: sentTier, UpstreamResponseServiceTier: test.observed, Model: "gpt-6.1-sol", Usage: OpenAIUsage{InputTokens: tokens.InputTokens + tokens.CacheReadTokens, OutputTokens: tokens.OutputTokens, CacheReadInputTokens: tokens.CacheReadTokens}, Duration: time.Second}
-					account := &Account{ID: 12469, Platform: PlatformOpenAI, Type: accountType}
+					account := &Account{ID: 12469, Platform: PlatformOpenAI, Type: accountType, Extra: map[string]any{"quota_limit": 20.0}}
 					err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{Result: result, APIKey: &APIKey{ID: 1017}, User: &User{ID: 2017}, Account: account})
 					require.NoError(t, err)
-					wantTier := ResolveOpenAIServiceTierBilling(account, test.requested, test.observed).Billing
+					wantAccountTier := ResolveOpenAIServiceTierBilling(account, test.requested, test.observed).Billing
 					if enabled {
-						wantTier = test.enabledTier
+						wantAccountTier = test.enabledAccountTier
 					}
-					require.Equal(t, wantTier, optionalStringValue(usageRepo.lastLog.ServiceTier))
-					require.Equal(t, wantTier, billingRepo.lastCmd.ServiceTier)
+					require.Equal(t, test.requested, optionalStringValue(usageRepo.lastLog.ServiceTier))
+					require.Equal(t, test.requested, billingRepo.lastCmd.ServiceTier)
+					require.Equal(t, test.requested, optionalStringValue(result.ServiceTier), "retain outbound tier")
 					require.Equal(t, test.observed, result.UpstreamResponseServiceTier, "retain observed upstream tier")
-					expected, calcErr := svc.billingService.CalculateCostWithServiceTier(result.Model, tokens, svc.cfg.Default.RateMultiplier, wantTier)
+					expected, calcErr := svc.billingService.CalculateCostWithServiceTier(result.Model, tokens, svc.cfg.Default.RateMultiplier, test.requested)
 					require.NoError(t, calcErr)
 					require.InDelta(t, expected.TotalCost, usageRepo.lastLog.TotalCost, 1e-10)
 					require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-10)
 					require.Equal(t, QuantizeUsageBillingAmount(expected.ActualCost), billingRepo.lastCmd.BalanceCost)
+					accountQuote, calcErr := svc.billingService.CalculateCostWithServiceTier(result.Model, tokens, 1, wantAccountTier)
+					require.NoError(t, calcErr)
+					estimatedAccountCost := usageRepo.lastLog.TotalCost
+					if usageRepo.lastLog.AccountStatsCost != nil {
+						estimatedAccountCost = *usageRepo.lastLog.AccountStatsCost
+					}
+					require.InDelta(t, accountQuote.TotalCost, estimatedAccountCost, 1e-10)
+					if account.SupportsAccountQuota() {
+						require.Equal(t, QuantizeUsageBillingAmount(accountQuote.TotalCost), billingRepo.lastCmd.AccountQuotaCost)
+					}
 				}
 			}
 		})
 	}
 }
 
-func TestOpenAIGatewayServiceRecordUsage_GlobalBillingUsesWSSnapshot(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_WSKeepsOutboundTierAndUsesAccountCostSnapshot(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
 	ctx := withOpenAIFastPolicyContext(context.Background(), &OpenAIFastPolicySettings{BillingFollowUpstreamTier: true})
 	tier := "priority"
 	err := svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{RequestID: "ws-tier-snapshot", ServiceTier: &tier, UpstreamResponseServiceTier: "default", Model: "gpt-6.1-sol", Usage: OpenAIUsage{InputTokens: 291, OutputTokens: 38}, Duration: time.Second, OpenAIWSMode: true},
-		APIKey: &APIKey{ID: 1}, User: &User{ID: 1}, Account: &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey},
+		APIKey: &APIKey{ID: 1}, User: &User{ID: 1}, Account: &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
 	})
 	require.NoError(t, err)
-	require.Equal(t, "default", optionalStringValue(usageRepo.lastLog.ServiceTier), "default response must select base pricing in reconciliation mode")
+	require.Equal(t, "priority", optionalStringValue(usageRepo.lastLog.ServiceTier))
+	baseCost, calcErr := svc.billingService.CalculateCost("gpt-6.1-sol", UsageTokens{InputTokens: 291, OutputTokens: 38}, 1)
+	require.NoError(t, calcErr)
+	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
+	require.InDelta(t, baseCost.TotalCost, *usageRepo.lastLog.AccountStatsCost, 1e-10)
 }

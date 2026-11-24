@@ -221,6 +221,10 @@ func TestUpstreamResponseModelObserverServiceTierTerminalEventWins(t *testing.T)
 	observer.ObserveOpenAI([]byte(`{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.6-sol","service_tier":"default","usage":{"input_tokens":1,"output_tokens":2}}}`), "response.completed")
 	require.Equal(t, "default", observer.ServiceTier())
 	require.False(t, observer.Conflict(), "tier echo must not be reported as a model conflict")
+
+	ultrafast := &upstreamResponseModelObserver{}
+	ultrafast.ObserveOpenAI([]byte(`{"response":{"model":"gpt-6.2-sol","service_tier":"ultrafast"}}`), "response.completed")
+	require.Equal(t, OpenAIFastTierUltrafast, ultrafast.ServiceTier())
 }
 
 func TestUpstreamResponseModelObserverServiceTierUntypedPayloads(t *testing.T) {
