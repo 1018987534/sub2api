@@ -127,6 +127,58 @@ func TestUsageLogFromService_IncludesServiceTierForUserAndAdmin(t *testing.T) {
 	require.InDelta(t, 1.5, *adminDTO.AccountRateMultiplier, 1e-12)
 }
 
+func TestUsageLogFromService_RecoversLegacyUltrafastCustomerCosts(t *testing.T) {
+	t.Parallel()
+	tier, mode := service.OpenAIFastTierUltrafast, string(service.BillingModeToken)
+	log := &service.UsageLog{
+		ServiceTier: &tier, BillingMode: &mode,
+		InputCost: 0.151656, OutputCost: 0.017775, CacheReadCost: 0.218496,
+		TotalCost: 0.387927, ActualCost: 0.00129309, RateMultiplier: 0.01,
+		AccountStatsCost: f64Ptr(0.129309), AccountRateMultiplier: f64Ptr(0.20),
+	}
+	user, admin := UsageLogFromService(log), UsageLogFromServiceAdmin(log)
+	for _, row := range []*UsageLog{user, &admin.UsageLog} {
+		require.Equal(t, tier, *row.ServiceTier)
+		require.InDelta(t, 0.050552, row.InputCost, 1e-10)
+		require.InDelta(t, 0.005925, row.OutputCost, 1e-10)
+		require.InDelta(t, 0.072832, row.CacheReadCost, 1e-10)
+		require.InDelta(t, 0.129309, row.TotalCost, 1e-10)
+		require.Equal(t, 0.00129309, row.ActualCost)
+	}
+	require.Equal(t, 0.129309, *admin.AccountStatsCost)
+	require.Equal(t, 0.387927, log.TotalCost)
+
+	log.AccountStatsCost = nil
+	admin = UsageLogFromServiceAdmin(log)
+	require.Equal(t, 0.387927, *admin.AccountStatsCost, "retain the old account-cost fallback")
+}
+
+func TestUsageLogFromService_PreservesUltrafastCostsWithoutRecoverableLegacyDiscount(t *testing.T) {
+	t.Parallel()
+	tier, tokenMode := service.OpenAIFastTierUltrafast, string(service.BillingModeToken)
+	for _, tc := range []struct {
+		name                  string
+		actualCost, inputCost float64
+	}{
+		{"paid", 0.00387927, 0.387927},
+		{"rounded_rate", 0.00387, 0.387927},
+		{"unitemized_surcharge", 0.00129309, 0.38},
+		{"no_debit", 0, 0.387927},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := &service.UsageLog{
+				ServiceTier: &tier, BillingMode: &tokenMode,
+				InputCost: tc.inputCost, TotalCost: 0.387927, ActualCost: tc.actualCost, RateMultiplier: 0.01,
+			}
+			row := UsageLogFromServiceAdmin(log)
+			require.Equal(t, tc.inputCost, row.InputCost)
+			require.Equal(t, log.TotalCost, row.TotalCost)
+			require.Equal(t, tc.actualCost, row.ActualCost)
+			require.Nil(t, row.AccountStatsCost)
+		})
+	}
+}
+
 func TestUsageLogFromService_UsesRequestedModelAndKeepsUpstreamAdminOnly(t *testing.T) {
 	t.Parallel()
 

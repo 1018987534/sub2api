@@ -2,6 +2,7 @@
 package dto
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -698,7 +699,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 	if requestedModel == "" {
 		requestedModel = l.Model
 	}
-	return UsageLog{
+	usage := UsageLog{
 		ID:                        l.ID,
 		UserID:                    l.UserID,
 		APIKeyID:                  l.APIKeyID,
@@ -755,6 +756,40 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		Group:                     GroupFromServiceShallow(l.Group),
 		Subscription:              UserSubscriptionFromService(l.Subscription),
 	}
+	applyLegacyUltrafastCustomerCosts(&usage)
+	return usage
+}
+
+// Older Free Fast rows kept the Ultrafast quote and recorded only the debit
+// at Standard. Ultrafast applies a uniform multiplier to token costs, so pure
+// token quotes can be recovered from the stored debit and rate. Surcharges can
+// have a different rate and are excluded from this reconstruction.
+func applyLegacyUltrafastCustomerCosts(usage *UsageLog) {
+	if usage.ServiceTier == nil || *usage.ServiceTier != service.OpenAIFastTierUltrafast ||
+		usage.BillingMode == nil || *usage.BillingMode != string(service.BillingModeToken) ||
+		usage.RateMultiplier <= 0 || usage.ActualCost <= 0 || usage.TotalCost <= 0 {
+		return
+	}
+	// The stored rate has four decimal places and the stored amounts have ten.
+	const rateRounding = 0.00005
+	const amountRounding = 1e-10
+	if usage.TotalCost*usage.RateMultiplier-usage.ActualCost <= usage.TotalCost*rateRounding+amountRounding {
+		return
+	}
+	componentTotal := usage.InputCost + usage.OutputCost + usage.CacheCreationCost +
+		usage.CacheReadCost + usage.ImageInputCost + usage.ImageOutputCost
+	if math.Abs(componentTotal-usage.TotalCost) > 4*amountRounding {
+		return
+	}
+	customerTotal := usage.ActualCost / usage.RateMultiplier
+	scale := customerTotal / usage.TotalCost
+	usage.InputCost *= scale
+	usage.OutputCost *= scale
+	usage.CacheCreationCost *= scale
+	usage.CacheReadCost *= scale
+	usage.ImageInputCost *= scale
+	usage.ImageOutputCost *= scale
+	usage.TotalCost = customerTotal
 }
 
 // UsageLogFromService converts a service UsageLog to DTO for regular users.
@@ -775,6 +810,10 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	}
 	usageLog := usageLogFromServiceUser(l)
 	usageLog.UpstreamEndpoint = l.UpstreamEndpoint
+	accountStatsCost := l.AccountStatsCost
+	if accountStatsCost == nil && usageLog.TotalCost != l.TotalCost {
+		accountStatsCost = &l.TotalCost
+	}
 	return &AdminUsageLog{
 		UsageLog:                usageLog,
 		UpstreamModel:           l.UpstreamModel,
@@ -787,7 +826,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		BillingTier:             l.BillingTier,
 		InstanceID:              l.InstanceID,
 		AccountRateMultiplier:   l.AccountRateMultiplier,
-		AccountStatsCost:        l.AccountStatsCost,
+		AccountStatsCost:        accountStatsCost,
 		IPAddress:               l.IPAddress,
 		Account:                 AccountSummaryFromService(l.Account),
 	}

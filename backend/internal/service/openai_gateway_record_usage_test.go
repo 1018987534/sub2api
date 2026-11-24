@@ -3213,62 +3213,86 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastChargesStandard(t *testin
 	require.Equal(t, "priority", *usageRepo.lastLog.ServiceTier)
 	require.InDelta(t, 0.5, usageRepo.lastLog.RateMultiplier, 1e-12)
 
-	standardTotal := float64(tokens.InputTokens)*inputPrice + float64(tokens.OutputTokens)*outputPrice
-	require.InDelta(t, standardTotal*fastMultiplier, usageRepo.lastLog.TotalCost, 1e-10)
+	standardInput := float64(tokens.InputTokens) * inputPrice
+	standardOutput := float64(tokens.OutputTokens) * outputPrice
+	standardTotal := standardInput + standardOutput
+	require.InDelta(t, standardInput, usageRepo.lastLog.InputCost, 1e-10)
+	require.InDelta(t, standardOutput, usageRepo.lastLog.OutputCost, 1e-10)
+	require.InDelta(t, standardTotal, usageRepo.lastLog.TotalCost, 1e-10)
 	require.InDelta(t, standardTotal*0.5, usageRepo.lastLog.ActualCost, 1e-10)
+	require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
+	require.InDelta(t, standardTotal*fastMultiplier, *usageRepo.lastLog.AccountStatsCost, 1e-10)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_ForcedUltrafastWithGroupDiscount(t *testing.T) {
-	for _, free := range []bool{true, false} {
-		name := "paid"
-		if free {
-			name = "free"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		freeFast               bool
+		observedTier           string
+		customerTierMultiplier float64
+		accountTierMultiplier  float64
+	}{
+		{"free_standard_account", true, "default", 1, 1},
+		{"free_ultrafast_account", true, OpenAIFastTierUltrafast, 1, 3},
+		{"paid_standard_account", false, "default", 3, 1},
+		{"paid_ultrafast_account", false, OpenAIFastTierUltrafast, 3, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 			billingRepo := &openAIRecordUsageBillingRepoStub{}
 			svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
 			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
-			inputPrice, outputPrice, ultrafastMultiplier := 0.001, 0.002, 3.0
+			inputPrice, outputPrice, cacheReadPrice := 2e-6, 10e-6, 0.1e-6
+			ultrafastMultiplier := 3.0
 			group := &Group{
 				ID: 123, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true,
-				RateMultiplier: 0.5, ForceOpenAIUltrafast: true, FreeOpenAIFast: free,
+				RateMultiplier: 0.01, ForceOpenAIUltrafast: true, FreeOpenAIFast: tc.freeFast,
+				LongContextPricingEnabled: true,
 				ModelPricing: []ChannelModelPricing{{
 					Models: []string{"gpt-6.2-sol"}, BillingMode: BillingModeToken,
-					InputPrice: &inputPrice, OutputPrice: &outputPrice, UltrafastMultiplier: &ultrafastMultiplier,
+					InputPrice: &inputPrice, OutputPrice: &outputPrice, CacheReadPrice: &cacheReadPrice,
+					UltrafastMultiplier: &ultrafastMultiplier,
 				}},
 			}
-			account := &Account{ID: 12491, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Extra: map[string]any{"quota_limit": 20.0}}
+			accountMultiplier := 0.20
+			account := &Account{ID: 12491, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, RateMultiplier: &accountMultiplier,
+				Extra: map[string]any{"quota_limit": 20.0, "openai_long_context_billing_enabled": true}}
 			ctx := context.WithValue(context.Background(), ctxkey.Group, group)
 			ctx = withOpenAIFastPolicyContext(ctx, &OpenAIFastPolicySettings{BillingFollowUpstreamTier: true})
 			body, err := svc.applyOpenAIFastPolicyToBody(ctx, account, "gpt-6.2-sol", []byte(`{"model":"gpt-6.2-sol","stream":true,"service_tier":"default"}`))
 			require.NoError(t, err)
 			outboundTier := extractOpenAIServiceTierFromBody(body)
 			require.Equal(t, OpenAIFastTierUltrafast, optionalStringValue(outboundTier))
-			observer := &upstreamResponseModelObserver{}
-			observer.ObserveOpenAI([]byte(`{"response":{"model":"gpt-6.2-sol","service_tier":"default"}}`), "response.completed")
+			const inputTokens, outputTokens, cacheReadTokens = 12638, 395, 364160
 			err = svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
 				Result: &OpenAIForwardResult{
 					RequestID: "resp_forced_ultrafast", Model: "gpt-6.2-sol", Stream: true,
-					ServiceTier: outboundTier, UpstreamResponseServiceTier: observer.ServiceTier(),
-					Usage: OpenAIUsage{InputTokens: 100, OutputTokens: 50}, Duration: time.Second,
+					ServiceTier: outboundTier, UpstreamResponseServiceTier: tc.observedTier,
+					Usage:    OpenAIUsage{InputTokens: inputTokens + cacheReadTokens, OutputTokens: outputTokens, CacheReadInputTokens: cacheReadTokens},
+					Duration: time.Second,
 				},
 				APIKey: &APIKey{ID: 129, GroupID: &group.ID, Group: group}, User: &User{ID: 1}, Account: account,
 			})
 			require.NoError(t, err)
-			standardCost := 100*inputPrice + 50*outputPrice
-			ultrafastCost := standardCost * ultrafastMultiplier
-			customerCost := ultrafastCost * group.RateMultiplier
-			if free {
-				customerCost = standardCost * group.RateMultiplier
+
+			log := usageRepo.lastLog
+			require.Equal(t, OpenAIFastTierUltrafast, optionalStringValue(log.ServiceTier))
+			require.True(t, log.LongContextBillingApplied)
+			require.InDelta(t, 0.050552*tc.customerTierMultiplier, log.InputCost, 1e-10)
+			require.InDelta(t, 0.005925*tc.customerTierMultiplier, log.OutputCost, 1e-10)
+			require.InDelta(t, 0.072832*tc.customerTierMultiplier, log.CacheReadCost, 1e-10)
+			const standardTotal = 0.129309
+			customerTotal := standardTotal * tc.customerTierMultiplier
+			customerDebit := customerTotal * group.RateMultiplier
+			require.InDelta(t, customerTotal, log.TotalCost, 1e-10)
+			require.InDelta(t, customerDebit, log.ActualCost, 1e-10)
+			require.InDelta(t, customerDebit, billingRepo.lastCmd.BalanceCost, 1e-10)
+			accountTotal := log.TotalCost
+			if log.AccountStatsCost != nil {
+				accountTotal = *log.AccountStatsCost
 			}
-			require.Equal(t, OpenAIFastTierUltrafast, optionalStringValue(usageRepo.lastLog.ServiceTier))
-			require.InDelta(t, ultrafastCost, usageRepo.lastLog.TotalCost, 1e-10)
-			require.InDelta(t, customerCost, usageRepo.lastLog.ActualCost, 1e-10)
-			require.InDelta(t, customerCost, billingRepo.lastCmd.BalanceCost, 1e-10)
-			require.NotNil(t, usageRepo.lastLog.AccountStatsCost)
-			require.InDelta(t, standardCost, *usageRepo.lastLog.AccountStatsCost, 1e-10)
-			require.InDelta(t, standardCost, billingRepo.lastCmd.AccountQuotaCost, 1e-10)
+			require.InDelta(t, standardTotal*tc.accountTierMultiplier, accountTotal, 1e-10)
+			require.InDelta(t, standardTotal*tc.accountTierMultiplier*accountMultiplier, billingRepo.lastCmd.AccountQuotaCost, 1e-10)
 		})
 	}
 }
