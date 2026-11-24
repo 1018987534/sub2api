@@ -218,6 +218,18 @@ export default {
       "label": "Read all group configurations",
       "category": "Groups"
     },
+    "model_uplaza_dread": {
+      "label": "Read the model plaza and its display prices",
+      "category": "Models"
+    },
+    "model_uplaza_dwrite": {
+      "label": "Add and update model plaza listings and display prices (billing is unaffected)",
+      "category": "Models"
+    },
+    "model_uplaza_ddelete": {
+      "label": "Remove models and display prices from the model plaza",
+      "category": "Models"
+    },
     "usage_dread": {
       "label": "Read site-wide usage details and user usage",
       "category": "Reports"

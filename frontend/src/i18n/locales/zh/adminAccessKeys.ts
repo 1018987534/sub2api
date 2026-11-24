@@ -218,6 +218,18 @@ export default {
       "label": "读取所有分组配置",
       "category": "分组"
     },
+    "model_uplaza_dread": {
+      "label": "读取模型广场与展示价",
+      "category": "模型"
+    },
+    "model_uplaza_dwrite": {
+      "label": "新增及修改模型广场展示配置（不影响扣费）",
+      "category": "模型"
+    },
+    "model_uplaza_ddelete": {
+      "label": "从模型广场移除模型和展示价",
+      "category": "模型"
+    },
     "usage_dread": {
       "label": "读取全站用量明细及用户用量",
       "category": "报表"

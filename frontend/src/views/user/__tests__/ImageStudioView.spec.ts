@@ -338,7 +338,9 @@ describe('ImageStudioView', () => {
 
     expect(wrapper.findAll('[data-test="session-card"]')).toHaveLength(2)
     expect(wrapper.get('[data-test="session-summary"]').text()).toBe('imageStudio.sessionCount:1:2')
-    expect(wrapper.find('[data-test="session-results-panel"]').text()).not.toContain('24')
+    const imageSources = wrapper.get('[data-test="session-results-panel"]').findAll('[data-test="session-card"] img')
+      .map((image) => image.attributes('src'))
+    expect(imageSources).toEqual(['data:image/png;base64,one', 'data:image/png;base64,two'])
     expect(mocks.listTasks).not.toHaveBeenCalled()
 
     wrapper.unmount()
