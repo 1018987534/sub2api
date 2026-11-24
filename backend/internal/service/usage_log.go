@@ -128,8 +128,8 @@ type UsageLog struct {
 	BillingTier *string
 	// BillingMode 计费模式：token/image
 	BillingMode *string
-	// ServiceTier records the billable request tier, e.g. OpenAI "priority" / "flex"
-	// or Anthropic "fast".
+	// ServiceTier records the outbound OpenAI request tier or the resolved
+	// Anthropic speed (e.g. "fast").
 	ServiceTier *string
 	// ReasoningEffort is the effective effort recorded for this request after
 	// group policy rewriting and model-family remapping (e.g. max -> xhigh).
