@@ -1282,8 +1282,8 @@ export default {
         commonPatterns: '常用模式'
       },
       openaiFastPolicy: {
-        billingFollowUpstreamTier: '按上游返回档位计费',
-        billingFollowUpstreamTierHint: '全局应用于所有 OpenAI 账号。开启后，上游返回 Fast/priority 才按 Fast 计费并显示 Fast；返回 default、缺失或未知档位时按标准计费和显示。Flex/Ultrafast 按对应档位计费。关闭后保留现有规则。',
+        billingFollowUpstreamTier: '按上游返回档位估算账号成本',
+        billingFollowUpstreamTierHint: '开启后，所有 OpenAI 账号按上游返回的档位估算成本和账号配额用量。返回档位缺失或未知时使用 Standard 价格。客户收费和用量记录仍按出站档位及分组配置处理。',
         title: 'OpenAI Fast/Flex 策略',
         description: '基于请求体 service_tier 字段拦截/过滤/透传 OpenAI fast(priority)、ultrafast 与 flex 请求；仅作用于 OpenAI 网关。“全部 tier 值”仅包含显式传入的 tier。',
         empty: '尚未配置任何规则。点击下方按钮新增。',

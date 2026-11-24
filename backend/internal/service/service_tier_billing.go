@@ -13,7 +13,7 @@ import (
 type ServiceTierBillingResolution struct {
 	Requested  string // tier carried by the request sent upstream ("" when none)
 	Observed   string // tier declared by the upstream response ("" when none)
-	Billing    string // tier used for billing and the usage log
+	Billing    string // tier selected by this pricing policy
 	Downgraded bool   // Billing is cheaper than Requested
 }
 
@@ -85,11 +85,9 @@ func resolveUpstreamReportedServiceTier(requested, observed string) ServiceTierB
 	}
 }
 
-// ResolveOpenAIServiceTierBilling applies the existing response-tier contract
-// for the selected credential. Public OpenAI API responses may lower billing.
-// The private ChatGPT Codex endpoint keeps its established default-echo
-// exception here; the opt-in global reconciliation mode uses the stricter
-// resolveUpstreamReportedServiceTier path above.
+// ResolveOpenAIServiceTierBilling estimates the account tier for the selected
+// credential. The private ChatGPT Codex endpoint can echo default even for a
+// priority request, so the legacy estimate keeps the requested tier in that case.
 func ResolveOpenAIServiceTierBilling(account *Account, requested, observed string) ServiceTierBillingResolution {
 	if account != nil && account.IsOpenAIOAuthLike() && codexOAuthResponseTierIsNonAuthoritative(observed) {
 		return ServiceTierBillingResolution{
@@ -110,49 +108,28 @@ func codexOAuthResponseTierIsNonAuthoritative(observed string) bool {
 	}
 }
 
-// ApplyOpenAIServiceTierBillingResolution lowers result.ServiceTier only when
-// the selected credential's upstream response tier is authoritative.
-func ApplyOpenAIServiceTierBillingResolution(account *Account, result *OpenAIForwardResult) ServiceTierBillingResolution {
-	if result == nil {
-		return ServiceTierBillingResolution{}
-	}
-	resolution := ResolveOpenAIServiceTierBilling(account, optionalStringValue(result.ServiceTier), result.UpstreamResponseServiceTier)
-	if resolution.Downgraded {
-		billing := resolution.Billing
-		result.ServiceTier = &billing
-	}
-	return resolution
-}
-
-// resolveServiceTierBilling applies the global billing policy before calculating
-// charges and persisting the same service tier for usage display.
-func (s *OpenAIGatewayService) resolveServiceTierBilling(ctx context.Context, account *Account, result *OpenAIForwardResult) (ServiceTierBillingResolution, error) {
-	if result == nil || account == nil || !account.IsOpenAI() {
-		return ApplyOpenAIServiceTierBillingResolution(account, result), nil
+// resolveOpenAIAccountCostTier selects the upstream tier for account cost and quota estimates.
+func (s *OpenAIGatewayService) resolveOpenAIAccountCostTier(ctx context.Context, account *Account, result *OpenAIForwardResult) (ServiceTierBillingResolution, error) {
+	requested := optionalStringValue(result.ServiceTier)
+	observed := result.UpstreamResponseServiceTier
+	if account == nil || !account.IsOpenAI() {
+		return ResolveBillingServiceTier(requested, observed), nil
 	}
 	settings := openAIFastPolicySettingsFromContext(ctx)
 	if settings == nil && s.settingService != nil {
 		var err error
 		settings, err = s.settingService.GetOpenAIFastPolicySettings(ctx)
 		if err != nil {
-			return ServiceTierBillingResolution{}, fmt.Errorf("get service tier billing policy: %w", err)
+			return ServiceTierBillingResolution{}, fmt.Errorf("get account cost tier policy: %w", err)
 		}
 	}
 	if settings != nil && settings.BillingFollowUpstreamTier {
-		resolution := resolveUpstreamReportedServiceTier(
-			optionalStringValue(result.ServiceTier),
-			result.UpstreamResponseServiceTier,
-		)
-		billing := resolution.Billing
-		result.ServiceTier = &billing
-		logServiceTierBillingResolution(ctx, account, result, resolution)
-		return resolution, nil
+		return resolveUpstreamReportedServiceTier(requested, observed), nil
 	}
-	return ApplyOpenAIServiceTierBillingResolution(account, result), nil
+	return ResolveOpenAIServiceTierBilling(account, requested, observed), nil
 }
 
-// ApplyForwardServiceTierBillingResolution is the ForwardResult counterpart of
-// ApplyOpenAIServiceTierBillingResolution.
+// ApplyForwardServiceTierBillingResolution applies upstream downgrades to generic gateway usage.
 func ApplyForwardServiceTierBillingResolution(result *ForwardResult) ServiceTierBillingResolution {
 	if result == nil {
 		return ServiceTierBillingResolution{}

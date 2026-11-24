@@ -31,10 +31,11 @@ func TestServiceTierAuditCorrelatesResponseAndBilling(t *testing.T) {
 	result.UpstreamHeaders = http.Header{"X-Service-Tier": {"priority"}, "Authorization": {"PRIVATE_RESPONSE_CONTENT"}}
 	svc := &OpenAIGatewayService{}
 	ctx = withOpenAIFastPolicyContext(ctx, &OpenAIFastPolicySettings{BillingFollowUpstreamTier: true})
-	resolution, err := svc.resolveServiceTierBilling(ctx, account, result)
+	resolution, err := svc.resolveOpenAIAccountCostTier(ctx, account, result)
 	require.NoError(t, err)
 	require.Equal(t, "default", resolution.Billing)
-	require.Equal(t, "default", *result.ServiceTier)
+	require.Equal(t, "priority", *result.ServiceTier)
+	logServiceTierBillingResolution(ctx, account, result, resolution, requestTier)
 	entries := logs.All()
 	require.Len(t, entries, 3)
 	for _, entry := range entries {
@@ -49,6 +50,8 @@ func TestServiceTierAuditCorrelatesResponseAndBilling(t *testing.T) {
 	require.Equal(t, "billing.service_tier_resolution", entries[2].Message)
 	require.Equal(t, "priority", entries[2].ContextMap()["requested_tier"])
 	require.Equal(t, "default", entries[2].ContextMap()["observed_tier"])
+	require.Equal(t, "priority", entries[2].ContextMap()["billed_tier"])
+	require.Equal(t, "default", entries[2].ContextMap()["account_cost_tier"])
 	require.Equal(t, "client-tier-audit", entries[2].ContextMap()["client_request_id"])
 	require.Equal(t, map[string]string{"X-Service-Tier": "priority"}, entries[2].ContextMap()["header_tiers"])
 }
