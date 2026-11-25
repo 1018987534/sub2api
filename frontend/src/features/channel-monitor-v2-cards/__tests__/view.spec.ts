@@ -12,7 +12,7 @@ vi.mock('@/api/channelMonitorV2', () => ({ getMatrix: vi.fn(), getSnapshot: vi.f
 vi.mock('@/api/intelligence', () => ({ getIntelligenceStatus: vi.fn() }))
 const view = () => mount(ChannelStatusCardsView, { global: { stubs: {
   PlatformIcon: true,
-  GroupMonitorCard: { props: ['row', 'probeMetadata'], template: '<article>{{ row.group_name }} {{ probeMetadata?.model }} {{ probeMetadata?.reasoning_effort }}</article>' }
+  GroupMonitorCard: { props: ['row', 'probeMetadata', 'models'], template: '<article>{{ row.group_name }} {{ probeMetadata?.model }} {{ probeMetadata?.reasoning_effort }} <span v-for="model in models" :key="model.probe_id">{{ model.model }}</span></article>' }
 } } })
 beforeEach(() => {
   vi.clearAllMocks()
@@ -67,11 +67,17 @@ describe('cards view independent read path', () => {
   })
 
   it('renders cards and detection status while the snapshot is still pending', async () => {
+    vi.mocked(getIntelligenceStatus).mockResolvedValueOnce({
+      groups: { 1: [] }, metadata: { 1: { model: 'dynamic-model', reasoning_effort: 'medium' } },
+      models: { 1: [{ probe_id: 8, model: 'secondary-model', reasoning_effort: 'low', records: [] }] },
+      window_minutes: 60, server_time: new Date().toISOString()
+    })
     let resolve!: (value: MonitorSnapshot) => void
     vi.mocked(getSnapshot).mockReturnValueOnce(new Promise(done => { resolve = done }))
     const wrapper = view(); await flushPromises()
     expect(wrapper.text()).toContain('Visible Group')
     expect(wrapper.text()).toContain('dynamic-model medium')
+    expect(wrapper.text()).toContain('secondary-model')
     expect(wrapper.text()).not.toContain('可用率 100%')
     expect(wrapper.get('[aria-label="刷新渠道状态"]').attributes('disabled')).toBeDefined()
     resolve({ config: { refresh_interval_seconds: 60 }, health: { overall: 'healthy' }, coverage: { coverage_complete: true, data_through: '2026-10-01T00:00:00Z' }, metrics: { has_requests: true, has_cache_tokens: true, error_rate: 0, cache_rate: 0.8 } } as MonitorSnapshot)

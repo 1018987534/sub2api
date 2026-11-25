@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIntelligenceSaveCAS(t *testing.T) {
@@ -16,21 +17,32 @@ func TestIntelligenceSaveCAS(t *testing.T) {
 	defer db.Close()
 	s := SQLStore{DB: db}
 	c := DefaultConfig(1)
-	mock.ExpectQuery("INSERT INTO intelligence_check_configs").WithArgs(c.GroupID, sqlmock.AnyArg(), false, 10, 900, 0).WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+	beginSave := func(exists bool) {
+		mock.ExpectBegin()
+		mock.ExpectExec("SELECT pg_advisory_xact_lock").WithArgs(c.GroupID).WillReturnResult(sqlmock.NewResult(0, 0))
+		mock.ExpectQuery("SELECT EXISTS").WithArgs(c.GroupID, c.Model, false, int64(0)).WillReturnRows(sqlmock.NewRows([]string{"exists", "count", "duplicate"}).AddRow(exists, 0, false))
+	}
+	beginSave(false)
+	mock.ExpectQuery("INSERT INTO intelligence_check_configs").WithArgs(c.GroupID, sqlmock.AnyArg(), false, 10, 900).WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
+	mock.ExpectCommit()
 	saved, err := s.Save(context.Background(), c)
 	require.NoError(t, err)
 	require.Equal(t, 1, saved.Version)
+	beginSave(true)
 	mock.ExpectQuery("INSERT INTO intelligence_check_configs").WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
 	_, err = s.Save(context.Background(), c)
 	require.ErrorIs(t, err, ErrConflict)
 	c.Version = 1
-	mock.ExpectQuery("INSERT INTO intelligence_check_configs").WillReturnError(sql.ErrNoRows)
+	beginSave(true)
 	mock.ExpectQuery("UPDATE intelligence_check_configs SET").WithArgs(c.GroupID, sqlmock.AnyArg(), false, 10, 900, 1).WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(2))
+	mock.ExpectCommit()
 	saved, err = s.Save(context.Background(), c)
 	require.NoError(t, err)
 	require.Equal(t, 2, saved.Version)
-	mock.ExpectQuery("INSERT INTO intelligence_check_configs").WillReturnError(sql.ErrNoRows)
+	beginSave(true)
 	mock.ExpectQuery("UPDATE intelligence_check_configs SET").WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
 	_, err = s.Save(context.Background(), c)
 	require.ErrorIs(t, err, ErrConflict)
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -42,15 +54,16 @@ func TestIntelligenceClaimLeaseAndSnapshot(t *testing.T) {
 	s := SQLStore{DB: db}
 	c := DefaultConfig(3)
 	raw, _ := json.Marshal(c)
-	mock.ExpectQuery("UPDATE intelligence_check_configs SET lease_token=.*FOR UPDATE OF c SKIP LOCKED LIMIT 1").
-		WithArgs(int64(0), sqlmock.AnyArg(), false).WillReturnRows(sqlmock.NewRows([]string{"config", "version"}).AddRow(raw, 8))
-	claim, err := s.Claim(context.Background(), 0, false)
+	mock.ExpectQuery("WITH next_primary.*FOR UPDATE OF c SKIP LOCKED.*UPDATE intelligence_check_configs SET lease_token=").
+		WithArgs(int64(0), sqlmock.AnyArg(), false, int64(0)).WillReturnRows(sqlmock.NewRows([]string{"config", "version", "group_id", "probe_id"}).AddRow(raw, 8, 3, 17))
+	claim, err := s.Claim(context.Background(), ProbeKey{}, false)
 	require.NoError(t, err)
 	require.Equal(t, 8, claim.Config.Version)
 	require.Equal(t, 10, claim.Config.IntervalMinutes)
+	require.Equal(t, ProbeKey{GroupID: 3, ProbeID: 17}, claim.Config.Key())
 	require.NotEmpty(t, claim.Token)
-	mock.ExpectQuery("UPDATE intelligence_check_configs SET lease_token=").WithArgs(int64(3), sqlmock.AnyArg(), true).WillReturnError(sql.ErrNoRows)
-	_, err = s.Claim(context.Background(), 3, true)
+	mock.ExpectQuery("UPDATE intelligence_check_configs SET lease_token=").WithArgs(int64(3), sqlmock.AnyArg(), true, int64(17)).WillReturnError(sql.ErrNoRows)
+	_, err = s.Claim(context.Background(), ProbeKey{GroupID: 3, ProbeID: 17}, true)
 	require.ErrorIs(t, err, ErrConflict)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -69,7 +82,7 @@ func TestIntelligenceFinishFencing(t *testing.T) {
 			}
 			mock.ExpectExec("UPDATE intelligence_check_configs SET lease_token=NULL").WithArgs(int64(1), "fence").WillReturnResult(sqlmock.NewResult(0, rows))
 			if owned {
-				mock.ExpectExec("INSERT INTO intelligence_check_runs").WithArgs(int64(1), sqlmock.AnyArg(), int64(1), "normal", "21", "", sqlmock.AnyArg(), int64(0), "", false, false).WillReturnResult(sqlmock.NewResult(1, 1))
+				mock.ExpectExec("INSERT INTO intelligence_check_runs").WithArgs(int64(1), sqlmock.AnyArg(), int64(1), "normal", "21", "", sqlmock.AnyArg(), int64(0), "", false, false, int64(0)).WillReturnResult(sqlmock.NewResult(1, 1))
 				mock.ExpectCommit()
 			} else {
 				mock.ExpectRollback()

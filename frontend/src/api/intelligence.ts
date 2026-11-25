@@ -3,6 +3,7 @@ import { repeatedArrayParamsSerializer } from './channelMonitorV2'
 
 export interface IntelligenceConfig {
  group_id: number
+ probe_id?: number
  version: number
  enabled: boolean
  interval_minutes: number
@@ -71,8 +72,22 @@ export async function getIntelligenceRecoveryHistory(beforeId = 0, signal?: Abor
   '/admin/intelligence-checks/recovery/history', { params: { before_id: beforeId }, signal }
  )).data
 }
-export interface IntelligenceMetadata { model: string; reasoning_effort: IntelligenceConfig['reasoning_effort'] }
-export interface IntelligenceStatus { metadata?: Record<string, IntelligenceMetadata>; groups: Record<string, IntelligenceRecord[]>; server_time: string; window_minutes: number; record_limit?: number }
+export interface IntelligenceMetadata {
+ model: string
+ reasoning_effort: IntelligenceConfig['reasoning_effort']
+ protocol?: IntelligenceConfig['protocol']
+ interval_minutes?: number
+ enabled?: boolean
+}
+export interface IntelligenceModelTimeline extends IntelligenceMetadata { probe_id: number; records: IntelligenceRecord[] }
+export interface IntelligenceStatus {
+ metadata?: Record<string, IntelligenceMetadata>
+ groups: Record<string, IntelligenceRecord[]>
+ models?: Record<string, IntelligenceModelTimeline[]>
+ server_time: string
+ window_minutes: number
+ record_limit?: number
+}
 export async function getIntelligenceStatus(groupIds: number[], signal?: AbortSignal) {
  const { data } = await apiClient.get<IntelligenceStatus>('/intelligence-checks/status', {
   params: { group_id: groupIds }, paramsSerializer: { serialize: repeatedArrayParamsSerializer }, signal
@@ -80,16 +95,26 @@ export async function getIntelligenceStatus(groupIds: number[], signal?: AbortSi
  return data
 }
 export async function getIntelligenceConfigs() {
- return (await apiClient.get<{ items: IntelligenceConfig[]; defaults: IntelligenceConfig }>('/admin/intelligence-checks/config')).data
+ return (await apiClient.get<{ items: IntelligenceConfig[]; defaults: IntelligenceConfig; max_models_per_group?: number }>('/admin/intelligence-checks/config')).data
 }
 export async function saveIntelligenceConfig(config: IntelligenceConfig) {
+ if (config.probe_id) {
+  return (await apiClient.put<IntelligenceConfig>(intelligenceModelsPath(config.group_id) + '/' + config.probe_id, config)).data
+ }
  return (await apiClient.put<IntelligenceConfig>('/admin/intelligence-checks/' + config.group_id + '/config', config)).data
 }
-export async function runIntelligenceCheck(groupId: number) {
- return (await apiClient.post<{ started: boolean }>('/admin/intelligence-checks/' + groupId + '/run')).data
+const intelligenceModelsPath = (groupId: number) => '/admin/intelligence-checks/' + groupId + '/models'
+export async function addIntelligenceModel(config: IntelligenceConfig) {
+ return (await apiClient.post<IntelligenceConfig>(intelligenceModelsPath(config.group_id), config)).data
 }
-export async function getIntelligenceHistory(groupId: number, beforeId = 0) {
- return (await apiClient.get<{ items: IntelligenceRecord[]; has_more: boolean }>('/admin/intelligence-checks/' + groupId + '/history', { params: { before_id: beforeId } })).data
+export async function deleteIntelligenceModel(groupId: number, probeId: number, version: number) {
+ return (await apiClient.delete<{ deleted: boolean }>(intelligenceModelsPath(groupId) + '/' + probeId, { params: { version } })).data
+}
+export async function runIntelligenceCheck(groupId: number, probeId?: number) {
+ return (await apiClient.post<{ started: boolean }>('/admin/intelligence-checks/' + groupId + '/run', undefined, { params: { probe_id: probeId } })).data
+}
+export async function getIntelligenceHistory(groupId: number, beforeId = 0, probeId?: number) {
+ return (await apiClient.get<{ items: IntelligenceRecord[]; has_more: boolean }>('/admin/intelligence-checks/' + groupId + '/history', { params: { before_id: beforeId, probe_id: probeId } })).data
 }
 
 // Safe metadata only: no API credential is returned by this endpoint.

@@ -71,7 +71,7 @@ func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyR
 				return intelligence.Config{}, err
 			}
 			for _, c := range configs {
-				if !c.Enabled || c.Validate() != nil {
+				if c.ProbeID != 0 || !c.Enabled || c.Validate() != nil {
 					continue
 				}
 				group, err := groups.GetByID(ctx, c.GroupID)
@@ -121,7 +121,7 @@ func (h *IntelligenceHandler) Configs(c *gin.Context) {
 		response.InternalError(c, "无法读取降智检测配置")
 		return
 	}
-	response.Success(c, gin.H{"items": items, "defaults": intelligence.DefaultConfig(0)})
+	response.Success(c, gin.H{"items": items, "defaults": intelligence.DefaultConfig(0), "max_models_per_group": intelligence.MaxGroupModels})
 }
 func intelligenceGroupID(c *gin.Context) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param("groupID"), 10, 64)
@@ -132,6 +132,46 @@ func intelligenceGroupID(c *gin.Context) (int64, bool) {
 	return id, true
 }
 func (h *IntelligenceHandler) Save(c *gin.Context) {
+	h.saveConfig(c, 0, false)
+}
+
+func (h *IntelligenceHandler) AddModel(c *gin.Context) {
+	h.saveConfig(c, 0, true)
+}
+
+func (h *IntelligenceHandler) SaveModel(c *gin.Context) {
+	if probeID, ok := intelligenceModelID(c); ok {
+		h.saveConfig(c, probeID, false)
+	}
+}
+
+func intelligenceModelID(c *gin.Context) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("probeID"), 10, 64)
+	if err != nil || id <= 0 {
+		response.BadRequest(c, "invalid probe id")
+		return 0, false
+	}
+	return id, true
+}
+
+func intelligenceProbeKey(c *gin.Context) (intelligence.ProbeKey, bool) {
+	groupID, ok := intelligenceGroupID(c)
+	if !ok {
+		return intelligence.ProbeKey{}, false
+	}
+	key := intelligence.ProbeKey{GroupID: groupID}
+	if raw := c.Query("probe_id"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || id < 0 {
+			response.BadRequest(c, "invalid probe id")
+			return intelligence.ProbeKey{}, false
+		}
+		key.ProbeID = id
+	}
+	return key, true
+}
+
+func (h *IntelligenceHandler) saveConfig(c *gin.Context, probeID int64, addModel bool) {
 	id, ok := intelligenceGroupID(c)
 	if !ok {
 		return
@@ -148,6 +188,7 @@ func (h *IntelligenceHandler) Save(c *gin.Context) {
 		return
 	}
 	input.GroupID = id
+	input.ProbeID = probeID
 	input.UpdatedBy = subject.UserID
 	if err := input.Validate(); err != nil {
 		response.BadRequest(c, err.Error())
@@ -168,9 +209,18 @@ func (h *IntelligenceHandler) Save(c *gin.Context) {
 			return
 		}
 	}
-	saved, err := h.store.Save(c.Request.Context(), input)
+	var saved intelligence.Config
+	if addModel {
+		saved, err = h.store.AddModel(c.Request.Context(), input)
+	} else {
+		saved, err = h.store.Save(c.Request.Context(), input)
+	}
 	if errors.Is(err, intelligence.ErrConflict) {
-		response.Error(c, 409, err.Error())
+		response.Error(c, 409, "检测配置已变更，或尚未保存主检测，请刷新后重试")
+		return
+	}
+	if errors.Is(err, intelligence.ErrDuplicateModel) || errors.Is(err, intelligence.ErrModelLimit) || errors.Is(err, intelligence.ErrInvalid) {
+		response.BadRequest(c, err.Error())
 		return
 	}
 	if err != nil {
@@ -179,12 +229,39 @@ func (h *IntelligenceHandler) Save(c *gin.Context) {
 	}
 	response.Success(c, saved)
 }
-func (h *IntelligenceHandler) Run(c *gin.Context) {
+
+func (h *IntelligenceHandler) DeleteModel(c *gin.Context) {
 	id, ok := intelligenceGroupID(c)
 	if !ok {
 		return
 	}
-	group, err := h.groups.GetByID(c.Request.Context(), id)
+	probeID, ok := intelligenceModelID(c)
+	if !ok {
+		return
+	}
+	version, err := strconv.Atoi(c.Query("version"))
+	if err != nil || version <= 0 {
+		response.BadRequest(c, "invalid version")
+		return
+	}
+	err = h.store.DeleteModel(c.Request.Context(), intelligence.ProbeKey{GroupID: id, ProbeID: probeID}, version)
+	if errors.Is(err, intelligence.ErrConflict) {
+		response.Error(c, 409, "检测正在运行或配置已变更，请稍后刷新重试")
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "无法删除降智检测配置")
+		return
+	}
+	response.Success(c, gin.H{"deleted": true})
+}
+
+func (h *IntelligenceHandler) Run(c *gin.Context) {
+	key, ok := intelligenceProbeKey(c)
+	if !ok {
+		return
+	}
+	group, err := h.groups.GetByID(c.Request.Context(), key.GroupID)
 	if err != nil || group == nil {
 		response.NotFound(c, "group not found")
 		return
@@ -193,7 +270,7 @@ func (h *IntelligenceHandler) Run(c *gin.Context) {
 		response.BadRequest(c, "仅支持名称包含不降智且状态为启用的分组")
 		return
 	}
-	err = h.runner.RunNow(c.Request.Context(), id)
+	err = h.runner.RunNow(c.Request.Context(), key)
 	if errors.Is(err, intelligence.ErrConflict) {
 		response.Error(c, 409, "检测正在运行、队列已满或配置尚未保存")
 		return
@@ -205,7 +282,7 @@ func (h *IntelligenceHandler) Run(c *gin.Context) {
 	response.Success(c, gin.H{"started": true})
 }
 func (h *IntelligenceHandler) History(c *gin.Context) {
-	id, ok := intelligenceGroupID(c)
+	key, ok := intelligenceProbeKey(c)
 	if !ok {
 		return
 	}
@@ -218,7 +295,7 @@ func (h *IntelligenceHandler) History(c *gin.Context) {
 			return
 		}
 	}
-	rows, err := h.store.History(c.Request.Context(), id, time.Now().Add(-7*24*time.Hour), before, 25)
+	rows, err := h.store.History(c.Request.Context(), key, time.Now().Add(-7*24*time.Hour), before, 25)
 	if err != nil {
 		response.InternalError(c, "无法读取检测记录")
 		return
@@ -288,18 +365,15 @@ func (h *IntelligenceHandler) RecordDetail(c *gin.Context) {
 		response.NotFound(c, "检测记录不存在或已过期")
 		return
 	}
-	// History uses an exclusive ID cursor. Read one candidate, then require an
-	// exact match so a removed record can never return its predecessor's answer.
-	records, err := h.store.History(c.Request.Context(), groupID, time.Now().Add(-7*24*time.Hour), recordID+1, 1)
+	record, err := h.store.Record(c.Request.Context(), groupID, recordID, time.Now().Add(-7*24*time.Hour))
+	if errors.Is(err, sql.ErrNoRows) {
+		response.NotFound(c, "检测记录不存在或已过期")
+		return
+	}
 	if err != nil {
 		response.InternalError(c, "无法读取检测回答")
 		return
 	}
-	if len(records) != 1 || records[0].ID != recordID || records[0].GroupID != groupID {
-		response.NotFound(c, "检测记录不存在或已过期")
-		return
-	}
-	record := records[0]
 	model, effort := "", ""
 	if record.Config != nil {
 		model, effort = record.Config.Model, record.Config.ReasoningEffort
@@ -308,6 +382,20 @@ func (h *IntelligenceHandler) RecordDetail(c *gin.Context) {
 		"id": record.ID, "group_id": record.GroupID, "status": record.Status,
 		"answer": record.Answer, "model": model, "reasoning_effort": effort,
 	})
+}
+
+type intelligenceDisplayMetadata struct {
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort"`
+	Protocol        string `json:"protocol"`
+	IntervalMinutes int    `json:"interval_minutes"`
+	Enabled         bool   `json:"enabled"`
+}
+
+type intelligenceModelTimeline struct {
+	intelligenceDisplayMetadata
+	ProbeID int64                         `json:"probe_id"`
+	Records []intelligence.TimelineRecord `json:"records"`
 }
 
 func (h *IntelligenceHandler) Status(c *gin.Context) {
@@ -339,29 +427,34 @@ func (h *IntelligenceHandler) Status(c *gin.Context) {
 		response.InternalError(c, "无法读取检测状态")
 		return
 	}
-	result := map[int64][]intelligence.Record{}
-	metadata := map[int64]gin.H{}
-	now := time.Now()
+	var visible []intelligence.Config
 	for _, cfg := range items {
-		if !allowed[cfg.GroupID] || !ids[cfg.GroupID] {
-			continue
+		if allowed[cfg.GroupID] && ids[cfg.GroupID] {
+			visible = append(visible, cfg)
 		}
-		records, err := h.store.History(c.Request.Context(), cfg.GroupID, now.Add(-7*24*time.Hour), 0, 60)
-		if err != nil {
-			response.InternalError(c, "无法读取检测状态")
-			return
-		}
-		// Strip prompts, answers, errors, key IDs and operator IDs server-side.
-		for i := range records {
-			records[i].Answer = ""
-			records[i].Error = ""
-			records[i].Config = nil
-			records[i].AccountID = 0
-			records[i].Paused = false
-		}
-		result[cfg.GroupID] = records
-		// Expose only display metadata for requested, authorized groups.
-		metadata[cfg.GroupID] = gin.H{"model": cfg.Model, "reasoning_effort": cfg.ReasoningEffort}
 	}
-	response.Success(c, gin.H{"groups": result, "metadata": metadata, "window_minutes": 7 * 24 * 60, "record_limit": 60, "server_time": now.UTC()})
+	const recordLimit = 60
+	now := time.Now()
+	timelines, err := h.store.Timelines(c.Request.Context(), visible, now.Add(-7*24*time.Hour), recordLimit)
+	if err != nil {
+		response.InternalError(c, "无法读取检测状态")
+		return
+	}
+	groups := map[int64][]intelligence.TimelineRecord{}
+	metadata := map[int64]intelligenceDisplayMetadata{}
+	models := map[int64][]intelligenceModelTimeline{}
+	for _, cfg := range visible {
+		records := timelines[cfg.Key()]
+		if records == nil {
+			records = []intelligence.TimelineRecord{}
+		}
+		meta := intelligenceDisplayMetadata{cfg.Model, cfg.ReasoningEffort, cfg.Protocol, cfg.IntervalMinutes, cfg.Enabled}
+		if cfg.ProbeID == 0 {
+			// Preserve the primary response fields for pages already open during rollout.
+			groups[cfg.GroupID], metadata[cfg.GroupID] = records, meta
+		} else {
+			models[cfg.GroupID] = append(models[cfg.GroupID], intelligenceModelTimeline{meta, cfg.ProbeID, records})
+		}
+	}
+	response.Success(c, gin.H{"groups": groups, "metadata": metadata, "models": models, "window_minutes": 7 * 24 * 60, "record_limit": recordLimit, "server_time": now.UTC()})
 }

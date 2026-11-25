@@ -29,6 +29,7 @@
       :row="row"
       :records="probes[String(row.group_id)]"
       :probe-metadata="probeMetadata[String(row.group_id)]"
+      :models="probeModels[String(row.group_id)]"
       :now="now + serverOffset"
       :countdown="countdown"
       :timeline-length="timeline.length"
@@ -47,7 +48,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import type { GroupPlatform } from '@/types'
 import { getMatrix, getSnapshot, type MonitorRange, type MonitorMatrixResponse, type MonitorSnapshot } from '@/api/channelMonitorV2'
-import { getIntelligenceStatus, type IntelligenceRecord, type IntelligenceMetadata } from '@/api/intelligence'
+import { getIntelligenceStatus, type IntelligenceRecord, type IntelligenceMetadata, type IntelligenceModelTimeline } from '@/api/intelligence'
 import { isChannelMonitorV2Mode } from '@/utils/featureFlags'
 import GroupMonitorCard from './GroupMonitorCard.vue'
 import { createMonitorDisplay, monitorTimelines } from './displayData'
@@ -60,6 +61,7 @@ const timeline = computed(() => monitorTimelines[matrixRead.value?.range ?? rang
 const snapshot = computed(() => snapshotRead.value?.response)
 const probes = ref<Record<string, IntelligenceRecord[]>>({})
 const probeMetadata = ref<Record<string, IntelligenceMetadata>>({})
+const probeModels = ref<Record<string, IntelligenceModelTimeline[]>>({})
 const loading = ref(false), matrixError = ref(''), snapshotError = ref(''), probeError = ref(false)
 const error = computed(() => [matrixError.value, snapshotError.value].filter(Boolean).join('；'))
 const now = ref(Date.now()), serverOffset = ref(0), nextRefresh = ref(Date.now() + 60000)
@@ -82,7 +84,7 @@ async function load() {
  const current = ++generation
  abort?.abort(); abort = new AbortController()
  const signal = abort.signal
- if (!enabled.value) { loading.value = false; matrixRead.value = null; probes.value = {}; probeMetadata.value = {}; snapshotRead.value = null; matrixError.value = ''; snapshotError.value = ''; probeError.value = false; return }
+ if (!enabled.value) { loading.value = false; matrixRead.value = null; probes.value = {}; probeMetadata.value = {}; probeModels.value = {}; snapshotRead.value = null; matrixError.value = ''; snapshotError.value = ''; probeError.value = false; return }
  loading.value = true; matrixError.value = ''; snapshotError.value = ''
  const filter = { range: range.value, platforms: [], groupIds: [], models: [] }
  // Each read commits independently, so a delayed summary cannot hide ready cards.
@@ -97,6 +99,7 @@ async function load() {
     if (current !== generation || signal.aborted) return
     probes.value = Object.assign({}, ...results.map(result => result.groups))
     probeMetadata.value = Object.assign({}, ...results.map(result => result.metadata || {}))
+    probeModels.value = Object.assign({}, ...results.map(result => result.models || {}))
     if (results.length) serverOffset.value = Date.parse(results[0].server_time) - Date.now()
     probeError.value = false
    } catch { if (current === generation && !signal.aborted) probeError.value = true }

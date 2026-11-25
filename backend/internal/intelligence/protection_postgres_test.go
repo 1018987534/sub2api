@@ -22,7 +22,7 @@ func TestIntelligenceProtectionPostgres(t *testing.T) {
 	db.SetMaxOpenConns(1)
 	ctx := context.Background()
 	_, err = db.ExecContext(ctx, `CREATE TEMP TABLE intelligence_check_configs(group_id BIGINT PRIMARY KEY,lease_token TEXT,lease_until TIMESTAMPTZ);
- CREATE TEMP TABLE intelligence_check_runs(id BIGSERIAL PRIMARY KEY,group_id BIGINT,checked_at TIMESTAMPTZ,duration_ms BIGINT,status TEXT,answer TEXT,error TEXT,config_snapshot JSONB,account_id BIGINT,request_id TEXT,paused BOOLEAN,protection_eligible BOOLEAN);
+ CREATE TEMP TABLE intelligence_check_runs(id BIGSERIAL PRIMARY KEY,group_id BIGINT,checked_at TIMESTAMPTZ,duration_ms BIGINT,status TEXT,answer TEXT,error TEXT,config_snapshot JSONB,account_id BIGINT,request_id TEXT,paused BOOLEAN,protection_eligible BOOLEAN,probe_id BIGINT NOT NULL DEFAULT 0);
  CREATE TEMP TABLE usage_logs(id BIGSERIAL PRIMARY KEY,request_id TEXT,api_key_id BIGINT,group_id BIGINT,account_id BIGINT);
  SET search_path=pg_temp;
  INSERT INTO intelligence_check_configs VALUES(7,NULL,NULL)`)
@@ -73,7 +73,7 @@ func TestIntelligenceProtectionPostgres(t *testing.T) {
 	err = s.Finish(ctx, &Claim{Config: c, Token: "stale"}, Record{GroupID: 7, Status: "degraded", AccountID: 1, CheckedAt: time.Now()})
 	require.ErrorIs(t, err, ErrConflict)
 	require.Equal(t, 7, pauses)
-	history, err := s.History(ctx, 7, time.Now().Add(-time.Hour), 0, 100)
+	history, err := s.History(ctx, ProbeKey{GroupID: 7}, time.Now().Add(-time.Hour), 0, 100)
 	require.NoError(t, err)
 	require.Len(t, history, len(tests))
 	require.Equal(t, int64(1), history[0].AccountID)
@@ -91,7 +91,7 @@ func TestIntelligenceGlobalAccountPostgres(t *testing.T) {
 	db.SetMaxOpenConns(1)
 	ctx := context.Background()
 	_, err = db.ExecContext(ctx, `CREATE TEMP TABLE intelligence_check_configs(group_id BIGINT PRIMARY KEY,lease_token TEXT,lease_until TIMESTAMPTZ);
- CREATE TEMP TABLE intelligence_check_runs(id BIGSERIAL PRIMARY KEY,group_id BIGINT,checked_at TIMESTAMPTZ,duration_ms BIGINT,status TEXT,answer TEXT,error TEXT,config_snapshot JSONB,account_id BIGINT,request_id TEXT,paused BOOLEAN,protection_eligible BOOLEAN);
+ CREATE TEMP TABLE intelligence_check_runs(id BIGSERIAL PRIMARY KEY,group_id BIGINT,checked_at TIMESTAMPTZ,duration_ms BIGINT,status TEXT,answer TEXT,error TEXT,config_snapshot JSONB,account_id BIGINT,request_id TEXT,paused BOOLEAN,protection_eligible BOOLEAN,probe_id BIGINT NOT NULL DEFAULT 0);
  SET search_path=pg_temp;INSERT INTO intelligence_check_configs VALUES(7,NULL,NULL),(8,NULL,NULL),(9,NULL,NULL);`)
 	require.NoError(t, err)
 	pauses, recoveries := 0, 0

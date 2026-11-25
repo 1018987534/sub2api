@@ -30,6 +30,7 @@ func TestIntelligenceGroupEligibilityPostgres(t *testing.T) {
  CREATE TEMP TABLE intelligence_check_configs(group_id BIGINT PRIMARY KEY,version INTEGER NOT NULL DEFAULT 1,config JSONB NOT NULL,
  enabled BOOLEAN NOT NULL DEFAULT TRUE,interval_minutes INTEGER NOT NULL DEFAULT 10,timeout_seconds INTEGER NOT NULL DEFAULT 900,
  next_run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),lease_token TEXT,lease_until TIMESTAMPTZ,updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+ CREATE TEMP TABLE intelligence_check_model_configs (LIKE intelligence_check_configs INCLUDING DEFAULTS, id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY);
  SET search_path=pg_temp;
  INSERT INTO groups VALUES(1,'不降智-稳定','active',NULL),(2,'013不降智','inactive',NULL),(3,'DeepSeek','active',NULL),(4,'不降智-已删除','active',NOW())`)
 	require.NoError(t, err)
@@ -58,7 +59,7 @@ func TestIntelligenceGroupEligibilityPostgres(t *testing.T) {
 	require.NoError(t, rows.Close())
 	manual := map[int64]bool{}
 	for _, id := range []int64{2, 3, 4} {
-		_, err = s.Claim(ctx, id, true)
+		_, err = s.Claim(ctx, ProbeKey{GroupID: id}, true)
 		require.True(t, err == nil || err == ErrConflict)
 		manual[id] = err == nil
 	}
@@ -66,7 +67,7 @@ func TestIntelligenceGroupEligibilityPostgres(t *testing.T) {
 	require.NoError(t, err)
 	automatic := []int64{}
 	for i := 0; i < 5; i++ {
-		claim, err := s.Claim(ctx, 0, false)
+		claim, err := s.Claim(ctx, ProbeKey{}, false)
 		if err == ErrConflict {
 			break
 		}
@@ -97,6 +98,6 @@ func TestIntelligenceGroupEligibilityPostgres(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
 	require.False(t, configs[0].Enabled)
-	_, err = s.Claim(ctx, 0, false)
+	_, err = s.Claim(ctx, ProbeKey{}, false)
 	require.ErrorIs(t, err, ErrConflict)
 }

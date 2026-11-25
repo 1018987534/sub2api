@@ -87,6 +87,27 @@ describe('independent V2 cards', () => {
     expect(wrapper.findAll('.probe-bar')).toHaveLength(6)
     expect(wrapper.findAll('.probe-slot')[59].find('.probe-bar').exists()).toBe(true)
   })
+  it('renders independent model rows, opens the correct answer and resets the row when the model changes', async () => {
+    const secondary = { ...records[1], id: 17 }
+    const added = { probe_id: 5, model: 'additional-model', reasoning_effort: 'high' as const, interval_minutes: 8, records: [secondary] }
+    vi.mocked(getIntelligenceRecordDetail).mockResolvedValue({ id: 17, group_id: 1, status: 'degraded', answer: '第二个模型的回答', model: added.model, reasoning_effort: 'high' })
+    const wrapper = mount(GroupMonitorCard, {
+      props: { row, now, countdown: 0, records: [records[0]], probeMetadata: { model: 'primary-model', reasoning_effort: 'low', interval_minutes: 5 }, models: [added] },
+      global: { stubs: { PlatformIcon: true, Teleport: true } }
+    })
+    const primary = wrapper.get('[data-probe-id="0"]')
+    const extra = wrapper.get('[data-probe-id="5"]')
+    expect(primary.text()).toContain('primary-model · low · 每 5 分钟检测')
+    expect(extra.text()).toContain('additional-model · high · 每 8 分钟检测')
+    expect(primary.findAll('.probe-bar').map(bar => bar.attributes('data-record-id'))).toEqual(['1'])
+    expect(extra.findAll('.probe-bar').map(bar => bar.attributes('data-record-id'))).toEqual(['17'])
+    await extra.get('.probe-bar').trigger('click'); await flushPromises()
+    expect(getIntelligenceRecordDetail).toHaveBeenCalledWith(1, 17, expect.any(AbortSignal))
+    expect(wrapper.get('[role="dialog"]').text()).toContain('第二个模型的回答')
+    await wrapper.setProps({ models: [{ ...added, model: 'replacement', records: [] }] })
+    expect(wrapper.get('[data-probe-id="5"]').find('.probe-bar').exists()).toBe(false)
+    expect(wrapper.get('[data-probe-id="5"]').text()).toContain('暂无检测')
+  })
   it('keeps detection space without a baseline for unconfigured OpenAI groups', () => {
     const wrapper = mount(GroupMonitorCard, { props: { row, now, countdown: 60 }, global: { stubs: { PlatformIcon: true } } })
     expect(wrapper.find('[aria-label="降智状态"]').exists()).toBe(true)
