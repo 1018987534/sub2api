@@ -167,11 +167,9 @@ func DefaultGatewayRoutingSettings() *GatewayRoutingSettings {
 		PacketLossCooldownMinutes:   defaultGatewayPacketLossCooldownMinutes,
 		TrafficThresholdPercent:     defaultGatewayRoutingThresholdPercent,
 		Nodes: []GatewayRoutingNodeSettings{
-			{ID: "bwg-us-01", Origin: "https://gateway-bwg-origin.xiaohondou.com", TargetWeight: 10},
-			{ID: "vmiss-us-01", Origin: "https://gateway-origin.xiaohondou.com", TargetWeight: 10},
-			{ID: "yt-us-01", Origin: "https://gateway154-origin.xiaohondou.com", TargetWeight: 54},
-			{ID: "vmiss-us-02", Origin: "https://gateway2-origin.xiaohondou.com", TargetWeight: 10},
-			{ID: "dmit-us-01", Origin: "https://gateway3-origin.xiaohondou.com", TargetWeight: 16},
+			{ID: "vmiss-us-01", Origin: "https://gateway-origin.xiaohondou.com", TargetWeight: 61},
+			{ID: "vmiss-us-02", Origin: "https://gateway2-origin.xiaohondou.com", TargetWeight: 18},
+			{ID: "dmit-us-01", Origin: "https://gateway3-origin.xiaohondou.com", TargetWeight: 21},
 		},
 	}
 }

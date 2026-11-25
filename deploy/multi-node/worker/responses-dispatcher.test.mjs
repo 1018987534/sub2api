@@ -87,19 +87,19 @@ function assertOriginSelection(randomValue, expectedFirst, expectedOrigins, node
   assert.deepEqual([...origins].sort(), [...expectedOrigins].sort());
 }
 
-test("selects the five static nodes with the configured percentages", () => {
+test("selects surviving static nodes by relative weight even with obsolete YT bindings", () => {
   const allOrigins = [
     "https://control.example",
     "https://old.example",
-    "https://yt.example",
     "https://new.example",
     "https://dmit.example",
   ];
   assertOriginSelection(0, "https://control.example", allOrigins);
   assertOriginSelection(25, "https://old.example", allOrigins);
-  assertOriginSelection(45, "https://yt.example", allOrigins);
-  assertOriginSelection(85, "https://new.example", allOrigins);
-  assertOriginSelection(95, "https://dmit.example", allOrigins);
+  assertOriginSelection(45, "https://new.example", allOrigins);
+  assertOriginSelection(55, "https://dmit.example", allOrigins);
+  const config = readFileSync(new URL("./wrangler.toml", import.meta.url), "utf8");
+  assert.doesNotMatch(config, /YT_US_01_|gateway154-origin/);
 });
 
 test("uses arbitrary runtime ratios and omits zero-weight nodes", () => {
@@ -1346,7 +1346,7 @@ test("turns repeated safe ingress rejections into a client-retryable 503", async
   }
 });
 
-test("reads the legacy static variable names during migration", () => {
+test("reads surviving legacy static variables but ignores the retired YT alias", () => {
   const legacyEnv = {
     CONTROL_ORIGIN: "https://control.example",
     GATEWAY_ORIGIN: "https://old.example",
@@ -1357,9 +1357,8 @@ test("reads the legacy static variable names during migration", () => {
     GATEWAY2_PERCENT: "10",
   };
   assert.deepEqual(staticRoutingNodes(legacyEnv), [
-    { id: "bwg-us-01", origin: "https://control.example", effective_weight: 50 },
+    { id: "bwg-us-01", origin: "https://control.example", effective_weight: 80 },
     { id: "vmiss-us-01", origin: "https://old.example", effective_weight: 10 },
-    { id: "yt-us-01", origin: "https://yt.example", effective_weight: 30 },
     { id: "vmiss-us-02", origin: "https://new.example", effective_weight: 10 },
   ]);
 });

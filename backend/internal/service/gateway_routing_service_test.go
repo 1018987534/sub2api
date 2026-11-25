@@ -88,20 +88,17 @@ func TestGatewayRoutingSettingsDefaultsAndValidation(t *testing.T) {
 
 	settings, err := service.GetGatewayRoutingSettings(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []string{"bwg-us-01", "vmiss-us-01", "yt-us-01", "vmiss-us-02", "dmit-us-01"}, []string{
+	require.Len(t, settings.Nodes, 3)
+	require.Equal(t, []string{"vmiss-us-01", "vmiss-us-02", "dmit-us-01"}, []string{
 		settings.Nodes[0].ID,
 		settings.Nodes[1].ID,
 		settings.Nodes[2].ID,
-		settings.Nodes[3].ID,
-		settings.Nodes[4].ID,
 	})
-	require.Equal(t, "https://gateway-bwg-origin.xiaohondou.com", settings.Nodes[0].Origin)
-	require.Equal(t, []int{10, 10, 54, 10, 16}, []int{
+	require.Equal(t, "https://gateway-origin.xiaohondou.com", settings.Nodes[0].Origin)
+	require.Equal(t, []int{61, 18, 21}, []int{
 		settings.Nodes[0].TargetWeight,
 		settings.Nodes[1].TargetWeight,
 		settings.Nodes[2].TargetWeight,
-		settings.Nodes[3].TargetWeight,
-		settings.Nodes[4].TargetWeight,
 	})
 	require.True(t, settings.HealthProtectionEnabled)
 	require.Empty(t, settings.OverflowNodeID)

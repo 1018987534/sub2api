@@ -1,7 +1,6 @@
-const DEFAULT_VMISS_US_01_PERCENT = 10;
-const DEFAULT_YT_US_01_PERCENT = 54;
-const DEFAULT_VMISS_US_02_PERCENT = 10;
-const DEFAULT_DMIT_US_01_PERCENT = 16;
+const DEFAULT_VMISS_US_01_PERCENT = 61;
+const DEFAULT_VMISS_US_02_PERCENT = 18;
+const DEFAULT_DMIT_US_01_PERCENT = 21;
 const DEFAULT_ROUTING_CONFIG_TTL_SECONDS = 1;
 const ROUTING_CONFIG_TIMEOUT_MS = 2000;
 const OVH_NODE_ID = "ovh-us-01";
@@ -66,16 +65,6 @@ function staticRoutingNodes(env) {
         "VMISS_US_01_PERCENT",
         DEFAULT_VMISS_US_01_PERCENT,
         "GATEWAY_PERCENT",
-      ),
-    },
-    {
-      id: "yt-us-01",
-      origin: environmentValue(env, "YT_US_01_ORIGIN", "GATEWAY154_ORIGIN"),
-      effective_weight: environmentInteger(
-        env,
-        "YT_US_01_PERCENT",
-        DEFAULT_YT_US_01_PERCENT,
-        "GATEWAY154_PERCENT",
       ),
     },
     {
