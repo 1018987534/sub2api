@@ -25,7 +25,8 @@
 
   </div>
   <section v-if="row.platform === 'openai' || records !== undefined || models?.length" class="intelligence-section mt-4 border-t border-gray-200/70 pt-3 dark:border-dark-700/60" aria-label="降智状态">
-   <h4 class="mb-2 text-xs font-semibold">降智状态</h4>
+   <h4 class="text-xs font-semibold">降智状态</h4>
+   <p class="intelligence-caption mb-2 mt-1 text-[10px] leading-[15px] text-gray-500 dark:text-gray-400">{{ INTELLIGENCE_CAPTION }}</p>
    <div class="divide-y divide-gray-200/70 dark:divide-dark-700/60 [&>*+*]:mt-2 [&>*+*]:pt-2">
     <IntelligenceTimelineRow :key="'primary:' + (probeMetadata?.model ?? '')" :probe-id="0" :records="records" :metadata="probeMetadata" :now="now" @open="openRecord" />
     <IntelligenceTimelineRow v-for="model in models" :key="model.probe_id + ':' + model.model" :probe-id="model.probe_id" :records="model.records" :metadata="model" :now="now" @open="openRecord" />
@@ -65,6 +66,7 @@ import type { MonitorMatrixRow } from '@/api/channelMonitorV2'
 import { createMonitorDisplay, type DisplayBucket } from './displayData'
 import { getIntelligenceRecordDetail, type IntelligenceRecord, type IntelligenceMetadata, type IntelligenceModelTimeline, type IntelligenceRecordDetail } from '@/api/intelligence'
 import IntelligenceTimelineRow from './IntelligenceTimelineRow.vue'
+import { INTELLIGENCE_CAPTION } from './constants'
 import { healthLabels, statusLabels, groupMultiplier, availabilityPercent, cachePercent, latency, platformName, platformIconClass, platformBadgeClass, passiveColor, barHeight } from './presentation'
 const props = withDefaults(defineProps<{ row: MonitorMatrixRow; records?: IntelligenceRecord[]; probeMetadata?: IntelligenceMetadata; models?: IntelligenceModelTimeline[]; now: number; countdown: number; timelineLength?: number; bucketSeconds?: number; windowEnd?: string }>(), { timelineLength: 18, bucketSeconds: 300 })
 const selectedRecord = ref<IntelligenceRecord | null>(null)

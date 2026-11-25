@@ -1,7 +1,7 @@
 <template>
  <div class="intelligence-model-row min-w-0" :data-probe-id="probeId" :aria-label="metadata?.model">
   <div class="flex items-start justify-between gap-2 text-xs font-medium">
-   <p class="intelligence-caption min-w-0 break-words text-[10px] leading-[15px] text-gray-500 dark:text-gray-400">{{ caption }}</p>
+   <p class="intelligence-model-label min-w-0 break-words text-gray-700 dark:text-gray-300">{{ modelLabel }}</p>
    <span class="flex shrink-0 items-center gap-1.5 whitespace-nowrap"><i class="probe-dot h-2 w-2 rounded-full" :class="last?.status ?? 'unknown'" />{{ last ? statusLabels[last.status] : '暂无检测' }}</span>
   </div>
   <div class="probe-track mt-2 grid h-5 w-full" :aria-label="(metadata?.model ? metadata.model + ' · ' : '') + '最近 60 次真实检测记录'">
@@ -20,12 +20,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { IntelligenceMetadata, IntelligenceRecord } from '@/api/intelligence'
-import { formatIntelligenceCaption, INTELLIGENCE_LEGEND } from './constants'
+import { formatIntelligenceModelLabel, INTELLIGENCE_LEGEND } from './constants'
 import { appendHistory, statusLabels } from './presentation'
 
 const props = defineProps<{ records?: IntelligenceRecord[]; metadata?: IntelligenceMetadata; now: number; probeId: number }>()
 defineEmits<{ open: [record: IntelligenceRecord] }>()
-const caption = computed(() => formatIntelligenceCaption(props.metadata))
+const modelLabel = computed(() => formatIntelligenceModelLabel(props.metadata))
 const recent = ref<IntelligenceRecord[]>([])
 watch(() => props.records, records => {
  const cutoff = props.now - 7 * 24 * 60 * 60 * 1000

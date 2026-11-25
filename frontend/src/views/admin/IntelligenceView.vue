@@ -12,7 +12,8 @@
       <IntelligenceRecoveryPanel v-if="view === 'recovery'" />
       <div v-show="view === 'groups'" class="public-preview">
         <span class="preview-label">公共监控文案</span>
-        <p class="preview-caption" data-testid="public-caption">{{ publicCaption }}</p>
+        <p class="preview-caption" data-testid="public-caption">{{ INTELLIGENCE_CAPTION }}</p>
+        <p class="preview-note" data-testid="public-model-label">{{ publicModelLabel }}</p>
         <p class="preview-note">渠道状态按模型展示检测结果。每行最多显示最近 60 条实际检测记录。</p>
       </div>
       <div v-if="error" class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">{{ error }}</div>
@@ -121,7 +122,7 @@ import IntelligenceRecoveryPanel from './IntelligenceRecoveryPanel.vue'
 import { addIntelligenceModel, deleteIntelligenceModel, getIntelligenceConfigs, getIntelligenceHistory, runIntelligenceCheck, saveIntelligenceConfig, type IntelligenceConfig, type IntelligenceRecord, getIntelligenceKeyOptions, type IntelligenceKeyOption } from '@/api/intelligence'
 import { getAll } from '@/api/admin/groups'
 import type { AdminGroup } from '@/types'
-import { formatIntelligenceCaption } from '@/features/channel-monitor-v2-cards/constants'
+import { formatIntelligenceModelLabel, INTELLIGENCE_CAPTION } from '@/features/channel-monitor-v2-cards/constants'
 
 const groups = ref<AdminGroup[]>([])
 const view = ref<'groups' | 'recovery'>('groups')
@@ -133,7 +134,7 @@ const adding = ref(false)
 const deleting = ref(false)
 const maxModels = ref(8)
 const expectedText = ref('')
-const publicCaption = computed(() => formatIntelligenceCaption(draft.value ?? undefined))
+const publicModelLabel = computed(() => formatIntelligenceModelLabel(draft.value ?? undefined))
 const history = ref<IntelligenceRecord[]>([])
 const hasMore = ref(false)
 const search = ref('')
