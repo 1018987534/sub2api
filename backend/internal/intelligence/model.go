@@ -4,13 +4,18 @@ package intelligence
 
 import (
 	"errors"
-	"golang.org/x/text/unicode/norm"
 	"strings"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 var ErrConflict = errors.New("configuration changed or probe already running")
 var ErrInvalid = errors.New("invalid intelligence check configuration")
+var ErrDuplicateModel = errors.New("同一分组不能重复配置相同模型")
+var ErrModelLimit = errors.New("分组检测模型数量已达上限")
+
+const MaxGroupModels = 8
 
 // GroupEligible is the shared scope for group probes; account recovery has its
 // own queue and does not depend on this group configuration.
@@ -22,6 +27,7 @@ const DefaultPrompt = "不使用任何外部工具回答以下问题：在一个
 
 type Config struct {
 	GroupID         int64    `json:"group_id"`
+	ProbeID         int64    `json:"probe_id,omitempty"` // 0 is the original primary check.
 	Version         int      `json:"version"`
 	Enabled         bool     `json:"enabled"`
 	IntervalMinutes int      `json:"interval_minutes"`
@@ -35,6 +41,10 @@ type Config struct {
 	Expected        []string `json:"expected"`
 	UpdatedBy       int64    `json:"updated_by"`
 }
+
+type ProbeKey struct{ GroupID, ProbeID int64 }
+
+func (c Config) Key() ProbeKey { return ProbeKey{c.GroupID, c.ProbeID} }
 
 type Record struct {
 	AccountID  int64     `json:"account_id,omitempty"`
@@ -50,6 +60,15 @@ type Record struct {
 	Config     *Config   `json:"config,omitempty"`
 }
 
+// TimelineRecord contains only the fields that the public chart needs.
+type TimelineRecord struct {
+	ID         int64     `json:"id"`
+	GroupID    int64     `json:"group_id"`
+	CheckedAt  time.Time `json:"checked_at"`
+	DurationMS int64     `json:"duration_ms"`
+	Status     string    `json:"status"`
+}
+
 type Claim struct {
 	Config Config
 	Token  string
@@ -60,7 +79,7 @@ func DefaultConfig(groupID int64) Config {
 }
 
 func (c Config) Validate() error {
-	if c.GroupID <= 0 || c.Version < 0 || c.IntervalMinutes < 1 || c.IntervalMinutes > 1440 || c.TimeoutSeconds < 5 || c.TimeoutSeconds > 900 || len(c.Model) > 128 || strings.TrimSpace(c.Model) == "" || strings.TrimSpace(c.Prompt) == "" || len(c.Prompt) > 32768 || c.APIKeyID < 0 || (c.Enabled && c.APIKeyID == 0) {
+	if c.GroupID <= 0 || c.ProbeID < 0 || c.Version < 0 || c.IntervalMinutes < 1 || c.IntervalMinutes > 1440 || c.TimeoutSeconds < 5 || c.TimeoutSeconds > 900 || len(c.Model) > 128 || strings.TrimSpace(c.Model) == "" || strings.TrimSpace(c.Prompt) == "" || len(c.Prompt) > 32768 || c.APIKeyID < 0 || (c.Enabled && c.APIKeyID == 0) {
 		return ErrInvalid
 	}
 	if c.Protocol != "responses" && c.Protocol != "chat_completions" && c.Protocol != "messages" {

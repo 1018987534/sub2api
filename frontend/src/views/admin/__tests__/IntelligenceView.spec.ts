@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import IntelligenceView from '../IntelligenceView.vue'
-import { getIntelligenceConfigs, getIntelligenceHistory, getIntelligenceRecoveryHistory, getIntelligenceKeyOptions, saveIntelligenceConfig, runIntelligenceCheck, type IntelligenceConfig } from '@/api/intelligence'
+import { addIntelligenceModel, deleteIntelligenceModel, getIntelligenceConfigs, getIntelligenceHistory, getIntelligenceRecoveryHistory, getIntelligenceKeyOptions, saveIntelligenceConfig, runIntelligenceCheck, type IntelligenceConfig } from '@/api/intelligence'
 import { getAll } from '@/api/admin/groups'
 import type { AdminGroup } from '@/types'
 
@@ -9,7 +9,7 @@ vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<mai
 vi.mock('vue-router', () => ({ onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/api/admin/groups', () => ({ getAll: vi.fn() }))
 vi.mock('@/api/intelligence', () => ({
-  getIntelligenceConfigs: vi.fn(), getIntelligenceHistory: vi.fn(), getIntelligenceRecoveryHistory: vi.fn(), getIntelligenceKeyOptions: vi.fn(), saveIntelligenceConfig: vi.fn(), runIntelligenceCheck: vi.fn()
+  addIntelligenceModel: vi.fn(), deleteIntelligenceModel: vi.fn(), getIntelligenceConfigs: vi.fn(), getIntelligenceHistory: vi.fn(), getIntelligenceRecoveryHistory: vi.fn(), getIntelligenceKeyOptions: vi.fn(), saveIntelligenceConfig: vi.fn(), runIntelligenceCheck: vi.fn()
 }))
 const config: IntelligenceConfig = {
   group_id: 1, version: 2, enabled: false, interval_minutes: 10, timeout_seconds: 30,
@@ -74,9 +74,9 @@ describe('intelligence admin', () => {
     expect((wrapper.findAll('textarea')[0].element as HTMLTextAreaElement).value).toBe('unsaved config')
     wrapper.unmount()
   })
-  it('saves actual interval and keyword changes while keeping the fixed public caption', async () => {
+  it('saves the configured interval and answers', async () => {
     const wrapper = mountView(); await flushPromises()
-    expect(wrapper.text()).toContain('actual-model · low · 每分钟检测 · 近 60 次 · 仅显示已检测记录')
+    expect(wrapper.text()).toContain('actual-model · low · 自动检测已停用 · 近 60 次 · 仅显示已检测记录')
     const textareas = wrapper.findAll('textarea')
     await textareas[1].setValue('42\nnew')
     await wrapper.findAll('input[type="number"]')[0].setValue(15)
@@ -87,17 +87,50 @@ describe('intelligence admin', () => {
     expect(wrapper.text()).toContain('实际运行间隔为 15 分钟')
     wrapper.unmount()
   })
-  it('previews dynamic model and effort without altering the fixed suffix or schedule', async () => {
+  it('previews the model and effort with the automatic detection state', async () => {
     const wrapper = mountView(); await flushPromises()
-    expect(wrapper.findAll('.form-section')).toHaveLength(3)
-    expect(wrapper.get('[aria-pressed="true"]').text()).toContain('Group One')
+    expect(wrapper.findAll('.form-section')).toHaveLength(4)
+    expect(wrapper.get('.group-option[aria-pressed="true"]').text()).toContain('Group One')
     await wrapper.get('input[maxlength="128"]').setValue('configured-model')
     const effort = wrapper.findAll('select').find(s => s.find('option[value="xhigh"]').exists())!
     await effort.setValue('high')
-    expect(wrapper.get('[data-testid="public-caption"]').text()).toBe('configured-model · high · 每分钟检测 · 近 60 次 · 仅显示已检测记录')
+    expect(wrapper.get('[data-testid="public-caption"]').text()).toBe('configured-model · high · 自动检测已停用 · 近 60 次 · 仅显示已检测记录')
     expect((wrapper.findAll('input[type="number"]')[0].element as HTMLInputElement).value).toBe('10')
     expect(saveIntelligenceConfig).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+  it('creates, runs, edits and removes the selected additional model without replacing the primary config', async () => {
+    vi.mocked(addIntelligenceModel).mockImplementation(async c => ({ ...c, version: 1, probe_id: 21 }))
+    vi.mocked(saveIntelligenceConfig).mockImplementation(async c => ({ ...c, version: 2 }))
+    vi.mocked(runIntelligenceCheck).mockResolvedValue({ started: true })
+    vi.mocked(deleteIntelligenceModel).mockResolvedValue({ deleted: true })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mountView(); await flushPromises()
+    const button = (text: string) => wrapper.findAll('button').find(b => b.text() === text)!
+    const model = wrapper.get('input[maxlength="128"]')
+    try {
+      await button('添加检测模型').trigger('click')
+      await model.setValue(config.model)
+      expect(button('保存配置').attributes('disabled')).toBeDefined()
+      await model.setValue('second-model')
+      await button('保存配置').trigger('click'); await flushPromises()
+      expect(addIntelligenceModel).toHaveBeenCalledWith(expect.objectContaining({ group_id: 1, enabled: false, version: 0, model: 'second-model' }))
+      expect(wrapper.findAll('button.model-option')).toHaveLength(2)
+      expect(getIntelligenceHistory).toHaveBeenLastCalledWith(1, 0, 21)
+      await button('立即检测').trigger('click'); await flushPromises()
+      expect(runIntelligenceCheck).toHaveBeenCalledWith(1, 21)
+      await model.setValue('updated-second-model')
+      await button('保存配置').trigger('click'); await flushPromises()
+      expect(saveIntelligenceConfig).toHaveBeenCalledWith(expect.objectContaining({ probe_id: 21, version: 1, model: 'updated-second-model' }))
+      await button('移除模型').trigger('click'); await flushPromises()
+      expect(deleteIntelligenceModel).toHaveBeenCalledWith(1, 21, 2)
+      expect(wrapper.findAll('button.model-option')).toHaveLength(1)
+      expect((model.element as HTMLInputElement).value).toBe(config.model)
+      expect(getIntelligenceHistory).toHaveBeenLastCalledWith(1, 0)
+    } finally {
+      confirm.mockRestore()
+      wrapper.unmount()
+    }
   })
   it('reports manual enqueue failure and does not synthesize a successful result', async () => {
     const wrapper = mountView(); await flushPromises()

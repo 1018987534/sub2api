@@ -2,17 +2,19 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
 	"github.com/Wei-Shaw/sub2api/internal/intelligence"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
-	"net/http"
-	"net/http/httptest"
-	"testing"
-	"time"
 )
 
 type intelligenceMonitorRepo struct {
@@ -27,9 +29,10 @@ func (r *intelligenceMonitorRepo) GetConfig(context.Context) (*service.ChannelMo
 type intelligenceHistoryStore struct {
 	intelligence.Store
 	requested []int64
-	limits    []int
-	since     []time.Time
-	before    []int64
+	keys      []intelligence.ProbeKey
+	limit     int
+	since     time.Time
+	recordID  int64
 	record    *intelligence.Record
 	err       error
 }
@@ -38,24 +41,34 @@ func (s *intelligenceHistoryStore) Configs(context.Context) ([]intelligence.Conf
 	c := intelligence.DefaultConfig(1)
 	c.Model = "configured-model"
 	c.ReasoningEffort = "high"
-	return []intelligence.Config{c, intelligence.DefaultConfig(2), intelligence.DefaultConfig(3)}, nil
+	additional := c
+	additional.ProbeID, additional.Model, additional.IntervalMinutes = 17, "second-model", 15
+	additional.Enabled = true
+	pending := c
+	pending.ProbeID, pending.Model = 18, "pending-model"
+	return []intelligence.Config{c, additional, pending, intelligence.DefaultConfig(2), intelligence.DefaultConfig(3)}, nil
 }
-func (s *intelligenceHistoryStore) History(_ context.Context, id int64, since time.Time, before int64, limit int) ([]intelligence.Record, error) {
-	s.requested = append(s.requested, id)
-	s.limits = append(s.limits, limit)
-	s.since = append(s.since, since)
-	s.before = append(s.before, before)
+func (s *intelligenceHistoryStore) Timelines(_ context.Context, configs []intelligence.Config, since time.Time, limit int) (map[intelligence.ProbeKey][]intelligence.TimelineRecord, error) {
+	s.limit, s.since = limit, since
+	for _, c := range configs {
+		s.keys = append(s.keys, c.Key())
+	}
+	return map[intelligence.ProbeKey][]intelligence.TimelineRecord{
+		{GroupID: 1}:              {{ID: 1, GroupID: 1, Status: "normal"}},
+		{GroupID: 1, ProbeID: 17}: {{ID: 2, GroupID: 1, Status: "degraded"}},
+	}, s.err
+}
+
+func (s *intelligenceHistoryStore) Record(_ context.Context, groupID, id int64, since time.Time) (intelligence.Record, error) {
+	s.requested = append(s.requested, groupID)
+	s.recordID, s.since = id, since
 	if s.err != nil {
-		return nil, s.err
+		return intelligence.Record{}, s.err
 	}
-	if s.record != nil {
-		return []intelligence.Record{*s.record}, nil
+	if s.record != nil && s.record.ID == id && s.record.GroupID == groupID {
+		return *s.record, nil
 	}
-	c := intelligence.DefaultConfig(id)
-	c.Prompt = "secret prompt"
-	c.APIKeyID = 123
-	c.UpdatedBy = 456
-	return []intelligence.Record{{ID: 1, GroupID: id, AccountID: 99, Paused: true, RequestID: "private-request", CheckedAt: time.Now(), Status: "normal", Answer: "secret answer", Error: "secret error", Config: &c}}, nil
+	return intelligence.Record{}, sql.ErrNoRows
 }
 func TestIntelligenceStatusAuthorizationAndRedaction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -68,7 +81,7 @@ func TestIntelligenceStatusAuthorizationAndRedaction(t *testing.T) {
 	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 99})
 	h.Status(c)
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, []int64{1}, store.requested)
+	require.Equal(t, []intelligence.ProbeKey{{GroupID: 1}, {GroupID: 1, ProbeID: 17}, {GroupID: 1, ProbeID: 18}}, store.keys)
 	body := w.Body.String()
 	for _, secret := range []string{"secret", "prompt", "answer", "api_key_id", "updated_by", "account_id", "paused", "private-request", `"config":`} {
 		require.NotContains(t, body, secret)
@@ -76,19 +89,26 @@ func TestIntelligenceStatusAuthorizationAndRedaction(t *testing.T) {
 	var decoded struct {
 		Data struct {
 			Groups        map[string][]intelligence.Record
-			Metadata      map[string]map[string]string `json:"metadata"`
-			WindowMinutes int                          `json:"window_minutes"`
-			RecordLimit   int                          `json:"record_limit"`
+			Metadata      map[string]intelligenceDisplayMetadata
+			Models        map[string][]intelligenceModelTimeline
+			WindowMinutes int `json:"window_minutes"`
+			RecordLimit   int `json:"record_limit"`
 		}
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &decoded))
 	require.Equal(t, 7*24*60, decoded.Data.WindowMinutes)
 	require.Equal(t, 60, decoded.Data.RecordLimit)
-	require.Equal(t, []int{60}, store.limits)
-	require.WithinDuration(t, time.Now().Add(-7*24*time.Hour), store.since[0], 5*time.Second)
+	require.Equal(t, 60, store.limit)
+	require.WithinDuration(t, time.Now().Add(-7*24*time.Hour), store.since, 5*time.Second)
 	require.Len(t, decoded.Data.Groups, 1)
-	require.Equal(t, map[string]map[string]string{"1": {"model": "configured-model", "reasoning_effort": "high"}}, decoded.Data.Metadata)
+	require.Equal(t, map[string]intelligenceDisplayMetadata{"1": {Model: "configured-model", ReasoningEffort: "high", Protocol: "responses", IntervalMinutes: 10}}, decoded.Data.Metadata)
 	require.Equal(t, "normal", decoded.Data.Groups["1"][0].Status)
+	require.Len(t, decoded.Data.Models, 1)
+	require.Len(t, decoded.Data.Models["1"], 2)
+	require.Equal(t, "second-model", decoded.Data.Models["1"][0].Model)
+	require.Equal(t, 15, decoded.Data.Models["1"][0].IntervalMinutes)
+	require.Equal(t, "degraded", decoded.Data.Models["1"][0].Records[0].Status)
+	require.Equal(t, []intelligence.TimelineRecord{}, decoded.Data.Models["1"][1].Records)
 }
 func TestIntelligenceStatusRejectsUnauthorizedAndDisabled(t *testing.T) {
 	repo := &intelligenceMonitorRepo{}
@@ -121,6 +141,7 @@ func TestIntelligenceRecordDetailReturnsAnswerWithoutTimingOrPrivateFields(t *te
 	for _, status := range []string{"normal", "degraded"} {
 		t.Run(status, func(t *testing.T) {
 			cfg := intelligence.DefaultConfig(1)
+			cfg.ProbeID = 17
 			cfg.Model, cfg.ReasoningEffort, cfg.Prompt = "saved-model", "high", "private prompt"
 			cfg.APIKeyID, cfg.UpdatedBy = 123, 456
 			store := &intelligenceHistoryStore{record: &intelligence.Record{
@@ -141,9 +162,8 @@ func TestIntelligenceRecordDetailReturnsAnswerWithoutTimingOrPrivateFields(t *te
 			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 			require.Equal(t, map[string]any{"id": float64(42), "group_id": float64(1), "status": status, "answer": "完整回答：21\n保留推导", "model": "saved-model", "reasoning_effort": "high"}, body.Data)
 			require.Equal(t, []int64{1}, store.requested)
-			require.Equal(t, []int64{43}, store.before)
-			require.Equal(t, []int{1}, store.limits)
-			require.WithinDuration(t, time.Now().Add(-7*24*time.Hour), store.since[0], 5*time.Second)
+			require.Equal(t, int64(42), store.recordID)
+			require.WithinDuration(t, time.Now().Add(-7*24*time.Hour), store.since, 5*time.Second)
 			for _, private := range []string{"checked_at", "duration_ms", "private", "account_id", "paused", "api_key_id", "updated_by", "config"} {
 				require.NotContains(t, w.Body.String(), private)
 			}

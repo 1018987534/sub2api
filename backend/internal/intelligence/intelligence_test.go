@@ -192,9 +192,11 @@ type runnerStore struct {
 	finishes atomic.Int32
 }
 
-func (s *runnerStore) Claim(_ context.Context, id int64, manual bool) (*Claim, error) {
+func (s *runnerStore) Claim(_ context.Context, key ProbeKey, manual bool) (*Claim, error) {
 	s.claims.Add(1)
-	return &Claim{Config: DefaultConfig(id), Token: "fence"}, nil
+	config := DefaultConfig(key.GroupID)
+	config.ProbeID = key.ProbeID
+	return &Claim{Config: config, Token: "fence"}, nil
 }
 func (s *runnerStore) Finish(context.Context, *Claim, Record) error { s.finishes.Add(1); return nil }
 
@@ -208,18 +210,18 @@ func TestIntelligenceRunnerBoundedAndStops(t *testing.T) {
 	s := &runnerStore{}
 	r := NewRunner(s, blockingProbe{}, func(context.Context) bool { return true })
 	for i := int64(1); i <= 4; i++ {
-		require.NoError(t, r.RunNow(context.Background(), i))
+		require.NoError(t, r.RunNow(context.Background(), ProbeKey{GroupID: i}))
 	}
-	require.ErrorIs(t, r.RunNow(context.Background(), 5), ErrConflict)
+	require.ErrorIs(t, r.RunNow(context.Background(), ProbeKey{GroupID: 5}), ErrConflict)
 	require.EqualValues(t, 4, s.claims.Load())
 	r.Stop()
 	require.EqualValues(t, 4, s.finishes.Load())
-	require.ErrorIs(t, r.RunNow(context.Background(), 1), context.Canceled)
+	require.ErrorIs(t, r.RunNow(context.Background(), ProbeKey{GroupID: 1}), context.Canceled)
 }
 func TestIntelligenceRunnerDisabled(t *testing.T) {
 	s := &runnerStore{}
 	r := NewRunner(s, blockingProbe{}, func(context.Context) bool { return false })
 	defer r.Stop()
-	require.Error(t, r.RunNow(context.Background(), 1))
+	require.Error(t, r.RunNow(context.Background(), ProbeKey{GroupID: 1}))
 	require.Zero(t, s.claims.Load())
 }

@@ -70,7 +70,7 @@ func TestIntelligenceStaleResultCannotRePausePostgres(t *testing.T) {
 	ctx := context.Background()
 	_, err := db.Exec(`DROP TABLE intelligence_check_runs;
  CREATE TABLE intelligence_check_configs(group_id BIGINT PRIMARY KEY,lease_token TEXT,lease_until TIMESTAMPTZ);
- CREATE TABLE intelligence_check_runs(id BIGSERIAL PRIMARY KEY,group_id BIGINT,checked_at TIMESTAMPTZ,duration_ms BIGINT,status TEXT,answer TEXT,error TEXT,config_snapshot JSONB,account_id BIGINT,request_id TEXT,paused BOOLEAN,protection_eligible BOOLEAN);
+ CREATE TABLE intelligence_check_runs(id BIGSERIAL PRIMARY KEY,group_id BIGINT,checked_at TIMESTAMPTZ,duration_ms BIGINT,status TEXT,answer TEXT,error TEXT,config_snapshot JSONB,account_id BIGINT,request_id TEXT,paused BOOLEAN,protection_eligible BOOLEAN,probe_id BIGINT NOT NULL DEFAULT 0);
  INSERT INTO intelligence_check_configs VALUES(79,'owned',NULL)`)
 	require.NoError(t, err)
 	pauses, recoveries := 0, 0

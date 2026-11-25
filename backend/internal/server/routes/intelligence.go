@@ -13,6 +13,9 @@ func registerIntelligenceRoutes(admin *gin.RouterGroup, h *handler.Handlers, set
 	checks.GET("/recovery/history", h.Intelligence.RecoveryHistory)
 	checks.GET("/:groupID/keys", h.Intelligence.KeyOptions)
 	checks.PUT("/:groupID/config", h.Intelligence.Save)
+	checks.POST("/:groupID/models", h.Intelligence.AddModel)
+	checks.PUT("/:groupID/models/:probeID", h.Intelligence.SaveModel)
+	checks.DELETE("/:groupID/models/:probeID", h.Intelligence.DeleteModel)
 	checks.GET("/:groupID/history", h.Intelligence.History)
 	checks.POST("/:groupID/run", channelMonitorModeV2Guard(settings), h.Intelligence.Run)
 }

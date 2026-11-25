@@ -53,7 +53,7 @@ func (r *Runner) Start() {
 				} else if r.Enabled == nil || r.Enabled(ctx) {
 					legacyReconciled = r.reconcileProtection(r.ctx, legacyReconciled)
 					for i := 0; i < cap(r.slots); i++ {
-						if err := r.launch(ctx, 0, false); err != nil {
+						if err := r.launch(ctx, ProbeKey{}, false); err != nil {
 							if !errors.Is(err, ErrConflict) && ctx.Err() == nil {
 								slog.Warn("intelligence check scheduling failed", "error", err)
 							}
@@ -99,8 +99,8 @@ func (r *Runner) reconcileProtection(ctx context.Context, legacyReconciled bool)
 	return true
 }
 
-func (r *Runner) RunNow(ctx context.Context, groupID int64) error {
-	if groupID <= 0 {
+func (r *Runner) RunNow(ctx context.Context, key ProbeKey) error {
+	if key.GroupID <= 0 || key.ProbeID < 0 {
 		return ErrInvalid
 	}
 	if err := r.reconcileGroupEligibility(ctx); err != nil {
@@ -109,9 +109,9 @@ func (r *Runner) RunNow(ctx context.Context, groupID int64) error {
 	if r.Enabled != nil && !r.Enabled(ctx) {
 		return errors.New("V2 intelligence checks are disabled")
 	}
-	return r.launch(ctx, groupID, true)
+	return r.launch(ctx, key, true)
 }
-func (r *Runner) launch(ctx context.Context, groupID int64, manual bool) error {
+func (r *Runner) launch(ctx context.Context, key ProbeKey, manual bool) error {
 	// Serialize Stop/Add to avoid WaitGroup.Add racing with shutdown.
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -125,7 +125,7 @@ func (r *Runner) launch(ctx context.Context, groupID int64, manual bool) error {
 	}
 	claimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	claim, err := r.Store.Claim(claimCtx, groupID, manual)
+	claim, err := r.Store.Claim(claimCtx, key, manual)
 	if err != nil {
 		<-r.slots
 		return err
@@ -138,7 +138,7 @@ func (r *Runner) launch(ctx context.Context, groupID int64, manual bool) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := r.Store.Finish(ctx, claim, record); err != nil {
-			slog.Error("intelligence result persistence failed", "group_id", claim.Config.GroupID, "error", err)
+			slog.Error("intelligence result persistence failed", "group_id", claim.Config.GroupID, "probe_id", claim.Config.ProbeID, "error", err)
 		}
 	}()
 	return nil

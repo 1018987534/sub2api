@@ -28,7 +28,8 @@ func TestIntelligenceSavePostgres(t *testing.T) {
  group_id BIGINT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 1, config JSONB NOT NULL,
  enabled BOOLEAN NOT NULL DEFAULT FALSE, interval_minutes INTEGER NOT NULL,
  timeout_seconds INTEGER NOT NULL, next_run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
- lease_token TEXT, lease_until TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`)
+ lease_token TEXT, lease_until TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+ CREATE TEMP TABLE intelligence_check_model_configs (LIKE intelligence_check_configs INCLUDING DEFAULTS, id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY)`)
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, `CREATE TEMP TABLE groups(id BIGINT PRIMARY KEY,name TEXT,status TEXT,deleted_at TIMESTAMPTZ);INSERT INTO groups VALUES(99,'不降智-测试','active',NULL)`)
 	require.NoError(t, err)

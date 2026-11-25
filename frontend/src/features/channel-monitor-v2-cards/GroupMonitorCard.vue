@@ -24,16 +24,12 @@
    <div class="mt-1 flex justify-between text-[9px] uppercase tracking-widest text-gray-400"><span>PAST</span><span>NOW</span></div>
 
   </div>
-  <section v-if="row.platform === 'openai' || records !== undefined" class="intelligence-section mt-4 border-t border-gray-200/70 pt-3 dark:border-dark-700/60" aria-label="降智状态">
-   <div class="flex items-center justify-between gap-2 text-xs font-medium"><h4 class="font-semibold">降智状态</h4><span class="flex items-center gap-1.5"><i class="h-2 w-2 rounded-full" :class="last ? last.status : 'unknown'" />{{ last ? statusLabels[last.status] : '暂无检测' }}</span></div>
-   <p class="intelligence-caption mt-1 text-[10px] leading-[15px] text-gray-500 dark:text-gray-400">{{ intelligenceCaption }}</p>
-   <div class="timeline-track probe-track mt-2" aria-label="最近 60 次真实检测记录">
-    <div v-for="(slot, index) in probeSlots" :key="index" class="probe-slot">
-     <button v-for="record in slot" :key="record.id" type="button" class="probe-bar" :class="record.status" :data-record-id="record.id" :title="recordTitle(record) + ' · 查看回答'" :aria-label="recordTitle(record) + ' · 查看回答'" @click="openRecord(record)" />
-    </div>
-   </div><span v-if="!recent.length" class="sr-only">暂无已完成检测</span>
-   <div class="mt-1.5 flex justify-between text-[10px] text-gray-500 dark:text-gray-400"><span>{{ INTELLIGENCE_LEGEND }}</span><time v-if="last">{{ new Date(last.checked_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</time></div>
-
+  <section v-if="row.platform === 'openai' || records !== undefined || models?.length" class="intelligence-section mt-4 border-t border-gray-200/70 pt-3 dark:border-dark-700/60" aria-label="降智状态">
+   <h4 class="mb-2 text-xs font-semibold">降智状态</h4>
+   <div class="divide-y divide-gray-200/70 dark:divide-dark-700/60 [&>*+*]:mt-2 [&>*+*]:pt-2">
+    <IntelligenceTimelineRow :key="'primary:' + (probeMetadata?.model ?? '')" :probe-id="0" :records="records" :metadata="probeMetadata" :now="now" @open="openRecord" />
+    <IntelligenceTimelineRow v-for="model in models" :key="model.probe_id + ':' + model.model" :probe-id="model.probe_id" :records="model.records" :metadata="model" :now="now" @open="openRecord" />
+   </div>
   </section>
   <Teleport to="body">
    <Transition name="timeline-tooltip">
@@ -61,18 +57,16 @@
  </article>
 </template>
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onUnmounted }  from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import type { GroupPlatform } from '@/types'
 import type { MonitorMatrixRow } from '@/api/channelMonitorV2'
 import { createMonitorDisplay, type DisplayBucket } from './displayData'
-import { getIntelligenceRecordDetail, type IntelligenceRecord, type IntelligenceMetadata, type IntelligenceRecordDetail } from '@/api/intelligence'
-import { INTELLIGENCE_CAPTION, INTELLIGENCE_LEGEND } from './constants'
-import { healthLabels, statusLabels, appendHistory, groupMultiplier, availabilityPercent, cachePercent, latency, platformName, platformIconClass, platformBadgeClass, passiveColor, barHeight } from './presentation'
-const props = withDefaults(defineProps<{ row: MonitorMatrixRow; records?: IntelligenceRecord[]; probeMetadata?: IntelligenceMetadata; now: number; countdown: number; timelineLength?: number; bucketSeconds?: number; windowEnd?: string }>(), { timelineLength: 18, bucketSeconds: 300 })
-const intelligenceCaption = computed(() => `${props.probeMetadata?.model || '—'} · ${props.probeMetadata?.reasoning_effort || '—'} · ${INTELLIGENCE_CAPTION}`)
-const recent = ref<IntelligenceRecord[]>([])
+import { getIntelligenceRecordDetail, type IntelligenceRecord, type IntelligenceMetadata, type IntelligenceModelTimeline, type IntelligenceRecordDetail } from '@/api/intelligence'
+import IntelligenceTimelineRow from './IntelligenceTimelineRow.vue'
+import { healthLabels, statusLabels, groupMultiplier, availabilityPercent, cachePercent, latency, platformName, platformIconClass, platformBadgeClass, passiveColor, barHeight } from './presentation'
+const props = withDefaults(defineProps<{ row: MonitorMatrixRow; records?: IntelligenceRecord[]; probeMetadata?: IntelligenceMetadata; models?: IntelligenceModelTimeline[]; now: number; countdown: number; timelineLength?: number; bucketSeconds?: number; windowEnd?: string }>(), { timelineLength: 18, bucketSeconds: 300 })
 const selectedRecord = ref<IntelligenceRecord | null>(null)
 const recordDetail = ref<IntelligenceRecordDetail | null>(null)
 const detailLoading = ref(false), detailError = ref(false)
@@ -102,10 +96,6 @@ function closeRecord() {
  detailError.value = false
 }
 onUnmounted(() => detailAbort?.abort())
-watch(() => props.records, records => {
- recent.value = appendHistory(recent.value, (records || []).filter(record => Date.parse(record.checked_at) <= props.now), record => record.id, record => Date.parse(record.checked_at), 60)
-}, { immediate: true, deep: true })
-const last = computed(() => recent.value.at(-1))
 const display = computed(() => {
  const requestedEnd = Date.parse(props.windowEnd ?? '')
  const step = props.bucketSeconds * 1000
@@ -134,10 +124,7 @@ function barStyle(index: number) {
 }
 onMounted(() => { window.addEventListener('scroll', hideBucket, true); window.addEventListener('resize', hideBucket) })
 onUnmounted(() => { window.removeEventListener('scroll', hideBucket, true); window.removeEventListener('resize', hideBucket) })
-// Newest stays at the right edge; only a new record shifts existing marks left.
-const probeSlots = computed(() => [...Array.from({ length: 60 - recent.value.length }, () => [] as IntelligenceRecord[]), ...recent.value.map(record => [record])])
 const bucketTitle = (b: DisplayBucket) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(b.bucket_start)) + ' · 可用率 ' + availabilityPercent(b.metrics, b.simulated ? 2 : 1) + ' · 缓存率 ' + cachePercent(b.metrics) + ' · 首 Token ' + latency(b.metrics) + (b.health.overall === 'unknown' ? ' · 样本不足' : '')
-const recordTitle = (r: IntelligenceRecord) => new Date(r.checked_at).toLocaleString() + ' · ' + statusLabels[r.status] + ' · ' + (r.duration_ms / 1000).toFixed(1) + 's'
 </script>
 <style scoped>
 .monitor-card{min-width:0;align-self:start}
@@ -149,16 +136,13 @@ dt{font-size:10px;line-height:15px;font-weight:600;letter-spacing:.05em;color:#9
 .state-pill{border-radius:999px;padding:4px 10px;font-size:12px;line-height:16px;font-weight:600;white-space:nowrap;flex-shrink:0}.state-pill.healthy{color:#047857;background:#d1fae5}.state-pill.warning{color:#b45309;background:#fef3c7}.state-pill.critical{color:#b91c1c;background:#fee2e2}.state-pill.unknown{color:#4b5563;background:#f3f4f6}
 .state-pill.healthy:is(.dark *){color:#6ee7b7;background:#10b98126}.state-pill.warning:is(.dark *){color:#fcd34d;background:#f59e0b26}.state-pill.critical:is(.dark *){color:#fca5a5;background:#ef444426}.state-pill.unknown:is(.dark *){color:#d1d5db;background:#334155}
 .timeline-track{display:grid;position:relative;height:20px;width:100%;isolation:isolate}
-.passive-track{gap:4px}.probe-track{grid-template-columns:repeat(60,minmax(0,1fr));gap:1px}
-.history-slot,.probe-slot{display:flex;align-items:flex-end;min-width:0;height:100%}.probe-slot{gap:1px}
-.history-bar,.probe-bar{display:block;min-width:0;width:100%;border-radius:3px}.history-bar{min-height:3px}.probe-bar{flex:1;height:100%;border-radius:2px}
-.history-hitbox:focus-visible,.probe-bar:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
-.normal{background:#10b981}.degraded{background:#fbbf24}.error{background:#ef4444}.unknown:not(.state-pill){background:#9ca3af}
-.normal:is(.dark *){background:#34d399}.error:is(.dark *){background:#f87171}
+.passive-track{gap:4px}
+.history-slot{display:flex;align-items:flex-end;min-width:0;height:100%}
+.history-bar{display:block;min-width:0;width:100%;border-radius:3px;min-height:3px}
+.history-hitbox:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}
 .history-hitbox,.history-visual{display:flex;align-items:flex-end;width:100%;height:100%;min-width:0}
 .history-hitbox{cursor:crosshair;outline-offset:2px;border-radius:4px}.history-visual{transform-origin:center bottom;pointer-events:none;transition:transform .24s cubic-bezier(.22,1,.36,1),opacity .22s ease}
 .history-hitbox[aria-describedby] .history-bar{filter:saturate(1.12) brightness(1.05);box-shadow:0 4px 10px #0f766e3d}
-.probe-bar{cursor:pointer;border:0;padding:0;transition:filter .15s}.probe-bar:hover{filter:brightness(1.15)}
 .timeline-tooltip{position:fixed;z-index:9999;width:max-content;max-width:min(280px,calc(100vw - 32px));transform:translate(var(--tooltip-x),-100%);border:1px solid rgb(255 255 255 / .84);border-radius:9px;background:#0f172aeb;padding:6px 9px;color:#f8fafc;font-size:10px;font-weight:600;line-height:1.35;box-shadow:0 10px 24px #0f172a33;pointer-events:none}
 .timeline-tooltip:after{position:absolute;left:50%;bottom:-4px;width:7px;height:7px;transform:translateX(-50%) rotate(45deg);border-right:1px solid rgb(255 255 255 / .84);border-bottom:1px solid rgb(255 255 255 / .84);background:#0f172aeb;content:''}
 .timeline-tooltip-enter-active,.timeline-tooltip-leave-active{transition:opacity .1s ease,transform .12s cubic-bezier(.22,1,.36,1)}
