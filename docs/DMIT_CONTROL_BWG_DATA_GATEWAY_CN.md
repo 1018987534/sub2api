@@ -2,16 +2,17 @@
 
 ## 当前状态
 
-2026-10-29，BWG `95.169.18.157` / `bwg-us-01` 退役。本文保留原文件名供历史链接使用。
-BWG 已从动态调度名单删除，同时移除 Worker 静态 origin、DNS 和 DMIT WireGuard peer。
-不能只把 BWG 权重设为 0：已配置的零权重节点仍可能被紧急兜底选中。
+本文保留原文件名供历史链接使用。`bwg-us-01` 于 2026-10-29 退出生产，
+`yt-us-01`（`154.23.243.26`）于 2026-11-25 退出生产。
+退役节点不应出现在动态调度、Worker 静态 origin、活动监控或 DMIT 的 WireGuard peer 中。
+不能只设为零权重：仍在配置中的零权重节点可能被紧急兜底选中。
 
 | 实例 | 主机 | 职责 | 数据访问 | 网关 origin |
 |---|---|---|---|---|
 | `dmit-us-01` | `179.255.105.184` | 唯一 control、嵌入前端、PostgreSQL、Redis、Komari | 本机 `10.20.0.1` | `gateway3-origin.xiaohondou.com` |
-| `vmiss-us-01` | `38.47.117.85` | gateway | WireGuard → DMIT | `gateway-origin.xiaohondou.com` |
-| `yt-us-01` | `154.23.243.26` | gateway | WireGuard → DMIT | `gateway154-origin.xiaohondou.com` |
-| `vmiss-us-02` | `38.47.113.166` | gateway | WireGuard → DMIT | `gateway2-origin.xiaohondou.com` |
+| `vmiss-us-01` | `38.47.117.85` | gateway | WireGuard 直连 DMIT | `gateway-origin.xiaohondou.com` |
+| `vmiss-us-02` | `38.47.113.166` | gateway | WireGuard 直连 DMIT | `gateway2-origin.xiaohondou.com` |
+| `ovh-us-01` | `147.135.37.51` | 海外专用 gateway | 本机 WireGuard → TLS WebSocket → DMIT | `gateway-ovh-origin.xiaohondou.com` |
 
 权威 PostgreSQL 容器是 DMIT 的 `sub2api-migration-postgres`，Redis 容器是
 `sub2api-migration-redis`。BWG 的旧数据容器自 2026-10-23 起已停止；其旧卷不能重新作为主库启动。
@@ -25,17 +26,16 @@ Responses 的三类路径及两类 Chat Completions 路径由现有 Worker 分�
 退役的 `nideyiyi.com` 和 `api.nideyiyi.com` 应用 DNS 和 Worker 路由不得恢复。
 
 权威目标来自 DMIT `settings.gateway_routing_settings`；
-有效权重来自 `GET /api/v1/gateway-routing/runtime`。2026-10-29 摘除 BWG 后的目标为：
+有效权重来自 `GET /api/v1/gateway-routing/runtime`。2026-11-25 摘除 YT 后普通池目标为：
 
 | 实例 | 目标权重 |
 |---|---|
-| `vmiss-us-01` | 22% |
-| `yt-us-01` | 57% |
-| `vmiss-us-02` | 7% |
-| `dmit-us-01` | 14% |
+| `vmiss-us-01` | 61% |
+| `vmiss-us-02` | 18% |
+| `dmit-us-01` | 21% |
 
-以上保留原四台存活节点 15:40:5:10 的相对比例，按最大余数法分配至 100%。
-后续以管理员配置为准。Worker 中仅保留这四台的静态变量，与本次目标一致。
+以上将普通池存活节点的 `30:9:10` 按最大余数法分配至 100%。OVH 的海外比例独立配置，
+不参与普通池的权重合计。后续以管理员配置为准；Worker 静态变量只包含普通池节点。
 
 配置运行时地址时，Worker 冷启动及缓存过期均等待权威配置，获取失败返回 503；
 不使用静态或过期权重。缓存 TTL 为 1 秒。已经发出的流不能迁移，应先摘流并确认请求排空再停服务。
@@ -43,7 +43,7 @@ Responses 的三类路径及两类 Chat Completions 路径由现有 Worker 分�
 仅 GET/HEAD 可在现有规则允许时故障切换。
 
 现有流量阈值、健康和丢包保护保持启用。零权重备用和全节点故障时的紧急兜底仅从配置中的节点选择，
-因此退役节点必须从 `nodes` 删除。历史 `usage_logs.instance_id=bwg-us-01` 继续保留。
+因此退役节点必须从 `nodes` 删除。BWG、YT 的历史 `usage_logs` 保留。
 
 ### 暂停与自动恢复的实际健康探测
 
@@ -62,21 +62,21 @@ readiness 成功，且不存在严重 ICMP 丢包。未满暂停时长时，正�
 持续严重丢包、数据库/Redis 不可用以及流量阈值保护仍保持摘流；重启主控后继续读取
 持久化暂停状态。
 
-2026-11-15 恢复记录：YT 到 DMIT 的 UDP 链路发生单向丢包，三台网关到数据库/Redis 的
-WireGuard 流量已改为经 YT 的 TLS WebSocket/TCP 通道。DMIT 的
-`sub2api-wg-wss-server.service` 仅允许 YT 访问 TCP 51824，并只转发本机 WireGuard 51820；
-YT 的 `sub2api-wg-wss-client.service` 通过校验证书的 TLS 连接承载 UDP，监听 UDP 51823，
-仅允许本机与两台 VMISS 访问。YT WireGuard endpoint 为 `127.0.0.1:51823`，
-两台 VMISS 为 `154.23.243.26:51823`。旧 UDP 51821 中继保留作回滚，原始配置和回滚脚本
-保存在各节点 `/root/sub2api-incident-20261115/`，该目录含私密配置，不复制进仓库。
+2026-11-15 曾因丢包临时经 YT 中继 WireGuard。2026-11-25 退役前，两台 VMISS 逐台
+切换到 DMIT `179.255.105.184:51820/UDP`，确认双向握手、PostgreSQL、Redis 就绪后才停
+YT 中继。OVH 原链路不变：本机 `127.0.0.1:51823/UDP` 经 TLS WebSocket 直达 DMIT
+`51824/TCP`，再到 DMIT 本机 WireGuard `51820/UDP`。不得因 YT 退役而停止 DMIT 的
+`sub2api-wg-wss-server.service`。本轮私有回滚配置保留在相关服务器的
+`/root/sub2api-yt-retirement-20261125/`，不得复制到仓库。
 
 ## 发布与监控
 
 DMIT control 使用 `-tags embed` 构建；三台 gateway 使用无前端产物。
-常规应用发布仍使用兼容文件名 `release_five_node.sh`，但其目标仅包含当前四台节点。
+常规应用发布工具仍使用兼容文件名 `release_five_node.sh`；执行前核对工具的发布名单
+与运行时、Komari 一致。仍含 YT 或缺少 OVH 的旧版脚本不得直接运行。
 发布前从 DMIT 的 `sub2api-migration-postgres` 检查 schema：
 
-- 无待执行 migration：依次发布 VMISS-01、YT、VMISS-02、DMIT。
+- 无待执行 migration：逐台发布 `vmiss-us-01`、`vmiss-us-02`、`ovh-us-01`、`dmit-us-01`。
 - 存在兼容的待执行 migration：先以 DMIT control 执行官方 migration，确认 schema 已更新，
   再发布三台 gateway。不得手工写 migration 表。
 
@@ -88,15 +88,14 @@ resources 的节点本地回滚归档继续保留，完成全节点验证后才�
 发布保留既有 main 提交、远端同步、干净构建、逐节点检查和失败回滚门禁。
 数据库、Redis 和其他业务不随应用发布重建或重启。
 
-Komari 位于 DMIT；公开页面为四节点监控。BWG 记录隐藏以保留历史指标，
-首页 ping 和任务绑定去掉 BWG，不能让退役节点重新成为调度候选。
+Komari 位于 DMIT；公开页面为四节点监控。BWG、YT 记录隐藏以保留历史指标，
+首页 ping 和任务绑定不包括退役节点。
 
 ## 退役与恢复边界
 
-退役前已确认：主站、PostgreSQL、Redis、Komari 均在 DMIT；
-三台存活 gateway 通过 WireGuard 直接访问 DMIT；BWG 未运行其他独立业务。
-先删调度、等待请求排空，再停 BWG 应用、Nginx、WireGuard、监控代理及相关 timer；
-最后移除 DNS、Worker BWG 变量及 DMIT peer。
+退役前先核对共享数据、中继和其他业务依赖。若有依赖，逐台验证替代路径；
+从运行时调度与 Worker 静态配置摘除节点，等原请求排空，再停专属服务，
+最后移除旧 origin DNS、监控任务绑定和专属 peer。保留旧容器数据和历史记录。
 
 BWG 原始配置与旧数据归档于 DMIT 的 `/root/bwg-retirement-20261029/`。
 该目录包含敏感配置和旧数据库，权限保持 root 私有，不提交仓库或公开。
