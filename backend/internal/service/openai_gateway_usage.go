@@ -230,25 +230,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, pricingAt)
 	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
 
-	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
-	if result.BillingModel != "" {
-		billingModel = strings.TrimSpace(result.BillingModel)
-	}
-	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" && input.ChannelMappedModel != input.OriginalModel {
-		billingModel = input.ChannelMappedModel
-	}
-	if input.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
-		billingModel = input.OriginalModel
-	}
-	billingModels := usageBillingModelCandidates(
-		billingModel,
-		result.BillingModel,
-		input.ChannelMappedModel,
-		input.OriginalModel,
-		result.UpstreamModel,
-		result.Model,
-	)
-	billingModels = s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, billingModels)
+	billingModels := s.openAIUsageBillingModels(ctx, apiKey, account, result.Model, result.UpstreamModel, result.BillingModel, input.ChannelUsageFields)
 	serviceTier := optionalStringValue(usageTier)
 	longContextBillingGate := openAILongContextBillingGate(billingAccount)
 	modelLongContextExempt := openAISubscriptionLongContextExempt(billingAccount, result)
@@ -977,6 +959,21 @@ func (s *OpenAIGatewayService) filterCNProviderBillingModelCandidates(ctx contex
 		out = append(out, candidate)
 	}
 	return out
+}
+
+func (s *OpenAIGatewayService) openAIUsageBillingModels(ctx context.Context, apiKey *APIKey, account *Account, model, upstreamModel, billingModel string, fields ChannelUsageFields) []string {
+	primary := forwardResultBillingModel(model, upstreamModel)
+	if billingModel != "" {
+		primary = strings.TrimSpace(billingModel)
+	}
+	if fields.BillingModelSource == BillingModelSourceChannelMapped && fields.ChannelMappedModel != "" && fields.ChannelMappedModel != fields.OriginalModel {
+		primary = fields.ChannelMappedModel
+	}
+	if fields.BillingModelSource == BillingModelSourceRequested && fields.OriginalModel != "" {
+		primary = fields.OriginalModel
+	}
+	return s.filterCNProviderBillingModelCandidates(ctx, account, apiKey,
+		usageBillingModelCandidates(primary, billingModel, fields.ChannelMappedModel, fields.OriginalModel, upstreamModel, model))
 }
 
 func (s *OpenAIGatewayService) resolveOpenAIChannelPricing(ctx context.Context, billingModel string, apiKey *APIKey) *ResolvedPricing {

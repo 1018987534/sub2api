@@ -53,6 +53,9 @@ func (s *GatewayService) ForwardSystemOne(ctx context.Context, c *gin.Context, a
 		}
 		upstreamModel = mappedModel
 	}
+	if err := checkForwardModelPricing(ctx, account, typesafe.JevLatestModel, mappedModel, ""); err != nil {
+		return nil, err
+	}
 	req, err := typesafe.NewSystemOneRequest(ctx, baseURL, key, body)
 	if err != nil {
 		return nil, err

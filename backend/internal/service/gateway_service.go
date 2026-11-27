@@ -918,6 +918,9 @@ func NewGatewayService(
 	balanceNotifyService *BalanceNotifyService,
 	userPlatformQuotaRepo UserPlatformQuotaRepository,
 ) *GatewayService {
+	if resolver == nil && billingService != nil {
+		resolver = NewModelPricingResolver(channelService, billingService)
+	}
 	userGroupRateTTL := resolveUserGroupRateCacheTTL(cfg)
 	modelsListTTL := resolveModelsListCacheTTL(cfg)
 

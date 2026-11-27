@@ -273,6 +273,10 @@ func (s *AntigravityGatewayService) prepareAntigravityCompatCall(
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadRequest, "invalid_request_error", ImageGenerationPermissionMessage())
 	}
 
+	if err := checkForwardModelPricing(ctx, account, request.originalModel, mappedModel, ""); err != nil {
+		return nil, err
+	}
+
 	if s.tokenProvider == nil {
 		return nil, s.writeAntigravityCompatError(c, http.StatusBadGateway, "api_error", "Antigravity token provider not configured")
 	}

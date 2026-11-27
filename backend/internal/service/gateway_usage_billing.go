@@ -1129,8 +1129,8 @@ func (s *GatewayService) hasResolvableTokenPricing(ctx context.Context, model st
 	if strings.TrimSpace(model) == "" {
 		return false
 	}
-	if s.resolveChannelPricing(ctx, model, apiKey) != nil {
-		return true
+	if s.resolver != nil {
+		return s.resolver.hasUsablePrice(ctx, apiKey, nil, model)
 	}
 	if s.billingService == nil {
 		return false

@@ -551,6 +551,9 @@ func (s *GeminiMessagesCompatService) Forward(ctx context.Context, c *gin.Contex
 	if account.Type == AccountTypeAPIKey || account.Type == AccountTypeServiceAccount {
 		mappedModel = account.GetMappedModel(req.Model)
 	}
+	if err := checkForwardModelPricing(ctx, account, req.Model, mappedModel, ""); err != nil {
+		return nil, err
+	}
 
 	geminiReq, err := convertClaudeMessagesToGeminiGenerateContent(body, mappedModel)
 	if err != nil {
@@ -1143,6 +1146,11 @@ func (s *GeminiMessagesCompatService) ForwardNative(ctx context.Context, c *gin.
 		// Code Assist's non-streaming generateContent may return no content; use streaming upstream and aggregate.
 		useUpstreamStream = true
 		upstreamAction = "streamGenerateContent"
+	}
+	if action != "countTokens" {
+		if err := checkForwardModelPricing(ctx, account, originalModel, mappedModel, ""); err != nil {
+			return nil, err
+		}
 	}
 	forceAIStudio := action == "countTokens"
 

@@ -114,6 +114,10 @@ func (s *GatewayService) ForwardAsChatCompletions(
 	// 7. Enforce cache_control block limit
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
 
+	if err := checkForwardModelPricing(ctx, account, originalModel, mappedModel, ""); err != nil {
+		return nil, err
+	}
+
 	// 8. Get access token
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {

@@ -296,6 +296,8 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		var result *service.ForwardResult
+		forwardCtx := h.gatewayService.WithModelPricingAdmission(requestCtx, apiKey,
+			clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 		setActualUpstreamEndpoint(c, "")
 		if shouldUseAntigravityCompat(account) {
 			if h.antigravityGatewayService == nil {
@@ -306,9 +308,9 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 				return
 			}
 			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
-			result, err = h.antigravityGatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
+			result, err = h.antigravityGatewayService.ForwardAsResponses(forwardCtx, c, account, forwardBody, parsedReq)
 		} else {
-			result, err = h.gatewayService.ForwardAsResponses(requestCtx, c, account, forwardBody, parsedReq)
+			result, err = h.gatewayService.ForwardAsResponses(forwardCtx, c, account, forwardBody, parsedReq)
 		}
 
 		if accountReleaseFunc != nil {
@@ -354,6 +356,10 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			})
 		}
 
+		if errors.Is(err, service.ErrModelPricingUnavailable) {
+			h.rejectUnpricedModel(c, streamStarted)
+			return
+		}
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {

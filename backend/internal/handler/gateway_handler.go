@@ -497,6 +497,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if fs.SwitchCount > 0 {
 				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 			}
+			requestCtx = h.gatewayService.WithModelPricingAdmission(requestCtx, apiKey,
+				clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
 			if account.Platform == service.PlatformAntigravity {
@@ -516,6 +518,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			if accountReleaseFunc != nil {
 				accountReleaseFunc()
+			}
+			if errors.Is(err, service.ErrModelPricingUnavailable) {
+				h.rejectUnpricedModel(c, streamStarted)
+				return
 			}
 			if err != nil {
 				var failoverErr *service.UpstreamFailoverError
@@ -922,6 +928,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
+			requestCtx = h.gatewayService.WithModelPricingAdmission(requestCtx, currentAPIKey,
+				clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
 			} else {
@@ -1000,6 +1008,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				})
 			}
 
+			if errors.Is(err, service.ErrModelPricingUnavailable) {
+				h.rejectUnpricedModel(c, streamStarted)
+				return
+			}
 			if err != nil {
 				// Beta policy block: return 400 immediately, no failover
 				var betaBlockedErr *service.BetaBlockedError

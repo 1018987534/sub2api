@@ -749,6 +749,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		if fs.SwitchCount > 0 {
 			requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
 		}
+		if action != "countTokens" {
+			requestCtx = h.gatewayService.WithModelPricingAdmission(requestCtx, apiKey,
+				clientRequestedUsageFields(c, channelMapping, reqModel, ""))
+		}
 		sessionGroupID := derefGroupID(apiKey.GroupID)
 		if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 			result, err = h.antigravityGatewayService.ForwardGemini(
@@ -767,6 +771,10 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 		}
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
+		}
+		if errors.Is(err, service.ErrModelPricingUnavailable) {
+			googleErrorWithType(c, http.StatusServiceUnavailable, "api_error", service.ModelPricingUnavailableCode, service.ModelPricingUnavailableMessage)
+			return
 		}
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError

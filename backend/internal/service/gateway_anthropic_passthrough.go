@@ -59,6 +59,10 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	account *Account,
 	input anthropicPassthroughForwardInput,
 ) (*ForwardResult, error) {
+	if err := checkForwardModelPricing(ctx, account, input.OriginalModel, input.RequestModel, ""); err != nil {
+		return nil, err
+	}
+
 	token, tokenType, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		return nil, err

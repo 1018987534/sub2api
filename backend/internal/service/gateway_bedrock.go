@@ -72,6 +72,10 @@ func (s *GatewayService) forwardBedrock(
 	if !ok {
 		return nil, fmt.Errorf("unsupported bedrock model: %s", reqModel)
 	}
+	if err := checkForwardModelPricing(ctx, account, reqModel, mappedModel, ""); err != nil {
+		return nil, err
+	}
+
 	if mappedModel != reqModel {
 		logger.LegacyPrintf("service.gateway", "[Bedrock] Model mapping: %s -> %s (account: %s)", reqModel, mappedModel, account.Name)
 	}

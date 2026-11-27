@@ -161,6 +161,9 @@ func (s *adminServiceImpl) CreateCompositeRoute(ctx context.Context, groupID int
 	if err != nil {
 		return nil, err
 	}
+	if err := s.validateCompositeRoutePublication(ctx, route); err != nil {
+		return nil, err
+	}
 	if err := s.compositeRouteRepo.Create(ctx, route); err != nil {
 		return nil, err
 	}
@@ -187,6 +190,9 @@ func (s *adminServiceImpl) UpdateCompositeRoute(ctx context.Context, groupID, ro
 		return nil, err
 	}
 	route.ID = routeID
+	if err := s.validateCompositeRoutePublication(ctx, route); err != nil {
+		return nil, err
+	}
 	if err := s.compositeRouteRepo.Update(ctx, route); err != nil {
 		return nil, err
 	}
@@ -656,6 +662,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		group.AllowLive = false
 	}
 	sanitizeGroupReasoningEffortPolicy(group)
+	if err := s.validateActiveGroupModelPricing(ctx, group, accountIDsToCopy); err != nil {
+		return nil, err
+	}
 	if err := s.groupRepo.Create(ctx, group); err != nil {
 		return nil, err
 	}
@@ -794,6 +803,9 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 
 	// 渠道缓存里存了 groupID → platform 的映射，改了平台要让它失效（见函数末尾）
 	previousPlatform := group.Platform
+	previousRateMultiplier := group.RateMultiplier
+	prospective := *group
+	group = &prospective
 
 	if input.Name != "" {
 		group.Name = input.Name
@@ -1103,22 +1115,8 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 	}
 
-	if err := s.groupRepo.Update(ctx, group); err != nil {
-		return nil, err
-	}
-
-	if s.authCacheInvalidator != nil {
-		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
-	}
-
-	// 平台变了就失效渠道缓存：该缓存持有 groupID → platform，而渠道定价 / 模型映射 /
-	// 模型白名单都按平台严格隔离。不失效的话，缓存最长 10 分钟仍按旧平台匹配，
-	// 期间定价查不到会静默回落到 LiteLLM 价格表、映射与白名单也不生效。
-	if group.Platform != previousPlatform && s.channelCacheInvalidator != nil {
-		s.channelCacheInvalidator.InvalidateCache()
-	}
-
-	// 如果指定了复制账号的源分组，同步绑定（替换当前分组的账号）
+	// Resolve replacement bindings before validating or updating the group.
+	var accountIDsToCopy []int64
 	if len(input.CopyAccountsFromGroupIDs) > 0 {
 		// 去重源分组 IDs
 		seen := make(map[int64]struct{})
@@ -1147,11 +1145,41 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		}
 
 		// 获取所有源分组的账号（去重）
-		accountIDsToCopy, err := s.groupRepo.GetAccountIDsByGroupIDs(ctx, uniqueSourceGroupIDs)
+		accountIDsToCopy, err = s.groupRepo.GetAccountIDsByGroupIDs(ctx, uniqueSourceGroupIDs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get accounts from source groups: %w", err)
 		}
 
+		if accountIDsToCopy == nil {
+			accountIDsToCopy = []int64{}
+		}
+	}
+
+	if input.Status == StatusActive || previousPlatform != group.Platform || input.ModelAllowlist != nil ||
+		input.ModelPricing != nil || input.LongContextPricingEnabled != nil || input.DefaultMappedModel != nil ||
+		input.MessagesDispatchModelConfig != nil || input.RequireOAuthOnly != nil || len(input.CopyAccountsFromGroupIDs) > 0 ||
+		(input.RateMultiplier != nil && previousRateMultiplier == 0) {
+		if err := s.validateActiveGroupModelPricing(ctx, group, accountIDsToCopy); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := s.groupRepo.Update(ctx, group); err != nil {
+		return nil, err
+	}
+
+	if s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByGroupID(ctx, id)
+	}
+
+	// 平台变了就失效渠道缓存：该缓存持有 groupID → platform，而渠道定价 / 模型映射 /
+	// 模型白名单都按平台严格隔离。不失效的话，缓存最长 10 分钟仍按旧平台匹配，
+	// 期间定价查不到会静默回落到 LiteLLM 价格表、映射与白名单也不生效。
+	if group.Platform != previousPlatform && s.channelCacheInvalidator != nil {
+		s.channelCacheInvalidator.InvalidateCache()
+	}
+
+	if len(input.CopyAccountsFromGroupIDs) > 0 {
 		// 先清空当前分组的所有账号绑定
 		if _, err := s.groupRepo.DeleteAccountGroupsByGroupID(ctx, id); err != nil {
 			return nil, fmt.Errorf("failed to clear existing account bindings: %w", err)

@@ -364,6 +364,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if actualModel == "" {
 			actualModel = reqModel
 		}
+		if err := checkForwardModelPricing(ctx, account, reqModel, actualModel, ""); err != nil {
+			return nil, err
+		}
 		SetOpsUpstreamModel(c, actualModel)
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		syncOpenAIResponsesInstructionsEcho(c, body)

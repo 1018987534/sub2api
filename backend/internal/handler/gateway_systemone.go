@@ -197,12 +197,18 @@ func (h *GatewayHandler) SystemOne(c *gin.Context) {
 		service.SetOpsUpstreamModel(c, model)
 
 		forwardStart := time.Now()
-		result, forwardErr := h.gatewayService.ForwardSystemOne(c.Request.Context(), c, account, body)
+		forwardCtx := h.gatewayService.WithModelPricingAdmission(c.Request.Context(), apiKey,
+			clientRequestedUsageFields(c, channelMapping, model, ""))
+		result, forwardErr := h.gatewayService.ForwardSystemOne(forwardCtx, c, account, body)
 		if accountRelease != nil {
 			accountRelease()
 		}
 		service.SetOpsLatencyMs(c, service.OpsResponseLatencyMsKey, time.Since(forwardStart).Milliseconds())
 
+		if errors.Is(forwardErr, service.ErrModelPricingUnavailable) {
+			h.rejectUnpricedModel(c, false)
+			return
+		}
 		if forwardErr != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(forwardErr, &failoverErr) {

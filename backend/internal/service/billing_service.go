@@ -1778,6 +1778,11 @@ func (s *BillingService) calculateTokenCost(resolved *ResolvedPricing, input Cos
 		// 选择最低档；未命中时自然回退到渠道基础价。
 		pricingContext = 1
 	}
+	if pricingContext == 0 && resolved.BasePricing == nil {
+		// Some providers only report output usage. An interval-only card still
+		// supplies its lowest tier when no input context was accounted for.
+		pricingContext = 1
+	}
 	pricing := input.Resolver.GetIntervalPricing(resolved, pricingContext)
 	if pricing == nil {
 		return nil, fmt.Errorf("no pricing available for model: %s: %w", input.Model, ErrModelPricingUnavailable)
@@ -2028,19 +2033,26 @@ func (s *BillingService) calculatePerRequestCost(resolved *ResolvedPricing, inpu
 	}
 
 	var unitPrice float64
+	if resolved.Mode == BillingModePerRequest && resolved.channelPricing != nil {
+		price := configuredPerRequestPrice(resolved, input)
+		if !hasConfiguredUnitPrice(price) {
+			return nil, fmt.Errorf("no per-request pricing for model: %s: %w", input.Model, ErrModelPricingUnavailable)
+		}
+		unitPrice = *price
+	} else {
+		if input.SizeTier != "" {
+			unitPrice = input.Resolver.GetRequestTierPrice(resolved, input.SizeTier)
+		}
 
-	if input.SizeTier != "" {
-		unitPrice = input.Resolver.GetRequestTierPrice(resolved, input.SizeTier)
-	}
+		if unitPrice == 0 {
+			totalContext := input.Tokens.InputTokens + input.Tokens.CacheCreationTokens + input.Tokens.CacheReadTokens
+			unitPrice = input.Resolver.GetRequestTierPriceByContext(resolved, totalContext)
+		}
 
-	if unitPrice == 0 {
-		totalContext := input.Tokens.InputTokens + input.Tokens.CacheCreationTokens + input.Tokens.CacheReadTokens
-		unitPrice = input.Resolver.GetRequestTierPriceByContext(resolved, totalContext)
-	}
-
-	// 回退到默认按次价格
-	if unitPrice == 0 {
-		unitPrice = resolved.DefaultPerRequestPrice
+		// 回退到默认按次价格
+		if unitPrice == 0 {
+			unitPrice = resolved.DefaultPerRequestPrice
+		}
 	}
 
 	totalCost := unitPrice * units
@@ -2050,6 +2062,24 @@ func (s *BillingService) calculatePerRequestCost(resolved *ResolvedPricing, inpu
 		TotalCost:  totalCost,
 		ActualCost: actualCost,
 	}, nil
+}
+
+func configuredPerRequestPrice(resolved *ResolvedPricing, input CostInput) *float64 {
+	if input.SizeTier != "" {
+		for _, tier := range resolved.RequestTiers {
+			if tier.TierLabel == input.SizeTier && tier.PerRequestPrice != nil {
+				return tier.PerRequestPrice
+			}
+		}
+	}
+	contextTokens := input.Tokens.InputTokens + input.Tokens.CacheCreationTokens + input.Tokens.CacheReadTokens
+	if contextTokens == 0 && resolved.channelPricing.PerRequestPrice == nil {
+		contextTokens = 1
+	}
+	if tier := FindMatchingInterval(resolved.RequestTiers, contextTokens); tier != nil && tier.PerRequestPrice != nil {
+		return tier.PerRequestPrice
+	}
+	return resolved.channelPricing.PerRequestPrice
 }
 
 // CalculateCost 计算使用费用

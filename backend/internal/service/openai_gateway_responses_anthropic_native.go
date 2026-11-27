@@ -126,6 +126,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaNativeAnthropic(
 	reasoningEffort := NormalizeClaudeOutputEffort(gjson.GetBytes(forwardedBody, "output_config.effort").String())
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, forwardedBody, upstreamModel)
 
+	if err := checkForwardModelPricing(ctx, account, originalModel, upstreamModel, billingModel); err != nil {
+		return nil, err
+	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)

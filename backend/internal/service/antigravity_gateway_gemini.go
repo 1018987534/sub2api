@@ -99,6 +99,11 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 	if geminiImageGenerationDenied(c, body, originalModel, mappedModel) {
 		return nil, s.writeGoogleError(c, http.StatusBadRequest, ImageGenerationPermissionMessage())
 	}
+	if action != "countTokens" {
+		if err := checkForwardModelPricing(ctx, account, originalModel, mappedModel, ""); err != nil {
+			return nil, err
+		}
+	}
 	forwardedModel := mappedModel
 
 	// 获取 access_token
@@ -210,6 +215,10 @@ func (s *AntigravityGatewayService) ForwardGemini(ctx context.Context, c *gin.Co
 			if fallbackModel != "" && fallbackModel != mappedModel {
 				logger.LegacyPrintf("service.antigravity_gateway", "[Antigravity] Model not found (%s), retrying with fallback model %s (account: %s)", mappedModel, fallbackModel, account.Name)
 
+				if err := checkForwardModelPricing(ctx, account, originalModel, fallbackModel, ""); err != nil {
+					_ = resp.Body.Close()
+					return nil, err
+				}
 				fallbackWrapped, err := s.wrapV1InternalRequest(projectID, fallbackModel, injectedBody)
 				if err == nil {
 					fallbackReq, err := antigravity.NewAPIRequest(ctx, upstreamAction, accessToken, fallbackWrapped)

@@ -301,6 +301,8 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
+		forwardCtx := h.gatewayService.WithModelPricingAdmission(c.Request.Context(), apiKey,
+			clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 		var result *service.ForwardResult
 		setActualUpstreamEndpoint(c, "")
 		if account.Platform == service.PlatformGemini {
@@ -311,7 +313,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				}
 				return
 			}
-			result, err = h.geminiCompatService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody)
+			result, err = h.geminiCompatService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody)
 		} else if shouldUseAntigravityCompat(account) {
 			if h.antigravityGatewayService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Antigravity compatibility service is not configured")
@@ -321,9 +323,9 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				return
 			}
 			setActualUpstreamEndpoint(c, EndpointAntigravityGenerateContent)
-			result, err = h.antigravityGatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			result, err = h.antigravityGatewayService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody, parsedReq)
 		} else {
-			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
+			result, err = h.gatewayService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody, parsedReq)
 		}
 
 		if accountReleaseFunc != nil {
@@ -369,6 +371,10 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			})
 		}
 
+		if errors.Is(err, service.ErrModelPricingUnavailable) {
+			h.rejectUnpricedModel(c, streamStarted)
+			return
+		}
 		if err != nil {
 			var failoverErr *service.UpstreamFailoverError
 			if errors.As(err, &failoverErr) {

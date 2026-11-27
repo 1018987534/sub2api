@@ -602,6 +602,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					return err
 				}
 			}
+			if hooks != nil && hooks.CheckModelPricing != nil {
+				model := openAIWSPayloadStringFromRaw(currentBridgePayload.payloadRaw, "model")
+				if account.Platform == PlatformGrok {
+					model = resolveGrokWSUpstreamModel(account, currentBridgePayload.payloadRaw, currentBridgePayload.originalModel)
+				}
+				if err := hooks.CheckModelPricing(turn, currentBridgePayload.originalModel, model); err != nil {
+					return err
+				}
+			}
 			if turnState != "" && c != nil && c.Request != nil {
 				c.Request.Header.Set(openAIWSTurnStateHeader, turnState)
 			}
@@ -1496,6 +1505,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		if !skipBeforeTurn && hooks != nil && hooks.BeforeTurn != nil {
 			if err := hooks.BeforeTurn(turn); err != nil {
+				return err
+			}
+		}
+		if hooks != nil && hooks.CheckModelPricing != nil {
+			if err := hooks.CheckModelPricing(turn, currentOriginalModel, openAIWSPayloadStringFromRaw(currentPayload, "model")); err != nil {
 				return err
 			}
 		}

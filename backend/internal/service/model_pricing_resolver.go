@@ -226,7 +226,19 @@ func (r *ModelPricingResolver) applyChannelOverrides(ctx context.Context, groupI
 
 // applyTokenOverrides 应用 token 模式的渠道覆盖
 func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricing, resolved *ResolvedPricing) {
+	resolved.Intervals = filterValidIntervals(chPricing.Intervals)
+	for i := range resolved.Intervals {
+		if resolved.Intervals[i].CacheWrite1hPrice != nil {
+			resolved.SupportsCacheBreakdown = true
+			break
+		}
+	}
 	if resolved.BasePricing == nil {
+		if !hasConfiguredUnitPrice(chPricing.InputPrice, chPricing.OutputPrice, chPricing.CacheWritePrice,
+			chPricing.CacheWrite1hPrice, chPricing.CacheWrite12hPrice, chPricing.CacheReadPrice,
+			chPricing.ImageInputPrice, chPricing.ImageOutputPrice) {
+			return
+		}
 		resolved.BasePricing = &ModelPricing{}
 	} else {
 		// 防止修改 fallbackPrices 中的共享指针
@@ -237,23 +249,13 @@ func (r *ModelPricingResolver) applyTokenOverrides(chPricing *ChannelModelPricin
 	applyChannelTokenPriceOverrides(resolved.BasePricing, chPricing)
 	if chPricing.CacheWrite1hPrice != nil {
 		resolved.SupportsCacheBreakdown = true
-		resolved.BasePricing.SupportsCacheBreakdown = true
 	}
-	for i := range chPricing.Intervals {
-		if chPricing.Intervals[i].CacheWrite1hPrice != nil {
-			resolved.SupportsCacheBreakdown = true
-			resolved.BasePricing.SupportsCacheBreakdown = true
-			break
-		}
-	}
+	resolved.BasePricing.SupportsCacheBreakdown = resolved.SupportsCacheBreakdown
 	resolved.BasePricing.FastMultiplier = chPricing.FastMultiplier
 	resolved.BasePricing.FlexMultiplier = chPricing.FlexMultiplier
 	resolved.BasePricing.UltrafastMultiplierOverride = chPricing.UltrafastMultiplier
 	resolved.BasePricing.ReasoningEffortMultipliers = maps.Clone(chPricing.ReasoningEffortMultipliers)
 	applyChannelImagePriceOverrides(chPricing, resolved.BasePricing)
-
-	// 区间未命中时回退到上面已经应用渠道覆盖的基础价。
-	resolved.Intervals = filterValidIntervals(chPricing.Intervals)
 }
 
 // applyChannelImagePriceOverrides 应用渠道图片输入/输出价，规则与其他 token 字段一致：
@@ -311,6 +313,9 @@ func (r *ModelPricingResolver) GetIntervalPricing(resolved *ResolvedPricing, tot
 	iv := FindMatchingInterval(resolved.Intervals, totalContextTokens)
 	if iv == nil {
 		return resolved.BasePricing
+	}
+	if resolved.BasePricing == nil && !intervalHasTokenPrice(iv) {
+		return nil
 	}
 
 	pricing := intervalToModelPricing(iv, resolved.BasePricing, resolved.channelPricing)

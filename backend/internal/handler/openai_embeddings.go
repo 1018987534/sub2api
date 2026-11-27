@@ -203,6 +203,8 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 		if channelMapping.Mapped {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
+		forwardCtx := h.gatewayService.WithModelPricingAdmission(c.Request.Context(), apiKey,
+			clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
@@ -210,8 +212,12 @@ func (h *OpenAIGatewayHandler) Embeddings(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardEmbeddings(c.Request.Context(), c, account, forwardBody, "")
+			return h.gatewayService.ForwardEmbeddings(forwardCtx, c, account, forwardBody, "")
 		}()
+		if errors.Is(err, service.ErrModelPricingUnavailable) {
+			h.rejectUnpricedModel(c, streamStarted)
+			return
+		}
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)

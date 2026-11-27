@@ -213,6 +213,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 	// the outbound request (for example GLM xhigh is forwarded as max).
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(upstreamBody, upstreamModel, billingModel, originalModel)
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, upstreamBody, upstreamModel)
+	if err := checkForwardModelPricing(ctx, account, originalModel, upstreamModel, billingModel); err != nil {
+		return nil, err
+	}
 	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, upstreamBody, clientStream, token, customUA, grokCacheIdentity)
 	if err != nil {
 		return nil, err

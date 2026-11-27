@@ -414,6 +414,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 	}
 
+	if err := checkForwardModelPricing(ctx, account, originalModel, reqModel, ""); err != nil {
+		return nil, err
+	}
+
 	// 重试循环
 	var resp *http.Response
 	lastWireBody := body

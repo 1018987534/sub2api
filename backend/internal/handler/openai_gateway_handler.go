@@ -889,6 +889,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
 			trace.BeginAttempt(account.ID, len(attemptBody), forwardStart)
 		}
+		forwardCtx := h.gatewayService.WithModelPricingAdmission(c.Request.Context(), apiKey,
+			clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				stopResponsesKeepalive()
@@ -896,8 +898,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
+			return h.gatewayService.Forward(forwardCtx, c, account, attemptBody)
 		}()
+		if errors.Is(err, service.ErrModelPricingUnavailable) {
+			h.rejectUnpricedModel(c, streamStarted)
+			return
+		}
 		if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
 			trace.EndAttempt(time.Now(), err != nil)
 		}
@@ -1494,14 +1500,20 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		// 应用渠道模型映射到请求体
 		forwardBody := mappedBodyForMessages(channelMappingMsg.Mapped, channelMappingMsg.MappedModel)
 		writerSizeBeforeForward := service.OpenAICompactKeepaliveAdjustedWrittenSize(c)
+		forwardCtx := h.gatewayService.WithModelPricingAdmission(c.Request.Context(), apiKey,
+			clientRequestedUsageFields(c, channelMappingMsg, reqModel, ""))
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
 				if accountReleaseFunc != nil {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
+			return h.gatewayService.ForwardAsAnthropic(forwardCtx, c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		}()
+		if errors.Is(err, service.ErrModelPricingUnavailable) {
+			h.rejectUnpricedModel(c, streamStarted)
+			return
+		}
 		var cyberBlockBodyMsg []byte
 		if service.GetOpsCyberPolicy(c) != nil {
 			cyberBlockBodyMsg = body
@@ -3268,6 +3280,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
 				return checkSimpleModeTurnBilling()
 			},
+			CheckModelPricing: func(turn int, model, upstreamModel string) error {
+				mapping := channelMappingWS
+				if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
+					mapping = snapshot.mapping
+				}
+				turnKey := turnBillingAPIKeys.forTurn(turn, apiKey)
+				return h.gatewayService.CheckModelPricingAdmission(withOpenAIWSTurnBillingGroup(ctx, turnKey), turnKey, account,
+					mapping.ToUsageFields(model, upstreamModel), model, upstreamModel, "")
+			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
 				turnStart := getTurnStart(turn)
 				cyberBlockBody := takeCyberTurnBody(turn)
@@ -3400,6 +3421,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			err := h.gatewayService.ProxyResponsesWebSocketFromClient(ctx, c, wsConn, account, token, wsFirstMessage, hooks)
 			if err == nil {
 				reqLog.Info("openai.websocket_ingress_closed", zap.Int64("account_id", account.ID))
+				return
+			}
+			if errors.Is(err, service.ErrModelPricingUnavailable) {
+				rejectUnpricedWebSocketModel(ctx, c, wsConn)
 				return
 			}
 			if service.IsOpenAIWSSessionPreemptedError(err) {

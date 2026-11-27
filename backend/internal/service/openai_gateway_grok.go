@@ -55,6 +55,9 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if isGrokImageGenerationModel(upstreamModel) {
 		return nil, fmt.Errorf("model %s is an image model and is not available on the Responses endpoint; use /v1/images/generations instead", upstreamModel)
 	}
+	if err := checkForwardModelPricing(ctx, account, originalModel, upstreamModel, ""); err != nil {
+		return nil, err
+	}
 	patchedBody, clientToolMapping, err := patchGrokResponsesBodyWithClientTools(body, upstreamModel)
 	if err != nil {
 		setOpsUpstreamError(c, http.StatusBadRequest, err.Error(), "")

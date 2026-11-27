@@ -556,6 +556,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.ValidateAccountGroupBindings(ctx, groupIDs); err != nil {
 		return nil, err
 	}
+	if err := s.validateAccountModelPublication(ctx, account, groupIDs); err != nil {
+		return nil, err
+	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
@@ -932,6 +935,17 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
+	_, modelMappingChanged := input.Credentials["model_mapping"]
+	if modelMappingChanged || input.Status == StatusActive || input.GroupIDs != nil {
+		groupIDs := account.GroupIDs
+		if input.GroupIDs != nil {
+			groupIDs = *input.GroupIDs
+		}
+		if err := s.validateAccountModelPublication(ctx, account, groupIDs); err != nil {
+			return nil, err
+		}
+	}
+
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -1090,10 +1104,13 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
+	_, modelMappingChanged := input.Credentials["model_mapping"]
+	checkModelPricing := s.modelPricingResolver != nil && (s.cfg == nil || s.cfg.RunMode != config.RunModeSimple) &&
+		(modelMappingChanged || input.GroupIDs != nil || input.Status == StatusActive || (input.Schedulable != nil && *input.Schedulable))
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil || checkModelPricing {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1266,6 +1283,31 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 	if input.Schedulable != nil {
 		repoUpdates.Schedulable = input.Schedulable
+	}
+	if checkModelPricing {
+		for _, account := range cachedTargets {
+			if account == nil {
+				continue
+			}
+			prospective := *account
+			if modelMappingChanged {
+				prospective.Credentials = make(map[string]any, len(account.Credentials)+1)
+				maps.Copy(prospective.Credentials, account.Credentials)
+				prospective.Credentials["model_mapping"] = input.Credentials["model_mapping"]
+			}
+			if input.Status != "" {
+				prospective.Status = input.Status
+			}
+			if input.Schedulable != nil {
+				prospective.Schedulable = *input.Schedulable
+			}
+			if input.GroupIDs != nil {
+				prospective.GroupIDs = *input.GroupIDs
+			}
+			if err := s.validateAccountModelPublication(ctx, &prospective, prospective.GroupIDs); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Run bulk update for column/jsonb fields first.
@@ -1443,6 +1485,17 @@ func (s *adminServiceImpl) SetAccountError(ctx context.Context, id int64, errorM
 }
 
 func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, schedulable bool) (*Account, error) {
+	if schedulable && s.modelPricingResolver != nil && (s.cfg == nil || s.cfg.RunMode != config.RunModeSimple) {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		prospective := *account
+		prospective.Schedulable = true
+		if err := s.validateAccountModelPublication(ctx, &prospective, account.GroupIDs); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.accountRepo.SetSchedulable(ctx, id, schedulable); err != nil {
 		return nil, err
 	}

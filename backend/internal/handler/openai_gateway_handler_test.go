@@ -1933,10 +1933,12 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 
 type openAIResponsesWSUsageLogCase struct {
 	simpleModeRejectAtRead int64
+	standardBilling        bool
 	compositeResolver      *service.CompositeRouteResolver
 	accountPlatform        string
 	closeReason            string
 	closeStatus            coderws.StatusCode
+	closeErrorCode         string
 	firstPayload           string
 	// midPayload 在首个 turn 完成后发送（如 session.update），上游桩会为它
 	// 回一个 response.completed，客户端按普通事件读取。
@@ -2198,6 +2200,16 @@ func (s *openAIWSFailoverHandlerAccountRepoStub) SetRateLimited(ctx context.Cont
 type openAIWSUsageHandlerUsageLogRepoStub struct {
 	service.UsageLogRepository
 	created chan *service.UsageLog
+}
+
+type openAIWSUsageHandlerUserRepoStub struct{ service.UserRepository }
+
+func (openAIWSUsageHandlerUserRepoStub) GetByID(_ context.Context, id int64) (*service.User, error) {
+	return &service.User{ID: id, Balance: 100}, nil
+}
+
+func (openAIWSUsageHandlerUserRepoStub) DeductBalance(context.Context, int64, float64) error {
+	return nil
 }
 
 func (s *openAIWSUsageHandlerUsageLogRepoStub) Create(ctx context.Context, log *service.UsageLog) (bool, error) {
@@ -3368,6 +3380,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 
 	cfg := &config.Config{}
 	cfg.RunMode = config.RunModeSimple
+	if tc.standardBilling {
+		cfg.RunMode = config.RunModeStandard
+	}
 	cfg.Default.RateMultiplier = 1
 	cfg.Security.URLAllowlist.Enabled = false
 	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
@@ -3401,13 +3416,14 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cfg.SimpleModeKeyRateLimitEnabled = true
 		keyRepo = &simpleModeWSRateLimitRepo{rejectAt: tc.simpleModeRejectAtRead}
 	}
-	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, keyRepo, nil, nil, cfg, nil)
+	userRepo := openAIWSUsageHandlerUserRepoStub{}
+	billingCacheSvc := service.NewBillingCacheService(nil, userRepo, nil, keyRepo, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheSvc.Stop)
 	gatewaySvc := service.NewOpenAIGatewayService(
 		accountRepo,
 		usageRepo,
 		nil,
-		nil,
+		userRepo,
 		nil,
 		nil,
 		nil,
@@ -3502,7 +3518,19 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	if tc.closeStatus == 0 {
 		tc.closeStatus = coderws.StatusPolicyViolation
 	}
+	readPricingError := func() {
+		if tc.closeErrorCode == "" {
+			return
+		}
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancelRead()
+		_, event, eventErr := clientConn.Read(readCtx)
+		require.NoError(t, eventErr)
+		require.Equal(t, "error", gjson.GetBytes(event, "type").String())
+		require.Equal(t, tc.closeErrorCode, gjson.GetBytes(event, "error.code").String())
+	}
 	if tc.firstFrameCloseExpected {
+		readPricingError()
 		readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 		_, _, readErr := clientConn.Read(readCtx)
 		cancelRead()
@@ -3560,6 +3588,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		cancelWrite()
 		require.NoError(t, err)
 		if tc.secondTurnCloseExpected {
+			readPricingError()
 			readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
 			_, _, readErr := clientConn.Read(readCtx)
 			cancelRead()
@@ -3578,6 +3607,16 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			require.Contains(t, closeErr.Reason, reason)
 			require.Len(t, upstreamPayloadCh, turnCount-1, "rejected turn must not reach upstream")
 			_ = clientConn.CloseNow()
+			if tc.closeErrorCode != "" {
+				select {
+				case log := <-usageRepo.created:
+					require.NotNil(t, log)
+					require.Positive(t, log.ActualCost)
+				case <-time.After(3 * time.Second):
+					t.Fatal("priced first turn did not create a usage record")
+				}
+				require.Empty(t, usageRepo.created, "rejected turn must not create a usage record")
+			}
 			return openAIResponsesWSUsageLogResult{}
 		}
 		readCompleted()

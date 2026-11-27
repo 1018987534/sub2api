@@ -291,3 +291,40 @@ func TestOpenAIWSTurnBillingAPIKeysKeepPreviousTurnUntilItIsRecorded(t *testing.
 	require.Same(t, conn, keys.forTurn(2, conn), "only the current and previous turn are kept")
 	require.Len(t, keys.keys, 2)
 }
+
+func TestOpenAIResponsesWebSocket_PricingAdmissionUsesEachTurnGroup(t *testing.T) {
+	const alias = "pricing-admission-alias"
+	const upstream = "pricing-admission-upstream"
+	const payload = `{"type":"response.create","model":"` + alias + `"}`
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool} {
+		t.Run(mode, func(t *testing.T) {
+			for _, pricedFirstTurn := range []bool{false, true} {
+				repo := newWSGroupPricingAPIKeyRepoStub(1)
+				repo.apiKey.User.Balance = 100
+				apiKeyService := newWSGroupPricingAPIKeyService(repo)
+				tc := openAIResponsesWSUsageLogCase{
+					standardBilling:         true,
+					firstPayload:            payload,
+					ingressMode:             mode,
+					apiKeyService:           apiKeyService,
+					apiKeyCredential:        wsGroupPricingKey,
+					channelMapping:          map[string]string{alias: upstream},
+					closeErrorCode:          service.ModelPricingUnavailableCode,
+					closeStatus:             coderws.StatusTryAgainLater,
+					closeReason:             service.ModelPricingUnavailableCode,
+					firstFrameCloseExpected: !pricedFirstTurn,
+					secondTurnCloseExpected: pricedFirstTurn,
+				}
+				if pricedFirstTurn {
+					price := 3e-6
+					repo.group.ModelPricing = []service.ChannelModelPricing{{Models: []string{upstream}, InputPrice: &price}}
+					tc.secondPayload = payload
+					tc.afterFirstUpstreamRequest = func(*service.ChannelService) error {
+						return repo.adminUpdate(apiKeyService, func(_ *service.APIKey, group *service.Group) { group.ModelPricing = nil })
+					}
+				}
+				runOpenAIResponsesWebSocketUsageLogCase(t, tc)
+			}
+		})
+	}
+}

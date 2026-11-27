@@ -307,6 +307,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
 			trace.BeginAttempt(account.ID, len(forwardBody), forwardStart)
 		}
+		forwardCtx := h.gatewayService.WithModelPricingAdmission(c.Request.Context(), apiKey,
+			clientRequestedUsageFields(c, channelMapping, reqModel, ""))
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
@@ -314,8 +316,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
-			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
+			return h.gatewayService.ForwardAsChatCompletions(forwardCtx, c, account, forwardBody, promptCacheKey, "")
 		}()
+		if errors.Is(err, service.ErrModelPricingUnavailable) {
+			h.rejectUnpricedModel(c, streamStarted)
+			return
+		}
 		if trace := service.OpenAILatencyTraceFromContext(c.Request.Context()); trace != nil {
 			trace.EndAttempt(time.Now(), err != nil)
 		}
