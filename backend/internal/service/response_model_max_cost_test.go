@@ -90,7 +90,8 @@ func TestOpenAIGatewayServiceRecordUsage_UpstreamResponseComparesFreeFastAtStand
 			BillingModelSource: BillingModelSourceUpstream},
 	}))
 	require.NotNil(t, logs.lastLog)
-	require.InDelta(t, expensive*100*responseFast, logs.lastLog.TotalCost, 1e-12)
+	require.Equal(t, priority, optionalStringValue(logs.lastLog.ServiceTier))
+	require.InDelta(t, expensive*100, logs.lastLog.TotalCost, 1e-12)
 	require.InDelta(t, expensive*100*group.RateMultiplier, logs.lastLog.ActualCost, 1e-12)
 	require.InDelta(t, logs.lastLog.ActualCost, users.lastAmount, 1e-12)
 }
