@@ -1,0 +1,37 @@
+# Candidate only. Include in the existing project-specific TLS server, not as
+# a replacement for the operator's whole nginx.conf. Preserve the exact health
+# probe ACLs and keep them outside this default location.
+# In http context: map $http_upgrade $sub2api_ovh_connection {
+#   default upgrade;
+#   ''      close;
+# }
+# The caller must validate project origin auth and a trusted Cloudflare source
+# in this server before the default location is allowed. Put the actual
+# secret/gate in a root-readable include. Never rely on these headers alone.
+location / {
+    # OVH_WG_ENDPOINT is a fixed private IP:port, not a URL from the client.
+    # No trailing URI: preserve the request's original URI and arguments.
+    proxy_pass http://OVH_WG_ENDPOINT;
+    proxy_http_version 1.1;
+    proxy_set_header Host xiaohondou.com;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host xiaohondou.com;
+    proxy_set_header CF-Connecting-IP $http_x_sub2api_client_ip;
+    proxy_set_header X-Real-IP $http_x_sub2api_client_ip;
+    proxy_set_header X-Forwarded-For $http_x_sub2api_client_ip;
+    proxy_set_header Forwarded "";
+    proxy_set_header X-Sub2API-Origin-Auth "";
+    proxy_set_header X-Sub2API-Client-IP "";
+    proxy_set_header X-Sub2API-Ingress-Node-ID "";
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $sub2api_ovh_connection;
+    proxy_connect_timeout 5s;
+    proxy_send_timeout 7200s;
+    proxy_read_timeout 7200s;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_intercept_errors off;
+    proxy_next_upstream off;
+    proxy_redirect off;
+}
