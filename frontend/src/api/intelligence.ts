@@ -95,7 +95,18 @@ export async function getIntelligenceStatus(groupIds: number[], signal?: AbortSi
  return data
 }
 export async function getIntelligenceConfigs() {
- return (await apiClient.get<{ items: IntelligenceConfig[]; defaults: IntelligenceConfig; max_models_per_group?: number }>('/admin/intelligence-checks/config')).data
+ return (await apiClient.get<{
+  items: IntelligenceConfig[]
+  defaults: IntelligenceConfig
+  max_models_per_group?: number
+  pause_threshold: number
+  max_pause_threshold: number
+ }>('/admin/intelligence-checks/config')).data
+}
+export async function saveIntelligencePauseThreshold(pauseThreshold: number) {
+ return (await apiClient.put<{ pause_threshold: number }>('/admin/intelligence-checks/protection', {
+  pause_threshold: pauseThreshold,
+ })).data
 }
 export async function saveIntelligenceConfig(config: IntelligenceConfig) {
  if (config.probe_id) {

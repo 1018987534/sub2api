@@ -14,8 +14,17 @@ var ErrConflict = errors.New("configuration changed or probe already running")
 var ErrInvalid = errors.New("invalid intelligence check configuration")
 var ErrDuplicateModel = errors.New("同一分组不能重复配置相同模型")
 var ErrModelLimit = errors.New("分组检测模型数量已达上限")
+var ErrInvalidPauseThreshold = errors.New("暂停门槛必须是 1 到 100 之间的整数")
 
-const MaxGroupModels = 8
+const (
+	MaxGroupModels        = 8
+	DefaultPauseThreshold = 1
+	MaxPauseThreshold     = 100
+)
+
+func ValidPauseThreshold(count int) bool {
+	return count >= DefaultPauseThreshold && count <= MaxPauseThreshold
+}
 
 // GroupEligible is the shared scope for group probes; account recovery has its
 // own queue and does not depend on this group configuration.

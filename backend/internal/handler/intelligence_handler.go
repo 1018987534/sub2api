@@ -27,20 +27,22 @@ type IntelligenceHandler struct {
 	groups        service.GroupRepository
 	access        channelMonitorV2GroupAuthorizer
 	monitor       *service.ChannelMonitorV2Service
+	settings      *service.SettingService
 }
 
 func NewIntelligenceHandler(db *sql.DB, cfg *config.Config, keys service.APIKeyRepository, groups service.GroupRepository, access *service.APIKeyService, settings *service.SettingService, monitor *service.ChannelMonitorV2Service, gateway *service.OpenAIGatewayService) *IntelligenceHandler {
-	h := &IntelligenceHandler{store: &intelligence.SQLStore{DB: db}, keys: keys, groups: groups, access: access, monitor: monitor}
+	store := &intelligence.SQLStore{DB: db, PauseThreshold: settings.GetIntelligencePauseThreshold}
+	h := &IntelligenceHandler{store: store, keys: keys, groups: groups, access: access, monitor: monitor, settings: settings}
 	recoveryStore := &intelligence.SQLRecoveryStore{DB: db}
 	h.recoveryAdmin = recoveryStore
 	if gateway != nil && groups != nil {
-		h.store.(*intelligence.SQLStore).ProtectionEligible = func(ctx context.Context, c intelligence.Config) (bool, error) {
+		store.ProtectionEligible = func(ctx context.Context, c intelligence.Config) (bool, error) {
 			group, err := groups.GetByID(ctx, c.GroupID)
 			return service.IntelligenceProtectionGroupEligible(group), err
 		}
-		h.store.(*intelligence.SQLStore).Recover = gateway.RecoverIntelligenceAccount
-		h.store.(*intelligence.SQLStore).RecoveryCutoff = gateway.IntelligenceRecoveryCutoff
-		h.store.(*intelligence.SQLStore).Protect = func(ctx context.Context, c intelligence.Config, accountID int64) (bool, error) {
+		store.Recover = gateway.RecoverIntelligenceAccount
+		store.RecoveryCutoff = gateway.IntelligenceRecoveryCutoff
+		store.Protect = func(ctx context.Context, c intelligence.Config, accountID int64) (bool, error) {
 			group, err := groups.GetByID(ctx, c.GroupID)
 			if err != nil {
 				return false, err
@@ -121,7 +123,36 @@ func (h *IntelligenceHandler) Configs(c *gin.Context) {
 		response.InternalError(c, "无法读取降智检测配置")
 		return
 	}
-	response.Success(c, gin.H{"items": items, "defaults": intelligence.DefaultConfig(0), "max_models_per_group": intelligence.MaxGroupModels})
+	threshold, err := h.settings.GetIntelligencePauseThreshold(c.Request.Context())
+	if err != nil {
+		response.InternalError(c, "无法读取降智暂停门槛")
+		return
+	}
+	response.Success(c, gin.H{
+		"items": items, "defaults": intelligence.DefaultConfig(0), "max_models_per_group": intelligence.MaxGroupModels,
+		"pause_threshold": threshold, "max_pause_threshold": intelligence.MaxPauseThreshold,
+	})
+}
+
+func (h *IntelligenceHandler) UpdatePauseThreshold(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+	var input struct {
+		PauseThreshold int `json:"pause_threshold"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		response.BadRequest(c, intelligence.ErrInvalidPauseThreshold.Error())
+		return
+	}
+	err := h.settings.SetIntelligencePauseThreshold(c.Request.Context(), input.PauseThreshold)
+	if errors.Is(err, intelligence.ErrInvalidPauseThreshold) {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	if err != nil {
+		response.InternalError(c, "无法保存降智暂停门槛")
+		return
+	}
+	response.Success(c, gin.H{"pause_threshold": input.PauseThreshold})
 }
 func intelligenceGroupID(c *gin.Context) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param("groupID"), 10, 64)

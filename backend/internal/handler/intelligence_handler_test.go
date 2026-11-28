@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,6 +71,71 @@ func (s *intelligenceHistoryStore) Record(_ context.Context, groupID, id int64, 
 	}
 	return intelligence.Record{}, sql.ErrNoRows
 }
+
+type intelligencePauseSettingsRepo struct {
+	service.SettingRepository
+	value string
+}
+
+func (r *intelligencePauseSettingsRepo) GetValue(context.Context, string) (string, error) {
+	if r.value == "" {
+		return "", service.ErrSettingNotFound
+	}
+	return r.value, nil
+}
+
+func (r *intelligencePauseSettingsRepo) Set(_ context.Context, _ string, value string) error {
+	r.value = value
+	return nil
+}
+
+func TestIntelligencePauseThresholdConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &intelligencePauseSettingsRepo{}
+	h := &IntelligenceHandler{store: &intelligenceHistoryStore{}, settings: service.NewSettingService(repo, nil)}
+	r := gin.New()
+	r.GET("/config", h.Configs)
+	r.PUT("/protection", h.UpdatePauseThreshold)
+	request := func(method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+	read := func(want int) {
+		t.Helper()
+		w := request(http.MethodGet, "/config", "")
+		require.Equal(t, http.StatusOK, w.Code)
+		var result struct {
+			Data struct {
+				PauseThreshold    int                   `json:"pause_threshold"`
+				MaxPauseThreshold int                   `json:"max_pause_threshold"`
+				Items             []intelligence.Config `json:"items"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+		require.Equal(t, want, result.Data.PauseThreshold)
+		require.Equal(t, intelligence.MaxPauseThreshold, result.Data.MaxPauseThreshold)
+		require.NotEmpty(t, result.Data.Items)
+	}
+	read(1)
+	require.Empty(t, repo.value)
+	w := request(http.MethodPut, "/protection", `{"pause_threshold":3}`)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"pause_threshold":3`)
+	read(3)
+	for _, input := range []string{`{}`, `{"pause_threshold":null}`, `{"pause_threshold":0}`, `{"pause_threshold":-1}`, `{"pause_threshold":101}`, `{"pause_threshold":1.5}`, `{"pause_threshold":"2"}`} {
+		require.Equal(t, http.StatusBadRequest, request(http.MethodPut, "/protection", input).Code, input)
+	}
+	read(3)
+	require.Equal(t, http.StatusOK, request(http.MethodPut, "/protection", `{"pause_threshold":100}`).Code)
+	read(100)
+	require.Equal(t, http.StatusOK, request(http.MethodPut, "/protection", `{"pause_threshold":1}`).Code)
+	read(1)
+}
+
 func TestIntelligenceStatusAuthorizationAndRedaction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := &intelligenceHistoryStore{}
