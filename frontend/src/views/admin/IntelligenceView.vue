@@ -10,6 +10,23 @@
         <button type="button" role="tab" :aria-selected="view === 'recovery'" :class="view === 'recovery' ? 'font-semibold text-emerald-600' : 'text-gray-500'" @click="view = 'recovery'">账号恢复检测</button>
       </div>
       <IntelligenceRecoveryPanel v-if="view === 'recovery'" />
+      <form v-if="pauseThreshold !== null" v-show="view === 'groups'" class="panel px-5 py-4" aria-labelledby="pause-threshold-heading" @submit.prevent="savePauseThreshold">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div class="min-w-0 flex-1 basis-72">
+            <h2 id="pause-threshold-heading" class="text-sm font-semibold">账号自动保护</h2>
+            <p id="pause-threshold-hint" class="preview-note mt-1">所有受保护分组共用此门槛。同一账号跨组累计主检测结果，正常结果或该账号的检测错误会中断连续计数。</p>
+          </div>
+          <div class="flex flex-wrap items-end gap-2">
+            <label class="field w-48">
+              <span>连续降智几次后暂停</span>
+              <input v-model.number="pauseThresholdDraft" data-testid="intelligence-pause-threshold" type="number" min="1" :max="maxPauseThreshold" step="1" required :disabled="savingPauseThreshold" :aria-invalid="pauseThresholdDirty && validPauseThreshold === null" aria-describedby="pause-threshold-hint">
+            </label>
+            <button type="submit" class="btn-secondary min-h-10" :disabled="savingPauseThreshold || !pauseThresholdDirty || validPauseThreshold === null">{{ savingPauseThreshold ? '保存中…' : '保存暂停门槛' }}</button>
+          </div>
+        </div>
+        <p v-if="pauseThresholdDirty && validPauseThreshold === null" class="mt-2 text-xs text-red-600" role="alert">请输入 1 到 {{ maxPauseThreshold }} 之间的整数。</p>
+        <p v-if="pauseThresholdError" class="mt-2 text-xs text-red-600" role="alert">{{ pauseThresholdError }}</p>
+      </form>
       <div v-show="view === 'groups'" class="public-preview">
         <span class="preview-label">公共监控文案</span>
         <p class="preview-caption" data-testid="public-caption">{{ INTELLIGENCE_CAPTION }}</p>
@@ -119,7 +136,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import IntelligenceRecoveryPanel from './IntelligenceRecoveryPanel.vue'
-import { addIntelligenceModel, deleteIntelligenceModel, getIntelligenceConfigs, getIntelligenceHistory, runIntelligenceCheck, saveIntelligenceConfig, type IntelligenceConfig, type IntelligenceRecord, getIntelligenceKeyOptions, type IntelligenceKeyOption } from '@/api/intelligence'
+import { addIntelligenceModel, deleteIntelligenceModel, getIntelligenceConfigs, getIntelligenceHistory, runIntelligenceCheck, saveIntelligenceConfig, saveIntelligencePauseThreshold, type IntelligenceConfig, type IntelligenceRecord, getIntelligenceKeyOptions, type IntelligenceKeyOption } from '@/api/intelligence'
 import { getAll } from '@/api/admin/groups'
 import type { AdminGroup } from '@/types'
 import { formatIntelligenceModelLabel, INTELLIGENCE_CAPTION } from '@/features/channel-monitor-v2-cards/constants'
@@ -133,6 +150,16 @@ const draft = ref<IntelligenceConfig | null>(null)
 const adding = ref(false)
 const deleting = ref(false)
 const maxModels = ref(8)
+const pauseThreshold = ref<number | null>(null)
+const pauseThresholdDraft = ref<number | string>('')
+const maxPauseThreshold = ref(0)
+const savingPauseThreshold = ref(false)
+const pauseThresholdError = ref('')
+const pauseThresholdDirty = computed(() => pauseThreshold.value !== null && pauseThresholdDraft.value !== pauseThreshold.value)
+const validPauseThreshold = computed(() => {
+  const count = pauseThresholdDraft.value
+  return typeof count === 'number' && Number.isInteger(count) && count >= 1 && count <= maxPauseThreshold.value ? count : null
+})
 const expectedText = ref('')
 const publicModelLabel = computed(() => formatIntelligenceModelLabel(draft.value ?? undefined))
 const history = ref<IntelligenceRecord[]>([])
@@ -226,8 +253,29 @@ async function reload() {
     const gs = allGroups.filter(group => group.status === 'active' && group.name.includes('不降智'))
     groups.value = gs; configs.value = cs.items || []; defaults.value = cs.defaults
     maxModels.value = cs.max_models_per_group ?? 8
+    pauseThreshold.value = cs.pause_threshold ?? null
+    pauseThresholdDraft.value = cs.pause_threshold ?? ''
+    maxPauseThreshold.value = cs.max_pause_threshold ?? 0
     if (gs[0]) selectGroup(gs[0])
   } catch (e) { if (!disposed) error.value = message(e) }
+}
+async function savePauseThreshold() {
+  const count = validPauseThreshold.value
+  if (!pauseThresholdDirty.value || count === null || savingPauseThreshold.value) return
+  savingPauseThreshold.value = true
+  pauseThresholdError.value = ''
+  notice.value = ''
+  try {
+    const saved = await saveIntelligencePauseThreshold(count)
+    if (disposed) return
+    pauseThreshold.value = saved.pause_threshold
+    pauseThresholdDraft.value = saved.pause_threshold
+    notice.value = `暂停门槛已保存为连续 ${saved.pause_threshold} 次降智。`
+  } catch (e) {
+    if (!disposed) pauseThresholdError.value = message(e)
+  } finally {
+    savingPauseThreshold.value = false
+  }
 }
 function selectGroup(g: AdminGroup) {
   if (busy.value || !defaults.value) return
@@ -332,10 +380,11 @@ function loadMore() {
 function statusLabel(s: IntelligenceRecord['status']) { return s === 'normal' ? '正常' : s === 'degraded' ? '答案异常' : '错误' }
 function statusClass(s: IntelligenceRecord['status']) { return s === 'normal' ? 'status-normal' : s === 'degraded' ? 'status-degraded' : 'status-error' }
 function formatTime(s: string) { return new Date(s).toLocaleString() }
+const hasUnsavedChanges = computed(() => dirty.value || saving.value || deleting.value || pauseThresholdDirty.value || savingPauseThreshold.value)
 function beforeUnload(e: BeforeUnloadEvent) {
-  if (dirty.value || saving.value || deleting.value) { e.preventDefault(); e.returnValue = '' }
+  if (hasUnsavedChanges.value) { e.preventDefault(); e.returnValue = '' }
 }
-onBeforeRouteLeave(() => !(dirty.value || saving.value || deleting.value) || window.confirm('配置尚未保存，确定离开吗？'))
+onBeforeRouteLeave(() => !hasUnsavedChanges.value || window.confirm('配置尚未保存，确定离开吗？'))
 onMounted(() => {
   void reload()
   window.addEventListener('beforeunload', beforeUnload)

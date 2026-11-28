@@ -30,6 +30,7 @@ type SQLStore struct {
 	DB                 *sql.DB
 	Protect            func(context.Context, Config, int64) (bool, error)
 	ProtectionEligible func(context.Context, Config) (bool, error)
+	PauseThreshold     func(context.Context) (int, error)
 	Recover            func(context.Context, int64) error
 	RecoveryCutoff     func(context.Context, int64) (time.Time, error)
 }
@@ -267,16 +268,20 @@ func (s *SQLStore) Finish(ctx context.Context, claim *Claim, r Record) error {
 				return err
 			}
 		}
-		// One attributed degraded result is sufficient. Ignore results that
-		// started before the account's latest confirmed recovery.
+		// Ignore results that started before the account's latest confirmed recovery.
 		if !r.CheckedAt.Before(cutoff) && r.Status == "normal" && s.Recover != nil {
 			if err = s.Recover(ctx, r.AccountID); err != nil {
 				return err
 			}
 		} else if !r.CheckedAt.Before(cutoff) && r.Status == "degraded" && s.Protect != nil {
-			r.Paused, err = s.Protect(ctx, claim.Config, r.AccountID)
+			thresholdReached, err := s.pauseThresholdReached(ctx, tx, r.AccountID, cutoff)
 			if err != nil {
-				slog.Error("intelligence account protection failed", "group_id", r.GroupID, "account_id", r.AccountID, "error", err)
+				slog.Error("intelligence pause threshold check failed", "group_id", r.GroupID, "account_id", r.AccountID, "error", err)
+			} else if thresholdReached {
+				r.Paused, err = s.Protect(ctx, claim.Config, r.AccountID)
+				if err != nil {
+					slog.Error("intelligence account protection failed", "group_id", r.GroupID, "account_id", r.AccountID, "error", err)
+				}
 			}
 		}
 	}
@@ -289,6 +294,31 @@ func (s *SQLStore) Finish(ctx context.Context, claim *Claim, r Record) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// The current result is already known to be degraded. Check only the prior
+// results for this account, under the same lock used to append the current run.
+func (s *SQLStore) pauseThresholdReached(ctx context.Context, tx *sql.Tx, accountID int64, cutoff time.Time) (bool, error) {
+	threshold := DefaultPauseThreshold
+	if s.PauseThreshold != nil {
+		var err error
+		threshold, err = s.PauseThreshold(ctx)
+		if err != nil {
+			return false, err
+		}
+	}
+	if !ValidPauseThreshold(threshold) {
+		return false, ErrInvalidPauseThreshold
+	}
+	if threshold == DefaultPauseThreshold {
+		return true, nil
+	}
+	var reached bool
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*)=$3 AND COALESCE(BOOL_AND(status='degraded'),false)
+ FROM (SELECT status FROM intelligence_check_runs
+ WHERE account_id=$1 AND protection_eligible AND probe_id=0 AND checked_at >= $2
+ ORDER BY id DESC LIMIT $3) recent`, accountID, cutoff, threshold-1).Scan(&reached)
+	return reached, err
 }
 
 func (s *SQLStore) resolveAccount(ctx context.Context, c Config, requestID string) int64 {

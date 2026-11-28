@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import IntelligenceView from '../IntelligenceView.vue'
-import { addIntelligenceModel, deleteIntelligenceModel, getIntelligenceConfigs, getIntelligenceHistory, getIntelligenceRecoveryHistory, getIntelligenceKeyOptions, saveIntelligenceConfig, runIntelligenceCheck, type IntelligenceConfig } from '@/api/intelligence'
+import { addIntelligenceModel, deleteIntelligenceModel, getIntelligenceConfigs, getIntelligenceHistory, getIntelligenceRecoveryHistory, getIntelligenceKeyOptions, saveIntelligenceConfig, saveIntelligencePauseThreshold, runIntelligenceCheck, type IntelligenceConfig } from '@/api/intelligence'
 import { getAll } from '@/api/admin/groups'
 import type { AdminGroup } from '@/types'
 
@@ -9,7 +9,7 @@ vi.mock('@/components/layout/AppLayout.vue', () => ({ default: { template: '<mai
 vi.mock('vue-router', () => ({ onBeforeRouteLeave: vi.fn() }))
 vi.mock('@/api/admin/groups', () => ({ getAll: vi.fn() }))
 vi.mock('@/api/intelligence', () => ({
-  addIntelligenceModel: vi.fn(), deleteIntelligenceModel: vi.fn(), getIntelligenceConfigs: vi.fn(), getIntelligenceHistory: vi.fn(), getIntelligenceRecoveryHistory: vi.fn(), getIntelligenceKeyOptions: vi.fn(), saveIntelligenceConfig: vi.fn(), runIntelligenceCheck: vi.fn()
+  addIntelligenceModel: vi.fn(), deleteIntelligenceModel: vi.fn(), getIntelligenceConfigs: vi.fn(), getIntelligenceHistory: vi.fn(), getIntelligenceRecoveryHistory: vi.fn(), getIntelligenceKeyOptions: vi.fn(), saveIntelligenceConfig: vi.fn(), saveIntelligencePauseThreshold: vi.fn(), runIntelligenceCheck: vi.fn()
 }))
 const config: IntelligenceConfig = {
   group_id: 1, version: 2, enabled: false, interval_minutes: 10, timeout_seconds: 30,
@@ -23,7 +23,12 @@ beforeEach(() => {
     { id: 1, name: '不降智 Group One', platform: 'openai', status: 'active' },
     { id: 2, name: '不降智 Group Two', platform: 'openai', status: 'active' }
   ] as AdminGroup[])
-  vi.mocked(getIntelligenceConfigs).mockResolvedValue({ items: [{ ...config, expected: [...config.expected] }], defaults: { ...config, group_id: 0, version: 0, api_key_id: 0 } })
+  vi.mocked(getIntelligenceConfigs).mockResolvedValue({
+    items: [{ ...config, expected: [...config.expected] }],
+    defaults: { ...config, group_id: 0, version: 0, api_key_id: 0 },
+    pause_threshold: 1,
+    max_pause_threshold: 100,
+  })
   vi.mocked(getIntelligenceHistory).mockResolvedValue({ items: [], has_more: false })
   vi.mocked(getIntelligenceRecoveryHistory).mockResolvedValue({ items: [], queue: [], has_more: false, server_time: '2026-10-08T01:00:00Z' })
   vi.mocked(getIntelligenceKeyOptions).mockResolvedValue({ items: [
@@ -33,6 +38,42 @@ beforeEach(() => {
   ], page: 1, has_more: false })
 })
 describe('intelligence admin', () => {
+  it('loads and saves the global pause threshold independently of group configuration', async () => {
+    let threshold = 1
+    const configs = await getIntelligenceConfigs()
+    vi.mocked(getIntelligenceConfigs).mockImplementation(async () => ({ ...configs, pause_threshold: threshold }))
+    vi.mocked(saveIntelligencePauseThreshold).mockImplementation(async count => {
+      threshold = count
+      return { pause_threshold: count }
+    })
+    const wrapper = mountView(); await flushPromises()
+    const input = wrapper.get<HTMLInputElement>('[data-testid="intelligence-pause-threshold"]')
+    const form = wrapper.get('form[aria-labelledby="pause-threshold-heading"]')
+    const save = form.get('button[type="submit"]')
+    expect(input.element.value).toBe('1')
+    expect(save.attributes('disabled')).toBeDefined()
+    for (const invalid of ['', '0', '2.5', '101']) {
+      await input.setValue(invalid)
+      expect(save.attributes('disabled')).toBeDefined()
+      await form.trigger('submit')
+    }
+    expect(saveIntelligencePauseThreshold).not.toHaveBeenCalled()
+
+    await input.setValue('3')
+    expect(save.attributes('disabled')).toBeUndefined()
+    await form.trigger('submit'); await flushPromises()
+    expect(saveIntelligencePauseThreshold).toHaveBeenCalledTimes(1)
+    expect(saveIntelligencePauseThreshold).toHaveBeenCalledWith(3)
+    expect(saveIntelligenceConfig).not.toHaveBeenCalled()
+    expect(save.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('暂停门槛已保存为连续 3 次降智')
+    wrapper.unmount()
+
+    const reloaded = mountView(); await flushPromises()
+    expect(reloaded.get<HTMLInputElement>('[data-testid="intelligence-pause-threshold"]').element.value).toBe('3')
+    reloaded.unmount()
+  })
+
   it('only lists active groups containing 不降智 and selects the first eligible group', async () => {
     vi.mocked(getAll).mockResolvedValue([
       { id: 111, name: '013不降智', platform: 'openai', status: 'inactive' },
@@ -80,7 +121,7 @@ describe('intelligence admin', () => {
     expect(wrapper.get('[data-testid="public-model-label"]').text()).toBe('actual-model · low')
     const textareas = wrapper.findAll('textarea')
     await textareas[1].setValue('42\nnew')
-    await wrapper.findAll('input[type="number"]')[0].setValue(15)
+    await wrapper.findAll('.config-panel input[type="number"]')[0].setValue(15)
     expect(wrapper.get('[data-testid="public-caption"]').text()).toBe('每 1 分钟检测 · 近 60 次 · 仅显示已检测记录')
     vi.mocked(saveIntelligenceConfig).mockImplementation(async c => ({ ...c, version: 3 }))
     await wrapper.findAll('button').find(b => b.text() === '保存配置')!.trigger('click')
@@ -98,7 +139,7 @@ describe('intelligence admin', () => {
     await effort.setValue('high')
     expect(wrapper.get('[data-testid="public-caption"]').text()).toBe('每 1 分钟检测 · 近 60 次 · 仅显示已检测记录')
     expect(wrapper.get('[data-testid="public-model-label"]').text()).toBe('configured-model · high')
-    expect((wrapper.findAll('input[type="number"]')[0].element as HTMLInputElement).value).toBe('10')
+    expect((wrapper.findAll('.config-panel input[type="number"]')[0].element as HTMLInputElement).value).toBe('10')
     expect(saveIntelligenceConfig).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -170,7 +211,7 @@ describe('intelligence admin', () => {
     expect(getIntelligenceKeyOptions).toHaveBeenCalledWith(1, 1, '', expect.any(AbortSignal))
     const picker = wrapper.get('[data-testid="intelligence-key-picker"]')
     expect(picker.element.tagName).toBe('SELECT')
-    expect(wrapper.findAll('input[type="number"]')).toHaveLength(2)
+    expect(wrapper.findAll('.config-panel input[type="number"]')).toHaveLength(2)
     expect(picker.text()).toContain('Admin probe · #12 · 不限额 · 不过期')
     expect(picker.find('option[value="14"]').attributes('disabled')).toBeDefined()
     expect(picker.text()).toContain('Key 已过期')
