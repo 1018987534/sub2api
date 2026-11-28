@@ -1,0 +1,12 @@
+name = "sub2api-responses-dispatcher"
+main = "whole-site-dispatcher.mjs"
+compatibility_date = "2026-07-30"
+workers_dev = false
+preview_urls = false
+account_id = "3e1de9bb31a7b222215fcec006ccd468"
+
+# The migration manages route bindings separately after origins are ready.
+# Use versions upload, never wrangler deploy with this candidate config.
+[vars]
+ROUTING_CONFIG_URL = "https://control-origin.xiaohondou.com/api/v1/gateway-routing/runtime"
+ROUTING_CONFIG_TTL_SECONDS = "1"

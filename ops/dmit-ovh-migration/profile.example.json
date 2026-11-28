@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "hook": "/absolute/private/path/to/reviewed-site-hook",
+  "release_commit": "REPLACE_WITH_REVIEWED_CDY_MAIN_SHA"
+}
